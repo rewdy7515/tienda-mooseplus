@@ -586,6 +586,63 @@ input[type="number"].input-inline {
   align-self: center;
   margin: 0;
 }
+.admin-actions.single {
+  justify-content: center;
+}
+.admin-action-full {
+  width: 100%;
+  max-width: 480px;
+}
+
+.admin-dashboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0 20px;
+}
+.admin-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.05);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.admin-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+.admin-card.reportes {
+  background: #ff716f;
+  border-color: #ff716f;
+  color: #fff;
+}
+.admin-card.cortes {
+  background: #ffa770;
+  border-color: #ffa770;
+  color: #fff;
+}
+.admin-card.pedidos {
+  background: #77b687;
+  border-color: #77b687;
+  color: #fff;
+}
+.admin-card .card-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 15px;
+}
+.admin-card .card-count {
+  font-size: 26px;
+  font-weight: 800;
+  margin: 4px 0;
+}
+.admin-card .card-desc {
+  margin: 4px 0 0;
+  color: #555;
+  font-size: 13px;
+}
 
 .modal {
   position: fixed;

@@ -12,11 +12,28 @@
 
     <main class="categorias-dinamicas">
       <h2>Administrar servicios</h2>
+      <div class="admin-dashboard">
+        <div class="admin-card reportes" id="dash-reportes">
+          <p class="card-title">Reportes</p>
+          <div class="card-count" id="count-reportes">--</div>
+          <p class="card-desc">Cortes pendientes</p>
+        </div>
+        <div class="admin-card cortes" id="dash-cortes">
+          <p class="card-title">Cortes</p>
+          <div class="card-count" id="count-cortes">--</div>
+          <p class="card-desc">Ventas por vencer</p>
+        </div>
+        <div class="admin-card pedidos" id="dash-pedidos">
+          <p class="card-title">Pedidos</p>
+          <div class="card-count" id="count-pedidos">--</div>
+          <p class="card-desc">Solicitudes recientes</p>
+        </div>
+      </div>
+      <div style="display:flex; gap:12px; margin:0 0 12px 0;">
+        <button class="btn-primary admin-action" id="btn-admin-cuentas" style="width:100%;">Administrar cuentas</button>
+      </div>
       <div class="admin-actions admin-group">
-        <button class="btn-primary admin-action" id="btn-revisar-reportes">Revisar reportes</button>
-        <button class="btn-primary admin-action" id="btn-cortes">Cortes</button>
         <button class="btn-primary admin-action" id="btn-renovar-servicio">Renovar servicio cliente</button>
-        <button class="btn-primary admin-action">Cambiar clave</button>
       </div>
       <div class="admin-actions admin-group">
         <button class="btn-primary admin-action">Recargar Netflix</button>
@@ -35,8 +52,6 @@
         <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
       </div>
       <div class="admin-actions admin-group">
-        <button class="btn-primary admin-action">Cuenta nueva</button>
-        <button class="btn-primary admin-action" id="btn-renovar">Renovar</button>
         <button class="btn-primary admin-action" id="btn-reemplazar">Reemplazar</button>
       </div>
       <p class="status">Selecciona una acción.</p>
@@ -44,7 +59,7 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
-      import { clearServerSession, loadCurrentUser } from "../scripts/api.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
 
       requireSession();
 
@@ -52,6 +67,36 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const logo = document.querySelector(".logo");
+
+      const countReportesEl = document.querySelector("#count-reportes");
+      const countCortesEl = document.querySelector("#count-cortes");
+      const countPedidosEl = document.querySelector("#count-pedidos");
+
+      async function loadCounts() {
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const [{ count: repCount }, { count: cortesCount }, { count: pedidosCount }] = await Promise.all([
+            supabase.from("reportes").select("id_reporte", { count: "exact", head: true }),
+            supabase
+              .from("ventas")
+              .select("id_venta", { count: "exact", head: true })
+              .lte("fecha_corte", today)
+              .or("suspendido.is.null,suspendido.eq.false"),
+            supabase
+              .from("ventas")
+              .select("id_venta", { count: "exact", head: true })
+              .eq("pendiente", true),
+          ]);
+          if (countReportesEl) countReportesEl.textContent = repCount ?? 0;
+          if (countCortesEl) countCortesEl.textContent = cortesCount ?? 0;
+          if (countPedidosEl) countPedidosEl.textContent = pedidosCount ?? 0;
+        } catch (err) {
+          console.error("load dashboard counts error", err);
+          if (countReportesEl) countReportesEl.textContent = "-";
+          if (countCortesEl) countCortesEl.textContent = "-";
+          if (countPedidosEl) countPedidosEl.textContent = "-";
+        }
+      }
 
       async function init() {
         try {
@@ -69,21 +114,24 @@
             document.querySelector("main .status").textContent =
               "No tienes permisos para administrar servicios.";
           }
+          await loadCounts();
         } catch (err) {
           console.error("admin init error", err);
         }
       }
 
-      document
-        .getElementById("btn-revisar-reportes")
-        ?.addEventListener("click", () => (window.location.href = "reportes/revisar_reportes.html"));
+      document.querySelector("#dash-reportes")?.addEventListener("click", () => {
+        window.location.href = "reportes/revisar_reportes.html";
+      });
+      document.querySelector("#dash-cortes")?.addEventListener("click", () => {
+        window.location.href = "cortes.html";
+      });
+      document.querySelector("#dash-pedidos")?.addEventListener("click", () => {
+        window.location.href = "pedidos_pendientes.html";
+      });
 
       init();
       attachLogout(clearServerSession);
-
-      document.getElementById("btn-cortes")?.addEventListener("click", () => {
-        window.location.href = "cortes.html";
-      });
 
       attachLogoHome();
 

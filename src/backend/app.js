@@ -1312,6 +1312,10 @@ app.get("/api/ventas/entregadas", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Servidor escuchando en puerto ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Servidor escuchando en puerto ${port}`);
+  });
+}
+
+module.exports = app;
