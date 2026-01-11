@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Administrar cuentas</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <link rel="stylesheet" href="../../styles/admin_cuentas.css" />
+    <style>
+      .cuentas-wrapper {
+        margin-top: 16px;
+        max-width: 960px;
+      }
+      .cuentas-busqueda {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: center;
+      }
+      .cuentas-busqueda .input-wrap {
+        position: relative;
+      }
+      .cuentas-busqueda input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        font-size: 14px;
+        color: #111;
+      }
+      .cuentas-busqueda button {
+        padding: 10px 14px;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        background: #111;
+        color: #fff;
+      }
+      .sugerencias-cuentas {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        margin-top: 6px;
+        overflow: hidden;
+        z-index: 30;
+      }
+      .sugerencias-cuentas.hidden {
+        display: none;
+      }
+      .sugerencias-cuentas button {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        color: #111;
+      }
+      .sugerencias-cuentas button:last-child {
+        border-bottom: none;
+      }
+      .sugerencias-cuentas button:hover {
+        background: #f7f7f7;
+      }
+
+      .cuenta-detalle {
+        margin-top: 16px;
+        padding: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #f9fafb;
+      }
+
+      .cuenta-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 8px 12px;
+        margin-bottom: 12px;
+      }
+
+      .cuenta-meta p {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .cuenta-title {
+        margin: 0 0 8px;
+      }
+      .cuenta-table-wrap {
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Administrar cuentas</h2>
+      <div class="cuentas-wrapper">
+        <div class="cuentas-busqueda">
+          <div class="input-wrap">
+            <input type="search" id="input-cuenta" placeholder="Buscar por correo" autocomplete="off" />
+            <div id="sugs-cuentas" class="sugerencias-cuentas hidden"></div>
+          </div>
+          <button type="button" id="btn-buscar-cuenta">🔍</button>
+          <button type="button" class="btn-add" id="btn-ir-agregar">Agregar servicio</button>
+        </div>
+        <div id="cuenta-detalle" class="cuenta-detalle"></div>
+      </div>
+    </main>
+
+    <div id="rec-overlay" class="rec-overlay">
+      <div class="rec-modal">
+        <h4>Recargar cuenta</h4>
+        <div class="rec-row">
+          <span class="rec-label">Correo</span>
+          <span class="rec-copy" id="rec-mail">-</span>
+        </div>
+        <div class="rec-row">
+          <span class="rec-label">Clave</span>
+          <span class="rec-copy" id="rec-pass">-</span>
+        </div>
+        <div class="rec-row">
+          <span class="rec-label">PIN</span>
+          <span class="rec-copy" id="rec-pin">Buscando...</span>
+        </div>
+        <div class="rec-row">
+          <span class="rec-label">Próx. corte</span>
+          <input type="date" class="rec-date" id="rec-corte" />
+        </div>
+        <div class="rec-actions">
+          <button type="button" class="rec-btn rec-primary" id="rec-do">Recargar</button>
+          <button type="button" class="rec-btn rec-close" id="rec-close">Cerrar</button>
+        </div>
+        <div class="rec-actions">
+          <!-- spacer for layout -->
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const inputCuenta = document.querySelector("#input-cuenta");
+      const sugs = document.querySelector("#sugs-cuentas");
+      const btnBuscar = document.querySelector("#btn-buscar-cuenta");
+      const btnIrAgregar = document.querySelector("#btn-ir-agregar");
+      const detalleEl = document.querySelector("#cuenta-detalle");
+      const modalPin = document.querySelector("#modal-pin");
+      const modalPinTitle = document.querySelector("#modal-pin-title");
+      const modalPinInput = document.querySelector("#input-pin");
+      const modalPinSave = document.querySelector("#btn-guardar-pin");
+      const modalPinClose = document.querySelector("#btn-cerrar-pin");
+      const modalRecargar = document.querySelector("#rec-overlay");
+      const recCorreo = document.querySelector("#rec-mail");
+      const recClave = document.querySelector("#rec-pass");
+      const recPin = document.querySelector("#rec-pin");
+      const recCorte = document.querySelector("#rec-corte");
+      const btnCerrarRecargar = document.querySelector("#rec-close");
+      const btnDoRecarga = document.querySelector("#rec-do");
+
+      const showModalRecargar = () => {
+        modalRecargar?.classList.add("show");
+      };
+      const hideModalRecargar = () => {
+        modalRecargar?.classList.remove("show");
+      };
+
+      const copyWithToast = async (el) => {
+        if (!el) return;
+        const text = el.textContent.trim();
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (_) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          } catch (err) {
+            console.error("copy error", err);
+            return;
+          }
+        }
+        let toast = el.querySelector(".copy-toast");
+        if (!toast) {
+          toast = document.createElement("div");
+          toast.className = "copy-toast";
+          toast.textContent = "Copiado al portapapeles";
+          el.appendChild(toast);
+        }
+        setTimeout(() => toast?.remove(), 1200);
+      };
+      let fetchCounter = 0;
+      let currentCuentaId = null;
+      let currentCuentaDetalle = null;
+      let modalState = { type: null, targetId: null, max: null, correo: "", nPerfil: null };
+      const modalReemplazo = document.querySelector("#modal-reemplazo-row");
+      const modalReemplazoMsg = document.querySelector("#modal-reemplazo-msg");
+
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+        } catch (err) {
+          console.error("admin cuentas init error", err);
+        }
+      })();
+
+      const renderSugerencias = (items, forceHide = false) => {
+        if (!sugs) return;
+        if (forceHide || !items.length) {
+          sugs.innerHTML = "";
+          sugs.classList.add("hidden");
+          return;
+        }
+        sugs.innerHTML = items
+          .map(
+            (c) =>
+              `<button type="button" data-id="${c.id_cuenta}" data-correo="${c.correo || ""}">${c.correo || ""}</button>`
+          )
+          .join("");
+        sugs.classList.remove("hidden");
+      };
+
+      const buscarCuentas = async (texto, forceHide = false) => {
+        const term = (texto || "").trim();
+        if (!term) {
+          renderSugerencias([], true);
+          return;
+        }
+        const current = ++fetchCounter;
+        try {
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, id_plataforma, id_proveedor, region, clave, fecha_corte, venta_perfil, venta_miembro")
+            .ilike("correo", `%${term}%`)
+            .order("correo", { ascending: true })
+            .limit(10);
+          if (current !== fetchCounter) return;
+          if (error) throw error;
+          const unique = Array.from(
+            new Map((data || []).filter((c) => c.correo).map((c) => [c.correo, c])).values()
+          ).slice(0, 5);
+          renderSugerencias(unique, forceHide);
+        } catch (err) {
+          console.error("buscar cuentas error", err);
+          renderSugerencias([], true);
+        }
+      };
+
+      inputCuenta?.addEventListener("input", (e) => {
+        buscarCuentas(e.target.value || "");
+      });
+
+      btnBuscar?.addEventListener("click", (e) => {
+        e.preventDefault();
+        buscarCuentas(inputCuenta?.value || "", false);
+        // si solo hay un match con id, carga detalle directamente
+        setTimeout(() => {
+          if (inputCuenta?.value) {
+            loadCuentaDetalleByCorreo(inputCuenta.value);
+          }
+        }, 50);
+        renderSugerencias([], true);
+      });
+
+      inputCuenta?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          buscarCuentas(inputCuenta?.value || "", true);
+          loadCuentaDetalleByCorreo(inputCuenta?.value || "");
+          renderSugerencias([], true);
+        }
+      });
+
+      // Fallback: disparar búsqueda en keyup Enter también
+      inputCuenta?.addEventListener("keyup", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          buscarCuentas(inputCuenta?.value || "", true);
+          loadCuentaDetalleByCorreo(inputCuenta?.value || "");
+          renderSugerencias([], true);
+        }
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!sugs) return;
+        const isInside = sugs.contains(e.target) || inputCuenta?.contains(e.target);
+        if (!isInside) renderSugerencias([], true);
+      });
+
+      inputCuenta?.addEventListener("focus", () => {
+        // no force show, suggestions appear only on input
+      });
+
+      btnIrAgregar?.addEventListener("click", () => {
+        window.location.href = "agregar_servicios.html";
+      });
+
+      sugs?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn || !inputCuenta) return;
+        inputCuenta.value = btn.dataset.correo || "";
+        renderSugerencias([], true);
+        if (btn.dataset.id) {
+          loadCuentaDetalle(btn.dataset.id);
+        }
+      });
+
+      const renderDetalle = (info) => {
+        currentCuentaId = info.id_cuenta || null;
+        if (!detalleEl) return;
+        if (!info) {
+          detalleEl.innerHTML = "<p class=\"status\">Sin datos.</p>";
+          return;
+        }
+
+        const rows = info.perfiles || [];
+        const colMode = info.colMode || "ocupado";
+        const showHogar = info.showHogar;
+
+        let thead = "";
+        if (colMode === "perfil") {
+          thead = `<tr>
+            <th>Perfil</th>
+            <th>PIN</th>
+            ${showHogar ? "<th>Perfil hogar</th>" : ""}
+            <th>Ocupado por</th>
+            <th>Acción</th>
+          </tr>`;
+        } else if (colMode === "miembro") {
+          thead = `<tr>
+            <th>PIN</th>
+            <th>Ocupado por</th>
+            <th>Acción</th>
+          </tr>`;
+        } else {
+          thead = `<tr>
+            <th>Ocupado por</th>
+            <th>Acción</th>
+          </tr>`;
+        }
+
+        const tbody = rows
+          .map((p) => {
+            const ocupado = p.ocupadoPor || "Vacío";
+            if (colMode === "perfil") {
+              const toggleHtml = showHogar
+                ? `<label class="toggle-label toggle-small">
+                    <input type="checkbox" class="toggle-hogar" data-perfil="${p.id_perfil}" ${p.hogar ? "checked" : ""} />
+                    <span class="toggle-switch toggle-green" aria-hidden="true"></span>
+                    <span class="toggle-text">${p.hogar ? "Activar" : "Desactivar"}</span>
+                  </label>`
+                : "";
+              return `<tr>
+                <td>${p.perfil}</td>
+                <td class="pin-cell">
+                  <span>${p.pin ?? ""}</span>
+                  <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
+                </td>
+                ${showHogar ? `<td>${toggleHtml}</td>` : ""}
+                <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
+                <td><button type="button" class="btn-primary btn-reemplazar-row"
+                  data-perfil="${p.id_perfil || ""}"
+                  data-correo="${info.correo || ""}"
+                  data-clave="${info.clave || ""}"
+                  data-nperfil="${p.n_raw ?? ""}"
+                  data-pin="${p.pin ?? ""}"
+                  data-plat="${info.plataformaNombre || ""}"
+                  data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
+                  data-idventa="${p.id_venta || ""}"
+                >Reemplazar</button></td>
+              </tr>`;
+            }
+            if (colMode === "miembro") {
+              return `<tr>
+                <td class="pin-cell">
+                  <span>${p.pin ?? ""}</span>
+                  <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
+                </td>
+                <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
+                <td><button type="button" class="btn-primary btn-reemplazar-row"
+                  data-perfil="${p.id_perfil || ""}"
+                  data-correo="${info.correo || ""}"
+                  data-clave="${info.clave || ""}"
+                  data-nperfil="${p.n_raw ?? ""}"
+                  data-pin="${p.pin ?? ""}"
+                  data-plat="${info.plataformaNombre || ""}"
+                  data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
+                  data-idventa="${p.id_venta || ""}"
+                >Reemplazar</button></td>
+              </tr>`;
+            }
+            return `<tr>
+              <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
+              <td><button type="button" class="btn-primary btn-reemplazar-row"
+                data-perfil="${p.id_perfil || ""}"
+                data-correo="${info.correo || ""}"
+                data-clave="${info.clave || ""}"
+                data-nperfil="${p.n_raw ?? ""}"
+                data-pin="${p.pin ?? ""}"
+                data-plat="${info.plataformaNombre || ""}"
+                data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
+                data-idventa="${p.id_venta || ""}"
+              >Reemplazar</button></td>
+            </tr>`;
+          })
+          .join("");
+
+        const table =
+          rows.length === 0
+            ? "<p class=\"status\">Sin perfiles asociados.</p>"
+            : `<div class="cuenta-table-wrap">
+                <table class="proximas-table">
+                  <thead>${thead}</thead>
+                  <tbody>${tbody}</tbody>
+                </table>
+              </div>`;
+
+        let plat9Table = "";
+        if (info.isPlat9) {
+          const filas = info.plat9Rows || [];
+          const needsPlus = filas.length < 5;
+          const bodyRows =
+            filas
+              .map(
+                (r) => `<tr>
+              <td>${r.cliente || "-"}</td>
+              <td>${r.correo || "-"}</td>
+              <td>${r.clave || "-"}</td>
+              <td>${r.usuario || "-"}</td>
+              <td>${r.fecha_corte || "-"}</td>
+              <td>${r.estado || "-"}</td>
+            </tr>`
+              )
+              .join("");
+          const plus = needsPlus ? `<tr class="row-add-miembro plat9-plus-row"><td colspan="6">+</td></tr>` : "";
+          plat9Table = `
+            <h4>Clientes</h4>
+            <div class="cuenta-table-wrap">
+              <table class="proximas-table">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Correo</th>
+                    <th>Clave</th>
+                    <th>Usuario</th>
+                    <th>Fecha de corte</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>${bodyRows}${plus}</tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        detalleEl.innerHTML = `
+          <h3 class="cuenta-title">Detalle de cuenta</h3>
+          <div class="cuenta-meta two-cols">
+            <div>
+              <p><strong>Plataforma:</strong> ${info.plataformaNombre || "-"}</p>
+              <p><strong>Proveedor:</strong> ${info.proveedorNombre || "-"}</p>
+              <p><strong>Región:</strong> ${info.region || "-"}</p>
+              <p><strong>Correo:</strong> ${info.correo || "-"}</p>
+              <p>
+                <strong>Clave:</strong> <span>${info.clave || "-"}</span>
+                <button type="button" class="btn-pin btn-clave" data-cuenta="${info.id_cuenta}" data-clave="${info.clave || ""}" data-correo="${info.correo || ""}">✏️</button>
+              </p>
+              <p><strong>Fecha de corte:</strong> <span class="fecha-corte-text">${info.fecha_corte || "-"}</span></p>
+            </div>
+            <div>
+              <p><strong>Acceso a códigos</strong></p>
+              <p>Instaddr: ${info.instaddr ? "Disponible" : "No disponible"}</p>
+              <p>Link: ${info.link_codigo || "-"}</p>
+              <p>Correo: ${info.correo_codigo || "-"}</p>
+              <p>Clave: ${info.pin_codigo || "-"}</p>
+            </div>
+          </div>
+          <div class="cuenta-toggle">
+            <label class="toggle-label">
+              <input type="checkbox" id="toggle-activa" data-id="${info.id_cuenta}" ${info.inactiva ? "checked" : ""} />
+              <span class="toggle-switch" aria-hidden="true"></span>
+              <span class="toggle-text">${info.inactiva ? "Inactivada" : "Activa"}</span>
+            </label>
+          </div>
+          <div class="cuenta-toggle">
+            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}">Recargar cuenta</button>
+          </div>
+          ${plat9Table}
+          <h4>Perfiles</h4>
+          ${table}
+          ${
+            info.showMiembros
+              ? `
+          <h4>Miembros extras</h4>
+          <div class="cuenta-table-wrap">
+            <table class="proximas-table">
+              <thead>
+                <tr>
+                  <th>Correo</th>
+                  <th>Clave</th>
+                  <th>Ocupado por</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${
+                  (info.miembrosExtras || [])
+                    .map(
+                      (m) => `
+                        <tr>
+                          <td>${m.correo || "-"}</td>
+                          <td>${m.clave || "-"}</td>
+                          <td>${m.ocupado || "-"}</td>
+                        </tr>
+                      `
+                    )
+                    .join("") || ""
+                }
+                <tr class="row-add-miembro">
+                  <td colspan="3" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          `
+              : ""
+          }
+        `;
+
+        const toggle = detalleEl.querySelector("#toggle-activa");
+        if (toggle) {
+          toggle.addEventListener("change", async (e) => {
+            const checked = e.target.checked;
+            const id = e.target.dataset.id;
+            try {
+              const { error } = await supabase
+                .from("cuentas")
+                .update({ inactiva: checked })
+                .eq("id_cuenta", id);
+            if (error) throw error;
+            const labelText = e.target.closest(".toggle-label")?.querySelector(".toggle-text");
+            if (labelText) labelText.textContent = checked ? "Inactivada" : "Activa";
+          } catch (err) {
+            console.error("toggle inactiva error", err);
+            e.target.checked = !checked;
+          }
+        });
+      }
+      };
+
+      const loadCuentaDetalle = async (idCuenta) => {
+        if (!detalleEl) return;
+        detalleEl.innerHTML = "<p class=\"status\">Cargando cuenta...</p>";
+        try {
+          const { data: cuenta, error } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva")
+            .eq("id_cuenta", idCuenta)
+            .maybeSingle();
+          if (error) throw error;
+          if (!cuenta) {
+            detalleEl.innerHTML = "<p class=\"status\">Cuenta no encontrada.</p>";
+            return;
+          }
+
+          const platId = cuenta.id_plataforma;
+          const provId = cuenta.id_proveedor;
+
+          const [{ data: prov, error: provErr }, { data: plat, error: platErr }] = await Promise.all([
+            provId
+              ? supabase.from("proveedores").select("nombre").eq("id_proveedor", provId).maybeSingle()
+              : Promise.resolve({ data: null, error: null }),
+            platId
+              ? supabase.from("plataformas").select("nombre, usa_pines, max_dig_pin").eq("id_plataforma", platId).maybeSingle()
+              : Promise.resolve({ data: null, error: null }),
+          ]);
+          if (provErr) throw provErr;
+          if (platErr) throw platErr;
+
+          let perfiles = [];
+          let ventasMap = {};
+          let usersMap = {};
+
+          const colMode =
+            cuenta.venta_perfil === true && cuenta.venta_miembro === false
+              ? "perfil"
+              : cuenta.venta_perfil === false && cuenta.venta_miembro === true
+              ? "miembro"
+              : "ocupado";
+          const showHogar = platId === 1 && colMode === "perfil";
+
+          const { data: perfData, error: perfErr } = await supabase
+            .from("perfiles")
+            .select("id_perfil, n_perfil, pin, perfil_hogar, ocupado")
+            .eq("id_cuenta", idCuenta)
+            .order("n_perfil");
+          if (perfErr) throw perfErr;
+          perfiles = perfData || [];
+
+          const perfilIds = perfiles.map((p) => p.id_perfil).filter(Boolean);
+          if (perfilIds.length) {
+          const { data: ventas, error: ventErr } = await supabase
+            .from("ventas")
+            .select("id_perfil, id_usuario, id_venta, fecha_corte")
+            .in("id_perfil", perfilIds);
+          if (ventErr) throw ventErr;
+          ventasMap = (ventas || []).reduce((acc, v) => {
+            acc[v.id_perfil] = {
+              id_usuario: v.id_usuario,
+              id_venta: v.id_venta,
+              fecha_corte: v.fecha_corte,
+            };
+            return acc;
+          }, {});
+
+            const userIds = Array.from(new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)));
+            if (userIds.length) {
+              const { data: users, error: userErr } = await supabase
+                .from("usuarios")
+                .select("id_usuario, nombre, apellido")
+                .in("id_usuario", userIds);
+              if (userErr) throw userErr;
+              usersMap = (users || []).reduce((acc, u) => {
+                acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+                return acc;
+              }, {});
+            }
+          }
+
+          // Perfiles marcados en reemplazos
+          let replSet = new Set();
+          if (perfilIds.length) {
+            const { data: repls, error: replErr } = await supabase
+              .from("reemplazos")
+              .select("id_perfil")
+              .in("id_perfil", perfilIds);
+            if (replErr) throw replErr;
+            replSet = new Set((repls || []).map((r) => r.id_perfil));
+          }
+
+          const perfilesRows = perfiles.map((p) => {
+            const enReemplazos = replSet.has(p.id_perfil);
+            const ocupador =
+              p.id_perfil && ventasMap[p.id_perfil]?.id_usuario
+                ? usersMap[ventasMap[p.id_perfil].id_usuario] || "Vacío"
+                : "Vacío";
+            return {
+              perfil: `M${p.n_perfil ?? ""}`,
+              pin: p.pin,
+              hogar: p.perfil_hogar === true,
+              id_perfil: p.id_perfil,
+              n_raw: p.n_perfil,
+              ocupadoPor: enReemplazos ? "Reemplazado" : ocupador,
+              id_venta: ventasMap[p.id_perfil]?.id_venta || null,
+              fecha_corte: ventasMap[p.id_perfil]?.fecha_corte || cuenta.fecha_corte || "",
+              reemplazado: enReemplazos,
+            };
+          });
+
+          let plat9Rows = null;
+          let isPlat9 = platId === 9;
+          if (isPlat9) {
+            const { data: ventas9, error: vent9Err } = await supabase
+              .from("ventas")
+              .select("id_usuario, fecha_corte, pendiente")
+              .eq("id_cuenta", idCuenta);
+            if (vent9Err) throw vent9Err;
+            const userIds9 = Array.from(new Set((ventas9 || []).map((v) => v.id_usuario).filter(Boolean)));
+            let userNames9 = {};
+            if (userIds9.length) {
+              const { data: users9, error: u9Err } = await supabase
+                .from("usuarios")
+                .select("id_usuario, nombre, apellido")
+                .in("id_usuario", userIds9);
+              if (u9Err) throw u9Err;
+              userNames9 = (users9 || []).reduce((acc, u) => {
+                acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+                return acc;
+              }, {});
+            }
+            plat9Rows = (ventas9 || []).map((v) => ({
+              cliente: userNames9[v.id_usuario] || "-",
+              correo: cuenta.correo || "-",
+              clave: cuenta.clave || "-",
+              usuario: v.id_usuario ? `#${v.id_usuario}` : "-",
+              fecha_corte: v.fecha_corte || "-",
+              estado: v.pendiente ? "Pendiente" : "Activo",
+            }));
+          }
+
+          // Miembros extras por id_cuenta_miembro
+          const { data: miembros, error: membErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, clave")
+            .eq("id_cuenta_miembro", idCuenta);
+          if (membErr) throw membErr;
+
+          let miembrosConUsuario = [];
+          if (miembros?.length) {
+            const cuentaIds = miembros.map((m) => m.id_cuenta).filter(Boolean);
+            const { data: ventasM, error: ventMErr } = await supabase
+              .from("ventas")
+              .select("id_cuenta, usuarios:usuarios(nombre, apellido)")
+              .in("id_cuenta", cuentaIds);
+            if (ventMErr) throw ventMErr;
+            const mapUser = (ventasM || []).reduce((acc, v) => {
+              const full = [v.usuarios?.nombre, v.usuarios?.apellido].filter(Boolean).join(" ").trim();
+              acc[v.id_cuenta] = full || "Vacío";
+              return acc;
+            }, {});
+            miembrosConUsuario = (miembros || []).map((m) => ({
+              correo: m.correo,
+              clave: m.clave,
+              ocupado: mapUser[m.id_cuenta] || "-",
+            }));
+          }
+
+          currentCuentaDetalle = {
+            plataformaNombre: plat?.nombre || "",
+            plataformaId: platId,
+            proveedorNombre: prov?.nombre || "",
+            region: cuenta.region || "",
+            correo: cuenta.correo || "",
+            clave: cuenta.clave || "",
+            fecha_corte: cuenta.fecha_corte || "",
+            perfiles: perfilesRows,
+            colMode,
+            showHogar,
+            inactiva: cuenta.inactiva,
+            instaddr: cuenta.instaddr,
+            link_codigo: cuenta.link_codigo,
+            correo_codigo: cuenta.correo_codigo,
+            pin_codigo: cuenta.pin_codigo,
+            id_cuenta: cuenta.id_cuenta,
+            max_dig_pin: plat?.max_dig_pin || null,
+            showMiembros: platId === 1,
+            miembrosExtras: miembrosConUsuario,
+            plat9Rows,
+            isPlat9,
+            venta_perfil: cuenta.venta_perfil,
+            venta_miembro: cuenta.venta_miembro,
+          };
+
+          renderDetalle(currentCuentaDetalle);
+        } catch (err) {
+          console.error("detalle cuenta error", err);
+          if (detalleEl) detalleEl.innerHTML = "<p class=\"status\">No se pudo cargar el detalle.</p>";
+        }
+      };
+
+      const loadCuentaDetalleByCorreo = async (correo) => {
+        try {
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("id_cuenta")
+            .eq("correo", correo)
+            .maybeSingle();
+          if (error) throw error;
+          if (data?.id_cuenta) {
+            loadCuentaDetalle(data.id_cuenta);
+          }
+        } catch (err) {
+          console.error("buscar por correo error", err);
+        }
+      };
+
+      const fetchPinRecarga = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("tarjetas_de_regalo")
+            .select("id_tarjeta_de_regalo, pin")
+            .eq("id_plataforma", 21)
+            .or("usado.is.null,usado.eq.false")
+            .order("id_tarjeta_de_regalo", { ascending: true })
+            .limit(1);
+          if (error) throw error;
+          if (!data?.length) return null;
+          return { id: data[0].id_tarjeta_de_regalo, pin: data[0].pin };
+        } catch (err) {
+          console.error("fetch pin recarga error", err);
+          return null;
+        }
+      };
+
+      attachLogout(clearServerSession);
+
+      // Toggle perfil hogar editable
+      detalleEl?.addEventListener("change", async (e) => {
+        const hog = e.target.closest(".toggle-hogar");
+        if (!hog) return;
+        const checked = hog.checked;
+        const idPerfil = hog.dataset.perfil;
+        if (!idPerfil) return;
+        try {
+          const { error } = await supabase.from("perfiles").update({ perfil_hogar: checked }).eq("id_perfil", idPerfil);
+          if (error) throw error;
+        } catch (err) {
+          console.error("toggle hogar error", err);
+          hog.checked = !checked;
+        }
+      });
+
+      // Recargar cuenta modal
+      detalleEl?.addEventListener("click", async (e) => {
+        const btnRec = e.target.closest(".btn-recargar-cuenta");
+        if (!btnRec) return;
+        recCorreo.textContent = btnRec.dataset.correo || "-";
+        recClave.textContent = btnRec.dataset.clave || "-";
+        const corteBase = btnRec.dataset.corte || "";
+        if (recCorte) {
+          const baseDate = corteBase ? new Date(corteBase) : new Date();
+          const plus30 = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+          recCorte.value = plus30.toISOString().slice(0, 10);
+        }
+        recPin.textContent = "Buscando...";
+        recPin.dataset.tid = "";
+        showModalRecargar();
+        const pinObj = await fetchPinRecarga();
+        if (pinObj?.pin) {
+          recPin.textContent = pinObj.pin;
+          recPin.dataset.tid = pinObj.id || "";
+        } else {
+          recPin.textContent = "-";
+          recPin.dataset.tid = "";
+        }
+      });
+
+      modalRecargar?.addEventListener("click", (e) => {
+        if (e.target === modalRecargar) {
+          hideModalRecargar();
+          return;
+        }
+        const badge = e.target.closest(".rec-copy");
+        if (badge) {
+          copyWithToast(badge);
+        }
+      });
+
+      btnCerrarRecargar?.addEventListener("click", () => hideModalRecargar());
+
+      modalRecargar?.addEventListener("click", (e) => {
+        if (e.target === modalRecargar) hideModalRecargar();
+      });
+
+      // Acción recargar
+      btnDoRecarga?.addEventListener("click", async () => {
+        try {
+          const nuevaFecha = recCorte?.value;
+          if (!nuevaFecha) {
+            alert("Selecciona una fecha de corte.");
+            return;
+          }
+          if (!currentCuentaId) {
+            alert("No se pudo identificar la cuenta.");
+            return;
+          }
+          const today = new Date().toISOString().slice(0, 10);
+          // Actualizar fecha_corte de cuenta
+          const { error: updErr } = await supabase
+            .from("cuentas")
+            .update({ fecha_corte: nuevaFecha })
+            .eq("id_cuenta", currentCuentaId);
+          if (updErr) throw updErr;
+
+          // Marcar tarjeta de regalo como usada si tenemos id
+          const pinId = recPin?.dataset?.tid;
+          if (pinId) {
+            const { error: cardErr } = await supabase
+              .from("tarjetas_de_regalo")
+              .update({ usado: true, fecha_uso: today, id_cuenta: currentCuentaId })
+              .eq("id_tarjeta_de_regalo", pinId);
+            if (cardErr) throw cardErr;
+          }
+
+          hideModalRecargar();
+          alert("Recarga registrada");
+          const fechaSpan = detalleEl?.querySelector(".fecha-corte-text");
+          if (fechaSpan) fechaSpan.textContent = nuevaFecha;
+          // actualizar dataset corte en botones recargar visibles
+          detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
+            btn.dataset.corte = nuevaFecha;
+          });
+        } catch (err) {
+          console.error("recargar cuenta error", err);
+          alert("No se pudo recargar la cuenta.");
+        }
+      });
+
+      // Tabla plataforma 9: fila +
+      detalleEl?.addEventListener("click", (e) => {
+        const plusRow = e.target.closest(".plat9-plus-row");
+        if (!plusRow) return;
+        const tbody = plusRow.parentElement;
+        if (!tbody) return;
+        if (tbody.querySelector(".plat9-input-row")) return; // evita múltiples
+        const newRow = document.createElement("tr");
+        newRow.className = "plat9-input-row";
+        newRow.innerHTML = `
+          <td><input type="text" class="plat9-input" placeholder="Cliente" /></td>
+          <td><input type="text" class="plat9-input" placeholder="Correo" /></td>
+          <td><input type="text" class="plat9-input" placeholder="Clave" /></td>
+          <td><input type="text" class="plat9-input" placeholder="Usuario" /></td>
+          <td>-</td>
+          <td>-</td>
+        `;
+        tbody.insertBefore(newRow, plusRow);
+      });
+
+      // Miembros extras: fila +
+      detalleEl?.addEventListener("click", async (e) => {
+        const addRow = e.target.closest(".row-add-miembro");
+        if (!addRow) return;
+        if (addRow.classList.contains("plat9-plus-row")) return; // no inputs for plataforma 9
+        const tbody = addRow.closest("tbody");
+        if (!tbody) return;
+        if (tbody.querySelector(".miembro-input-row")) return;
+        const inputRow = document.createElement("tr");
+        inputRow.className = "miembro-input-row";
+        inputRow.innerHTML = `
+          <td>
+            <div class="input-wrap">
+              <input type="text" id="miembro-input" placeholder="Buscar correo (plataforma 1)" autocomplete="off" />
+              <div id="miembro-sugs" class="sugerencias-cuentas hidden"></div>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="text" id="miembro-clave" placeholder="Clave" />
+              <button type="button" class="btn-save-miembro">💾</button>
+            </div>
+          </td>
+          <td></td>
+        `;
+        tbody.insertBefore(inputRow, addRow);
+
+        const inp = inputRow.querySelector("#miembro-input");
+        const claveInput = inputRow.querySelector("#miembro-clave");
+        const sugsBox = inputRow.querySelector("#miembro-sugs");
+        let sugsCounter = 0;
+        const renderSugs = (items) => {
+          if (!sugsBox) return;
+          if (!items.length) {
+            sugsBox.innerHTML = "";
+            sugsBox.classList.add("hidden");
+            return;
+          }
+          sugsBox.innerHTML = items
+            .map(
+              (c) =>
+                `<button type="button" data-correo="${c.correo || ""}" data-clave="${c.clave || ""}">${c.correo || ""}</button>`
+            )
+            .join("");
+          sugsBox.classList.remove("hidden");
+        };
+        const search = async (term) => {
+          const t = term.trim();
+          if (!t) {
+            renderSugs([]);
+            return;
+          }
+          const current = ++sugsCounter;
+          try {
+            const { data, error } = await supabase
+              .from("cuentas")
+              .select("correo, clave")
+              .eq("id_plataforma", 1)
+              .ilike("correo", `%${t}%`)
+              .limit(5);
+            if (current !== sugsCounter) return;
+            if (error) throw error;
+            renderSugs(data || []);
+          } catch (err) {
+            console.error("sugs miembro error", err);
+            renderSugs([]);
+          }
+        };
+        inp?.addEventListener("input", (ev) => search(ev.target.value));
+        sugsBox?.addEventListener("click", (ev) => {
+          const btn = ev.target.closest("button[data-correo]");
+          if (!btn) return;
+          inp.value = btn.dataset.correo || "";
+          claveInput.value = btn.dataset.clave || "";
+          renderSugs([]);
+        });
+        document.addEventListener(
+          "click",
+          (ev) => {
+            if (!inputRow.contains(ev.target)) {
+              renderSugs([]);
+            }
+          },
+          { once: true }
+        );
+        inp?.focus();
+      });
+
+      // Guardar miembro extra
+      detalleEl?.addEventListener("click", async (e) => {
+        const btnSave = e.target.closest(".btn-save-miembro");
+        if (!btnSave) return;
+        const row = btnSave.closest(".miembro-input-row");
+        const correoInp = row?.querySelector("#miembro-input");
+        const claveInp = row?.querySelector("#miembro-clave");
+        const correoVal = (correoInp?.value || "").trim();
+        const claveVal = (claveInp?.value || "").trim();
+        if (!correoVal) {
+          alert("Ingresa un correo de cuenta (plataforma 1).");
+          return;
+        }
+        if (!currentCuentaId) {
+          alert("No se pudo identificar la cuenta principal.");
+          return;
+        }
+        try {
+          const { data: cuentaMiembro, error: cmErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta")
+            .eq("correo", correoVal)
+            .eq("id_plataforma", 1)
+            .maybeSingle();
+          if (cmErr) throw cmErr;
+          if (!cuentaMiembro?.id_cuenta) {
+            alert("No se encontró una cuenta con ese correo en plataforma 1.");
+            return;
+          }
+          const payload = {
+            venta_miembro: true,
+            venta_perfil: false,
+            id_cuenta_miembro: currentCuentaId,
+          };
+          if (claveVal) payload.clave = claveVal;
+          const { error: updErr } = await supabase
+            .from("cuentas")
+            .update(payload)
+            .eq("id_cuenta", cuentaMiembro.id_cuenta);
+          if (updErr) throw updErr;
+          alert("Miembro actualizado.");
+          const newRow = document.createElement("tr");
+          newRow.innerHTML = `
+            <td>${correoVal}</td>
+            <td>${claveVal || "-"}</td>
+            <td>-</td>
+          `;
+          const tbody = row?.parentElement;
+          if (tbody) {
+            const addRow = tbody.querySelector(".row-add-miembro");
+            tbody.insertBefore(newRow, addRow);
+          }
+          row?.remove();
+        } catch (err) {
+          console.error("guardar miembro extra error", err);
+          alert("No se pudo guardar el miembro.");
+        }
+      });
+
+      // Modal PIN
+      const closePinModal = () => {
+        modalPin?.classList.add("hidden");
+        modalState = { type: null, targetId: null, max: null };
+        if (modalPinInput) {
+          modalPinInput.value = "";
+          modalPinInput.removeAttribute("maxLength");
+        }
+        if (modalPinTitle) modalPinTitle.textContent = "Cambiar";
+      };
+
+      // Acciones de detalle: PIN y Reemplazo
+      detalleEl?.addEventListener("click", async (e) => {
+        const btnPin = e.target.closest(".btn-pin");
+        if (btnPin) {
+          const idPerfil = btnPin.dataset.perfil || null;
+          const pinVal = btnPin.dataset.pin || "";
+          const max = Number(btnPin.dataset.max) || null;
+          const nPerfil = btnPin.dataset.nperfil || "";
+          const correoVal = btnPin.dataset.correo || "";
+          modalState = { type: "pin", targetId: idPerfil, max, nPerfil, correo: correoVal };
+          if (modalPinTitle) modalPinTitle.textContent = "Cambiar PIN";
+          if (modalPinInput) {
+            modalPinInput.value = pinVal;
+            if (max) modalPinInput.maxLength = max;
+            else modalPinInput.removeAttribute("maxLength");
+          }
+          modalPin?.classList.remove("hidden");
+          return;
+        }
+
+        const btnRepl = e.target.closest(".btn-reemplazar-row");
+        if (btnRepl) {
+          try {
+            if (!currentCuentaDetalle) {
+              alert("No se pudo obtener la cuenta actual.");
+              return;
+            }
+            const plataformaId = currentCuentaDetalle.plataformaId;
+            const cuentaId = currentCuentaDetalle.id_cuenta;
+            const rowPerfil = currentCuentaDetalle.perfiles?.find(
+              (p) => String(p.id_perfil) === String(btnRepl.dataset.perfil || "")
+            );
+            const ventaId = rowPerfil?.id_venta || obtenerVentaPerfil(btnRepl.dataset.perfil);
+            if (!ventaId) {
+              alert("No se encontró la venta asociada.");
+              return;
+            }
+
+            const ventaPerfil = currentCuentaDetalle.venta_perfil === true;
+            const ventaMiembro = currentCuentaDetalle.venta_miembro === true;
+            const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
+            const perfilHogar = rowPerfil?.hogar === true;
+
+            let nuevoCuenta = null;
+            let nuevoPerfil = null;
+            let nuevaSubCuenta = null;
+            let dataDestino = {};
+
+            if (esCuentaCompleta) {
+              const { data, error } = await findCuentaCompleta(plataformaId, cuentaId);
+              if (error) throw error;
+              if (!data) return alert("Sin stock");
+              nuevoCuenta = data.id_cuenta;
+              dataDestino = { correo: data.correo, clave: data.clave };
+            } else if (ventaPerfil || rowPerfil) {
+              if (perfilHogar) {
+                const { data, error } = await findPerfilLibre(plataformaId, cuentaId, { requireHogar: true });
+                if (error) throw error;
+                if (!data) {
+                  const { data: sub, error: subErr } = await findSubCuentaLibre(plataformaId, cuentaId);
+                  if (subErr) throw subErr;
+                  if (!sub) return alert("Sin stock");
+                  nuevaSubCuenta = sub.id_sub_cuenta;
+                  nuevoCuenta = sub.id_cuenta;
+                  dataDestino = { correo: sub.correo, clave: sub.clave, pin: sub.pin };
+                } else {
+                  nuevoPerfil = data.id_perfil;
+                  nuevoCuenta = data.id_cuenta;
+                  dataDestino = {
+                    correo: data.cuentas?.correo,
+                    clave: data.cuentas?.clave,
+                    pin: data.pin,
+                    n_perfil: data.n_perfil,
+                  };
+                }
+              } else {
+                const { data, error } = await findPerfilLibre(plataformaId, cuentaId, { requireHogar: false });
+                if (error) throw error;
+                if (!data) return alert("Sin stock");
+                nuevoPerfil = data.id_perfil;
+                nuevoCuenta = data.id_cuenta;
+                dataDestino = {
+                  correo: data.cuentas?.correo,
+                  clave: data.cuentas?.clave,
+                  pin: data.pin,
+                  n_perfil: data.n_perfil,
+                };
+              }
+            } else if (ventaMiembro) {
+              const { data, error } = await findPerfilLibre(plataformaId, cuentaId, {});
+              if (error) throw error;
+              if (data) {
+                nuevoPerfil = data.id_perfil;
+                nuevoCuenta = data.id_cuenta;
+                dataDestino = {
+                  correo: data.cuentas?.correo,
+                  clave: data.cuentas?.clave,
+                  pin: data.pin,
+                  n_perfil: data.n_perfil,
+                };
+              } else {
+                const { data: sub, error: subErr } = await findSubCuentaLibre(plataformaId, cuentaId);
+                if (subErr) throw subErr;
+                if (!sub) return alert("Sin stock");
+                nuevaSubCuenta = sub.id_sub_cuenta;
+                nuevoCuenta = sub.id_cuenta;
+                dataDestino = { correo: sub.correo, clave: sub.clave, pin: sub.pin };
+              }
+            } else {
+              const { data, error } = await findCuentaCompleta(plataformaId, cuentaId);
+              if (error) throw error;
+              if (!data) return alert("Sin stock");
+              nuevoCuenta = data.id_cuenta;
+              dataDestino = { correo: data.correo, clave: data.clave };
+            }
+
+            if (!nuevoCuenta && !nuevoPerfil && !nuevaSubCuenta) {
+              alert("Sin stock");
+              return;
+            }
+
+            const updates = {
+              id_cuenta: nuevoCuenta || null,
+              id_perfil: nuevoPerfil || null,
+              id_sub_cuenta: nuevaSubCuenta || null,
+            };
+            const { error: updVentaErr } = await supabase.from("ventas").update(updates).eq("id_venta", ventaId);
+            if (updVentaErr) throw updVentaErr;
+
+            if (rowPerfil?.id_perfil) {
+              await supabase.from("perfiles").update({ ocupado: false }).eq("id_perfil", rowPerfil.id_perfil);
+            }
+            if (nuevoPerfil) {
+              await supabase.from("perfiles").update({ ocupado: true }).eq("id_perfil", nuevoPerfil);
+            }
+            if (nuevaSubCuenta) {
+              await supabase.from("sub_cuentas").update({ ocupado: true }).eq("id_sub_cuenta", nuevaSubCuenta);
+            }
+            if (esCuentaCompleta && nuevoCuenta) {
+              await supabase.from("cuentas").update({ ocupado: true }).eq("id_cuenta", nuevoCuenta);
+            }
+
+            await supabase.from("reemplazos").insert({
+              id_cuenta: cuentaId,
+              id_perfil: rowPerfil?.id_perfil || null,
+              id_sub_cuenta: null,
+            });
+
+            const perfilTxtOld = rowPerfil?.perfil || "-";
+            const perfilTxtNew = dataDestino?.n_perfil ? `M${dataDestino.n_perfil}` : "-";
+            const idVentaFmt = `#${String(ventaId).padStart(4, "0")}`;
+            const msgLines = [
+              "_*Reemplazo de:*",
+              `${currentCuentaDetalle.correo || "-"} ${perfilTxtOld}_`,
+              "",
+              `*${currentCuentaDetalle.plataformaNombre || "-"}* 🫎 \`ID Venta: ${idVentaFmt}\``,
+              "_Instagram: @moose.plus_",
+              "",
+              `*Correo:* ${dataDestino.correo || "-"}`,
+              `*Clave:* ${dataDestino.clave || "-"}`,
+              `*Perfil:* ${perfilTxtNew}`,
+              `*Pin:* ${dataDestino.pin || "-"}`,
+              "",
+              "*Próxima fecha de pago:*",
+              `_${rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte || "-"}_`,
+            ].join("\n");
+            modalReemplazoMsg.textContent = "Servicio reemplazado";
+            const copyBtn = modalReemplazo.querySelector("#btn-reemplazo-copy");
+            const copyContent = modalReemplazo.querySelector("#modal-reemplazo-copytext");
+            if (copyBtn) copyBtn.dataset.copy = msgLines;
+            if (copyContent) copyContent.textContent = msgLines;
+            modalReemplazo.classList.remove("hidden");
+          } catch (err) {
+            console.error("reemplazo admin error", err);
+            alert("No se pudo reemplazar.");
+          }
+          return;
+        }
+      });
+
+      // Modal clave (cuenta)
+      detalleEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-clave");
+        if (!btn) return;
+        const idCuenta = btn.dataset.cuenta || null;
+        const claveVal = btn.dataset.clave || "";
+        const correoVal = btn.dataset.correo || "";
+        modalState = { type: "clave", targetId: idCuenta, max: null, correo: correoVal };
+        if (modalPinTitle) modalPinTitle.textContent = "Cambiar clave";
+        if (modalPinInput) {
+          modalPinInput.value = claveVal;
+          modalPinInput.removeAttribute("maxLength");
+        }
+        modalPin?.classList.remove("hidden");
+      });
+
+      modalPinClose?.addEventListener("click", closePinModal);
+      modalPin?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) closePinModal();
+      });
+
+      modalReemplazo?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-close")) {
+          modalReemplazo.classList.add("hidden");
+        }
+      });
+
+      document.querySelector("#btn-reemplazo-copy")?.addEventListener("click", (e) => {
+        const btn = e.currentTarget;
+        const text = btn?.dataset?.copy || "";
+        copyWithToastAt(text, btn);
+      });
+
+      const copyWithToastAt = (text, anchor) => {
+        if (!text) return;
+        try {
+          navigator.clipboard.writeText(text);
+        } catch (err) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          } catch (_err) {
+            console.error("copy error", err);
+            return;
+          }
+        }
+        if (!anchor) return;
+        let toast = anchor.querySelector(".copy-toast");
+        if (!toast) {
+          toast = document.createElement("div");
+          toast.className = "copy-toast";
+          toast.textContent = "Copiado al portapapeles";
+          anchor.appendChild(toast);
+        }
+        toast.classList.add("visible");
+        setTimeout(() => toast?.remove(), 1200);
+      };
+
+      // Helpers de reemplazo (versión simplificada, sin reporte)
+      const findPerfilLibre = async (plataformaId, excludeCuenta, opts = {}) => {
+        const { requireHogar = null, requireVentaPerfil = null } = opts;
+        let excluidos = [];
+        try {
+          const { data: repData } = await supabase.from("reemplazos").select("id_perfil").not("id_perfil", "is", null);
+          excluidos = (repData || []).map((r) => r.id_perfil);
+        } catch (err) {
+          console.error("reemplazos lookup error", err);
+        }
+        let query = supabase
+          .from("perfiles")
+          .select("id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, cuentas!inner(id_plataforma, venta_perfil, venta_miembro, inactiva, correo, clave)")
+          .eq("cuentas.id_plataforma", plataformaId)
+          .or("ocupado.is.null,ocupado.eq.false")
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .order("id_perfil", { ascending: true })
+          .limit(1);
+        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+        if (requireHogar !== null) query = query.eq("perfil_hogar", requireHogar);
+        const { data, error } = await query;
+        if (error) return { error };
+        let rows = (data || []).filter((r) => r.id_cuenta !== excludeCuenta);
+        if (excluidos.length) {
+          rows = rows.filter((r) => !excluidos.includes(r.id_perfil));
+        }
+        if (requireVentaPerfil !== null) {
+          rows = rows.filter((r) => r.cuentas?.venta_perfil === requireVentaPerfil);
+        }
+        return { data: rows[0] || null };
+      };
+
+      const findSubCuentaLibre = async (plataformaId, excludeCuenta) => {
+        let query = supabase
+          .from("sub_cuentas")
+          .select("id_sub_cuenta, id_cuenta, ocupado, correo, clave, pin, cuentas!inner(id_plataforma, inactiva)")
+          .eq("cuentas.id_plataforma", plataformaId)
+          .or("ocupado.is.null,ocupado.eq.false")
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .order("id_sub_cuenta", { ascending: true })
+          .limit(1);
+        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+        const { data, error } = await query;
+        if (error) return { error };
+        return { data: data?.[0] || null };
+      };
+
+      const findCuentaCompleta = async (plataformaId, excludeCuenta) => {
+        let query = supabase
+          .from("cuentas")
+          .select("id_cuenta, correo, clave, inactiva")
+          .eq("id_plataforma", plataformaId)
+          .eq("venta_perfil", false)
+          .eq("venta_miembro", false)
+          .or("ocupado.is.null,ocupado.eq.false")
+          .or("inactiva.is.null,inactiva.eq.false")
+          .order("id_cuenta", { ascending: true })
+          .limit(1);
+        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+        const { data, error } = await query;
+        if (error) return { error };
+        return { data: data?.[0] || null };
+      };
+
+      const obtenerVentaPerfil = (perfilId) => {
+        if (!currentCuentaDetalle?.perfiles) return null;
+        const row = currentCuentaDetalle.perfiles.find((p) => String(p.id_perfil) === String(perfilId));
+        return row?.id_venta || null;
+      };
+
+      modalPinSave?.addEventListener("click", async () => {
+        if (!modalState.targetId) {
+          closePinModal();
+          return;
+        }
+        const newPin = modalPinInput?.value.trim() || "";
+        if (modalState.type === "pin" && modalState.max && newPin.length > modalState.max) {
+          alert(`El PIN no debe exceder ${modalState.max} dígitos.`);
+          return;
+        }
+        try {
+          if (modalState.type === "pin") {
+            const { error } = await supabase
+              .from("perfiles")
+              .update({ pin: newPin || null })
+              .eq("id_perfil", modalState.targetId);
+            if (error) throw error;
+
+            // Notificar al usuario de este perfil
+            const today = new Date().toISOString().slice(0, 10);
+            const { data: ventaPerfil, error: ventaErr } = await supabase
+              .from("ventas")
+              .select("id_usuario")
+              .eq("id_perfil", modalState.targetId)
+              .maybeSingle();
+            if (ventaErr) throw ventaErr;
+            const uid = ventaPerfil?.id_usuario;
+            if (uid) {
+              const { error: notifErr } = await supabase.from("notificaciones").insert({
+                id_usuario: uid,
+                titulo: "Actualización de PIN",
+                mensaje: `Se ha actualizado el PIN de la cuenta ${modalState.correo || ""}. El nuevo PIN del perfil ${modalState.nPerfil ? `M${modalState.nPerfil}` : ""} es ${newPin || ""}`,
+                fecha: today,
+                leido: false,
+              });
+              if (notifErr) throw notifErr;
+            }
+          } else if (modalState.type === "clave") {
+            const { error } = await supabase
+              .from("cuentas")
+              .update({ clave: newPin || null })
+              .eq("id_cuenta", modalState.targetId);
+            if (error) throw error;
+
+            // Notificaciones a usuarios de la cuenta cuyo corte no sea hoy
+            const today = new Date().toISOString().slice(0, 10);
+            const { data: ventasUsuarios, error: ventErr } = await supabase
+              .from("ventas")
+              .select("id_usuario, fecha_corte")
+              .eq("id_cuenta", modalState.targetId)
+              .neq("fecha_corte", today);
+            if (ventErr) throw ventErr;
+            const userIds = Array.from(
+              new Set((ventasUsuarios || []).map((v) => v.id_usuario).filter(Boolean))
+            );
+            if (userIds.length) {
+              const payload = userIds.map((uid) => ({
+                id_usuario: uid,
+                titulo: "Actualización de clave",
+                mensaje: `Se ha actualizado la clave de la cuenta ${modalState.correo || ""} a ${newPin || ""}`,
+                fecha: today,
+                leido: false,
+              }));
+              const { error: notifErr } = await supabase.from("notificaciones").insert(payload);
+              if (notifErr) throw notifErr;
+            }
+          }
+          if (modalState.type === "clave") {
+            const btn = detalleEl?.querySelector(`.btn-clave[data-cuenta="${modalState.targetId}"]`);
+            const span = btn?.previousElementSibling;
+            if (span) span.textContent = newPin || "-";
+          }
+          closePinModal();
+        } catch (err) {
+          console.error("update pin/clave error", err);
+          alert("No se pudo actualizar.");
+        }
+      });
+    </script>
+
+    <div id="modal-reemplazo-row" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen" style="max-width:280px; text-align:center;">
+        <button class="modal-close" aria-label="Cerrar">×</button>
+        <div class="modal-body">
+          <p id="modal-reemplazo-msg" style="margin:0; font-weight:600;">Reemplazando...</p>
+          <button type="button" id="btn-reemplazo-copy" class="btn-outline" style="margin-top:10px; white-space:pre-wrap; text-align:left; width:100%;">
+            Copiar resumen
+          </button>
+          <pre id="modal-reemplazo-copytext" style="white-space:pre-wrap; text-align:left; margin:6px 0 0 0;"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-pin" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen" style="max-width:320px;">
+        <button class="modal-close" id="btn-cerrar-pin" aria-label="Cerrar">×</button>
+        <div class="modal-body modal-renovar-sel-body">
+          <h3 id="modal-pin-title">Cambiar PIN</h3>
+          <input type="text" id="input-pin" class="input" />
+          <button type="button" class="btn-primary" id="btn-guardar-pin">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

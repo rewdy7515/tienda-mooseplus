@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cortes</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .cortes-wrapper {
+        margin-top: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .cortes-btns {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+      }
+      .cortes-btn {
+        width: 100%;
+        text-align: left;
+        padding: 14px 18px;
+        font-size: 16px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: relative;
+      }
+      .cortes-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .cortes-table th,
+      .cortes-table td {
+        border: 1px solid #e5e7eb;
+        padding: 8px;
+      }
+      .cortes-table th {
+        background: #444;
+        color: #fff;
+      }
+      .cortes-table tbody tr:nth-child(odd) {
+        background: #f5f5f5;
+      }
+      .cortes-table tbody tr:nth-child(even) {
+        background: #fff;
+      }
+      .cortes-hidden {
+        display: none;
+      }
+      .cortar-btn {
+        background: #ef4444;
+        color: #fff;
+        border: none;
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .row-disabled {
+        background: #e5e7eb !important;
+        color: #6b7280;
+      }
+      .row-disabled input {
+        background: #e5e7eb;
+        color: #6b7280;
+        pointer-events: none;
+      }
+      .cortar-btn.disabled {
+        background: #6b7280;
+        cursor: not-allowed;
+      }
+      .input-inline {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+
+      .cortes-block {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cortes-badge {
+        background: #9ca3af;
+        color: #fff;
+        border-radius: 999px;
+        min-width: 26px;
+        padding: 4px 8px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 700;
+        margin-left: 12px;
+        line-height: 1;
+      }
+      .copy-wrap,
+      .copy-cell {
+        position: relative;
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: absolute;
+        top: -22px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #111;
+        color: #fff;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 5;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Cortes</h2>
+      <div class="cortes-wrapper">
+        <div id="cortes-status" class="status">Cargando plataformas...</div>
+        <div id="cortes-tablas"></div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
+      import { clearServerSession, supabase } from "../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const tablasEl = document.querySelector("#cortes-tablas");
+      const statusEl = document.querySelector("#cortes-status");
+      let platMaxMap = {};
+      let platCorteClaveMap = {};
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const renderBloques = (plataformasConItems) => {
+        if (!tablasEl) return;
+        if (!plataformasConItems.length) {
+          setStatus("No hay ventas próximas a corte.");
+          tablasEl.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        tablasEl.innerHTML = plataformasConItems
+          .map(({ plataforma, items }) => {
+            const sortedItems = [...items].sort((a, b) => {
+              const ca = (a.cuentas?.correo || a.correo || "").toLowerCase();
+              const cb = (b.cuentas?.correo || b.correo || "").toLowerCase();
+              if (ca === cb) return 0;
+              return ca > cb ? 1 : -1;
+            });
+            const usaPines = !!plataforma.usa_pines;
+            const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
+            const rows = sortedItems
+              .map((v) => {
+                const maxPin = plataforma.max_dig_pin || "";
+                if (v.tipo === "reemplazo") {
+                  const perfilLabel = v.perfil ? `M${v.perfil}` : "-";
+                  const cuentaId = v.id_cuenta || "";
+                  const perfilId = v.id_perfil || "";
+                  const subId = v.id_sub_cuenta || "";
+                  return `
+                    <tr>
+                      <td>-</td>
+                      <td>Reemplazado</td>
+                      <td class="copy-cell" data-copy="${v.correo || ""}">${v.correo || "-"}</td>
+                      <td>
+                        <div class="copy-wrap" data-copy="${v.clave || ""}">
+                          <input type="text" class="input-inline copy-input" value="${v.clave || ""}" data-reemplazo="${v.id_reemplazo || ""}" data-cuenta="${cuentaId}" data-subcuenta="${subId}" data-field="clave" data-original="${v.clave || ""}">
+                        </div>
+                      </td>
+                      <td>${perfilLabel}</td>
+                      <td>
+                        <input type="text" class="input-inline" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
+                      </td>
+                      <td></td>
+                      <td><button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button></td>
+                    </tr>
+                  `;
+                }
+                const cliente = v.usuarios
+                  ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
+                  : "-";
+                const correo = v.cuentas?.correo || "-";
+                const clave = v.cuentas?.clave || "";
+                const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
+                const pin = v.perfiles?.pin ?? "";
+                const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
+                const cuentaId = v.cuentas?.id_cuenta || "";
+                const perfilId = v.perfiles?.id_perfil || "";
+                return `
+                  <tr>
+                    <td>${ventaId ? `#${ventaId}` : ""}</td>
+                    <td>${cliente}</td>
+                    <td class="copy-cell" data-copy="${correo}">${correo}</td>
+                    <td>
+                      <div class="copy-wrap" data-copy="${clave}">
+                        <input type="text" class="input-inline copy-input" value="${clave}" data-venta="${v.id_venta}" data-cuenta="${cuentaId}" data-field="clave" data-original="${clave}">
+                      </div>
+                    </td>
+                    <td>${perfil}</td>
+                    <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
+                    <td>${v.fecha_corte || ""}</td>
+                    <td><button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button></td>
+                  </tr>
+                `;
+              })
+              .join("");
+            return `
+              <div class="cortes-block">
+                <button type="button" data-plat="${plataforma.id_plataforma}" class="btn-outline inventario-btn cortes-btn">
+                  <span>${plataforma.nombre || `Plataforma ${plataforma.id_plataforma}`}</span>
+                  <span class="cortes-badge" aria-label="Total de registros">${items.length}</span>
+                </button>
+                <div class="cortes-tabla cortes-hidden" id="tabla-plat-${plataforma.id_plataforma}">
+                  <table class="cortes-table">
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Cliente</th>
+                        <th>Correo</th>
+                        <th>Clave</th>
+                        <th>Perfil</th>
+                        <th>PIN</th>
+                        <th>Fecha de corte</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rows}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const init = async () => {
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const { data: ventas, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma), perfiles:perfiles(id_perfil, n_perfil, pin)"
+            )
+            .lte("fecha_corte", today)
+            .or("suspendido.is.null,suspendido.eq.false");
+          if (error) throw error;
+
+          const map = new Map();
+          const ensureEntry = (platId) => {
+            if (!map.has(platId)) {
+              map.set(platId, { plataforma: { id_plataforma: platId, nombre: null }, items: [] });
+            }
+            return map.get(platId);
+          };
+
+          (ventas || []).forEach((v) => {
+            const platId = v.cuentas?.id_plataforma;
+            if (!platId) return;
+            const entry = ensureEntry(platId);
+            entry.items.push({ ...v, tipo: "venta" });
+          });
+
+          const { data: reemplazos, error: replErr } = await supabase
+            .from("reemplazos")
+            .select(
+              "id_reemplazo, id_cuenta, id_perfil, id_sub_cuenta, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma), perfiles:perfiles(id_perfil, n_perfil, pin), sub_cuentas:sub_cuentas(id_sub_cuenta, correo, clave, pin)"
+            );
+          if (replErr) throw replErr;
+          (reemplazos || []).forEach((r) => {
+            const platId = r.cuentas?.id_plataforma;
+            if (!platId) return;
+            const entry = ensureEntry(platId);
+            entry.items.push({
+              id_reemplazo: r.id_reemplazo,
+              tipo: "reemplazo",
+              id_cuenta: r.id_cuenta,
+              id_perfil: r.id_perfil,
+              id_sub_cuenta: r.id_sub_cuenta,
+              correo: r.cuentas?.correo || r.sub_cuentas?.correo || "-",
+              clave: r.cuentas?.clave || r.sub_cuentas?.clave || "",
+              perfil: r.perfiles?.n_perfil || null,
+              pin: r.perfiles?.pin ?? r.sub_cuentas?.pin ?? "",
+            });
+          });
+
+          const platIds = Array.from(map.keys());
+          if (!platIds.length) {
+            renderBloques([]);
+            return;
+          }
+
+          const { data: plataformasInfo, error: platErr } = await supabase
+            .from("plataformas")
+            .select("id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave")
+            .in("id_plataforma", platIds);
+          if (platErr) throw platErr;
+          const platNameMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p.nombre;
+            return acc;
+          }, {});
+          platMaxMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p.max_dig_pin;
+            return acc;
+          }, {});
+          const platPinesMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.usa_pines;
+            return acc;
+          }, {});
+          platCorteClaveMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.corte_por_clave;
+            return acc;
+          }, {});
+
+          const bloques = Array.from(map.values()).map((entry) => ({
+            plataforma: {
+              id_plataforma: entry.plataforma.id_plataforma,
+              nombre: platNameMap[entry.plataforma.id_plataforma] || `Plataforma ${entry.plataforma.id_plataforma}`,
+              max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
+              usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
+            },
+            items: entry.items,
+          }));
+
+          bloques.sort(
+            (a, b) => Number(a.plataforma.id_plataforma) - Number(b.plataforma.id_plataforma)
+          );
+
+          renderBloques(bloques);
+        } catch (err) {
+          console.error("cortes init error", err);
+        setStatus("No se pudieron cargar las plataformas/ventas.");
+      }
+    };
+
+      const copyToClipboard = async (text, anchor) => {
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (err) {
+          try {
+            const temp = document.createElement("textarea");
+            temp.value = text;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            temp.remove();
+          } catch (_) {
+            console.error("No se pudo copiar al portapapeles");
+            return;
+          }
+        }
+        if (!anchor) return;
+        const holder = anchor.closest(".copy-wrap, .copy-cell") || anchor.parentElement;
+        if (!holder) return;
+        let toast = holder.querySelector(".copy-toast");
+        if (!toast) {
+          toast = document.createElement("div");
+          toast.className = "copy-toast";
+          toast.textContent = "Copiado al portapapeles";
+          holder.appendChild(toast);
+        }
+        toast.classList.add("visible");
+        setTimeout(() => toast?.remove(), 1200);
+      };
+
+      tablasEl?.addEventListener("click", (e) => {
+        const copyCell = e.target.closest(".copy-cell");
+        if (copyCell) {
+          copyToClipboard(copyCell.dataset.copy || copyCell.textContent.trim(), copyCell);
+          return;
+        }
+        const copyInput = e.target.closest(".copy-input");
+        if (copyInput) {
+          copyToClipboard(copyInput.value, copyInput);
+          return;
+        }
+        const cortarBtn = e.target.closest(".cortar-btn");
+        if (cortarBtn) {
+          const row = cortarBtn.closest("tr");
+          if (!row) return;
+          const ventaId = cortarBtn.dataset.venta;
+          const replId = cortarBtn.dataset.reemplazo;
+          const claveInput = row.querySelector('input[data-field="clave"]');
+          const pinInput = row.querySelector('input[data-field="pin"]');
+          const usaPines = cortarBtn.dataset.usapines === "true";
+          const pinChanged = pinInput && pinInput.dataset.original !== pinInput.value;
+          const claveChanged = claveInput && claveInput.dataset.original !== claveInput.value;
+          if (usaPines && pinInput && !pinChanged) {
+            alert("Debes modificar el pin del perfil para poder cortar");
+            return; // si hay pin pero no cambió, no se actualiza nada
+          }
+          if (usaPines && pinInput && pinChanged) {
+            const max = Number(pinInput.dataset.maxpin);
+            const val = pinInput.value;
+            if (max && val) {
+              if (!/^[0-9]+$/.test(val) || val.length !== max) {
+                alert("Longitud invalida para el PIN");
+                pinInput.focus();
+                return;
+              }
+            }
+          }
+          const needsClaveChange = !claveChanged && (!usaPines || !pinInput || !pinChanged);
+          if (needsClaveChange) {
+            alert("Debes modificar la contraseña para poder cortar");
+            return;
+          }
+
+          const updateVenta = async () => {
+            const updates = [];
+            if (ventaId) {
+              updates.push(
+                supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
+              );
+            }
+            if (claveInput && claveInput.dataset.original !== claveInput.value) {
+              const cuentaId = claveInput.dataset.cuenta;
+              if (cuentaId) {
+                updates.push(
+                  supabase.from("cuentas").update({ clave: claveInput.value }).eq("id_cuenta", cuentaId)
+                );
+                const cortePorClave = cortarBtn.dataset.corteclave === "true";
+                if (cortePorClave) {
+                  const today = new Date().toISOString().slice(0, 10);
+                  updates.push(
+                    supabase
+                      .from("ventas")
+                      .update({ suspendido: true })
+                      .eq("id_cuenta", cuentaId)
+                      .lte("fecha_corte", today)
+                      .or("suspendido.is.null,suspendido.eq.false")
+                  );
+                } else if (!usaPines) {
+                  updates.push(
+                    supabase.from("ventas").update({ suspendido: true }).eq("id_cuenta", cuentaId)
+                  );
+                }
+              }
+            }
+            if (pinInput && pinInput.dataset.original !== pinInput.value) {
+              const perfilId = pinInput.dataset.perfil;
+              if (perfilId) {
+                updates.push(
+                  supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
+                );
+              }
+            }
+            if (updates.length) {
+              const results = await Promise.all(updates);
+              const err = results.find((r) => r.error)?.error;
+              if (err) throw err;
+              if (claveInput) claveInput.dataset.original = claveInput.value;
+              if (pinInput) pinInput.dataset.original = pinInput.value;
+            }
+          };
+
+          const updateReemplazo = async () => {
+            const updates = [];
+            if (claveInput && claveInput.dataset.original !== claveInput.value) {
+              const cuentaId = claveInput.dataset.cuenta;
+              const subId = claveInput.dataset.subcuenta;
+              if (cuentaId) {
+                updates.push(
+                  supabase.from("cuentas").update({ clave: claveInput.value }).eq("id_cuenta", cuentaId)
+                );
+              } else if (subId) {
+                updates.push(
+                  supabase.from("sub_cuentas").update({ clave: claveInput.value }).eq("id_sub_cuenta", subId)
+                );
+              }
+            }
+            if (pinInput && pinInput.dataset.original !== pinInput.value) {
+              const perfilId = pinInput.dataset.perfil;
+              const subId = pinInput.dataset.subcuenta;
+              if (perfilId) {
+                updates.push(
+                  supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
+                );
+              } else if (subId) {
+                updates.push(
+                  supabase.from("sub_cuentas").update({ pin: pinInput.value }).eq("id_sub_cuenta", subId)
+                );
+              }
+            }
+            const perfilIdForFree = pinInput?.dataset.perfil;
+            if (perfilIdForFree) {
+              updates.push(
+                supabase.from("perfiles").update({ ocupado: false }).eq("id_perfil", perfilIdForFree)
+              );
+            }
+            if (updates.length) {
+              const results = await Promise.all(updates);
+              const err = results.find((r) => r.error)?.error;
+              if (err) throw err;
+              if (claveInput) claveInput.dataset.original = claveInput.value;
+              if (pinInput) pinInput.dataset.original = pinInput.value;
+            }
+            if (replId) {
+              const { error: delErr } = await supabase.from("reemplazos").delete().eq("id_reemplazo", replId);
+              if (delErr) throw delErr;
+            }
+          };
+
+          (async () => {
+            try {
+              if (ventaId) {
+                await updateVenta();
+                row.classList.add("row-disabled");
+                const inputs = row.querySelectorAll("input");
+                inputs.forEach((inp) => (inp.disabled = true));
+                cortarBtn.classList.add("disabled");
+                cortarBtn.disabled = true;
+              } else if (replId) {
+                await updateReemplazo();
+                row.classList.add("row-disabled");
+                const inputs = row.querySelectorAll("input");
+                inputs.forEach((inp) => (inp.disabled = true));
+                cortarBtn.classList.add("disabled");
+                cortarBtn.disabled = true;
+              }
+            } catch (err) {
+              console.error("cortar update error", err);
+              alert("No se pudo guardar los cambios antes de cortar.");
+            }
+          })();
+          return;
+        }
+        const btn = e.target.closest("button[data-plat]");
+        if (!btn) return;
+        const platId = btn.dataset.plat;
+        const target = document.querySelector(`#tabla-plat-${platId}`);
+        if (!target) return;
+        const isHidden = target.classList.contains("cortes-hidden");
+        const tablas = tablasEl?.querySelectorAll(".cortes-tabla") || [];
+        if (isHidden) {
+          tablas.forEach((t) => t.classList.add("cortes-hidden"));
+          target.classList.remove("cortes-hidden");
+        } else {
+          target.classList.add("cortes-hidden");
+        }
+      });
+
+      tablasEl?.addEventListener("input", (e) => {
+        const pinInput = e.target.closest('input[data-field="pin"]');
+        if (!pinInput) return;
+        const max = Number(pinInput.dataset.maxpin);
+        let val = pinInput.value.replace(/\D/g, "");
+        if (max) val = val.slice(0, max);
+        pinInput.value = val;
+      });
+
+      init();
+    </script>
+  </body>
+</html>

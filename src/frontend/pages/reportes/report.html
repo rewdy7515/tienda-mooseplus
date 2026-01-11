@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reportes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Reportes</h2>
+      <div class="actions" style="margin-bottom: 16px;">
+        <button id="btn-crear-reporte" class="btn-primary">Hacer un reporte</button>
+      </div>
+      <h3>Reportes pendientes</h3>
+      <div id="reportes-status" class="status"></div>
+      <div id="reportes-plataformas" class="admin-actions" style="gap:8px; margin-top:8px;"></div>
+      <div id="tabla-wrapper" class="tabla-wrapper hidden" style="margin-top: 12px;">
+        <table class="reportes-table" id="tabla-pendientes">
+          <thead>
+            <tr>
+              <th>ID Reporte</th>
+              <th>Correo</th>
+              <th>Fecha del reporte</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="reportes-body">
+            <tr><td colspan="4" class="status">Selecciona una plataforma.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="actions" style="margin-top:20px;">
+        <button id="btn-solucionados" class="btn-outline">Reportes solucionados (últimos 30 días)</button>
+      </div>
+      <div id="solucionados-section" class="hidden">
+        <div id="solucionados-plataformas" class="admin-actions" style="gap:8px; margin-top:8px;"></div>
+        <div id="solucionados-wrapper" class="tabla-wrapper hidden" style="margin-top: 12px;">
+          <table class="reportes-table" id="tabla-solucionados">
+            <thead>
+              <tr>
+                <th>ID Reporte</th>
+                <th>Correo</th>
+                <th>Fecha del reporte</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody id="solucionados-body">
+              <tr><td colspan="4" class="status">Selecciona una plataforma.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="modal-solucionado" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card modal-card-sol">
+          <button class="modal-close modal-sol-close" aria-label="Cerrar">×</button>
+          <div class="modal-body resumen-body">
+            <h3 id="sol-modal-title"></h3>
+            <div class="modal-info-grid">
+              <div class="label">Correo:</div>
+              <div class="value" id="sol-modal-correo"></div>
+              <div class="label">Clave:</div>
+              <div class="value" id="sol-modal-clave"></div>
+              <div class="label">Perfil:</div>
+              <div class="value" id="sol-modal-perfil"></div>
+              <div class="label">PIN:</div>
+              <div class="value" id="sol-modal-pin"></div>
+              <div class="label">Notas:</div>
+              <div class="value" id="sol-modal-notas"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="../../scripts/report.js"></script>
+  </body>
+</html>

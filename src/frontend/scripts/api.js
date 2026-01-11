@@ -1,0 +1,267 @@
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.86.0/+esm";
+import { requireSession } from "./session.js";
+
+const supabase = createClient(
+  "https://ojigtjcwhcrnawdbtqkl.supabase.co",
+  "sb_publishable_pUhdf8wgEJyUtUg6TZqcTA_qF9gwEjJ"
+);
+
+// Mantén mismo host para que las cookies de sesión sean válidas; en local usa el mismo hostname y puerto 3000.
+const API_BASE = (() => {
+  if (typeof window === "undefined") return "http://localhost:3000";
+  const { protocol, hostname, port } = window.location;
+  // Si estás en 127.0.0.1 o localhost con Live Server (5500), apunta al backend en 3000 pero mismo hostname.
+  if ((hostname === "localhost" || hostname === "127.0.0.1") && port && port !== "3000") {
+    return `${protocol}//${hostname}:3000`;
+  }
+  // Si el front ya corre en el mismo host/puerto que el backend, usa origin.
+  return window.location.origin;
+})();
+
+const bufferToBase64 = (buffer) => {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+};
+
+export async function loadCatalog() {
+  const [
+    { data: categorias, error: errCat },
+    { data: plataformas, error: errPlat },
+    { data: precios, error: errPre },
+    { data: descuentos, error: errDesc },
+  ] = await Promise.all([
+    supabase.from("categorias").select("id_categoria, nombre").order("id_categoria"),
+    supabase
+      .from("plataformas")
+      .select(
+        "id_plataforma, id_categoria, nombre, imagen, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses"
+      )
+      .order("nombre"),
+    supabase
+      .from("precios")
+      .select(
+        "id_precio, id_plataforma, cantidad, precio_usd_detal, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta"
+      )
+      .order("id_precio"),
+    supabase.from("descuentos_meses").select("id_descuento, meses, descuento"),
+  ]);
+
+  if (errCat || errPlat || errPre || errDesc) {
+    throw new Error(errCat?.message || errPlat?.message || errPre?.message || errDesc?.message);
+  }
+
+  return { categorias, plataformas, precios, descuentos };
+}
+
+// Enviar delta de cantidad (+ agrega / - resta). Si la cantidad resultante es <= 0 se borra el item, y si no quedan items se elimina el carrito.
+export async function sendCartDelta(idPrecio, delta, meses, extra = {}) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const res = await fetch(`${API_BASE}/api/cart/item`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ id_precio: idPrecio, delta, id_usuario, meses, ...extra }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("cart/item response", res.status, text);
+    }
+  } catch (err) {
+    console.error("No se pudo enviar al backend:", err);
+  }
+}
+
+export async function createCart() {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const res = await fetch(`${API_BASE}/api/cart`, {
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ id_usuario }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("cart create response", res.status, text);
+      return null;
+    }
+    return res.json();
+  } catch (err) {
+    console.error("No se pudo crear el carrito:", err);
+    return null;
+  }
+}
+
+export async function fetchCart() {
+  await ensureServerSession();
+  try {
+    const id = requireSession();
+    const res = await fetch(`${API_BASE}/api/cart?id_usuario=${encodeURIComponent(id)}`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("cart get response", res.status, text);
+      return { items: [] };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("No se pudo obtener el carrito:", err);
+    return { items: [] };
+  }
+}
+
+export async function submitCheckout(payload) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const res = await fetch(`${API_BASE}/api/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ ...payload, id_usuario, comprobante: payload.comprobantes }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("checkout response", res.status, text);
+      return { error: text || "Error en checkout" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("No se pudo completar el checkout:", err);
+    return { error: err.message };
+  }
+}
+
+export async function uploadComprobantes(files = []) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const payloadFiles = await Promise.all(
+      files.map(async (file) => ({
+        name: file.name,
+        type: file.type,
+        content: bufferToBase64(await file.arrayBuffer()),
+      }))
+    );
+
+    const res = await fetch(`${API_BASE}/api/checkout/upload`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ files: payloadFiles, id_usuario }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("upload comprobantes response", res.status, text);
+      return { error: text || "No se pudieron subir los comprobantes" };
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error("No se pudieron subir los comprobantes:", err);
+    return { error: err.message };
+  }
+}
+
+export async function fetchInventario() {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/inventario`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("inventario response", res.status, text);
+      return { error: text || "No se pudo cargar el inventario" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("No se pudo cargar el inventario:", err);
+    return { error: err.message };
+  }
+}
+
+export async function fetchEntregadas() {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/ventas/entregadas`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("entregadas response", res.status, text);
+      return { error: text || "No se pudo cargar entregas" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("No se pudo cargar entregas:", err);
+    return { error: err.message };
+  }
+}
+
+export async function startSession(idUsuario) {
+  try {
+    const res = await fetch(`${API_BASE}/api/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id_usuario: idUsuario }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("startSession response", res.status, text);
+      return { error: text || "No se pudo establecer la sesión" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("startSession error", err);
+    return { error: err.message };
+  }
+}
+
+export async function clearServerSession() {
+  try {
+    await fetch(`${API_BASE}/api/session`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    // Fallback: limpia cookie en caso de que el delete falle silenciosamente
+    document.cookie = "session_user_id=; Max-Age=0; path=/";
+  } catch (err) {
+    console.error("clearServerSession error", err);
+  }
+}
+
+export async function ensureServerSession() {
+  const id = requireSession();
+  await startSession(id);
+}
+
+export async function loadCurrentUser() {
+  const idUsuario = requireSession();
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin")
+    .eq("id_usuario", idUsuario)
+    .maybeSingle();
+  if (error) {
+    console.error("loadCurrentUser error", error);
+    return null;
+  }
+  return data;
+}
+
+export { supabase };

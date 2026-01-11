@@ -1,0 +1,1317 @@
+const express = require("express");
+const cors = require("cors");
+const { supabaseAdmin } = require("../database/db");
+const { port } = require("../../config/config");
+
+const app = express();
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "10mb" }));
+
+const AUTH_REQUIRED = "AUTH_REQUIRED";
+
+// Usa el id de usuario autenticado que envíe el cliente.
+const parseSessionUserId = (req) => {
+  const raw = req?.headers?.cookie || "";
+  const parts = raw.split(";").map((c) => c.trim().split("="));
+  const cookieMap = parts.reduce((acc, [k, v]) => {
+    if (k) acc[k] = decodeURIComponent(v || "");
+    return acc;
+  }, {});
+  const id = Number(cookieMap.session_user_id);
+  return !Number.isNaN(id) && id > 0 ? id : null;
+};
+
+const getOrCreateUsuario = async (req) => {
+  const fromSession = parseSessionUserId(req);
+  if (fromSession) return fromSession;
+  const incomingId = Number(req?.body?.id_usuario || req?.query?.id_usuario);
+  if (!Number.isNaN(incomingId) && incomingId > 0) {
+    return incomingId;
+  }
+  const err = new Error(AUTH_REQUIRED);
+  err.code = AUTH_REQUIRED;
+  throw err;
+};
+
+const getCurrentCarrito = async (idUsuario) => {
+  const { data, error } = await supabaseAdmin
+    .from("carritos")
+    .select("id_carrito")
+    .eq("id_usuario", idUsuario)
+    .order("fecha_creacion", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id_carrito || null;
+};
+
+const getOrCreateCarrito = async (idUsuario) => {
+  const { data, error } = await supabaseAdmin
+    .from("carritos")
+    .select("id_carrito")
+    .eq("id_usuario", idUsuario)
+    .order("fecha_creacion", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data.id_carrito;
+
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from("carritos")
+    .insert({ id_usuario: idUsuario, fecha_creacion: new Date().toISOString() })
+    .select("id_carrito")
+    .single();
+  if (insertErr) throw insertErr;
+  return inserted.id_carrito;
+};
+
+// Endpoint para agregar/actualizar/eliminar items del carrito.
+// Se maneja por delta: cantidad positiva suma, negativa resta; si el resultado es <=0 se elimina el item.
+app.post("/api/cart/item", async (req, res) => {
+  console.log("[cart:item] body", req.body);
+  const { id_precio, delta, meses, renovacion = false, id_venta = null } = req.body || {};
+  if (!id_precio || delta === undefined) {
+    return res
+      .status(400)
+      .json({ error: "id_precio y delta son requeridos" });
+  }
+
+  const parsedDelta = Number(delta);
+  if (Number.isNaN(parsedDelta) || parsedDelta === 0) {
+    return res.status(400).json({ error: "delta debe ser numérico distinto de 0" });
+  }
+
+  try {
+    const bodyUserId = req.body?.id_usuario || null;
+    const idUsuario = (await getOrCreateUsuario(req)) || bodyUserId;
+    if (!idUsuario) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    const idCarrito = await getOrCreateCarrito(idUsuario);
+    const mesesVal = (() => {
+      const num = Number(meses);
+      if (Number.isFinite(num) && num > 0) return Math.max(1, Math.round(num));
+      return null;
+    })();
+
+    // Trae item existente
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from("carrito_items")
+      .select("id_item, cantidad, meses, renovacion, id_venta")
+      .eq("id_carrito", idCarrito)
+      .eq("id_precio", id_precio)
+      .eq("renovacion", renovacion === true)
+      .maybeSingle();
+    if (selErr) throw selErr;
+    // Filtra por id_venta según sea null o definido
+    const matchesVenta =
+      id_venta === undefined || id_venta === null
+        ? existing?.id_venta === null || existing?.id_venta === undefined
+        : existing?.id_venta === id_venta;
+    const matchExisting = existing && matchesVenta;
+    
+    const newQty = (matchExisting ? existing.cantidad : 0) + parsedDelta;
+
+    if (matchExisting && newQty <= 0) {
+      const { error: delErr } = await supabaseAdmin
+        .from("carrito_items")
+        .delete()
+        .eq("id_item", existing.id_item);
+      if (delErr) throw delErr;
+    } else if (matchExisting) {
+      const { error: updErr } = await supabaseAdmin
+        .from("carrito_items")
+        .update({
+          cantidad: newQty,
+          meses: mesesVal ?? existing.meses ?? null,
+          renovacion: renovacion === true,
+          id_venta: id_venta ?? existing.id_venta ?? null,
+        })
+        .eq("id_item", existing.id_item);
+      if (updErr) throw updErr;
+    } else if (newQty > 0) {
+      const { error: insErr } = await supabaseAdmin
+        .from("carrito_items")
+        .insert({
+          id_carrito: idCarrito,
+          id_precio,
+          cantidad: newQty,
+          meses: mesesVal,
+          renovacion: renovacion === true,
+          id_venta: id_venta ?? null,
+        });
+      if (insErr) throw insErr;
+    }
+
+    // Si no quedan items, elimina el carrito
+    const { data: countData, count, error: cntErr } = await supabaseAdmin
+      .from("carrito_items")
+      .select("id_item", { count: "exact", head: true })
+      .eq("id_carrito", idCarrito);
+    if (cntErr) throw cntErr;
+    const remaining = typeof count === "number" ? count : countData?.length ?? 0;
+    if (remaining === 0) {
+      await supabaseAdmin.from("carritos").delete().eq("id_carrito", idCarrito);
+      console.log("[cart:item] carrito vacío, eliminado", idCarrito);
+    }
+
+    console.log("[cart:item] usuario", idUsuario, "carrito", idCarrito, "delta", parsedDelta, "id_precio", id_precio, "remaining", remaining);
+    res.json({ ok: true, id_carrito: idCarrito, remaining });
+  } catch (err) {
+    console.error("[cart:item] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Crear (o devolver) carrito del usuario activo
+app.post("/api/cart", async (_req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(_req);
+    const idCarrito = await getOrCreateCarrito(idUsuario);
+    res.json({ ok: true, id_carrito: idCarrito });
+  } catch (err) {
+    console.error("[cart:create] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Obtener carrito existente y sus items
+app.get("/api/cart", async (_req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(_req);
+    const carritoId = await getCurrentCarrito(idUsuario);
+    if (!carritoId) return res.json({ items: [] });
+
+    const { data: items, error: itemErr } = await supabaseAdmin
+      .from("carrito_items")
+      .select("id_item, id_precio, cantidad, meses, renovacion, id_venta")
+      .eq("id_carrito", carritoId);
+    if (itemErr) throw itemErr;
+
+    res.json({ id_carrito: carritoId, items });
+  } catch (err) {
+    console.error("[cart:get] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sube comprobantes al bucket usando la clave de servicio (evita RLS en cliente)
+app.post("/api/checkout/upload", async (req, res) => {
+  const files = req.body?.files;
+  if (!Array.isArray(files) || !files.length) {
+    return res.status(400).json({ error: "files es requerido" });
+  }
+
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    const urls = [];
+
+    const sanitizeFileName = (name = "file") => {
+      const cleaned = String(name)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9._-]/g, "");
+      return cleaned || "file";
+    };
+
+    for (const file of files) {
+      const { name, content, type } = file || {};
+      if (!name || !content) {
+        return res
+          .status(400)
+          .json({ error: "Cada archivo necesita name y content en base64" });
+      }
+      const buffer = Buffer.from(content, "base64");
+      const safeName = sanitizeFileName(name);
+      const path = `comprobantes/${idUsuario}/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}-${safeName}`;
+
+      const { error } = await supabaseAdmin.storage
+        .from("private_assets")
+        .upload(path, buffer, {
+          contentType: type || "application/octet-stream",
+        });
+      if (error) throw error;
+      const { data } = supabaseAdmin.storage.from("private_assets").getPublicUrl(path);
+      if (data?.publicUrl) urls.push(data.publicUrl);
+    }
+
+    res.json({ urls });
+  } catch (err) {
+    console.error("[checkout:upload] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sesión: setea cookie httpOnly con el id de usuario
+app.post("/api/session", async (req, res) => {
+  const { id_usuario } = req.body || {};
+  const parsed = Number(id_usuario);
+  if (!parsed || Number.isNaN(parsed)) {
+    return res.status(400).json({ error: "id_usuario es requerido" });
+  }
+  res.cookie("session_user_id", parsed, {
+    httpOnly: true,
+    sameSite: "lax",
+  });
+  res.json({ ok: true });
+});
+
+app.delete("/api/session", (_req, res) => {
+  res.clearCookie("session_user_id", { httpOnly: true, sameSite: "lax" });
+  res.json({ ok: true });
+});
+
+// Inventario: ventas por usuario autenticado agrupadas por plataforma
+app.get("/api/inventario", async (req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    if (!idUsuario) throw new Error("Usuario no autenticado");
+
+    const { data, error } = await supabaseAdmin
+      .from("ventas")
+      .select(
+        `
+        id_venta,
+        fecha_corte,
+        id_precio,
+        id_cuenta,
+        id_perfil,
+        cuentas:cuentas(
+          id_cuenta,
+          id_plataforma,
+          correo,
+          clave,
+          plataformas(nombre)
+        ),
+        perfiles:perfiles(
+          id_perfil,
+          n_perfil,
+          pin
+        ),
+        precios:precios(plan)
+      `
+      )
+      .eq("id_usuario", idUsuario);
+    if (error) throw error;
+
+    const items = (data || []).map((row) => {
+      const plataforma = row.cuentas?.plataformas?.nombre || "Sin plataforma";
+      const plan = row.precios?.plan || "Sin plan";
+      return {
+        plataforma,
+        plan,
+        id_venta: row.id_venta,
+        id_precio: row.id_precio || null,
+        id_plataforma: row.cuentas?.id_plataforma || null,
+        id_cuenta: row.id_cuenta || row.cuentas?.id_cuenta || null,
+        id_perfil: row.id_perfil || row.perfiles?.id_perfil || null,
+        correo: row.cuentas?.correo || "",
+        clave: row.cuentas?.clave || "",
+        n_perfil: row.perfiles?.n_perfil ?? null,
+        pin: row.perfiles?.pin ?? null,
+        fecha_corte: row.fecha_corte,
+      };
+    });
+
+    const grouped = items.reduce((acc, item) => {
+      if (!acc[item.plataforma]) acc[item.plataforma] = {};
+      if (!acc[item.plataforma][item.plan]) acc[item.plataforma][item.plan] = [];
+      acc[item.plataforma][item.plan].push(item);
+      return acc;
+    }, {});
+
+    const plataformas = Object.entries(grouped).map(([nombre, planes]) => ({
+      nombre,
+      planes: Object.entries(planes).map(([plan, ventas]) => ({ plan, ventas })),
+    }));
+
+    res.json({ plataformas });
+  } catch (err) {
+    console.error("[inventario] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: importar cuentas (CSV)
+app.post("/api/admin/import-cuentas", async (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: "rows es requerido" });
+  }
+
+  const boolVal = (v) => {
+    if (typeof v === "boolean") return v;
+    const s = String(v || "").trim().toLowerCase();
+    if (!s) return false;
+    return s === "true";
+  };
+  const toDate = (value) => {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.valueOf()) ? null : d.toISOString().slice(0, 10);
+  };
+
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    if (!idUsuario) throw new Error("Usuario no autenticado");
+
+    const normalized = rows
+      .map((r) => {
+        const correo = (r.correo || "").trim().toLowerCase();
+        const id_plataforma = Number(r.id_plataforma);
+        const id_proveedor =
+          r.id_proveedor === null || r.id_proveedor === undefined || r.id_proveedor === ""
+            ? null
+            : Number(r.id_proveedor);
+        return {
+          correo,
+          clave: (r.clave || "").trim() || null,
+          fecha_corte: toDate(r.fecha_corte),
+          fecha_pagada: toDate(r.fecha_pagada),
+          inactiva: boolVal(r.inactiva),
+          ocupado: boolVal(r.ocupado),
+          id_plataforma: Number.isFinite(id_plataforma) ? id_plataforma : null,
+          id_proveedor: Number.isFinite(id_proveedor) ? id_proveedor : null,
+          region: (r.region || "").trim() || null,
+          correo_codigo: (r.correo_codigo || "").trim() || null,
+          clave_codigo: (r.clave_codigo || "").trim() || null,
+          link_codigo: (r.link_codigo || "").trim() || null,
+          pin_codigo: (r.pin_codigo || "").trim() || null,
+          instaddr: boolVal(r.instaddr),
+          venta_perfil: boolVal(r.venta_perfil),
+          venta_miembro: boolVal(r.venta_miembro),
+        };
+      })
+      .filter((r) => r.correo && Number.isFinite(r.id_plataforma));
+
+    if (!normalized.length) {
+      return res.status(400).json({ error: "No hay filas válidas para importar" });
+    }
+
+    const correos = [...new Set(normalized.map((r) => r.correo))];
+    const { data: cuentasExist, error: cuentasErr } = await supabaseAdmin
+      .from("cuentas")
+      .select("id_cuenta, correo")
+      .in("correo", correos);
+    if (cuentasErr) throw cuentasErr;
+    const cuentaByCorreo = (cuentasExist || []).reduce((acc, c) => {
+      acc[c.correo?.toLowerCase?.()] = c.id_cuenta;
+      return acc;
+    }, {});
+
+    const mergedByCorreo = new Map();
+    normalized.forEach((r) => {
+      const id_cuenta = cuentaByCorreo[r.correo] || null;
+      const current = mergedByCorreo.get(r.correo) || {};
+      mergedByCorreo.set(r.correo, { ...current, ...r, id_cuenta });
+    });
+
+    const upsertRows = Array.from(mergedByCorreo.values()).map((r) => ({
+      ...r,
+      id_cuenta: r.id_cuenta || undefined,
+    }));
+
+    if (!upsertRows.length) {
+      return res.status(400).json({ error: "No hay filas válidas para importar" });
+    }
+
+    const { error: upsertErr } = await supabaseAdmin
+      .from("cuentas")
+      .upsert(upsertRows, { onConflict: "id_cuenta" });
+    if (upsertErr) throw upsertErr;
+
+    const nuevas = upsertRows.filter((r) => !r.id_cuenta).length;
+    const actualizadas = upsertRows.length - nuevas;
+
+    res.json({
+      ok: true,
+      cuentas: upsertRows.length,
+      nuevas,
+      actualizadas,
+    });
+  } catch (err) {
+    console.error("[admin:import-cuentas] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: importar clientes (ventas y perfiles ocupados)
+app.post("/api/admin/import-clientes", async (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: "rows es requerido" });
+  }
+
+  const boolVal = (v) =>
+    v === true || v === "true" || v === "1" || v === 1 || v === "t" || v === "on";
+
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    if (!idUsuario) throw new Error("Usuario no autenticado");
+
+    const makeNameKey = (nombre, apellido) =>
+      `${(nombre || "").trim().toLowerCase()}|${(apellido || "").trim().toLowerCase()}`;
+
+    const normalized = rows
+      .map((r) => {
+        const correo = (r.correo || "").trim().toLowerCase();
+        const rawVenta = (r.id_venta || "").toString().replace(/#/g, "").trim();
+        const id_venta = rawVenta ? Number(rawVenta) : null;
+        const n_perfil =
+          r.n_perfil === "" || r.n_perfil === null || r.n_perfil === undefined
+            ? null
+            : Number(r.n_perfil);
+        const fecha_corte = r.fecha_corte ? new Date(r.fecha_corte) : null;
+        const suspendido = boolVal(r.suspendido);
+        const meses_contratados =
+          r.meses_contratados === "" || r.meses_contratados === null || r.meses_contratados === undefined
+            ? null
+            : Number(r.meses_contratados);
+        const corte_reemplazo = boolVal(r.corte_reemplazo);
+        const nombreCompleto = (r.nombre || "").trim();
+        const [nombre, ...resto] = nombreCompleto.split(/\s+/);
+        const apellido = resto.join(" ").trim() || null;
+
+        return {
+          correo,
+          id_venta: Number.isNaN(id_venta) ? null : id_venta,
+          n_perfil: Number.isInteger(n_perfil) ? n_perfil : null,
+          fecha_corte:
+            fecha_corte && !Number.isNaN(fecha_corte.valueOf())
+              ? fecha_corte.toISOString().slice(0, 10)
+              : null,
+          suspendido,
+          meses_contratados: Number.isFinite(meses_contratados) ? meses_contratados : null,
+          corte_reemplazo,
+          nombre: nombre || null,
+          apellido,
+        };
+      })
+      .filter((r) => r.correo && r.n_perfil !== null);
+
+    if (!normalized.length) {
+      return res.status(400).json({ error: "No hay filas válidas para importar" });
+    }
+
+    const correos = [...new Set(normalized.map((r) => r.correo))];
+    const { data: cuentas, error: cuentasErr } = await supabaseAdmin
+      .from("cuentas")
+      .select("id_cuenta, correo")
+      .in("correo", correos);
+    if (cuentasErr) throw cuentasErr;
+    const cuentaByCorreo = (cuentas || []).reduce((acc, c) => {
+      acc[c.correo?.toLowerCase?.()] = c.id_cuenta;
+      return acc;
+    }, {});
+
+    const rowsWithCuenta = normalized.map((r) => ({
+      ...r,
+      id_cuenta: cuentaByCorreo[r.correo] || null,
+      name_key: makeNameKey(r.nombre, r.apellido),
+    }));
+
+    const cuentasIds = [...new Set(rowsWithCuenta.map((r) => r.id_cuenta).filter(Boolean))];
+
+    const nameKeys = Array.from(
+      new Set(rowsWithCuenta.map((r) => r.name_key).filter((k) => k && k !== "|"))
+    );
+
+    let usuarioByName = {};
+    if (nameKeys.length) {
+      // Trae todos los usuarios y normaliza a llave nombre|apellido en minúsculas
+      const { data: usuariosExist, error: usrErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("id_usuario, nombre, apellido");
+      if (usrErr) throw usrErr;
+      usuarioByName = (usuariosExist || []).reduce((acc, u) => {
+        const key = makeNameKey(u.nombre, u.apellido);
+        if (key && key !== "|") acc[key] = u.id_usuario;
+        return acc;
+      }, {});
+    }
+
+    const nuevosUsuarios = [];
+    const newKeys = new Set();
+    rowsWithCuenta.forEach((r) => {
+      if (
+        !r.id_cuenta ||
+        !r.name_key ||
+        r.name_key === "|" ||
+        usuarioByName[r.name_key] ||
+        newKeys.has(r.name_key)
+      ) {
+        return;
+      }
+      newKeys.add(r.name_key);
+      nuevosUsuarios.push({
+        nombre: r.nombre || "Cliente",
+        apellido: r.apellido,
+      });
+    });
+
+    if (nuevosUsuarios.length) {
+      const { data: insertedUsers, error: insUsrErr } = await supabaseAdmin
+        .from("usuarios")
+        .insert(nuevosUsuarios)
+        .select("id_usuario, nombre, apellido");
+      if (insUsrErr) throw insUsrErr;
+      (insertedUsers || []).forEach((u) => {
+        const key = makeNameKey(u.nombre, u.apellido);
+        usuarioByName[key] = u.id_usuario;
+      });
+    }
+
+    const { data: perfiles, error: perfErr } = await supabaseAdmin
+      .from("perfiles")
+      .select("id_perfil, id_cuenta, n_perfil")
+      .in("id_cuenta", cuentasIds);
+    if (perfErr) throw perfErr;
+    const perfilMap = {};
+    (perfiles || []).forEach((p) => {
+      if (!perfilMap[p.id_cuenta]) perfilMap[p.id_cuenta] = {};
+      perfilMap[p.id_cuenta][p.n_perfil] = p.id_perfil;
+    });
+
+    const perfilesToUpdate = new Set();
+    const ventasToInsert = [];
+
+    rowsWithCuenta.forEach((r) => {
+      if (!r.id_cuenta) return;
+      const id_usuario = usuarioByName[r.name_key] || null;
+      const id_perfil = perfilMap[r.id_cuenta]?.[r.n_perfil] || null;
+      if (id_perfil) perfilesToUpdate.add(id_perfil);
+
+      ventasToInsert.push({
+        id_venta: r.id_venta || undefined,
+        id_usuario,
+        id_cuenta: r.id_cuenta,
+        id_perfil,
+        fecha_corte: r.fecha_corte,
+        suspendido: r.suspendido,
+        meses_contratados: r.meses_contratados,
+        corte_reemplazo: r.corte_reemplazo,
+      });
+    });
+
+    // Manejo de duplicados en id_venta: actualiza y guarda versión previa
+    if (ventasToInsert.length) {
+      const ventasConIdMap = new Map();
+      const ventasSinId = [];
+      ventasToInsert.forEach((v) => {
+        if (v.id_venta) {
+          ventasConIdMap.set(v.id_venta, v);
+        } else {
+          ventasSinId.push(v);
+        }
+      });
+
+      const idsConValor = Array.from(ventasConIdMap.keys());
+      let existing = [];
+      if (idsConValor.length) {
+        const { data: existingRows, error: existErr } = await supabaseAdmin
+          .from("ventas")
+          .select("id_venta, id_cuenta, id_perfil")
+          .in("id_venta", idsConValor);
+        if (existErr) throw existErr;
+        existing = existingRows || [];
+      }
+
+      if (existing.length) {
+        const reemplazos = existing.map((row) => ({
+          id_item: row.id_venta,
+          id_usuario: idUsuario,
+          correo_anterior: row.id_cuenta ? String(row.id_cuenta) : null,
+          perfil_anterior: row.id_perfil ? String(row.id_perfil) : null,
+          correo_nuevo: null,
+          perfil_nuevo: null,
+          motivo: "Import clients overwrite",
+        }));
+        const { error: repErr } = await supabaseAdmin.from("historial_reemplazos").insert(reemplazos);
+        if (repErr) throw repErr;
+      }
+
+      const ventasConId = Array.from(ventasConIdMap.values());
+      if (ventasConId.length) {
+        const { error: ventaUpdErr } = await supabaseAdmin
+          .from("ventas")
+          .upsert(ventasConId, { onConflict: "id_venta" });
+        if (ventaUpdErr) throw ventaUpdErr;
+      }
+
+      if (ventasSinId.length) {
+        const { error: ventaInsErr } = await supabaseAdmin.from("ventas").insert(ventasSinId);
+        if (ventaInsErr) throw ventaInsErr;
+      }
+    }
+
+    if (perfilesToUpdate.size) {
+      const { error: updPerfErr } = await supabaseAdmin
+        .from("perfiles")
+        .update({ ocupado: true })
+        .in("id_perfil", Array.from(perfilesToUpdate));
+      if (updPerfErr) throw updPerfErr;
+    }
+
+    res.json({
+      ok: true,
+      ventas: ventasToInsert.length,
+      perfiles_ocupados: perfilesToUpdate.size,
+      usuarios: Object.keys(usuarioByName).length,
+    });
+  } catch (err) {
+    console.error("[admin:import-clientes] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: importar pines de perfiles desde CSV parseado en frontend
+app.post("/api/admin/import-pines", async (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: "rows es requerido" });
+  }
+
+  const boolVal = (v) =>
+    v === true || v === "true" || v === "1" || v === 1 || v === "t" || v === "on";
+
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    if (!idUsuario) throw new Error("Usuario no autenticado");
+
+    const normalized = rows
+      .map((r) => ({
+        correo: (r.correo || "").trim().toLowerCase(),
+        n_perfil:
+          r.n_perfil === null || r.n_perfil === undefined || r.n_perfil === ""
+            ? null
+            : Number(r.n_perfil),
+        pin: (() => {
+          if (r.pin === null || r.pin === undefined || r.pin === "") return null;
+          const num = Number(r.pin);
+          return Number.isNaN(num) || num < -32768 || num > 32767 ? null : num;
+        })(),
+        perfil_hogar: boolVal(r.perfil_hogar),
+        ocupado: boolVal(r.ocupado),
+      }))
+      .filter((r) => r.correo);
+    console.log("[import-pines] normalized sample", normalized.slice(0, 5));
+
+    if (!normalized.length) {
+      return res.status(400).json({ error: "No hay filas válidas para importar" });
+    }
+
+    const correos = [...new Set(normalized.map((r) => r.correo))];
+    const { data: cuentas, error: cuentasErr } = await supabaseAdmin
+      .from("cuentas")
+      .select("id_cuenta, correo")
+      .in("correo", correos);
+    if (cuentasErr) throw cuentasErr;
+
+    const cuentaByCorreo = (cuentas || []).reduce((acc, c) => {
+      acc[c.correo?.toLowerCase?.()] = c.id_cuenta;
+      return acc;
+    }, {});
+
+    const rowsWithCuenta = normalized.map((r) => ({
+      ...r,
+      id_cuenta: cuentaByCorreo[r.correo] || null,
+    }));
+    console.log("[import-pines] rowsWithCuenta sample", rowsWithCuenta.slice(0, 5));
+    const sinCuenta = rowsWithCuenta.filter((r) => !r.id_cuenta).map((r) => r.correo);
+
+    // Inserta todo en perfiles, enlazando por correo/id_cuenta; se ignora lógica especial de perfil_hogar
+    const perfilesToInsert = rowsWithCuenta
+      .filter((r) => r.id_cuenta)
+      .map((r) => ({
+        id_cuenta: r.id_cuenta,
+        n_perfil: Number.isInteger(r.n_perfil) ? r.n_perfil : null,
+        pin: r.pin,
+        perfil_hogar: !!r.perfil_hogar,
+        ocupado: r.ocupado || false,
+      }));
+
+    if (perfilesToInsert.length) {
+      const { error: insertErr } = await supabaseAdmin.from("perfiles").insert(perfilesToInsert);
+      if (insertErr) throw insertErr;
+    }
+
+    console.log("[import-pines] inserted perfiles", perfilesToInsert.length);
+
+    res.json({
+      ok: true,
+      perfiles_insertados: perfilesToInsert.length,
+      sin_cuenta: [...new Set(sinCuenta)],
+    });
+  } catch (err) {
+    console.error("[admin:import-pines] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Checkout: crea orden y ventas, sube referencia y comprobante
+app.post("/api/checkout", async (req, res) => {
+  const {
+    id_metodo_de_pago,
+    referencia,
+    comprobantes,
+    comprobante,
+    total: totalCliente,
+    tasa_bs,
+    id_usuario_override,
+  } = req.body || {};
+  const archivos = Array.isArray(comprobantes) ? comprobantes : Array.isArray(comprobante) ? comprobante : [];
+  if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
+    return res
+      .status(400)
+      .json({ error: "id_metodo_de_pago, referencia y comprobante(s) son requeridos" });
+  }
+
+  try {
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    const idUsuarioVentas =
+      id_usuario_override && Number.isFinite(Number(id_usuario_override))
+        ? Number(id_usuario_override)
+        : idUsuarioSesion;
+    const carritoId = await getCurrentCarrito(idUsuarioSesion);
+    if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
+
+    const { data: items, error: itemErr } = await supabaseAdmin
+      .from("carrito_items")
+      .select("id_precio, cantidad, meses, renovacion, id_venta")
+      .eq("id_carrito", carritoId);
+    if (itemErr) throw itemErr;
+    if (!items?.length) {
+      return res.status(400).json({ error: "El carrito está vacío" });
+    }
+
+    const preciosIds = items.map((i) => i.id_precio);
+    const { data: precios, error: precioErr } = await supabaseAdmin
+      .from("precios")
+      .select("id_precio, precio_usd_detal, id_plataforma, completa, sub_cuenta")
+      .in("id_precio", preciosIds);
+    if (precioErr) throw precioErr;
+    const priceMap = (precios || []).reduce((acc, p) => {
+      acc[p.id_precio] = p;
+      return acc;
+    }, {});
+
+    const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
+    const { data: plataformas, error: platErr } = await supabaseAdmin
+      .from("plataformas")
+      .select("id_plataforma, nombre")
+      .in("id_plataforma", plataformaIds);
+    if (platErr) throw platErr;
+    const platNameById = (plataformas || []).reduce((acc, p) => {
+      acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
+      return acc;
+    }, {});
+
+    const totalCalc = items.reduce((sum, it) => {
+      const unit = priceMap[it.id_precio]?.precio_usd_detal || 0;
+      const mesesVal = it.meses || 1;
+      return sum + unit * (it.cantidad || 0) * mesesVal;
+    }, 0);
+    const total = Number.isFinite(Number(totalCliente)) ? Number(totalCliente) : totalCalc;
+    const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
+    console.log("[checkout] carrito items", items);
+    console.log("[checkout] precios usados", priceMap);
+
+    // Renovaciones (no asignan stock nuevo)
+    const renovaciones = (items || []).filter((it) => it.renovacion === true && it.id_venta);
+    const idsVentasRenovar = renovaciones.map((r) => r.id_venta).filter(Boolean);
+    const ventaMap = {};
+    if (idsVentasRenovar.length) {
+      const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
+        .from("ventas")
+        .select("id_venta, fecha_corte")
+        .in("id_venta", idsVentasRenovar);
+      if (ventErr) throw ventErr;
+      (ventasExistentes || []).forEach((v) => {
+        ventaMap[v.id_venta] = v;
+      });
+    }
+    const isoHoy = new Date().toISOString().slice(0, 10);
+    const renovPromises = renovaciones.map((it) => {
+      const price = priceMap[it.id_precio] || {};
+      const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
+      const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
+      const base = (Number(price.precio_usd_detal) || 0) * cantidadVal * mesesVal;
+      const monto = Number(base.toFixed(2));
+      const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || null;
+      const fechaBase = fechaBaseSrc ? new Date(fechaBaseSrc) : new Date();
+      fechaBase.setMonth(fechaBase.getMonth() + mesesVal);
+      const fecha_corte = fechaBase.toISOString().slice(0, 10);
+      return supabaseAdmin
+        .from("ventas")
+        .update({
+          fecha_pago: isoHoy,
+          fecha_corte,
+          monto,
+        })
+        .eq("id_venta", it.id_venta);
+    });
+    if (renovPromises.length) {
+      const renovRes = await Promise.all(renovPromises);
+      const renovErr = renovRes.find((r) => r?.error);
+      if (renovErr?.error) throw renovErr.error;
+    }
+
+    // Filtra items nuevos (no renovaciones) para asignación de stock
+    const itemsNuevos = (items || []).filter((it) => !(it.renovacion === true && it.id_venta));
+
+    // Verificación de stock y asignación de recursos
+    const asignaciones = [];
+    const pendientes = [];
+    const subCuentasAsignadas = [];
+    for (const it of itemsNuevos) {
+      const price = priceMap[it.id_precio];
+      if (!price) {
+        return res.status(400).json({ error: `Precio no encontrado para item ${it.id_precio}` });
+      }
+      const cantidad = it.cantidad || 0;
+      if (cantidad <= 0) continue;
+      const platId = price.id_plataforma;
+      const mesesItemRaw = it.meses || 1;
+      const mesesItem = Number.isFinite(Number(mesesItemRaw))
+        ? Math.max(1, Math.round(Number(mesesItemRaw)))
+        : 1;
+      console.log("[checkout] item", it, "mesesRaw", mesesItemRaw, "meses", mesesItem);
+
+      if (price.sub_cuenta) {
+        const usedPerfiles = [];
+        // Caso especial plataforma 1: prioriza perfiles hogar en cuentas venta_perfil, luego venta_miembro, luego sub_cuentas.
+        if (platId === 1) {
+          const fetchPerf = async (ventaPerfilFlag) => {
+            const { data, error } = await supabaseAdmin
+              .from("perfiles")
+              .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
+              .eq("perfil_hogar", true)
+              .eq("cuentas.id_plataforma", platId)
+              .eq("cuentas.venta_perfil", ventaPerfilFlag)
+              .or("ocupado.is.null,ocupado.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .limit(cantidad);
+            if (error) throw error;
+            return data || [];
+          };
+
+          // 1) perfiles hogar en cuentas venta_perfil = true
+          let perfilesDisp = await fetchPerf(true);
+          perfilesDisp = perfilesDisp.filter((p) => !p.ocupado);
+          const takePref = perfilesDisp.slice(0, cantidad - usedPerfiles.length);
+          takePref.forEach((p) => {
+            asignaciones.push({
+              id_precio: price.id_precio,
+              monto: price.precio_usd_detal || 0,
+              id_cuenta: p.id_cuenta,
+              id_perfil: p.id_perfil,
+              id_sub_cuenta: null,
+              meses: mesesItem,
+              pendiente: false,
+            });
+            usedPerfiles.push(p.id_perfil);
+          });
+
+          const faltantesPref = Math.max(0, cantidad - usedPerfiles.length);
+          if (faltantesPref > 0) {
+            // 2) perfiles hogar en cuentas venta_miembro = true
+            let perfilesAlt = await fetchPerf(false);
+            perfilesAlt = perfilesAlt.filter((p) => !p.ocupado);
+            const takeAlt = perfilesAlt.slice(0, faltantesPref);
+            takeAlt.forEach((p) => {
+              asignaciones.push({
+                id_precio: price.id_precio,
+                monto: price.precio_usd_detal || 0,
+                id_cuenta: p.id_cuenta,
+                id_perfil: p.id_perfil,
+                id_sub_cuenta: null,
+                meses: mesesItem,
+                pendiente: false,
+              });
+              usedPerfiles.push(p.id_perfil);
+            });
+          }
+
+          const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
+          if (faltantesPerf > 0) {
+            // 3) sub_cuentas libres en cuentas venta_miembro o venta_perfil
+            const { data: subLibres, error: subErr } = await supabaseAdmin
+              .from("sub_cuentas")
+              .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
+              .eq("cuentas.id_plataforma", platId)
+              .or("cuentas.venta_miembro.eq.true,cuentas.venta_perfil.eq.true")
+              .or("ocupado.is.null,ocupado.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .limit(faltantesPerf);
+            if (subErr) throw subErr;
+            const disponibles = (subLibres || []).filter((s) => !s.ocupado);
+            const faltantes = Math.max(0, faltantesPerf - disponibles.length);
+            disponibles.slice(0, faltantesPerf).forEach((s) => {
+              asignaciones.push({
+                id_precio: price.id_precio,
+                monto: price.precio_usd_detal || 0,
+                id_cuenta: s.id_cuenta,
+                id_sub_cuenta: s.id_sub_cuenta,
+                id_perfil: null,
+                meses: mesesItem,
+                pendiente: false,
+              });
+              subCuentasAsignadas.push(s.id_sub_cuenta);
+            });
+            if (faltantes > 0) {
+              Array.from({ length: faltantes }).forEach(() => {
+                pendientes.push({
+                  id_precio: price.id_precio,
+                  monto: price.precio_usd_detal || 0,
+                  id_cuenta: null,
+                  id_perfil: null,
+                  id_sub_cuenta: null,
+                  meses: mesesItem,
+                  pendiente: true,
+                });
+              });
+            }
+          }
+        } else {
+          // Flujo normal para otras plataformas
+          const { data: perfilesHogar, error: hogarErr } = await supabaseAdmin
+            .from("perfiles")
+            .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
+            .eq("perfil_hogar", true)
+            .eq("cuentas.id_plataforma", platId)
+            .eq("cuentas.venta_miembro", true)
+            .eq("cuentas.venta_perfil", false)
+            .or("ocupado.is.null,ocupado.eq.false")
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+            .limit(cantidad);
+          if (hogarErr) throw hogarErr;
+
+          const perfilesDisp = perfilesHogar || [];
+          const usadosPerf = perfilesDisp.slice(0, cantidad);
+          usadosPerf.forEach((p) => {
+            asignaciones.push({
+              id_precio: price.id_precio,
+              monto: price.precio_usd_detal || 0,
+              id_cuenta: p.id_cuenta,
+              id_perfil: p.id_perfil,
+              id_sub_cuenta: null,
+              meses: mesesItem,
+              pendiente: false,
+            });
+          });
+
+          const faltantesPerf = Math.max(0, cantidad - usadosPerf.length);
+          if (faltantesPerf > 0) {
+            const { data: subLibres, error: subErr } = await supabaseAdmin
+              .from("sub_cuentas")
+              .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
+              .eq("cuentas.id_plataforma", platId)
+              .eq("cuentas.venta_miembro", true)
+              .eq("cuentas.venta_perfil", false)
+              .or("ocupado.is.null,ocupado.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .limit(faltantesPerf);
+            if (subErr) throw subErr;
+            const disponibles = subLibres || [];
+            const faltantes = Math.max(0, faltantesPerf - disponibles.length);
+            disponibles.slice(0, faltantesPerf).forEach((s) => {
+              asignaciones.push({
+                id_precio: price.id_precio,
+                monto: price.precio_usd_detal || 0,
+                id_cuenta: s.id_cuenta,
+                id_sub_cuenta: s.id_sub_cuenta,
+                id_perfil: null,
+                meses: mesesItem,
+                pendiente: false,
+              });
+              subCuentasAsignadas.push(s.id_sub_cuenta);
+            });
+            if (faltantes > 0) {
+              Array.from({ length: faltantes }).forEach(() => {
+                pendientes.push({
+                  id_precio: price.id_precio,
+                  monto: price.precio_usd_detal || 0,
+                  id_cuenta: null,
+                  id_perfil: null,
+                  id_sub_cuenta: null,
+                  meses: mesesItem,
+                  pendiente: true,
+                });
+              });
+            }
+          }
+        }
+      } else if (price.completa) {
+        const { data: cuentasLibres, error: ctaErr } = await supabaseAdmin
+          .from("cuentas")
+          .select("id_cuenta, id_plataforma, ocupado, inactiva")
+          .eq("id_plataforma", platId)
+          .eq("venta_perfil", false)
+          .eq("venta_miembro", false)
+          .or("ocupado.is.null,ocupado.eq.false")
+          .or("inactiva.is.null,inactiva.eq.false")
+          .limit(cantidad);
+        if (ctaErr) throw ctaErr;
+        const disponibles = cuentasLibres || [];
+        const faltantes = Math.max(0, cantidad - disponibles.length);
+        disponibles.slice(0, cantidad).forEach((cta) => {
+          asignaciones.push({
+            id_precio: price.id_precio,
+            monto: price.precio_usd_detal || 0,
+            id_cuenta: cta.id_cuenta,
+            id_perfil: null,
+            id_sub_cuenta: null,
+            meses: mesesItem,
+            pendiente: false,
+          });
+        });
+        if (faltantes > 0) {
+          Array.from({ length: faltantes }).forEach(() => {
+            pendientes.push({
+              id_precio: price.id_precio,
+              monto: price.precio_usd_detal || 0,
+              id_cuenta: null,
+              id_perfil: null,
+              id_sub_cuenta: null,
+              meses: mesesItem,
+              pendiente: true,
+            });
+          });
+        }
+      } else {
+        const { data: perfilesLibres, error: perfErr } = await supabaseAdmin
+          .from("perfiles")
+          .select("id_perfil, id_cuenta, cuentas!inner(id_plataforma, inactiva, venta_perfil)")
+          .eq("cuentas.id_plataforma", platId)
+          .eq("cuentas.venta_perfil", true)
+          .or("ocupado.is.null,ocupado.eq.false")
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .limit(cantidad);
+        if (perfErr) throw perfErr;
+        const disponibles = perfilesLibres || [];
+        const faltantes = Math.max(0, cantidad - disponibles.length);
+        disponibles.slice(0, cantidad).forEach((p) => {
+          asignaciones.push({
+            id_precio: price.id_precio,
+            monto: price.precio_usd_detal || 0,
+            id_cuenta: p.id_cuenta,
+            id_perfil: p.id_perfil,
+            id_sub_cuenta: null,
+            meses: mesesItem,
+            pendiente: false,
+          });
+        });
+        if (faltantes > 0) {
+          Array.from({ length: faltantes }).forEach(() => {
+            pendientes.push({
+              id_precio: price.id_precio,
+              monto: price.precio_usd_detal || 0,
+              id_cuenta: null,
+              id_perfil: null,
+              id_sub_cuenta: null,
+              meses: mesesItem,
+              pendiente: true,
+            });
+          });
+        }
+      }
+    }
+
+    const { data: orden, error: ordErr } = await supabaseAdmin
+      .from("ordenes")
+      .insert({
+        id_usuario: idUsuarioVentas,
+        total,
+        tasa_bs: tasaBs,
+        id_metodo_de_pago,
+        referencia,
+        comprobante: archivos,
+      })
+      .select("id_orden")
+      .single();
+    if (ordErr) throw ordErr;
+
+    const ventasToInsert = [...asignaciones, ...pendientes].map((a) => {
+      const mesesValRaw = a.meses || 1;
+      const mesesVal =
+        Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
+          ? Math.max(1, Math.round(Number(mesesValRaw)))
+          : 1;
+      return {
+        id_usuario: idUsuarioVentas,
+        id_precio: a.id_precio,
+        id_cuenta: a.id_cuenta,
+        id_perfil: a.id_perfil,
+        // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
+        id_orden: orden.id_orden,
+        monto: Number(a.monto) || 0,
+        pendiente: !!a.pendiente,
+        meses_contratados: mesesVal,
+        fecha_corte: a.pendiente
+          ? null
+          : (() => {
+              const d = new Date();
+            d.setMonth(d.getMonth() + mesesVal);
+            return d.toISOString().slice(0, 10);
+          })(),
+      };
+    });
+    console.log("[checkout] asignaciones", asignaciones);
+    console.log("[checkout] pendientes", pendientes);
+    console.log("[checkout] ventasToInsert", ventasToInsert);
+
+    let insertedVentas = [];
+    if (ventasToInsert.length) {
+      const { data: ventasRes, error: ventaErr } = await supabaseAdmin
+        .from("ventas")
+        .insert(ventasToInsert)
+        .select("id_venta, id_cuenta, id_precio");
+      if (ventaErr) throw ventaErr;
+      insertedVentas = ventasRes || [];
+    }
+
+    // Historial de ventas (nuevas + renovaciones) con monto como float completo
+    const histRows = [];
+    // Nuevas (insertadas recién)
+    insertedVentas.forEach((v, idx) => {
+      const src = ventasToInsert[idx] || {};
+      const platId = priceMap[v.id_precio]?.id_plataforma || null;
+      histRows.push({
+        id_usuario_cliente: idUsuarioVentas,
+        id_proveedor: null,
+        monto: Number(src.monto) || 0,
+        fecha_pago: isoHoy,
+        venta_cliente: true,
+        renovacion: false,
+        id_venta: v.id_venta,
+        id_plataforma: platId,
+        id_cuenta: v.id_cuenta,
+        registrado_por: idUsuarioSesion,
+      });
+    });
+    // Renovaciones
+    renovaciones.forEach((it) => {
+      const platId = priceMap[it.id_precio]?.id_plataforma || null;
+      // monto ya calculado arriba como base (unit * cantidad * meses)
+      const price = priceMap[it.id_precio] || {};
+      const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
+      const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
+      const base = (Number(price.precio_usd_detal) || 0) * cantidadVal * mesesVal;
+      histRows.push({
+        id_usuario_cliente: idUsuarioVentas,
+        id_proveedor: null,
+        monto: Number(base) || 0,
+        fecha_pago: isoHoy,
+        venta_cliente: true,
+        renovacion: true,
+        id_venta: it.id_venta,
+        id_plataforma: platId,
+        id_cuenta: null,
+        registrado_por: idUsuarioSesion,
+      });
+    });
+    if (histRows.length) {
+      const { error: histErr } = await supabaseAdmin.from("historial_ventas").insert(histRows);
+      if (histErr) throw histErr;
+    }
+
+    // marca recursos como ocupados
+    const perfilesIds = asignaciones.map((a) => a.id_perfil).filter(Boolean);
+    const cuentasIds = asignaciones
+      .filter((a) => a.id_perfil === null && a.id_cuenta)
+      .map((a) => a.id_cuenta);
+    const subIds = asignaciones.map((a) => a.id_sub_cuenta).filter(Boolean);
+    if (perfilesIds.length) {
+      const { error: updPerfErr } = await supabaseAdmin
+        .from("perfiles")
+        .update({ ocupado: true })
+        .in("id_perfil", perfilesIds);
+      if (updPerfErr) throw updPerfErr;
+    }
+    if (cuentasIds.length) {
+      const { error: updCtaErr } = await supabaseAdmin
+        .from("cuentas")
+        .update({ ocupado: true })
+        .in("id_cuenta", cuentasIds);
+      if (updCtaErr) throw updCtaErr;
+    }
+    if (subIds.length) {
+      const { error: updSubErr } = await supabaseAdmin
+        .from("sub_cuentas")
+        .update({ ocupado: true })
+        .in("id_sub_cuenta", subIds);
+      if (updSubErr) throw updSubErr;
+    }
+
+    // limpia carrito
+    await supabaseAdmin.from("carrito_items").delete().eq("id_carrito", carritoId);
+    await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
+
+    res.json({ ok: true, id_orden: orden.id_orden, total, ventas: ventasToInsert.length });
+  } catch (err) {
+    console.error("[checkout] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ventas entregadas (pendiente = false) por usuario
+app.get("/api/ventas/entregadas", async (req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    if (!idUsuario) throw new Error("Usuario no autenticado");
+
+    const { data, error } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta", { count: "exact" })
+      .eq("id_usuario", idUsuario)
+      .eq("pendiente", false);
+    if (error) throw error;
+
+    res.json({ entregadas: data?.length || 0 });
+  } catch (err) {
+    console.error("[ventas entregadas] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Servidor escuchando en puerto ${port}`);
+});

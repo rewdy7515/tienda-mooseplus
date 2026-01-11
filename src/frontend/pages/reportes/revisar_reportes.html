@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Revisar reportes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Reportes pendientes</h2>
+      <p id="revisar-status" class="status">Cargando reportes...</p>
+
+      <div id="plataformas-filtros" class="admin-actions" style="gap: 8px; flex-wrap: wrap;"></div>
+
+      <div class="tabla-wrapper" style="margin-top: 16px;">
+        <table class="reportes-table" id="reportes-table">
+          <thead>
+            <tr>
+              <th>ID Reporte</th>
+              <th>Cliente</th>
+              <th>Correo</th>
+              <th>Motivo</th>
+              <th>Fecha</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody id="reportes-body">
+            <tr>
+              <td colspan="6" class="status">Selecciona una plataforma.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="modal-detalle" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card">
+          <button class="modal-close" aria-label="Cerrar">×</button>
+          <div class="modal-body modal-body-split">
+            <div class="modal-info">
+              <h3 id="modal-plat-title" class="plat-title"></h3>
+              <div class="modal-info-grid">
+                <div class="label">Correo:</div>
+                <div class="value" id="modal-correo"></div>
+                <div class="label">Contraseña:</div>
+                <div class="value"><input type="text" id="modal-clave" class="form-input input-inline" /></div>
+                <div class="label perfil-row">Perfil:</div>
+                <div class="value perfil-row" id="modal-perfil"></div>
+                <div class="label perfil-row">PIN:</div>
+                <div class="value perfil-row">
+                  <input type="number" id="modal-pin" class="form-input input-inline" inputmode="numeric" min="0" step="1" />
+                </div>
+                <div class="label">Motivo:</div>
+                <div class="value" id="modal-motivo"></div>
+              </div>
+              <div class="modal-actions-column">
+                <button class="btn-primary" id="btn-cerrar-reporte">Cerrar reporte</button>
+                <button class="btn-outline" id="btn-faltan-recaudos">Faltan recaudos</button>
+                <button class="btn-outline" id="btn-reemplazar">Reemplazar</button>
+              </div>
+            </div>
+            <div class="modal-evidencia">
+              <p><strong>Evidencia:</strong></p>
+              <div id="modal-imagen-wrapper">
+                <img id="modal-imagen" src="" alt="Evidencia" />
+              </div>
+              <p id="modal-sin-imagen" class="hidden">Sin imagen</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modal-resumen" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card modal-card-resumen">
+          <button class="modal-close modal-resumen-close" aria-label="Cerrar">×</button>
+          <div class="modal-body resumen-body">
+            <h3>Resumen de cambios</h3>
+            <div class="resumen-rows">
+              <div id="resumen-clave" class="resumen-row hidden">
+                <div class="label">Contraseña:</div>
+                <div class="value" id="resumen-clave-text"></div>
+              </div>
+              <div id="resumen-pin" class="resumen-row hidden">
+                <div class="label">PIN:</div>
+                <div class="value" id="resumen-pin-text"></div>
+              </div>
+            </div>
+            <div class="resumen-checks">
+              <label><input type="checkbox" class="resumen-check" id="check-suscripcion" /> Suscripción activada</label>
+              <label><input type="checkbox" class="resumen-check" id="check-perfiles" /> Perfiles modificados</label>
+              <label><input type="checkbox" class="resumen-check" id="check-ingreso" /> Se pudo ingresar sin problemas con los datos de la cuenta</label>
+              <label><input type="checkbox" class="resumen-check" id="check-pin-same" /> Se volvió a poner el mismo pin al perfil</label>
+              <label><input type="checkbox" class="resumen-check" id="check-otro" /> Otro</label>
+              <textarea id="resumen-otro-text" class="form-input hidden" rows="3" placeholder="Describe el caso"></textarea>
+            </div>
+            <div class="modal-actions-column" style="margin-top:12px;">
+              <button class="btn-primary" id="btn-guardar-campos">Guardar campos</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modal-reemplazo-confirm" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card">
+          <button class="modal-close modal-reemplazo-close" aria-label="Cerrar">×</button>
+          <div class="modal-body">
+            <h3>Confirmar reemplazo</h3>
+            <label class="form-label" for="select-razon-reemplazo">Razón del reemplazo</label>
+            <select id="select-razon-reemplazo" class="form-select">
+              <option value="">Selecciona una razón</option>
+              <option value="error hogar">Error hogar</option>
+              <option value="cuenta inhabilitada por el proveedor">Cuenta inhabilitada por el proveedor</option>
+            </select>
+            <div class="modal-actions-column" style="margin-top:12px;">
+              <button class="btn-primary" id="btn-confirmar-reemplazo">Realizar reemplazo</button>
+              <button class="btn-outline" id="btn-cancelar-reemplazo">Cancelar reemplazo</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="../../scripts/revisar_reportes.js"></script>
+  </body>
+</html>

@@ -1,0 +1,59 @@
+<header class="header">
+  <img src="__ROOT__logo.png" class="logo" alt="Logo" />
+
+  <div class="search-box">
+    <input
+      type="text"
+      id="search-input"
+      class="search"
+      placeholder="Buscar..."
+      autocomplete="off"
+    />
+    <div id="search-results" class="search-results hidden"></div>
+  </div>
+
+  <div class="user-info">
+    <button id="btn-stock" class="btn-outline" style="max-width: 140px">
+      Stock
+    </button>
+    <div class="user-menu">
+      <img src="__ROOT__avatar.png" class="avatar" alt="Foto de perfil" />
+      <span class="username">Usuario</span>
+      <div class="user-dropdown">
+        <a href="#" class="dropdown-item">Saldo</a>
+        <a href="__PAGES__inventario.html" class="dropdown-item">Inventario</a>
+        <a href="__PAGES__notificaciones.html" class="dropdown-item"
+          >Notificaciones</a
+        >
+        <a href="__PAGES__reportes/report.html" class="dropdown-item"
+          >Reportes</a
+        >
+        <a href="__PAGES__admin.html" class="dropdown-item admin-link hidden"
+          >Administrar servicios</a
+        >
+        <button type="button" class="dropdown-item dropdown-button logout-btn">
+          Cerrar sesión
+        </button>
+      </div>
+    </div>
+    <img src="__ROOT__carrito.png" class="carrito" alt="Carrito" />
+  </div>
+</header>
+
+<div id="cart-drawer" class="cart-drawer">
+  <div class="cart-backdrop"></div>
+  <aside class="cart-panel">
+    <div class="cart-header">
+      <h3>Carrito</h3>
+      <button id="cart-close" class="cart-close" aria-label="Cerrar">×</button>
+    </div>
+    <div id="cart-items" class="cart-items">
+      <p class="cart-empty">Tu carrito está vacío.</p>
+    </div>
+    <div class="cart-actions">
+      <button class="btn-primary" id="btn-checkout">Ir a pagar</button>
+      <button class="btn-outline" id="btn-view-cart">Ver carrito</button>
+      <button class="btn-outline" id="btn-assign-client">Asignar a cliente</button>
+    </div>
+  </aside>
+</div>

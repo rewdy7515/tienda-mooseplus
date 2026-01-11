@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crear reporte</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Crear reporte</h2>
+      <form id="reporte-form" class="reporte-form">
+        <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
+        <p class="status">Se muestran únicamente los servicios que tienes actualmente.</p>
+        <select id="select-plataforma" class="form-select" required>
+          <option value="">Seleccione plataforma</option>
+        </select>
+
+        <label class="form-label" for="select-correo">Correo <span class="required">*</span></label>
+        <select id="select-correo" class="form-select" required>
+          <option value="">Seleccione correo</option>
+        </select>
+
+        <div id="perfil-wrapper" class="hidden">
+          <label class="form-label" for="select-perfil">Perfil <span class="required">*</span></label>
+          <select id="select-perfil" class="form-select">
+            <option value="">Seleccione perfil</option>
+          </select>
+        </div>
+
+        <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
+        <select id="select-motivo" class="form-select" required>
+          <option value="">Seleccione motivo</option>
+          <option value="contrasena">Contraseña incorrecta</option>
+          <option value="pin">PIN incorrecto</option>
+          <option value="suscripcion">Suscripción inactiva</option>
+          <option value="otro">Otro</option>
+        </select>
+
+        <div id="motivo-otro-wrapper" class="hidden">
+          <label class="form-label" for="input-motivo-otro">Describe el problema <span class="required">*</span></label>
+          <textarea id="input-motivo-otro" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
+        </div>
+
+        <label class="form-label">Evidencia</label>
+        <div id="dropzone" class="dropzone">
+          <p>Arrastra una imagen aquí o</p>
+          <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
+          <input id="input-files" type="file" accept="image/*" hidden />
+          <div id="file-preview" class="file-preview"></div>
+        </div>
+
+        <div class="form-group checkbox-line">
+          <label class="form-label" for="chk-no-screenshot">
+            <input type="checkbox" id="chk-no-screenshot" />
+            La aplicación no me permite tomar screenshot.
+          </label>
+        </div>
+
+        <div id="motivo-extra-wrapper" class="hidden">
+          <label class="form-label" for="input-motivo-extra">Describe el problema <span class="required">*</span></label>
+          <textarea id="input-motivo-extra" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
+        </div>
+
+        <div class="actions" style="margin-top: 16px;">
+          <button type="submit" class="btn-primary">Enviar reporte</button>
+        </div>
+      </form>
+    </main>
+
+    <script type="module" src="../../scripts/crear_reporte.js"></script>
+  </body>
+</html>

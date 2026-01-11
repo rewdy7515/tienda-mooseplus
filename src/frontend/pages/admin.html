@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Administrar servicios</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Administrar servicios</h2>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action" id="btn-revisar-reportes">Revisar reportes</button>
+        <button class="btn-primary admin-action" id="btn-cortes">Cortes</button>
+        <button class="btn-primary admin-action" id="btn-renovar-servicio">Renovar servicio cliente</button>
+        <button class="btn-primary admin-action">Cambiar clave</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action">Recargar Netflix</button>
+        <button class="btn-primary admin-action">Agregar pines para recargar</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action" id="btn-admin-cuentas">Administrar cuentas</button>
+        <button class="btn-primary admin-action" id="btn-agregar-pines">Agregar pines</button>
+        <button class="btn-primary admin-action" id="btn-editar-precios">Editar precios</button>
+        <button class="btn-primary admin-action" id="btn-agregar-servicios">Agregar servicios</button>
+        <button class="btn-primary admin-action">Reemplazar servicios</button>
+        <button class="btn-primary admin-action" id="btn-importar-datos">Importar datos</button>
+        <button class="btn-primary admin-action" id="btn-registrar-proveedor">Registrar proveedor</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action">Cuenta nueva</button>
+        <button class="btn-primary admin-action" id="btn-renovar">Renovar</button>
+        <button class="btn-primary admin-action" id="btn-reemplazar">Reemplazar</button>
+      </div>
+      <p class="status">Selecciona una acción.</p>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
+      import { clearServerSession, loadCurrentUser } from "../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const logo = document.querySelector(".logo");
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            document.querySelector("main .status").textContent =
+              "No tienes permisos para administrar servicios.";
+          }
+        } catch (err) {
+          console.error("admin init error", err);
+        }
+      }
+
+      document
+        .getElementById("btn-revisar-reportes")
+        ?.addEventListener("click", () => (window.location.href = "reportes/revisar_reportes.html"));
+
+      init();
+      attachLogout(clearServerSession);
+
+      document.getElementById("btn-cortes")?.addEventListener("click", () => {
+        window.location.href = "cortes.html";
+      });
+
+      attachLogoHome();
+
+      document.querySelector("#btn-agregar-servicios")?.addEventListener("click", () => {
+        window.location.href = "admin/agregar_servicios.html";
+      });
+
+      document.querySelector("#btn-agregar-pines")?.addEventListener("click", () => {
+        window.location.href = "admin/agregar_pines.html";
+      });
+
+      document.querySelector("#btn-editar-precios")?.addEventListener("click", () => {
+        window.location.href = "admin/editar_precios.html";
+      });
+
+      document.querySelector("#btn-importar-datos")?.addEventListener("click", () => {
+        window.location.href = "admin/importar.html";
+      });
+
+      document.getElementById("btn-renovar-servicio")?.addEventListener("click", () => {
+        window.location.href = "renovar_cliente.html";
+      });
+
+      document.getElementById("btn-registrar-proveedor")?.addEventListener("click", () => {
+        window.location.href = "registrar_proveedor.html";
+      });
+
+      document.getElementById("btn-admin-cuentas")?.addEventListener("click", () => {
+        window.location.href = "admin/admin_cuentas.html";
+      });
+
+      document.getElementById("btn-recordatorios")?.addEventListener("click", () => {
+        window.location.href = "recordatorios.html";
+      });
+
+      document.getElementById("btn-renovar")?.addEventListener("click", () => {
+        window.location.href = "renovar_cliente.html";
+      });
+
+      document.querySelector(".admin-actions:last-of-type .admin-action:nth-child(1)")?.addEventListener("click", () => {
+        window.location.href = "cuenta_nueva.html";
+      });
+
+      document.getElementById("btn-reemplazar")?.addEventListener("click", () => {
+        window.location.href = "reemplazos.html";
+      });
+    </script>
+  </body>
+</html>

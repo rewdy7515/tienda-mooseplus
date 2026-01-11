@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inventario</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Inventario</h2>
+      <div class="inventario-actions">
+        <button
+          type="button"
+          id="btn-proximas"
+          class="btn-primary"
+          style="background-color:#22c55e;border-color:#22c55e;"
+        >
+          Renovar cuentas
+        </button>
+      </div>
+      <p id="inventario-status" class="status">Cargando inventario...</p>
+      <div id="inventario-list" class="inventario-list"></div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, getSessionRoles, setSessionRoles, attachLogoHome } from "../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, fetchInventario, ensureServerSession, sendCartDelta } from "../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const logo = document.querySelector(".logo");
+      const listEl = document.querySelector("#inventario-list");
+      const statusEl = document.querySelector("#inventario-status");
+      const btnProximas = document.querySelector("#btn-proximas");
+      const modalProximas = document.querySelector("#modal-proximas");
+      const modalProximasClose = document.querySelector(".modal-proximas-close");
+      const proximasContent = document.querySelector("#proximas-content");
+      const btnProximasAdd = document.querySelector("#btn-proximas-add");
+      let ultimasPlataformas = [];
+      let proximasSeleccionadas = new Set();
+
+      const formatDate = (iso) => {
+        if (!iso) return "";
+        const d = new Date(iso);
+        if (Number.isNaN(d.valueOf())) return "";
+        return d.toISOString().slice(0, 10);
+      };
+
+      const diffDias = (iso) => {
+        if (!iso) return null;
+        const hoy = new Date();
+        const fecha = new Date(iso);
+        if (Number.isNaN(fecha.valueOf())) return null;
+        const diff = fecha - hoy;
+        return Math.ceil(diff / (1000 * 60 * 60 * 24));
+      };
+
+      const renderProximas = (plataformas) => {
+        if (!proximasContent) return;
+        proximasContent.innerHTML = "";
+        if (!plataformas.length) {
+          proximasContent.innerHTML = '<p class="status">Sin datos de próximas renovaciones.</p>';
+          return;
+        }
+
+        const bloques = [];
+        plataformas.forEach((p) => {
+          const items = [];
+          (p.planes || []).forEach((planObj) => {
+            (planObj.ventas || []).forEach((v) => {
+              const dias = diffDias(v.fecha_corte);
+              if (dias === null) return;
+              items.push({
+                id_venta: v.id_venta,
+                id_precio: v.id_precio,
+                correo: v.correo || "",
+                perfil: v.n_perfil ?? "",
+                dias,
+              });
+            });
+          });
+          if (items.length) {
+            items.sort((a, b) => a.dias - b.dias);
+            const rows = items
+              .map(
+                (it) => `
+                  <tr>
+                    <td>
+                      <label class="proximas-check">
+                        <input type="checkbox" data-venta="${it.id_venta ?? ""}" data-precio="${it.id_precio ?? ""}" />
+                        <span>${it.correo}</span>
+                      </label>
+                    </td>
+                    <td>${it.perfil}</td>
+                    <td>${it.dias} días</td>
+                  </tr>
+                `
+              )
+              .join("");
+            bloques.push(`
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${p.nombre || "Plataforma"}</h3>
+                <table class="proximas-table">
+                  <tbody>
+                    ${rows}
+                  </tbody>
+                </table>
+              </div>
+            `);
+          }
+        });
+
+        if (!bloques.length) {
+          proximasContent.innerHTML = '<p class="status">Sin datos de próximas renovaciones.</p>';
+          return;
+        }
+
+        proximasContent.innerHTML = `
+          <div class="proximas-header">Cuentas próximas a vencerse:</div>
+          ${bloques.join("")}
+        `;
+      };
+
+      const renderPlataformas = (plataformas) => {
+        if (!listEl || !statusEl) return;
+        listEl.innerHTML = "";
+        if (!plataformas.length) {
+          statusEl.textContent = "No hay ventas asociadas a este usuario.";
+          return;
+        }
+        statusEl.textContent = "";
+        plataformas.forEach((p, idx) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "inventario-item";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn-outline inventario-btn";
+          btn.textContent = p.nombre || `Plataforma ${idx + 1}`;
+
+          const planList = document.createElement("div");
+          planList.className = "inventario-plan-list hidden";
+
+          (p.planes || []).forEach((planObj, pIdx) => {
+            const planWrapper = document.createElement("div");
+            planWrapper.className = "inventario-plan";
+            const planName = (planObj.plan || "").trim();
+            const hasPlanName = planName && planName.toLowerCase() !== "sin plan";
+            const planBtn = hasPlanName ? document.createElement("button") : null;
+            if (planBtn) {
+              planBtn.type = "button";
+              planBtn.className = "btn-outline inventario-plan-btn";
+              planBtn.textContent = planName || `Plan ${pIdx + 1}`;
+            }
+
+            const table = document.createElement("table");
+            table.className = `inventario-table ${hasPlanName ? "hidden" : ""}`;
+            table.innerHTML = `
+              <thead>
+                <tr>
+                  <th>ID Venta</th>
+                  <th>Correo</th>
+                  <th>Clave</th>
+                  <th>Perfil</th>
+                  <th>PIN</th>
+                  <th>Fecha de Corte</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(planObj.ventas || [])
+                  .map(
+                    (v) => `
+                    <tr>
+                      <td>${v.id_venta ?? ""}</td>
+                      <td>${v.correo || ""}</td>
+                      <td>${v.clave || ""}</td>
+                      <td>${v.n_perfil ?? ""}</td>
+                      <td>${v.pin ?? ""}</td>
+                      <td>${formatDate(v.fecha_corte)}</td>
+                      <td>
+                        <div class="actions-inline">
+                          <button class="btn-small btn-renovar" data-venta="${v.id_venta ?? ""}" data-precio="${v.id_precio ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
+                          <button class="btn-small btn-red-report" data-plataforma="${v.id_plataforma ?? ""}" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${v.id_perfil ?? ""}" style="background-color:#ef4444;color:white;">❕</button>
+                          <button class="btn-small" style="background-color:#3b82f6;color:white;">📑</button>
+                        </div>
+                      </td>
+                    </tr>`
+                  )
+                  .join("")}
+              </tbody>
+            `;
+
+            if (planBtn) {
+              planBtn.addEventListener("click", () => {
+                table.classList.toggle("hidden");
+              });
+              planWrapper.appendChild(planBtn);
+            }
+
+            planWrapper.appendChild(table);
+            planList.appendChild(planWrapper);
+          });
+
+          btn.addEventListener("click", () => {
+            planList.classList.toggle("hidden");
+            // Si solo hay un plan, abrirlo directamente
+            if ((p.planes || []).length === 1) {
+              const singleTable = planList.querySelector("table");
+              singleTable?.classList.remove("hidden");
+            }
+          });
+
+          wrapper.appendChild(btn);
+          wrapper.appendChild(planList);
+          listEl.appendChild(wrapper);
+        });
+      };
+
+      const loadInventario = async () => {
+        if (statusEl) statusEl.textContent = "Cargando inventario...";
+        // Garantiza que la cookie de sesión esté activa antes de pedir datos protegidos
+        await ensureServerSession();
+        const resp = await fetchInventario();
+        if (resp?.error) {
+          statusEl.textContent = resp.error;
+          return;
+        }
+        ultimasPlataformas = resp?.plataformas || [];
+        renderPlataformas(ultimasPlataformas);
+      };
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          setSessionRoles(user || {});
+          const sessionRoles = getSessionRoles();
+          const isAdmin =
+            isTrue(sessionRoles?.permiso_admin) ||
+            isTrue(sessionRoles?.permiso_superadmin) ||
+            isTrue(user?.permiso_admin) ||
+            isTrue(user?.permiso_superadmin);
+          if (!sessionRoles && user) {
+            setSessionRoles(user);
+          }
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          await loadInventario();
+        } catch (err) {
+          console.error("inventario init error", err);
+          if (statusEl) statusEl.textContent = "No se pudo cargar el inventario.";
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+
+      attachLogoHome();
+
+      btnProximas?.addEventListener("click", () => {
+        renderProximas(ultimasPlataformas);
+        modalProximas?.classList.remove("hidden");
+      });
+
+      const closeProximas = () => {
+        modalProximas?.classList.add("hidden");
+      };
+
+      modalProximas?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
+          closeProximas();
+        }
+      });
+      modalProximasClose?.addEventListener("click", closeProximas);
+
+      listEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-red-report");
+        if (!btn) return;
+        const plat = btn.dataset.plataforma || "";
+        const cuenta = btn.dataset.cuenta || "";
+        const perfil = btn.dataset.perfil || "";
+        const params = new URLSearchParams();
+        if (plat) params.set("plataforma", plat);
+        if (cuenta) params.set("cuenta", cuenta);
+        if (perfil) params.set("perfil", perfil);
+        const url = `reportes/crear_reporte.html${params.toString() ? `?${params.toString()}` : ""}`;
+        window.location.href = url;
+      });
+
+      // Modal renovar
+      const modalRenovar = document.querySelector("#modal-renovar");
+      const modalRenovarClose = document.querySelector(".modal-renovar-close");
+      const renovarSpan = document.querySelector("#renovar-meses");
+      const btnRenovarMas = document.querySelector("#renovar-mas");
+      const btnRenovarMenos = document.querySelector("#renovar-menos");
+      const btnRenovarAgregar = document.querySelector("#btn-renovar-agregar");
+      let selectedRenovarVenta = null;
+      let selectedRenovarPrecio = null;
+
+      const closeRenovarModal = () => {
+        modalRenovar?.classList.add("hidden");
+        selectedRenovarVenta = null;
+        if (renovarSpan) renovarSpan.textContent = "1";
+      };
+
+      listEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-renovar");
+        if (!btn) return;
+        selectedRenovarVenta = btn.dataset.venta || null;
+        selectedRenovarPrecio = btn.dataset.precio || null;
+        modalRenovar?.classList.remove("hidden");
+      });
+
+      modalRenovar?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
+          closeRenovarModal();
+        }
+      });
+      modalRenovarClose?.addEventListener("click", closeRenovarModal);
+
+      btnRenovarAgregar?.addEventListener("click", () => {
+        const meses = Number(renovarSpan?.textContent || 1);
+        if (!meses || meses < 1) {
+          alert("Selecciona al menos 1 mes.");
+          return;
+        }
+        if (!selectedRenovarPrecio) {
+          alert("No se pudo identificar el precio de la venta.");
+          return;
+        }
+        sendCartDelta(selectedRenovarPrecio, 1, meses, { renovacion: true, id_venta: selectedRenovarVenta })
+          .then(() => {
+            alert("Agregado al carrito.");
+            // Simula animación de carrito (requiere .carrito en DOM)
+            const cartIcon = document.querySelector(".carrito");
+            if (cartIcon) {
+              cartIcon.classList.add("flying-price");
+              setTimeout(() => cartIcon.classList.remove("flying-price"), 600);
+            }
+            closeRenovarModal();
+          })
+          .catch((err) => {
+            console.error("renovar add cart error", err);
+            alert("No se pudo agregar al carrito.");
+          });
+      });
+
+      const adjustMeses = (delta) => {
+        const current = Number(renovarSpan?.textContent || 1);
+        const next = Math.max(1, current + delta);
+        if (renovarSpan) renovarSpan.textContent = String(next);
+      };
+      btnRenovarMas?.addEventListener("click", () => adjustMeses(1));
+      btnRenovarMenos?.addEventListener("click", () => adjustMeses(-1));
+
+      // Agregar renovaciones seleccionadas
+      btnProximasAdd?.addEventListener("click", () => {
+        if (!proximasContent) return;
+        const checks = proximasContent.querySelectorAll('input[type="checkbox"]:checked');
+        if (!checks.length) {
+          alert("Selecciona al menos una cuenta.");
+          return;
+        }
+        checks.forEach((chk) => {
+          const idVenta = chk.dataset.venta || null;
+          const idPrecio = chk.dataset.precio || null;
+          if (!idVenta || !idPrecio) return;
+          sendCartDelta(idPrecio, 1, 1, { renovacion: true, id_venta: idVenta })
+            .catch((err) => console.error("add renovaciones error", err));
+        });
+        alert("Renovaciones agregadas al carrito.");
+        closeProximas();
+      });
+    </script>
+    <div id="modal-renovar" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-renovar">
+        <button class="modal-close modal-renovar-close" aria-label="Cerrar">×</button>
+        <div class="modal-body modal-renovar-stack">
+          <h3>Renovar</h3>
+          <p>¿Cuántos meses quieres renovar?</p>
+          <div class="modal-qty" id="modal-renovar-qty">
+            <button type="button" id="renovar-menos">-</button>
+            <span id="renovar-meses">1</span>
+            <button type="button" id="renovar-mas">+</button>
+          </div>
+          <button class="btn-primary" id="btn-renovar-agregar">Agregar al carrito</button>
+        </div>
+      </div>
+    </div>
+    <div id="modal-proximas" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen modal-card-proximas">
+        <button class="modal-close modal-proximas-close" aria-label="Cerrar">×</button>
+        <div class="modal-body modal-proximas-body">
+          <h3 class="proximas-header modal-proximas-title">Cuentas próximas a vencerse:</h3>
+          <div id="proximas-content" class="proximas-panel"></div>
+          <div class="proximas-actions">
+            <button type="button" class="btn-primary" id="btn-proximas-add">Añadir renovaciones al carrito</button>
+            <p class="proximas-footnote">(Puedes modificar la duración en el carrito)</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
