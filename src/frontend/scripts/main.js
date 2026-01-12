@@ -22,7 +22,6 @@ import {
   showDeliveryNotice,
   getDeliverySeen,
   setDeliverySeen,
-  updateDeliveryBadge,
 } from "./session.js";
 
 requireSession();
@@ -245,14 +244,13 @@ async function init() {
       },
     });
 
-    // Aviso de servicios entregados (solo si hay nuevos) y badge
+    // Aviso de servicios entregados (solo si hay nuevos) sin badge
     try {
       const userId = requireSession();
       const entregas = await fetchEntregadas();
       if (!entregas?.error) {
         const count = entregas.entregadas || 0;
         const seen = getDeliverySeen(userId);
-        updateDeliveryBadge(count);
         if (count > seen) {
           showDeliveryNotice();
           setDeliverySeen(userId, count);

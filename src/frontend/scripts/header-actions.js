@@ -31,18 +31,33 @@ if (!window.__headerActionsInit) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
       }
-      // entregas badge
-      fetchEntregadas()
-        .then((resp) => {
-          if (resp?.entregadas > 0) {
-            const badge = document.querySelector("#btn-stock .delivery-badge");
-            if (badge) {
-              badge.textContent = resp.entregadas;
-              badge.classList.remove("hidden");
-            }
+      // Dot de inventario según notificacion_inventario
+      if (user?.notificacion_inventario) {
+        const inventarioLink = Array.from(document.querySelectorAll("a")).find(
+          (a) => a.textContent?.trim().toLowerCase().startsWith("inventario")
+        );
+        if (inventarioLink) {
+          let dot = inventarioLink.querySelector(".delivery-dot");
+          if (!dot) {
+            dot = document.createElement("span");
+            dot.className = "delivery-dot";
+            inventarioLink.appendChild(dot);
           }
-        })
-        .catch(() => {});
+          dot.classList.remove("hidden");
+          // al hacer click, limpiar flag
+          inventarioLink.addEventListener(
+            "click",
+            async () => {
+              try {
+                await supabase.from("usuarios").update({ notificacion_inventario: false }).eq("id_usuario", userId);
+              } catch (err) {
+                console.error("clear notificacion_inventario error", err);
+              }
+            },
+            { once: true }
+          );
+        }
+      }
     } catch (err) {
       console.error("header user init error", err);
     }

@@ -165,18 +165,17 @@ export function showDeliveryNotice() {
   }
 }
 
-// Badge de entregas junto a Inventario
-export function updateDeliveryBadge(count = 0) {
+// Marca el dot de inventario si notificacion_inventario == true
+export function updateDeliveryDot(show = false) {
   const inventarioLink = Array.from(document.querySelectorAll("a")).find(
-    (a) => a.textContent?.trim().toLowerCase() === "inventario"
+    (a) => a.textContent?.toLowerCase().includes("inventario")
   );
   if (!inventarioLink) return;
-  let badge = inventarioLink.querySelector(".delivery-badge");
-  if (!badge) {
-    badge = document.createElement("span");
-    badge.className = "delivery-badge";
-    inventarioLink.appendChild(badge);
+  let dot = inventarioLink.querySelector(".delivery-dot");
+  if (!dot) {
+    dot = document.createElement("span");
+    dot.className = "delivery-dot";
+    inventarioLink.appendChild(dot);
   }
-  badge.textContent = String(count || 0);
-  badge.classList.toggle("hidden", count <= 0);
+  dot.classList.toggle("hidden", !show);
 }

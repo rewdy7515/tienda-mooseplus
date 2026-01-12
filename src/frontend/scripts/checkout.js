@@ -312,6 +312,13 @@ btnSendPayment?.addEventListener("click", async () => {
       alert(`Error en checkout: ${resp.error}`);
       return;
     }
+    // Marcar notificación de inventario para el usuario en sesión
+    try {
+      const userId = requireSession();
+      await supabase.from("usuarios").update({ notificacion_inventario: true }).eq("id_usuario", userId);
+    } catch (flagErr) {
+      console.error("update notificacion_inventario error", flagErr);
+    }
     alert("Pago enviado correctamente.");
     window.location.href = "index.html";
   } catch (err) {
