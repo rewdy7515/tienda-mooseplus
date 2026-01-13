@@ -54,6 +54,16 @@ async function handleLogin(event) {
   setLoading(true);
 
   try {
+    // 1) Iniciar sesión en Supabase Auth
+    const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (authErr) {
+      throw authErr;
+    }
+
+    // 2) Buscar usuario en tabla usuarios por correo (para id_usuario)
     const { data: user, error } = await supabase
       .from("usuarios")
       .select(
@@ -66,19 +76,22 @@ async function handleLogin(event) {
       throw error;
     }
 
+    // Si no existe en tabla usuarios, avisar para registro
     if (!user) {
       emailError.innerHTML =
-        'Este correo no está registrado. <a class="link-inline" href="signup.html">Regístrate</a>';
+        'Este correo no está registrado en usuarios. <a class="link-inline" href="signup.html">Regístrate</a>';
       emailInput.classList.add("input-error");
       return;
     }
 
-    if (user.clave !== password) {
+    // Opcional: valida clave local si aún se usa
+    if (user.clave && user.clave !== password) {
       passwordError.textContent = "La clave no coincide.";
       passwordInput.classList.add("input-error");
       return;
     }
 
+    // 3) Setear sesión local con id_usuario de la tabla
     setSessionUserId(user.id_usuario);
     setSessionRoles({
       acceso_cliente: user.acceso_cliente,
@@ -87,6 +100,7 @@ async function handleLogin(event) {
       permiso_superadmin: user.permiso_superadmin,
     });
     await startSession(user.id_usuario);
+
     try {
       const cartData = await fetchCart();
       setCachedCart(cartData);

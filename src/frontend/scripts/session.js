@@ -100,11 +100,7 @@ export function requireSession() {
       id = cookieId;
     }
   }
-  if (!id) {
-    const prefix = getPathPrefix();
-    window.location.href = `${prefix}login.html`;
-    throw new Error("No hay sesión activa");
-  }
+  // Ya no forzamos redirección; devolvemos null si no hay sesión
   return id;
 }
 

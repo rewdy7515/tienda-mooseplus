@@ -80,6 +80,39 @@ body {
   object-fit: contain;
 }
 
+/* Header responsive (móvil) */
+@media (max-width: 640px) {
+  .header {
+    flex-wrap: wrap;
+    padding: 8px;
+    gap: 8px;
+  }
+  .logo {
+    display: none;
+  }
+  .search-box {
+    order: 2;
+    width: 100%;
+  }
+  .user-info {
+    width: auto;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .user-info > *:not(.carrito) {
+    display: none !important;
+  }
+  .user-menu,
+  #btn-login,
+  #btn-stock {
+    display: none !important;
+  }
+  .carrito {
+    width: 26px;
+    margin-left: auto;
+  }
+}
+
 .search-result-name {
   font-size: 14px;
   font-weight: 600;

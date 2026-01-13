@@ -1,7 +1,15 @@
 import { loadCatalog, ensureServerSession, fetchEntregadas } from "./api.js";
 import { initSearch } from "./search.js";
-import { requireSession, attachLogoHome, setSessionRoles, getSessionRoles } from "./session.js";
-import { loadCurrentUser } from "./api.js";
+import {
+  attachLogoHome,
+  setSessionRoles,
+  getSessionRoles,
+  getSessionUserId,
+  showDeliveryNotice,
+  getDeliverySeen,
+  setDeliverySeen,
+} from "./session.js";
+import { loadCurrentUser, supabase } from "./api.js";
 
 if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
@@ -10,7 +18,29 @@ if (!window.__headerActionsInit) {
   // Sesión / usuario
   const initUser = async () => {
     try {
-      const userId = requireSession();
+      const userId = getSessionUserId();
+      const loginBtn = document.querySelector("#btn-login");
+      const showLogin = () => {
+        if (loginBtn) {
+          loginBtn.classList.remove("hidden");
+          loginBtn.addEventListener("click", () => {
+            window.location.href = `${pagesRoot}login.html`;
+          });
+        }
+        const btnStock = document.querySelector("#btn-stock");
+        if (btnStock) {
+          btnStock.classList.add("hidden");
+          btnStock.style.display = "none";
+        }
+      };
+      if (!userId) {
+        showLogin();
+        return;
+      }
+      if (loginBtn) {
+        loginBtn.classList.add("hidden");
+        loginBtn.style.display = "none";
+      }
       await ensureServerSession();
       const user = await loadCurrentUser();
       setSessionRoles(user || {});
@@ -22,14 +52,21 @@ if (!window.__headerActionsInit) {
       }
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const isSuper =
+        isTrue(roles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
       const isAdmin =
         isTrue(roles?.permiso_admin) ||
-        isTrue(roles?.permiso_superadmin) ||
-        isTrue(user?.permiso_admin) ||
-        isTrue(user?.permiso_superadmin);
+        isSuper ||
+        isTrue(user?.permiso_admin);
       if (adminLink) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
+      }
+      const btnStock = document.querySelector("#btn-stock");
+      if (btnStock) {
+        const showStock = isSuper;
+        btnStock.classList.toggle("hidden", !showStock);
+        btnStock.style.display = showStock ? "inline-flex" : "none";
       }
       // Dot de inventario según notificacion_inventario
       if (user?.notificacion_inventario) {
@@ -57,6 +94,8 @@ if (!window.__headerActionsInit) {
             { once: true }
           );
         }
+      } else {
+        showLogin();
       }
     } catch (err) {
       console.error("header user init error", err);

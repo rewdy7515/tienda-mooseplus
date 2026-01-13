@@ -138,6 +138,26 @@ async function handleSubmit(e) {
         )) ||
       (phoneDial ? `+${phoneDial} ${telefono}` : telefono);
 
+    // 1) Registrar en Auth de Supabase
+    const { data: authData, error: authErr } = await supabase.auth.signUp({
+      email: correo.trim(),
+      password: clave,
+      options: {
+        data: {
+          display_name: `${nombre} ${apellido}`.trim(),
+          nombre,
+          apellido,
+          telefono: phoneFull,
+          phone: phoneFull,
+        },
+      },
+    });
+    if (authErr) {
+      console.error("auth.signUp error", authErr);
+      throw authErr;
+    }
+
+    // 2) Registrar en tabla usuarios
     const { data, error } = await supabase
       .from("usuarios")
       .insert({ nombre, apellido, telefono: phoneFull, correo, clave })
@@ -150,10 +170,10 @@ async function handleSubmit(e) {
       throw new Error("No se pudo obtener el usuario creado");
     }
 
-    setStatus("Registro exitoso. Redirigiendo a inicio de sesión...", false);
+    setStatus("Registro exitoso. Revisa tu correo para confirmar.", false);
     setTimeout(() => {
       window.location.href = "login.html";
-    }, 500);
+    }, 800);
   } catch (err) {
     console.error("signup error", err);
     setStatus("No se pudo completar el registro. Intenta de nuevo.", true);

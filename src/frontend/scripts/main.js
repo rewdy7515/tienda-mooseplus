@@ -11,7 +11,6 @@ import { initModal, openModal, setPrecios, setStockData, setDescuentos } from ".
 import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
 import {
-  requireSession,
   attachLogout,
   getCachedCart,
   setCachedCart,
@@ -23,8 +22,6 @@ import {
   getDeliverySeen,
   setDeliverySeen,
 } from "./session.js";
-
-requireSession();
 
 const contenedor = document.querySelector("#categorias-container");
 const estado = document.querySelector("#categorias-status");
