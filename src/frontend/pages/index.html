@@ -8,6 +8,14 @@
   </head>
 
   <body>
+    <div id="page-loader" class="page-loader">
+      <img
+        src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png"
+        alt="Logo"
+        class="page-loader__logo"
+      />
+    </div>
+
     <div id="app-header" data-header-root="../" data-header-pages=""></div>
     <script src="../scripts/header-loader.js"></script>
 
@@ -76,6 +84,12 @@
       </div>
     </div>
 
+    <script>
+      window.addEventListener("load", () => {
+        const loader = document.getElementById("page-loader");
+        if (loader) loader.classList.add("hidden");
+      });
+    </script>
     <script type="module" src="../scripts/main.js"></script>
   </body>
 </html>
