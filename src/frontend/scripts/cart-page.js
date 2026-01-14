@@ -5,6 +5,8 @@ import {
   clearServerSession,
   loadCurrentUser,
   ensureServerSession,
+  startSession,
+  supabase,
 } from "./api.js";
 import {
   requireSession,
@@ -15,6 +17,7 @@ import {
   getSessionRoles,
   setSessionRoles,
   attachLogoHome,
+  setSessionUserId,
 } from "./session.js";
 
 requireSession();
@@ -30,6 +33,34 @@ let descuentos = [];
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+async function syncAuthSession() {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.warn("[auth] getSession error", error);
+      return null;
+    }
+    const email = data?.session?.user?.email;
+    if (!email) return null;
+    const { data: user, error: userErr } = await supabase
+      .from("usuarios")
+      .select("id_usuario, nombre, apellido, acceso_cliente, permiso_admin, permiso_superadmin")
+      .ilike("correo", email)
+      .maybeSingle();
+    if (userErr) {
+      console.warn("[auth] load usuario error", userErr);
+      return null;
+    }
+    if (!user?.id_usuario) return null;
+    setSessionUserId(user.id_usuario);
+    await startSession(user.id_usuario);
+    return user;
+  } catch (err) {
+    console.warn("syncAuthSession error", err);
+    return null;
+  }
+}
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg;
@@ -101,8 +132,15 @@ const renderCart = () => {
         <tr>
           <td>
             <div class="cart-info tight">
-              <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
-              <p class="cart-detail">${detalle || ""}</p>
+              <div class="cart-product">
+                <div class="cart-thumb-sm">
+                  <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" />
+                </div>
+                <div class="cart-product-text">
+                  <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
+                  <p class="cart-detail">${detalle || ""}</p>
+                </div>
+              </div>
             </div>
           </td>
           <td class="cart-cell-center">${tipo}</td>
@@ -219,6 +257,7 @@ const handleCartClick = (e) => {
 async function init() {
   setStatus("Cargando carrito...");
   try {
+    await syncAuthSession();
     await ensureServerSession();
     const currentUser = await loadCurrentUser();
     if (usernameEl && currentUser) {
@@ -243,7 +282,17 @@ async function init() {
     const cachedCart = getCachedCart();
     const [cartData, catalog] = await Promise.all([fetchCart(), loadCatalog()]);
     setCachedCart(cartData);
-    precios = catalog.precios;
+    const esCliente =
+      isTrue(sessionRoles?.acceso_cliente) ||
+      isTrue(currentUser?.acceso_cliente);
+    const precioData = (catalog.precios || [])
+      .map((p) => {
+        const valor = esCliente ? p.precio_usd_detal : p.precio_usd_mayor;
+        if (valor == null) return null;
+        return { ...p, precio_usd_detal: valor, precio_usd_mayor: undefined };
+      })
+      .filter(Boolean);
+    precios = precioData;
     plataformas = catalog.plataformas;
     descuentos = catalog.descuentos || [];
     cartItems = cartData.items || [];

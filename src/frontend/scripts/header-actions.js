@@ -20,12 +20,17 @@ if (!window.__headerActionsInit) {
     try {
       const userId = getSessionUserId();
       const loginBtn = document.querySelector("#btn-login");
+      const userMenu = document.querySelector(".user-menu");
       const showLogin = () => {
         if (loginBtn) {
           loginBtn.classList.remove("hidden");
           loginBtn.addEventListener("click", () => {
             window.location.href = `${pagesRoot}login.html`;
           });
+        }
+        if (userMenu) {
+          userMenu.classList.add("hidden");
+          userMenu.style.display = "none";
         }
         const btnStock = document.querySelector("#btn-stock");
         if (btnStock) {
@@ -40,6 +45,10 @@ if (!window.__headerActionsInit) {
       if (loginBtn) {
         loginBtn.classList.add("hidden");
         loginBtn.style.display = "none";
+      }
+      if (userMenu) {
+        userMenu.classList.remove("hidden");
+        userMenu.style.display = "flex";
       }
       await ensureServerSession();
       const user = await loadCurrentUser();
@@ -58,6 +67,14 @@ if (!window.__headerActionsInit) {
         isTrue(roles?.permiso_admin) ||
         isSuper ||
         isTrue(user?.permiso_admin);
+
+      // Bloqueo de acceso a páginas admin si no tiene permisos
+      const isAdminPath = window.location.pathname.includes("/pages/admin/");
+      if (isAdminPath && !isAdmin) {
+        window.location.href = `${pagesRoot}index.html`;
+        return;
+      }
+
       if (adminLink) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
@@ -95,7 +112,11 @@ if (!window.__headerActionsInit) {
           );
         }
       } else {
-        showLogin();
+        const inventarioLink = Array.from(document.querySelectorAll("a")).find(
+          (a) => a.textContent?.trim().toLowerCase().startsWith("inventario")
+        );
+        const dot = inventarioLink?.querySelector(".delivery-dot");
+        if (dot) dot.classList.add("hidden");
       }
     } catch (err) {
       console.error("header user init error", err);

@@ -9,24 +9,22 @@
 
   <body>
     <div id="page-loader" class="page-loader">
-      <img
-        src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png"
-        alt="Logo"
-        class="page-loader__logo"
-      />
+      <div class="page-loader__logo" aria-label="Cargando"></div>
     </div>
 
-    <div id="app-header" data-header-root="../" data-header-pages=""></div>
-    <script src="../scripts/header-loader.js"></script>
+    <div id="app-shell" class="app-shell hidden">
+      <div id="app-header" data-header-root="../" data-header-pages=""></div>
+      <script src="../scripts/header-loader.js"></script>
 
-    <!-- CONTENEDOR DE CATEGORÍAS -->
-    <main>
-      <section class="categorias-dinamicas">
-        <h2>Categorías</h2>
-        <p id="categorias-status" class="status"></p>
-        <div id="categorias-container" class="categorias-grid"></div>
-      </section>
-    </main>
+      <!-- CONTENEDOR DE CATEGORÍAS -->
+      <main>
+        <section class="categorias-dinamicas">
+          <h2>Categorías</h2>
+          <p id="categorias-status" class="status"></p>
+          <div id="categorias-container" class="categorias-grid"></div>
+        </section>
+      </main>
+    </div>
 
     <!-- Modal plataformas -->
     <div id="platform-modal" class="modal hidden">
@@ -84,12 +82,6 @@
       </div>
     </div>
 
-    <script>
-      window.addEventListener("load", () => {
-        const loader = document.getElementById("page-loader");
-        if (loader) loader.classList.add("hidden");
-      });
-    </script>
     <script type="module" src="../scripts/main.js"></script>
   </body>
 </html>

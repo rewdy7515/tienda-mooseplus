@@ -66,9 +66,7 @@ async function handleLogin(event) {
     // 2) Buscar usuario en tabla usuarios por correo (para id_usuario)
     const { data: user, error } = await supabase
       .from("usuarios")
-      .select(
-        "id_usuario, clave, acceso_cliente, acceso_vendedor, permiso_admin, permiso_superadmin"
-      )
+      .select("id_usuario, clave, acceso_cliente, permiso_admin, permiso_superadmin")
       .ilike("correo", email)
       .maybeSingle();
 
@@ -95,7 +93,6 @@ async function handleLogin(event) {
     setSessionUserId(user.id_usuario);
     setSessionRoles({
       acceso_cliente: user.acceso_cliente,
-      acceso_vendedor: user.acceso_vendedor,
       permiso_admin: user.permiso_admin,
       permiso_superadmin: user.permiso_superadmin,
     });

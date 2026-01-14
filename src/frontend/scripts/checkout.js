@@ -1,4 +1,11 @@
-import { supabase, fetchCart, loadCatalog, submitCheckout, uploadComprobantes } from "./api.js";
+import {
+  supabase,
+  fetchCart,
+  loadCatalog,
+  submitCheckout,
+  uploadComprobantes,
+  fetchP2PRate,
+} from "./api.js";
 import { requireSession, attachLogoHome } from "./session.js";
 
 requireSession();
@@ -14,8 +21,6 @@ const dropzone = document.querySelector("#dropzone");
 const totalEl = document.querySelector("#checkout-total");
 const btnSendPayment = document.querySelector("#btn-send-payment");
 const refInput = document.querySelector("#input-ref");
-// Prefills para pruebas
-if (refInput) refInput.value = "1111";
 
 let metodos = [];
 let seleccionado = null;
@@ -25,6 +30,8 @@ let precios = [];
 let plataformas = [];
 let descuentos = [];
 let cartId = null;
+let tasaBs = null;
+const TASA_MARKUP = 1.015; // +1.5%
 
 const renderMetodos = () => {
   if (!metodosContainer) return;
@@ -50,19 +57,84 @@ const renderDetalle = () => {
   }
   const m = metodos[seleccionado];
   const campos = [
-    { label: "Nombre", valor: m.nombre },
-    { label: "Correo", valor: m.correo },
-    { label: "ID", valor: m.id },
-    { label: "Cédula", valor: m.cedula },
-    { label: "Teléfono", valor: m.telefono },
+    { label: "Nombre", valor: m.nombre, copy: false },
+    { label: "Correo", valor: m.correo, copy: true },
+    { label: "ID", valor: m.id, copy: true },
+    { label: "Cédula", valor: m.cedula, copy: false },
+    { label: "Teléfono", valor: m.telefono, copy: false },
   ].filter((c) => c.valor !== null && c.valor !== undefined && c.valor !== "");
 
-  metodoDetalle.innerHTML = campos
-    .map((c) => `<p><strong>${c.label}:</strong> ${c.valor}</p>`)
+  const detalleHtml = campos
+    .map((c) => {
+      const safeVal = String(c.valor).replace(/"/g, "&quot;");
+      const copyIcon = c.copy
+        ? `<img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" class="copy-field-icon" data-copy="${safeVal}" style="width:14px; height:14px; margin-left:6px; cursor:pointer;" />`
+        : "";
+      return `<p><strong>${c.label}:</strong> <span>${c.valor}</span>${copyIcon}</p>`;
+    })
     .join("");
+
+  const isMetodoBs = Number(m.id_metodo_de_pago ?? m.id) === 1;
+  metodoDetalle.innerHTML =
+    detalleHtml +
+    (isMetodoBs
+      ? `<button type="button" class="btn-primary copy-detalle-btn" style="margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px; width:100%;">
+          <span>Copiar al portapapeles</span>
+          <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:18px; height:18px; filter: brightness(0) invert(1);" />
+        </button>`
+      : "");
+
+  if (isMetodoBs) {
+    const btnCopy = metodoDetalle.querySelector(".copy-detalle-btn");
+    btnCopy?.addEventListener("click", async () => {
+      const text = campos.map((c) => `${c.valor}`).join("\n");
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+        btnCopy.textContent = "Copiado!";
+        setTimeout(() => (btnCopy.textContent = "Copiar al portapapeles"), 1500);
+      } catch (err) {
+        console.error("copy detalle error", err);
+      }
+    });
+  }
+
+  // Copy individual fields (correo, id)
+  metodoDetalle.querySelectorAll(".copy-field-icon").forEach((icon) => {
+    icon.addEventListener("click", async () => {
+      const val = icon.dataset.copy || "";
+      const decoded = val.replace(/&quot;/g, '"');
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(decoded);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = decoded;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+        icon.style.opacity = "0.6";
+        setTimeout(() => {
+          icon.style.opacity = "1";
+        }, 800);
+      } catch (err) {
+        console.error("copy field error", err);
+      }
+    });
+  });
 };
 
-const populateSelect = () => {
+const populateSelect = (defaultIdx = null) => {
   if (!metodoSelect) return;
   metodoSelect.innerHTML = '<option value="">Seleccione un método</option>';
   metodos.forEach((m, idx) => {
@@ -71,9 +143,9 @@ const populateSelect = () => {
     opt.textContent = m.nombre || `Método ${idx + 1}`;
     metodoSelect.appendChild(opt);
   });
-  // Prefill de pruebas: seleccionar índice 5 si existe
-  if (metodos.length > 5) {
-    metodoSelect.value = "5";
+  const selIdx = defaultIdx !== null ? defaultIdx : seleccionado;
+  if (selIdx !== null && selIdx >= 0) {
+    metodoSelect.value = String(selIdx);
   }
 };
 
@@ -179,7 +251,9 @@ const renderTotal = () => {
   const metodo = seleccionado !== null ? metodos[seleccionado] : null;
   const metodoId = metodo?.id_metodo_de_pago ?? metodo?.id;
   const isBs = metodo && Number(metodoId) === 1;
-  const lineBs = isBs ? `<div>Bs. ${(totalUsd * 400).toFixed(2)}</div>` : "";
+  const tasaVal = Number.isFinite(tasaBs) ? tasaBs : null;
+  const lineBs =
+    isBs && tasaVal ? `<div>Bs. ${(totalUsd * tasaVal).toFixed(2)}</div>` : "";
   totalEl.innerHTML = `<div>${lineUsd}</div>${lineBs}`;
 };
 
@@ -201,13 +275,15 @@ const calcularTotalRpc = async (id_carrito) => {
 
 async function init() {
   try {
-    const [cartData, catalog, metodosResp] = await Promise.all([
+    const [cartData, catalog, metodosResp, tasaResp] = await Promise.all([
       fetchCart(),
       loadCatalog(),
       supabase.from("metodos_de_pago").select("id_metodo_de_pago, nombre, correo, id, cedula, telefono"),
+      fetchP2PRate(),
     ]);
     if (metodosResp.error) throw metodosResp.error;
     metodos = metodosResp.data || [];
+    tasaBs = tasaResp ? tasaResp * TASA_MARKUP : null;
     cartItems = cartData.items || [];
     cartId = cartData.id_carrito || null;
     precios = catalog.precios;
@@ -218,22 +294,17 @@ async function init() {
 
     // Selecciona por defecto el método con id 1 si existe
     // Prefill de pruebas: seleccionar índice 5 si existe, si no cae al método id 1
-    if (metodos.length > 5) {
-      seleccionado = 5;
-      if (metodoSelect) metodoSelect.value = "5";
-    } else {
-      const idxDefault = metodos.findIndex(
-        (m) => Number(m.id_metodo_de_pago ?? m.id) === 1
-      );
-      if (idxDefault >= 0) {
-        seleccionado = idxDefault;
-        if (metodoSelect) metodoSelect.value = String(idxDefault);
-      }
+    let idxDefault = metodos.findIndex(
+      (m) => Number(m.id_metodo_de_pago ?? m.id) === 1
+    );
+    if (idxDefault < 0 && metodos.length) idxDefault = 0;
+    if (idxDefault >= 0) {
+      seleccionado = idxDefault;
     }
 
+    populateSelect(idxDefault >= 0 ? idxDefault : null);
     renderMetodos();
     renderDetalle();
-    populateSelect();
     renderTotal();
   } catch (err) {
     console.error("checkout load error", err);
@@ -305,7 +376,7 @@ btnSendPayment?.addEventListener("click", async () => {
       referencia: refInput.value.trim(),
       comprobantes,
       total: totalUsd,
-      tasa_bs: 400,
+      tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
     };
     const resp = await submitCheckout(payload);
     if (resp?.error) {

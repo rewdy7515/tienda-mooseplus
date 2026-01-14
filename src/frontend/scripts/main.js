@@ -21,6 +21,7 @@ import {
   showDeliveryNotice,
   getDeliverySeen,
   setDeliverySeen,
+  requireSession,
 } from "./session.js";
 
 const contenedor = document.querySelector("#categorias-container");
@@ -170,7 +171,19 @@ async function init() {
   initModal(modalEls);
 
   try {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.warn("[auth] getSession error", error);
+      } else {
+        console.log("[auth] session", data?.session);
+      }
+    } catch (err) {
+      console.warn("[auth] getSession exception", err);
+    }
+
     const currentUser = await loadCurrentUser();
+    console.log("[user] currentUser", currentUser);
     const btnAssign = document.querySelector("#btn-assign-client");
     if (usernameEl && currentUser) {
       const fullName = [currentUser.nombre, currentUser.apellido]
@@ -205,8 +218,19 @@ async function init() {
     setCachedCart(cartData);
     const [catalog, stockMap] = await Promise.all([loadCatalog(), loadStockSummary()]);
     const { categorias, plataformas, precios, descuentos } = catalog;
+    const esCliente =
+      isTrue(sessionRoles?.acceso_cliente) ||
+      isTrue(currentUser?.acceso_cliente);
+    const usarMayor = !esCliente;
+    const preciosVisibles = (precios || [])
+      .map((p) => {
+        const valor = esCliente ? p.precio_usd_detal : p.precio_usd_mayor;
+        if (valor == null) return null;
+        return { ...p, precio_usd_detal: valor, precio_usd_mayor: undefined };
+      })
+      .filter(Boolean);
     setStockData(stockMap);
-    const preciosMap = buildPreciosMap(precios);
+    const preciosMap = buildPreciosMap(preciosVisibles);
     setPrecios(preciosMap);
     setDescuentos(descuentos || []);
     updateSearchData(plataformas);
@@ -227,7 +251,7 @@ async function init() {
       closeEl: cartClose,
       iconEl: cartIcon,
       itemsContainer: cartItemsEl,
-      initialItems: mapCartItems(cartData.items || [], precios, plataformas),
+      initialItems: mapCartItems(cartData.items || [], preciosVisibles, plataformas),
     });
     initSearch({
       input: searchInput,
@@ -258,6 +282,11 @@ async function init() {
     }
   } catch (err) {
     setEstado(`Error: ${err.message}`);
+  } finally {
+    const loader = document.getElementById("page-loader");
+    const shell = document.getElementById("app-shell");
+    if (shell) shell.classList.remove("hidden");
+    if (loader) loader.classList.add("hidden");
   }
 }
 

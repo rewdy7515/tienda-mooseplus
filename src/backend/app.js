@@ -13,6 +13,7 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 
 const AUTH_REQUIRED = "AUTH_REQUIRED";
+const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
 // Usa el id de usuario autenticado que envíe el cliente.
 const parseSessionUserId = (req) => {
@@ -69,6 +70,58 @@ const getOrCreateCarrito = async (idUsuario) => {
   if (insertErr) throw insertErr;
   return inserted.id_carrito;
 };
+
+const BINANCE_CACHE_MS = 2 * 60 * 1000;
+let cachedP2PRate = { value: null, ts: 0 };
+
+const fetchP2PRate = async (asset = "USDT", fiat = "VES") => {
+  const now = Date.now();
+  if (cachedP2PRate.value && now - cachedP2PRate.ts < BINANCE_CACHE_MS) {
+    return cachedP2PRate.value;
+  }
+
+  const body = {
+    page: 1,
+    rows: 10,
+    payTypes: [],
+    asset,
+    fiat,
+    tradeType: "BUY",
+    publisherType: null,
+  };
+
+  const resp = await fetch(BINANCE_P2P_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(`Binance P2P error ${resp.status}`);
+  }
+  const json = await resp.json();
+  const precios = (json?.data || [])
+    .map((item) => Number(item?.adv?.price))
+    .filter((n) => Number.isFinite(n));
+  if (!precios.length) {
+    throw new Error("Binance P2P sin precios");
+  }
+  const top = precios.slice(0, 5);
+  const rate =
+    top.reduce((acc, val) => acc + val, 0) / top.length;
+  cachedP2PRate = { value: rate, ts: now };
+  return rate;
+};
+
+// Tasa Binance P2P USDT/VES (promedio top ofertas BUY)
+app.get("/api/p2p/rate", async (_req, res) => {
+  try {
+    const rate = await fetchP2PRate();
+    res.json({ rate });
+  } catch (err) {
+    console.error("[p2p rate] error", err);
+    res.status(502).json({ error: "No se pudo obtener la tasa P2P" });
+  }
+});
 
 // Endpoint para agregar/actualizar/eliminar items del carrito.
 // Se maneja por delta: cantidad positiva suma, negativa resta; si el resultado es <=0 se elimina el item.

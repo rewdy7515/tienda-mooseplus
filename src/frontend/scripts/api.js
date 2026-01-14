@@ -1,4 +1,4 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.86.0/+esm";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0?no-check&sourcemap=0";
 import { requireSession } from "./session.js";
 
 const supabase = createClient(
@@ -7,16 +7,8 @@ const supabase = createClient(
 );
 
 // Mantén mismo host para que las cookies de sesión sean válidas; en local usa el mismo hostname y puerto 3000.
-const API_BASE = (() => {
-  if (typeof window === "undefined") return "http://localhost:3000";
-  const { protocol, hostname, port } = window.location;
-  // Si estás en 127.0.0.1 o localhost con Live Server (5500), apunta al backend en 3000 pero mismo hostname.
-  if ((hostname === "localhost" || hostname === "127.0.0.1") && port && port !== "3000") {
-    return `${protocol}//${hostname}:3000`;
-  }
-  // Si el front ya corre en el mismo host/puerto que el backend, usa origin.
-  return window.location.origin;
-})();
+// Ajusta aquí el host/puerto real del backend
+const API_BASE = "http://127.0.0.1:3000";
 
 const bufferToBase64 = (buffer) => {
   let binary = "";
@@ -45,7 +37,7 @@ export async function loadCatalog() {
     supabase
       .from("precios")
       .select(
-        "id_precio, id_plataforma, cantidad, precio_usd_detal, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta"
+        "id_precio, id_plataforma, cantidad, precio_usd_detal, precio_usd_mayor, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta"
       )
       .order("id_precio"),
     supabase.from("descuentos_meses").select("id_descuento, meses, descuento"),
@@ -212,6 +204,24 @@ export async function fetchEntregadas() {
   }
 }
 
+export async function fetchP2PRate() {
+  try {
+    const res = await fetch(`${API_BASE}/api/p2p/rate`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("p2p rate response", res.status, text);
+      return null;
+    }
+    const data = await res.json();
+    return Number.isFinite(data?.rate) ? data.rate : null;
+  } catch (err) {
+    console.error("No se pudo obtener la tasa P2P:", err);
+    return null;
+  }
+}
+
 export async function startSession(idUsuario) {
   try {
     const res = await fetch(`${API_BASE}/api/session`, {
@@ -254,7 +264,7 @@ export async function loadCurrentUser() {
   const idUsuario = requireSession();
   const { data, error } = await supabase
     .from("usuarios")
-    .select("id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin")
+    .select("id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin, acceso_cliente")
     .eq("id_usuario", idUsuario)
     .maybeSingle();
   if (error) {

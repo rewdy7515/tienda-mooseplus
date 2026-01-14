@@ -1,4 +1,5 @@
 import { sendCartDelta } from "./api.js";
+import { requireSession } from "./session.js";
 import { addToCart } from "./cart.js";
 
 let modalEls = {};
@@ -101,9 +102,9 @@ const renderPrecios = (plataformaId, flags) => {
   } else {
     modalQtyMonths?.classList.remove("hidden");
   }
-  const opciones = [...(preciosPorPlataforma[plataformaId] || [])].sort(
-    (a, b) => (a.id_precio || 0) - (b.id_precio || 0)
-  );
+  const opciones = [...(preciosPorPlataforma[plataformaId] || [])]
+    .filter((p) => p.precio_usd_detal !== null && p.precio_usd_detal !== undefined)
+    .sort((a, b) => (a.id_precio || 0) - (b.id_precio || 0));
   if (!opciones.length) {
     modalPrecios.innerHTML =
       '<p class="sin-plataformas">Sin precios configurados.</p>';
@@ -294,6 +295,12 @@ export const initModal = (elements) => {
   closeBtn?.addEventListener("click", closeModal);
   backdrop?.addEventListener("click", closeModal);
   btnAdd?.addEventListener("click", () => {
+    // Si no hay sesión, redirige a login (requireSession hace redirect)
+    try {
+      requireSession();
+    } catch (err) {
+      return;
+    }
     if (!selectedPrecio || !currentPlatform || !selectedPrecio.id_precio) {
       console.error("Falta id_precio en el precio seleccionado");
       return;

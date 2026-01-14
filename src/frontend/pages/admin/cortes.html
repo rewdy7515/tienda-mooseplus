@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cortes</title>
-    <link rel="stylesheet" href="../styles/styles.css" />
+    <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
       .cortes-wrapper {
         margin-top: 16px;
@@ -121,8 +121,8 @@
     </style>
   </head>
   <body>
-    <div id="app-header" data-header-root="../" data-header-pages=""></div>
-    <script src="../scripts/header-loader.js"></script>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas">
       <h2>Cortes</h2>
@@ -133,8 +133,8 @@
     </main>
 
     <script type="module">
-      import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
-      import { clearServerSession, supabase } from "../scripts/api.js";
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, supabase } from "../../scripts/api.js";
 
       requireSession();
       attachLogoHome();

@@ -7,6 +7,10 @@ if (!window.__cartWidgetInit) {
     try {
       await ensureServerSession();
       const [cartResp, catalog] = await Promise.all([fetchCart(), loadCatalog()]);
+      const cartId = cartResp?.id_carrito;
+      if (!cartId) {
+        return;
+      }
       const items = cartResp?.items || [];
       const precios = catalog?.precios || [];
       const plataformas = catalog?.plataformas || [];

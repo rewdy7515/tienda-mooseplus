@@ -143,6 +143,8 @@ export function addToCart(newItem) {
     cartItems.push(newItem);
   }
   renderCart();
+  // abrir el carrito para feedback
+  openCart();
 }
 
 export function openCart() {

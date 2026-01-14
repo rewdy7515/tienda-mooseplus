@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Reemplazos</title>
-    <link rel="stylesheet" href="../styles/styles.css" />
+    <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
       .buscador-wrapper {
         margin-top: 16px;
@@ -66,8 +66,8 @@
     </style>
   </head>
   <body>
-    <div id="app-header" data-header-root="../" data-header-pages=""></div>
-    <script src="../scripts/header-loader.js"></script>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas">
       <h2>Reemplazos</h2>
@@ -87,8 +87,8 @@
     </main>
 
     <script type="module">
-      import { requireSession, attachLogoHome } from "../scripts/session.js";
-      import { supabase } from "../scripts/api.js";
+      import { requireSession, attachLogoHome } from "../../scripts/session.js";
+      import { supabase } from "../../scripts/api.js";
 
       requireSession();
       attachLogoHome();

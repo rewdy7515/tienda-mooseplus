@@ -26,7 +26,6 @@ const getCookie = (name) => {
 
 const normalizeRoles = (roles = {}) => ({
   acceso_cliente: normalizeFlag(roles.acceso_cliente),
-  acceso_vendedor: normalizeFlag(roles.acceso_vendedor),
   permiso_admin: normalizeFlag(roles.permiso_admin),
   permiso_superadmin: normalizeFlag(roles.permiso_superadmin),
 });

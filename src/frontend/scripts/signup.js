@@ -55,11 +55,11 @@ function setLoading(isLoading) {
 async function correoExiste(correo) {
   const { data, error } = await supabase
     .from("usuarios")
-    .select("id_usuario")
+    .select("id_usuario, fecha_registro")
     .ilike("correo", correo)
     .maybeSingle();
   if (error) throw error;
-  return Boolean(data);
+  return data || null;
 }
 
 async function handleSubmit(e) {
@@ -121,8 +121,11 @@ async function handleSubmit(e) {
   setLoading(true);
 
   try {
-    const existe = await correoExiste(correo);
-    if (existe) {
+    const existente = await correoExiste(correo);
+    const correoLibre = !existente;
+    const reutilizar =
+      existente && (existente.fecha_registro === null || typeof existente.fecha_registro === "undefined");
+    if (!correoLibre && !reutilizar) {
       errors.correo.innerHTML =
         'Este correo ya está registrado. <a class="link-inline" href="login.html">Inicia sesión</a>';
       fields.correo.classList.add("input-error");
@@ -158,11 +161,27 @@ async function handleSubmit(e) {
     }
 
     // 2) Registrar en tabla usuarios
-    const { data, error } = await supabase
-      .from("usuarios")
-      .insert({ nombre, apellido, telefono: phoneFull, correo, clave })
-      .select("id_usuario")
-      .single();
+    const today = new Date().toISOString().slice(0, 10);
+    let data = null;
+    let error = null;
+    if (reutilizar && existente?.id_usuario) {
+      const upd = await supabase
+        .from("usuarios")
+        .update({ nombre, apellido, telefono: phoneFull, correo, clave, fecha_registro: today })
+        .eq("id_usuario", existente.id_usuario)
+        .select("id_usuario")
+        .single();
+      data = upd.data;
+      error = upd.error;
+    } else {
+      const ins = await supabase
+        .from("usuarios")
+        .insert({ nombre, apellido, telefono: phoneFull, correo, clave, fecha_registro: today })
+        .select("id_usuario")
+        .single();
+      data = ins.data;
+      error = ins.error;
+    }
 
     if (error) throw error;
 
