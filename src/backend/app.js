@@ -525,8 +525,7 @@ app.post("/api/admin/import-clientes", async (req, res) => {
     v === true || v === "true" || v === "1" || v === 1 || v === "t" || v === "on";
 
   try {
-    const idUsuario = await getOrCreateUsuario(req);
-    if (!idUsuario) throw new Error("Usuario no autenticado");
+    const idUsuario = Number(req.body?.id_usuario) || null;
 
     const makeNameKey = (nombre, apellido) =>
       `${(nombre || "").trim().toLowerCase()}|${(apellido || "").trim().toLowerCase()}`;
@@ -739,9 +738,6 @@ app.post("/api/admin/import-clientes", async (req, res) => {
     });
   } catch (err) {
     console.error("[admin:import-clientes] error", err);
-    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
-      return res.status(401).json({ error: "Usuario no autenticado" });
-    }
     res.status(500).json({ error: err.message });
   }
 });

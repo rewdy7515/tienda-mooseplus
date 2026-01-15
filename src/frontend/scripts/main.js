@@ -63,7 +63,6 @@ const searchInput = document.querySelector("#search-input");
 const searchResults = document.querySelector("#search-results");
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
-const btnStock = document.querySelector("#btn-stock");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
 const buildPreciosMap = (precios) =>
@@ -301,14 +300,6 @@ viewCartBtn?.addEventListener("click", () => {
 
 // Redirección al inicio al hacer clic en el logo
 attachLogoHome();
-
-btnStock?.addEventListener("click", () => {
-  window.location.href = "stock.html";
-});
-
-btnStock?.addEventListener("click", () => {
-  window.location.href = "stock.html";
-});
 
 const btnCheckout = document.querySelector("#btn-checkout");
 btnCheckout?.addEventListener("click", () => {

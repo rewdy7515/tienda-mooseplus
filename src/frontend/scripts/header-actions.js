@@ -32,11 +32,6 @@ if (!window.__headerActionsInit) {
           userMenu.classList.add("hidden");
           userMenu.style.display = "none";
         }
-        const btnStock = document.querySelector("#btn-stock");
-        if (btnStock) {
-          btnStock.classList.add("hidden");
-          btnStock.style.display = "none";
-        }
       };
       if (!userId) {
         showLogin();
@@ -78,12 +73,6 @@ if (!window.__headerActionsInit) {
       if (adminLink) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
-      }
-      const btnStock = document.querySelector("#btn-stock");
-      if (btnStock) {
-        const showStock = isSuper;
-        btnStock.classList.toggle("hidden", !showStock);
-        btnStock.style.display = showStock ? "inline-flex" : "none";
       }
       // Dot de inventario según notificacion_inventario
       if (user?.notificacion_inventario) {
@@ -135,11 +124,6 @@ if (!window.__headerActionsInit) {
   const btnCheckout = document.querySelector("#btn-checkout");
   btnCheckout?.addEventListener("click", () => {
     window.location.href = `${pagesRoot}checkout.html`;
-  });
-
-  const btnStock = document.querySelector("#btn-stock");
-  btnStock?.addEventListener("click", () => {
-    window.location.href = `${pagesRoot}stock.html`;
   });
 
   // Búsqueda en el header (usa catálogo para autocompletar)
