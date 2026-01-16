@@ -226,6 +226,37 @@ export async function fetchP2PRate() {
   }
 }
 
+export async function fetchTestingFlag() {
+  try {
+    const { data, error } = await supabase
+      .from("testing")
+      .select("testing")
+      .eq("id_testing", 1)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.testing ?? false;
+  } catch (err) {
+    console.error("fetchTestingFlag error", err);
+    return false;
+  }
+}
+
+export async function updateTestingFlag(value) {
+  try {
+    const { data, error } = await supabase
+      .from("testing")
+      .update({ testing: value })
+      .eq("id_testing", 1)
+      .select("testing")
+      .maybeSingle();
+    if (error) throw error;
+    return data?.testing ?? value;
+  } catch (err) {
+    console.error("updateTestingFlag error", err);
+    return value;
+  }
+}
+
 export async function startSession(idUsuario) {
   try {
     const res = await fetch(`${API_BASE}/api/session`, {

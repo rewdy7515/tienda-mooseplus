@@ -5,6 +5,8 @@ import {
   loadCurrentUser,
   supabase,
   fetchEntregadas,
+  fetchTestingFlag,
+  updateTestingFlag,
 } from "./api.js";
 import { initCart } from "./cart.js";
 import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
@@ -35,6 +37,7 @@ const cartClose = document.querySelector("#cart-close");
 const cartIcon = document.querySelector(".carrito");
 const cartItemsEl = document.querySelector("#cart-items");
 const logo = document.querySelector(".logo");
+const testingBtn = document.querySelector("#btn-testing-toggle");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -111,6 +114,8 @@ const mapCartItems = (items, precios, plataformas) => {
 
     return {
       id_precio: item.id_precio,
+      id_item: item.id_item,
+      id_venta: item.id_venta,
       id_plataforma: price.id_plataforma,
       nombre: platform.nombre || `Precio ${item.id_precio}`,
       imagen: platform.imagen,
@@ -120,6 +125,7 @@ const mapCartItems = (items, precios, plataformas) => {
       meses: item.meses,
       detalle,
       flags,
+      renovacion: item.renovacion,
     };
   });
 };
@@ -211,6 +217,10 @@ async function init() {
       });
       btnAssign.dataset.bound = "1";
     }
+    if (testingBtn) {
+      testingBtn.classList.toggle("hidden", !isSuper);
+      testingBtn.style.display = isSuper ? "inline-flex" : "none";
+    }
 
     const cachedCart = getCachedCart();
     const cartData = await fetchCart();
@@ -278,6 +288,29 @@ async function init() {
       }
     } catch (err) {
       console.warn("No se pudo cargar entregas", err);
+    }
+
+    // Toggle Testing/Production
+    if (testingBtn && !testingBtn.dataset.bound) {
+      testingBtn.dataset.bound = "1";
+      const applyState = (isTesting) => {
+        testingBtn.textContent = isTesting === true ? "Testing" : "Production";
+        testingBtn.classList.toggle("testing-off", !isTesting);
+      };
+      fetchTestingFlag().then((flag) => applyState(flag === true));
+      testingBtn.addEventListener("click", async () => {
+        testingBtn.disabled = true;
+        try {
+          const currentIsTesting = testingBtn.textContent?.toLowerCase() === "testing";
+          const next = !currentIsTesting;
+          const updated = await updateTestingFlag(next);
+          applyState(updated === true);
+        } catch (err) {
+          console.error("toggle testing error", err);
+        } finally {
+          testingBtn.disabled = false;
+        }
+      });
     }
   } catch (err) {
     setEstado(`Error: ${err.message}`);

@@ -12,13 +12,14 @@
         max-width: 960px;
       }
       .cuentas-busqueda {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
+        display: flex;
+        flex-direction: column;
         gap: 10px;
-        align-items: center;
+        align-items: flex-start;
       }
       .cuentas-busqueda .input-wrap {
         position: relative;
+        width: 100%;
       }
       .cuentas-busqueda input {
         width: 100%;
@@ -35,6 +36,11 @@
         cursor: pointer;
         background: #111;
         color: #fff;
+      }
+      .cuentas-acciones {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
       }
       .sugerencias-cuentas {
         position: absolute;
@@ -95,6 +101,50 @@
       .cuenta-table-wrap {
         overflow-x: auto;
       }
+      .cliente-ventas {
+        margin-top: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .cliente-ventas h3 {
+        margin: 0 0 6px;
+      }
+      .cliente-ventas .ventas-table-wrap {
+        overflow-x: auto;
+      }
+      .cliente-ventas table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 500px;
+      }
+      .cliente-ventas th,
+      .cliente-ventas td {
+        border: 1px solid #e5e7eb;
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 14px;
+      }
+      .cliente-ventas th {
+        background: #f5f5f5;
+        font-weight: 700;
+      }
+      .cliente-ventas .btn-copy {
+        padding: 6px 10px;
+        border: none;
+        border-radius: 8px;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+      }
+      .cliente-ventas .btn-delete {
+        padding: 6px 10px;
+        border: none;
+        border-radius: 8px;
+        background: #dc2626;
+        color: #fff;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -106,15 +156,36 @@
       <div class="cuentas-wrapper">
         <div class="cuentas-busqueda">
           <div class="input-wrap">
+            <input type="search" id="input-cliente" placeholder="Buscar por cliente" autocomplete="off" />
+            <div id="sugs-clientes" class="sugerencias-cuentas hidden"></div>
+          </div>
+          <div class="input-wrap">
             <input type="search" id="input-cuenta" placeholder="Buscar por correo" autocomplete="off" />
             <div id="sugs-cuentas" class="sugerencias-cuentas hidden"></div>
           </div>
-          <button type="button" id="btn-buscar-cuenta">🔍</button>
-          <button type="button" class="btn-add" id="btn-ir-agregar">Agregar servicio</button>
+          <div class="cuentas-acciones">
+            <button type="button" id="btn-buscar-cuenta">🔍</button>
+            <button type="button" class="btn-add" id="btn-ir-agregar">Agregar servicio</button>
+          </div>
         </div>
         <div id="cuenta-detalle" class="cuenta-detalle"></div>
+        <div id="cliente-ventas" class="cliente-ventas"></div>
       </div>
     </main>
+
+    <div id="modal-delete-venta" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card" style="max-width:320px;">
+        <button class="modal-close modal-delete-close" aria-label="Cerrar">×</button>
+        <div class="modal-body">
+          <p style="margin-top:0;">¿Estás seguro de que quieres eliminar este servicio?</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" id="btn-confirm-delete" class="btn-primary" style="background:#dc2626; border-color:#dc2626;">Sí, eliminar</button>
+            <button type="button" id="btn-cancel-delete" class="btn-outline">Volver</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div id="rec-overlay" class="rec-overlay">
       <div class="rec-modal">
@@ -148,6 +219,7 @@
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { buildServiceCopyText } from "../../scripts/copy-format.js";
 
       requireSession();
       attachLogoHome();
@@ -157,10 +229,13 @@
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const inputCuenta = document.querySelector("#input-cuenta");
+      const inputCliente = document.querySelector("#input-cliente");
       const sugs = document.querySelector("#sugs-cuentas");
+      const sugsClientes = document.querySelector("#sugs-clientes");
       const btnBuscar = document.querySelector("#btn-buscar-cuenta");
       const btnIrAgregar = document.querySelector("#btn-ir-agregar");
       const detalleEl = document.querySelector("#cuenta-detalle");
+      const clienteVentasEl = document.querySelector("#cliente-ventas");
       const modalPin = document.querySelector("#modal-pin");
       const modalPinTitle = document.querySelector("#modal-pin-title");
       const modalPinInput = document.querySelector("#input-pin");
@@ -214,6 +289,12 @@
       let currentCuentaDetalle = null;
       let modalState = { type: null, targetId: null, max: null, correo: "", nPerfil: null };
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
+      let fetchCounterClientes = 0;
+      const modalDelete = document.querySelector("#modal-delete-venta");
+      const btnConfirmDelete = document.querySelector("#btn-confirm-delete");
+      const btnCancelDelete = document.querySelector("#btn-cancel-delete");
+      const btnCloseDelete = document.querySelector(".modal-delete-close");
+      let deleteTargetId = null;
       const modalReemplazoMsg = document.querySelector("#modal-reemplazo-msg");
 
       (async () => {
@@ -253,6 +334,7 @@
         const term = (texto || "").trim();
         if (!term) {
           renderSugerencias([], true);
+          clienteVentasEl && (clienteVentasEl.innerHTML = "");
           return;
         }
         const current = ++fetchCounter;
@@ -310,10 +392,280 @@
         }
       });
 
+      const renderSugerenciasClientes = (items, forceHide = false) => {
+        if (!sugsClientes) return;
+        if (forceHide || !items.length) {
+          sugsClientes.innerHTML = "";
+          sugsClientes.classList.add("hidden");
+          return;
+        }
+        sugsClientes.innerHTML = items
+          .map(
+            (c) => `
+            <button type="button" data-id="${c.id_usuario}" data-correo="${c.correo || ""}">
+              ${[c.nombre, c.apellido].filter(Boolean).join(" ").trim()} (${c.correo || ""})
+            </button>
+          `
+          )
+          .join("");
+        sugsClientes.classList.remove("hidden");
+      };
+
+      const buscarClientes = async (texto) => {
+        const term = (texto || "").trim();
+        if (!term) {
+          renderSugerenciasClientes([], true);
+          return;
+        }
+        const parts = term.split(/\s+/);
+        const nombreTerm = parts.shift() || "";
+        const apellidoTerm = parts.join(" ").trim();
+        const current = ++fetchCounterClientes;
+        try {
+          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido, correo").ilike("nombre", `%${nombreTerm}%`);
+          if (apellidoTerm) {
+            query = query.ilike("apellido", `%${apellidoTerm}%`);
+          }
+          const { data, error } = await query.limit(5);
+          if (current !== fetchCounterClientes) return;
+          if (error) throw error;
+          const parsed = (data || []).map((u) => ({
+            id_usuario: u.id_usuario,
+            nombre: u.nombre,
+            apellido: u.apellido,
+            correo: u.correo,
+          }));
+          renderSugerenciasClientes(parsed, false);
+        } catch (err) {
+          console.error("buscar clientes error", err);
+          renderSugerenciasClientes([], true);
+        }
+      };
+
+      inputCliente?.addEventListener("input", (e) => {
+        renderSugerencias([], true);
+        buscarClientes(e.target.value || "");
+      });
+
+      sugsClientes?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        const texto = btn.textContent || "";
+        if (inputCliente) {
+          const nameOnly = texto.replace(/\s*\(.+\)\s*$/, "").trim();
+          inputCliente.value = nameOnly;
+        }
+        renderSugerenciasClientes([], true);
+        renderSugerencias([], true);
+        const userId = btn.dataset.id;
+        if (userId) {
+          inputCliente.dataset.selectedId = userId;
+          loadVentasByCliente(userId);
+        }
+      });
+
       document.addEventListener("click", (e) => {
-        if (!sugs) return;
-        const isInside = sugs.contains(e.target) || inputCuenta?.contains(e.target);
-        if (!isInside) renderSugerencias([], true);
+        const insideCuentas = sugs?.contains(e.target) || inputCuenta?.contains(e.target);
+        const insideClientes = sugsClientes?.contains(e.target) || inputCliente?.contains(e.target);
+        if (!insideCuentas) renderSugerencias([], true);
+        if (!insideClientes) renderSugerenciasClientes([], true);
+      });
+
+      const renderVentasCliente = (grouped) => {
+        if (!clienteVentasEl) return;
+        if (!grouped || !Object.keys(grouped).length) {
+          clienteVentasEl.innerHTML = "";
+          return;
+        }
+          const blocks = Object.entries(grouped).map(([platName, rows]) => {
+            const trs = rows
+              .map(
+                (r) => `
+              <tr>
+                <td>${r.id_venta ?? ""}</td>
+                <td>${r.correo || ""}</td>
+                <td>${r.clave || ""}</td>
+                <td>${r.n_perfil ?? ""}</td>
+                <td>${r.fecha_corte || ""}</td>
+                <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <button class="btn-copy" data-copy="${encodeURIComponent(
+                    buildServiceCopyText({
+                      plataforma: platName,
+                      idVenta: r.id_venta,
+                      correo: r.correo,
+                      clave: r.clave,
+                      nPerfil: r.n_perfil,
+                      pin: r.pin,
+                      fechaCorte: r.fecha_corte,
+                    })
+                  )}">Copiar</button>
+                  <button class="btn-delete" data-id-venta="${r.id_venta ?? ""}">Eliminar</button>
+                </td>
+              </tr>
+            `
+              )
+              .join("");
+          return `
+            <div class="ventas-bloque">
+              <h3>${platName}</h3>
+              <div class="ventas-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID de Venta</th>
+                      <th>Correo</th>
+                      <th>Clave</th>
+                      <th>Perfil</th>
+                      <th>Fecha de Corte</th>
+                      <th>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>${trs}</tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        });
+        clienteVentasEl.innerHTML = blocks.join("");
+      };
+
+      const loadVentasByCliente = async (idUsuario) => {
+        if (!idUsuario) return;
+        try {
+          const { data: ventas, error } = await supabase
+            .from("ventas")
+            .select("id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio")
+            .eq("id_usuario", idUsuario);
+          if (error) throw error;
+          const cuentasIds = [...new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean))];
+          const perfilesIds = [...new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean))];
+          let cuentaMap = {};
+          if (cuentasIds.length) {
+            const { data: cuentas } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, correo, clave, id_plataforma")
+              .in("id_cuenta", cuentasIds);
+            cuentaMap =
+              (cuentas || []).reduce((acc, c) => {
+                acc[c.id_cuenta] = c;
+                return acc;
+              }, {}) || {};
+          }
+          let perfilMap = {};
+          if (perfilesIds.length) {
+            const { data: perfiles } = await supabase
+              .from("perfiles")
+              .select("id_perfil, n_perfil, pin")
+              .in("id_perfil", perfilesIds);
+            perfilMap =
+              (perfiles || []).reduce((acc, p) => {
+                acc[p.id_perfil] = { n_perfil: p.n_perfil, pin: p.pin };
+                return acc;
+              }, {}) || {};
+          }
+          let precioMap = {};
+          const precioIds = [...new Set((ventas || []).map((v) => v.id_precio).filter(Boolean))];
+          if (precioIds.length) {
+            const { data: precios } = await supabase
+              .from("precios")
+              .select("id_precio, id_plataforma")
+              .in("id_precio", precioIds);
+            precioMap =
+              (precios || []).reduce((acc, p) => {
+                acc[p.id_precio] = p.id_plataforma;
+                return acc;
+              }, {}) || {};
+          }
+          let plataformaMap = {};
+          const platIds = [
+            ...new Set(
+              (ventas || [])
+                .map((v) => cuentaMap[v.id_cuenta]?.id_plataforma || precioMap[v.id_precio])
+                .filter(Boolean)
+            ),
+          ];
+          if (platIds.length) {
+            const { data: plats } = await supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre")
+              .in("id_plataforma", platIds);
+            plataformaMap =
+              (plats || []).reduce((acc, p) => {
+                acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
+                return acc;
+              }, {}) || {};
+          }
+          const grouped = {};
+          (ventas || []).forEach((v) => {
+            const cuenta = cuentaMap[v.id_cuenta] || {};
+            const platId = cuenta.id_plataforma || precioMap[v.id_precio] || "desconocida";
+            const platName = plataformaMap[platId] || `Plataforma ${platId}`;
+            if (!grouped[platName]) grouped[platName] = [];
+            const perfilInfo = perfilMap[v.id_perfil] || {};
+            grouped[platName].push({
+              id_venta: v.id_venta,
+              correo: cuenta.correo || "",
+              clave: cuenta.clave || "",
+              n_perfil: perfilInfo.n_perfil ?? "",
+              pin: perfilInfo.pin ?? "",
+              fecha_corte: v.fecha_corte || "",
+            });
+          });
+          renderVentasCliente(grouped);
+        } catch (err) {
+          console.error("loadVentasByCliente error", err);
+          if (clienteVentasEl) clienteVentasEl.innerHTML = '<p class="status">No se pudo cargar ventas.</p>';
+        }
+      };
+
+      clienteVentasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-copy");
+        const delBtn = e.target.closest(".btn-delete");
+        if (btn) {
+          const text = decodeURIComponent(btn.dataset.copy || "");
+          if (!text) return;
+          try {
+            navigator.clipboard.writeText(text);
+          } catch (_err) {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          return;
+        }
+        if (delBtn) {
+          deleteTargetId = delBtn.dataset.idVenta || null;
+          if (modalDelete) modalDelete.classList.remove("hidden");
+        }
+      });
+
+      const closeDeleteModal = () => {
+        deleteTargetId = null;
+        modalDelete?.classList.add("hidden");
+      };
+
+      btnCancelDelete?.addEventListener("click", closeDeleteModal);
+      btnCloseDelete?.addEventListener("click", closeDeleteModal);
+      modalDelete?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) closeDeleteModal();
+      });
+
+      btnConfirmDelete?.addEventListener("click", async () => {
+        if (!deleteTargetId) return;
+        try {
+          const { error } = await supabase.from("ventas").delete().eq("id_venta", deleteTargetId);
+          if (error) throw error;
+          if (inputCliente?.dataset.selectedId) {
+            loadVentasByCliente(inputCliente.dataset.selectedId);
+          }
+        } catch (err) {
+          console.error("delete venta error", err);
+        } finally {
+          closeDeleteModal();
+        }
       });
 
       inputCuenta?.addEventListener("focus", () => {

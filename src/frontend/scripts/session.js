@@ -120,10 +120,19 @@ export async function attachLogout(clearServerSession, clearCartCache) {
 }
 
 export function attachLogoHome() {
-  const prefix = window.__headerRoot || getPathPrefix() || "/";
+  const buildHomeHref = () => {
+    const { origin, pathname } = window.location;
+    const idx = pathname.indexOf("/pages/");
+    if (idx >= 0) {
+      const base = pathname.slice(0, idx + "/pages/".length);
+      return `${origin}${base}index.html`;
+    }
+    return `${origin}/`;
+  };
+  const homeHref = buildHomeHref();
   document.querySelectorAll(".logo").forEach((logo) => {
     logo.addEventListener("click", () => {
-      window.location.href = `${prefix}index.html`;
+      window.location.href = homeHref;
     });
   });
 }

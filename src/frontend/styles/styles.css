@@ -1198,6 +1198,26 @@ input[type="number"].input-inline {
   margin: 20px;
 }
 
+.testing-toggle-wrap {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 20px 10px;
+}
+
+.testing-toggle-btn {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  cursor: pointer;
+  background: #f97316;
+  color: #fff;
+}
+
+.testing-toggle-btn.testing-off {
+  background: #16a34a;
+}
+
 .categorias-grid {
   display: flex;
   flex-direction: column;

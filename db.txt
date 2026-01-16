@@ -252,6 +252,11 @@ CREATE TABLE public.tarjetas_de_regalo (
   CONSTRAINT tarjetas_de_regalo_vendido_a_fkey FOREIGN KEY (vendido_a) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT tarjetas_de_regalo_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta)
 );
+CREATE TABLE public.testing (
+  id_testing bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  testing boolean NOT NULL,
+  CONSTRAINT testing_pkey PRIMARY KEY (id_testing)
+);
 CREATE TABLE public.usuarios (
   id_usuario bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   nombre text NOT NULL,
@@ -262,10 +267,13 @@ CREATE TABLE public.usuarios (
   fecha_registro date,
   correo text,
   acceso_cliente boolean,
-  acceso_vendedor boolean,
   permiso_admin boolean,
   permiso_superadmin boolean,
   auth_id bigint,
+  id_auth uuid UNIQUE,
+  claim_token text UNIQUE,
+  claim_expires timestamp with time zone,
+  notificacion_inventario boolean,
   CONSTRAINT usuarios_pkey PRIMARY KEY (id_usuario)
 );
 CREATE TABLE public.ventas (

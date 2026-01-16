@@ -53,7 +53,7 @@ const renderCart = () => {
             <span>${item.cantidad}</span>
             <button class="cart-plus" aria-label="Aumentar">+</button>
           </div>
-          <button class="cart-remove" data-index="${idx}" aria-label="Eliminar">×</button>
+          <button class="cart-remove" data-index="${idx}" data-id-item="${item.id_item || ""}" aria-label="Eliminar">×</button>
         </div>
       </div>`
     )
@@ -97,8 +97,12 @@ export function initCart({
       const item = cartItems[idx];
       const key = item.id_precio || item.id_plataforma;
       const qtyToRemove = item?.cantidad || 0;
+      const meses = item?.meses || null;
+      const idVenta = item?.id_venta || null;
+      const idItem = btn.dataset.idItem || null;
       cartItems.splice(idx, 1);
-      if (key && qtyToRemove > 0) sendCartDelta(key, -qtyToRemove);
+      if (key && qtyToRemove > 0)
+        sendCartDelta(key, -qtyToRemove, meses, { id_venta: idVenta, id_item: idItem, renovacion: item?.renovacion });
       renderCart();
       return;
     }

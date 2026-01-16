@@ -146,27 +146,45 @@ app.post("/api/cart/item", async (req, res) => {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
     const idCarrito = await getOrCreateCarrito(idUsuario);
+    const bodyIdItem = req.body?.id_item ? Number(req.body.id_item) : null;
     const mesesVal = (() => {
       const num = Number(meses);
       if (Number.isFinite(num) && num > 0) return Math.max(1, Math.round(num));
       return null;
     })();
 
-    // Trae item existente
-    const { data: existing, error: selErr } = await supabaseAdmin
-      .from("carrito_items")
-      .select("id_item, cantidad, meses, renovacion, id_venta")
-      .eq("id_carrito", idCarrito)
-      .eq("id_precio", id_precio)
-      .eq("renovacion", renovacion === true)
-      .maybeSingle();
+    // Trae item existente (prioriza id_item si viene)
+    let existing = null;
+    if (bodyIdItem) {
+      const { data, error } = await supabaseAdmin
+        .from("carrito_items")
+        .select("id_item, cantidad, meses, renovacion, id_venta")
+        .eq("id_carrito", idCarrito)
+        .eq("id_item", bodyIdItem)
+        .maybeSingle();
+      if (error) throw error;
+      existing = data || null;
+    }
+    if (!existing) {
+      const { data, error: selErr } = await supabaseAdmin
+        .from("carrito_items")
+        .select("id_item, cantidad, meses, renovacion, id_venta")
+        .eq("id_carrito", idCarrito)
+        .eq("id_precio", id_precio)
+        .eq("renovacion", renovacion === true)
+        .maybeSingle();
+      if (selErr) throw selErr;
+      existing = data || null;
+    }
     if (selErr) throw selErr;
     // Filtra por id_venta según sea null o definido
     const matchesVenta =
       id_venta === undefined || id_venta === null
         ? existing?.id_venta === null || existing?.id_venta === undefined
         : existing?.id_venta === id_venta;
-    const matchExisting = existing && matchesVenta;
+    // También compara meses si viene en body
+    const matchesMeses = mesesVal === null || mesesVal === undefined ? true : existing?.meses === mesesVal;
+    const matchExisting = existing && matchesVenta && matchesMeses;
     
     const newQty = (matchExisting ? existing.cantidad : 0) + parsedDelta;
 
