@@ -6,10 +6,11 @@ const supabase = createClient(
   "sb_publishable_pUhdf8wgEJyUtUg6TZqcTA_qF9gwEjJ"
 );
 
-// Mantén mismo host para cookies; en prod usa el origin actual, en SSR fallback a localhost.
+// Mantén mismo host; si estás en el servidor estático local (127.0.0.1:5500) apunta al backend local en 3000.
 const API_BASE = (() => {
   if (typeof window === "undefined") return "http://localhost:3000";
   const { protocol, host } = window.location;
+  if (host === "127.0.0.1:5500") return "http://127.0.0.1:3000";
   return `${protocol}//${host}`;
 })();
 
