@@ -120,7 +120,7 @@ export async function attachLogout(clearServerSession, clearCartCache) {
 }
 
 export function attachLogoHome() {
-  const prefix = getPathPrefix();
+  const prefix = window.__headerRoot || getPathPrefix() || "/";
   document.querySelectorAll(".logo").forEach((logo) => {
     logo.addEventListener("click", () => {
       window.location.href = `${prefix}index.html`;

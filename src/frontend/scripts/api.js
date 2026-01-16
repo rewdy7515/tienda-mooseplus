@@ -6,9 +6,12 @@ const supabase = createClient(
   "sb_publishable_pUhdf8wgEJyUtUg6TZqcTA_qF9gwEjJ"
 );
 
-// Mantén mismo host para que las cookies de sesión sean válidas; en local usa el mismo hostname y puerto 3000.
-// Ajusta aquí el host/puerto real del backend
-const API_BASE = "http://127.0.0.1:3000";
+// Mantén mismo host para cookies; en prod usa el origin actual, en SSR fallback a localhost.
+const API_BASE = (() => {
+  if (typeof window === "undefined") return "http://localhost:3000";
+  const { protocol, host } = window.location;
+  return `${protocol}//${host}`;
+})();
 
 const bufferToBase64 = (buffer) => {
   let binary = "";
