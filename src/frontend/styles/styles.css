@@ -177,6 +177,11 @@ body {
   pointer-events: auto;
   transform: translateY(0);
 }
+.user-menu.open .user-dropdown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
 
 .delivery-toast {
   position: absolute;

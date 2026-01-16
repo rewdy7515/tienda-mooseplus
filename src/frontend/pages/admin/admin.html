@@ -16,7 +16,7 @@
         <div class="admin-card reportes" id="dash-reportes">
           <p class="card-title">Reportes</p>
           <div class="card-count" id="count-reportes">--</div>
-          <p class="card-desc">Cortes pendientes</p>
+          <p class="card-desc"></p>
         </div>
         <div class="admin-card cortes" id="dash-cortes">
           <p class="card-title">Cortes</p>
@@ -159,8 +159,11 @@
         window.location.href = "registrar_proveedor.html";
       });
 
-      document.getElementById("btn-admin-cuentas")?.addEventListener("click", () => {
-        window.location.href = "admin/admin_cuentas.html";
+      document.querySelectorAll("#btn-admin-cuentas")?.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const base = window.location.pathname.replace(/[^/]+$/, "");
+          window.location.href = `${base}admin_cuentas.html`;
+        });
       });
 
       document.getElementById("btn-recordatorios")?.addEventListener("click", () => {

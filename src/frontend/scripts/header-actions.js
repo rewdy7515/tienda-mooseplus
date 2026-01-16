@@ -21,6 +21,17 @@ if (!window.__headerActionsInit) {
       const userId = getSessionUserId();
       const loginBtn = document.querySelector("#btn-login");
       const userMenu = document.querySelector(".user-menu");
+      const userDropdown = document.querySelector(".user-dropdown");
+      if (userMenu && userDropdown) {
+        userMenu.addEventListener("click", () => {
+          userMenu.classList.toggle("open");
+        });
+        document.addEventListener("click", (e) => {
+          if (!userMenu.contains(e.target)) {
+            userMenu.classList.remove("open");
+          }
+        });
+      }
       const showLogin = () => {
         if (loginBtn) {
           loginBtn.classList.remove("hidden");
