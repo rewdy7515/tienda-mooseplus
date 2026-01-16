@@ -205,7 +205,7 @@ async function init() {
       adminLink.style.display = isAdmin ? "block" : "none";
     }
     if (btnAssign && !btnAssign.dataset.bound) {
-      btnAssign.classList.remove("assign-hidden");
+      btnAssign.classList.toggle("hidden", !isSuper);
       btnAssign.addEventListener("click", () => {
         window.location.href = "cuenta_nueva.html";
       });

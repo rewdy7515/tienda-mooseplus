@@ -15,6 +15,25 @@ if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
   const pagesRoot = window.__headerPages || "";
 
+  const bindCartFallback = () => {
+    if (window.__cartFallbackBound) return;
+    const drawer = document.querySelector("#cart-drawer");
+    const backdrop = document.querySelector("#cart-drawer .cart-backdrop");
+    const closeBtn = document.querySelector("#cart-close");
+    const icon = document.querySelector(".carrito");
+    if (!drawer || !icon) return;
+    const close = () => drawer.classList.remove("open");
+    const open = () => drawer.classList.add("open");
+    icon.addEventListener("click", open);
+    icon.addEventListener("touchstart", open, { passive: true });
+    backdrop?.addEventListener("click", close);
+    closeBtn?.addEventListener("click", close);
+    drawer.addEventListener("click", (e) => {
+      if (e.target.classList.contains("cart-backdrop")) close();
+    });
+    window.__cartFallbackBound = true;
+  };
+
   // Sesión / usuario
   const initUser = async () => {
     try {
@@ -23,14 +42,28 @@ if (!window.__headerActionsInit) {
       const userMenu = document.querySelector(".user-menu");
       const userDropdown = document.querySelector(".user-dropdown");
       if (userMenu && userDropdown) {
-        userMenu.addEventListener("click", () => {
+        const toggleMenu = (e) => {
+          e?.stopPropagation();
           userMenu.classList.toggle("open");
-        });
+        };
+        userMenu.addEventListener("click", toggleMenu);
+        userMenu.addEventListener("touchstart", toggleMenu, { passive: true });
+        userDropdown.addEventListener("click", (e) => e.stopPropagation());
+        userDropdown.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
         document.addEventListener("click", (e) => {
           if (!userMenu.contains(e.target)) {
             userMenu.classList.remove("open");
           }
         });
+        document.addEventListener(
+          "touchstart",
+          (e) => {
+            if (!userMenu.contains(e.target)) {
+              userMenu.classList.remove("open");
+            }
+          },
+          { passive: true }
+        );
       }
       const showLogin = () => {
         if (loginBtn) {
@@ -46,6 +79,7 @@ if (!window.__headerActionsInit) {
       };
       if (!userId) {
         showLogin();
+        bindCartFallback();
         return;
       }
       if (loginBtn) {
@@ -56,6 +90,7 @@ if (!window.__headerActionsInit) {
         userMenu.classList.remove("hidden");
         userMenu.style.display = "flex";
       }
+      bindCartFallback();
       await ensureServerSession();
       const user = await loadCurrentUser();
       setSessionRoles(user || {});

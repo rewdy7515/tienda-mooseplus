@@ -76,9 +76,6 @@
   bottom: 20px;
   background: #fff;
 }
-#btn-assign-client {
-  display: block !important;
-}
 
 /* Contenedor de tabla en página de carrito */
 .cart-items.page-cart {
