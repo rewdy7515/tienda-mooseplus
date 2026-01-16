@@ -592,7 +592,7 @@
               n_perfil: perf?.n_perfil || null,
               pin: perf?.pin || "",
               cliente: userMap[v.id_usuario] || "-",
-                perfil: perfInfo?.n_perfil ? `M${perfInfo.n_perfil}` : "",
+              perfil: perf?.n_perfil ? `M${perf.n_perfil}` : "",
               hogarText: isPlatPerfilHogar && perf ? (perf.perfil_hogar ? "Activado" : "Desactivado") : "",
               fecha_corte: formatFechaCorte(fechaRaw) || "-",
               fecha_corte_raw: fechaRaw,
@@ -877,9 +877,9 @@
         if (!modalRow) return;
         modalRowMeses = 1;
         if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
-        if (modalRowCliente) modalRowCliente.textContent = data.cliente || "-";
-        if (modalRowPerfil) modalRowPerfil.textContent = data.perfil || "-";
-        if (modalRowFecha) modalRowFecha.textContent = formatFechaCorte(data.fecha) || "-";
+        if (modalRowCliente) modalRowCliente.textContent = data.cliente || "";
+        if (modalRowPerfil) modalRowPerfil.textContent = data.perfil || "";
+        if (modalRowFecha) modalRowFecha.textContent = data.fecha ? formatFechaCorte(data.fecha) : "";
         if (modalRowMonto) modalRowMonto.value = "";
         if (modalRowRef) modalRowRef.value = "";
         modalRow.dataset.idVenta = data.id_venta || "";
@@ -919,9 +919,9 @@
         const btn = e.target.closest(".btn-renovar-row");
         if (!btn) return;
         const data = {
-          cliente: btn.dataset.cliente || "-",
-          perfil: btn.dataset.perfil || "-",
-          fecha: btn.dataset.fecha || "-",
+          cliente: btn.dataset.cliente || "",
+          perfil: btn.dataset.perfil || "",
+          fecha: btn.dataset.fecha || "",
           id_venta: btn.dataset.venta || "",
           id_plataforma: btn.dataset.idPlataforma || "",
           id_cuenta: btn.dataset.idCuenta || "",
@@ -986,17 +986,20 @@
 
           alert("Renovación aplicada.");
           // Mostrar modal de confirmación con texto copiables
-          const texto = [
-            "*✅ Servicio renovado 🫡*",
-            "",
-            `*${modalRowContext.plataforma_nombre || "-"}* 🫎 \`ID Venta: #${modalRowContext.id_venta || ""}\``,
-            `*Correo:* ${modalRowContext.correo || "-"}`,
-            `*Contraseña:* ${modalRowContext.clave || "-"}`,
-            `*Perfil:* ${modalRowContext.n_perfil ? `M${modalRowContext.n_perfil}` : "-"}`,
-            `*PIN:* ${modalRowContext.pin || "-"}`,
-            "Próxima fecha de pago:",
-            `_${formatFechaCorte(nuevaFecha)}_`,
-          ].join("\n");
+          const lines = ["*✅ Servicio renovado 🫡*"];
+          if (modalRowContext.plataforma_nombre || modalRowContext.id_venta) {
+            lines.push(
+              `*${modalRowContext.plataforma_nombre || ""}*${modalRowContext.id_venta ? ` 🫎 \`ID Venta: #${modalRowContext.id_venta}\`` : ""}`.trim()
+            );
+          }
+          if (modalRowContext.correo) lines.push(`*Correo:* ${modalRowContext.correo}`);
+          if (modalRowContext.clave) lines.push(`*Contraseña:* ${modalRowContext.clave}`);
+          if (modalRowContext.n_perfil) lines.push(`*Perfil:* M${modalRowContext.n_perfil}`);
+          if (modalRowContext.pin) lines.push(`*PIN:* ${modalRowContext.pin}`);
+          if (nuevaFecha) {
+            lines.push("Próxima fecha de pago:", `_${formatFechaCorte(nuevaFecha)}_`);
+          }
+          const texto = lines.join("\n");
 
           if (modalRowConfirmText) modalRowConfirmText.textContent = texto;
           if (modalRowConfirm) modalRowConfirm.classList.remove("hidden");

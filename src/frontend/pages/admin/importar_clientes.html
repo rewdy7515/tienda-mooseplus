@@ -22,6 +22,13 @@
         <p class="status">Selecciona un archivo CSV para continuar.</p>
         <button id="btn-importar" class="btn-primary" type="button">Importar</button>
         <p id="import-status" class="status"></p>
+
+        <hr />
+        <label class="form-label" for="input-csv-fechas">Subir CSV de fechas (id_venta, fecha_corte)</label>
+        <input id="input-csv-fechas" class="form-input" type="file" accept=".csv,text/csv" />
+        <p class="status">Solo se usa id_venta y fecha_corte. id_venta puede traer # y ceros a la izquierda.</p>
+        <button id="btn-importar-fechas" class="btn-primary" type="button">Importar fechas</button>
+        <p id="import-status-fechas" class="status"></p>
       </div>
     </main>
 
@@ -35,6 +42,9 @@
       const inputCsv = document.querySelector("#input-csv");
       const btnImportar = document.querySelector("#btn-importar");
       const statusEl = document.querySelector("#import-status");
+      const inputCsvFechas = document.querySelector("#input-csv-fechas");
+      const btnImportarFechas = document.querySelector("#btn-importar-fechas");
+      const statusFechasEl = document.querySelector("#import-status-fechas");
 
       async function init() {
         try {
@@ -99,6 +109,41 @@
         });
       };
 
+      const parseCsvFechas = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
+        const splitLine = (line) =>
+          line
+            .split(new RegExp(`${sep}(?=(?:[^"]*"[^"]*")*[^"]*$)`))
+            .map((c) => c.replace(/^"(.*)"$/, "$1").trim());
+
+        const headers = splitLine(lines[0]).map((h) => h.replace(/^\uFEFF/, "").toLowerCase());
+        const idx = {
+          id_venta: headers.indexOf("id_venta"),
+          fecha_corte: headers.indexOf("fecha_corte"),
+        };
+        const required = ["id_venta", "fecha_corte"];
+        const hasAll = required.every((k) => idx[k] >= 0);
+        if (!hasAll) return [];
+
+        const rows = lines.slice(1).map((line) => {
+          const cols = splitLine(line);
+          return {
+            id_venta: cols[idx.id_venta],
+            fecha_corte: cols[idx.fecha_corte],
+          };
+        });
+
+        const valid = rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test((r.fecha_corte || "").trim()));
+        const invalid = rows.length - valid.length;
+        console.log("[importar fechas] filtrados:", { total: rows.length, valid: valid.length, invalid });
+        return valid;
+      };
+
       async function importar() {
         if (statusEl) statusEl.textContent = "";
         const file = inputCsv?.files?.[0];
@@ -131,6 +176,39 @@
       }
 
       btnImportar?.addEventListener("click", importar);
+
+      btnImportarFechas?.addEventListener("click", async () => {
+        if (statusFechasEl) statusFechasEl.textContent = "";
+        const file = inputCsvFechas?.files?.[0];
+        if (!file) {
+          statusFechasEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        console.log("[importar fechas] raw text first 200 chars:", text.slice(0, 200));
+        const parsed = parseCsvFechas(text);
+        console.log("[importar fechas] parsed rows:", parsed.length, "sample:", parsed.slice(0, 3));
+        if (!parsed.length) {
+          statusFechasEl.textContent = "No se encontraron filas con id_venta y fecha_corte.";
+          return;
+        }
+        try {
+          const res = await fetch("http://localhost:3000/api/admin/import-fechas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: parsed }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || body?.error) {
+            statusFechasEl.textContent = body?.error || "Error al importar fechas.";
+            return;
+          }
+          statusFechasEl.textContent = `Fechas actualizadas: ${body.actualizadas || 0}`;
+        } catch (err) {
+          console.error("importar fechas error", err);
+          statusFechasEl.textContent = "No se pudo importar las fechas.";
+        }
+      });
     </script>
   </body>
 </html>

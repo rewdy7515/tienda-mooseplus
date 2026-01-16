@@ -1290,8 +1290,7 @@ input[type="number"].input-inline {
 }
 
 .auth-logo {
-  width: 64px;
-  height: 64px;
+  width: 80px;
   object-fit: contain;
   margin-bottom: 10px;
   filter: brightness(0);
@@ -1313,6 +1312,14 @@ input[type="number"].input-inline {
   flex-direction: column;
   gap: 7px;
   text-align: left;
+  align-items: flex-start;
+}
+
+.auth-form .form-input,
+.auth-form .input-with-toggle {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .auth-submit {
@@ -1373,20 +1380,20 @@ input[type="number"].input-inline {
   top: 50%;
   transform: translateY(-50%);
   background: transparent;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 6px;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #333;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: color 0.15s ease;
 }
 
 .toggle-password:hover {
-  background: #f4f4f4;
-  border-color: #ccc;
+  background: transparent;
+  color: #111;
 }
 
 .toggle-password svg {

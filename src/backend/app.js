@@ -539,7 +539,9 @@ app.post("/api/admin/import-clientes", async (req, res) => {
           r.n_perfil === "" || r.n_perfil === null || r.n_perfil === undefined
             ? null
             : Number(r.n_perfil);
-        const fecha_corte = r.fecha_corte ? new Date(r.fecha_corte) : null;
+        const fecha_corte_str = (r.fecha_corte || "").trim();
+        const fecha_corte =
+          /^\d{4}-\d{2}-\d{2}$/.test(fecha_corte_str) ? fecha_corte_str : null;
         const suspendido = boolVal(r.suspendido);
         const meses_contratados =
           r.meses_contratados === "" || r.meses_contratados === null || r.meses_contratados === undefined
@@ -554,10 +556,7 @@ app.post("/api/admin/import-clientes", async (req, res) => {
           correo,
           id_venta: Number.isNaN(id_venta) ? null : id_venta,
           n_perfil: Number.isInteger(n_perfil) ? n_perfil : null,
-          fecha_corte:
-            fecha_corte && !Number.isNaN(fecha_corte.valueOf())
-              ? fecha_corte.toISOString().slice(0, 10)
-              : null,
+          fecha_corte,
           suspendido,
           meses_contratados: Number.isFinite(meses_contratados) ? meses_contratados : null,
           corte_reemplazo,
@@ -566,6 +565,8 @@ app.post("/api/admin/import-clientes", async (req, res) => {
         };
       })
       .filter((r) => r.correo && r.n_perfil !== null);
+
+    console.log("[import-clientes] normalized sample", normalized.slice(0, 5));
 
     if (!normalized.length) {
       return res.status(400).json({ error: "No hay filas válidas para importar" });
@@ -651,7 +652,7 @@ app.post("/api/admin/import-clientes", async (req, res) => {
     });
 
     const perfilesToUpdate = new Set();
-    const ventasToInsert = [];
+    const ventasToUpsert = [];
 
     rowsWithCuenta.forEach((r) => {
       if (!r.id_cuenta) return;
@@ -659,67 +660,37 @@ app.post("/api/admin/import-clientes", async (req, res) => {
       const id_perfil = perfilMap[r.id_cuenta]?.[r.n_perfil] || null;
       if (id_perfil) perfilesToUpdate.add(id_perfil);
 
-      ventasToInsert.push({
-        id_venta: r.id_venta || undefined,
-        id_usuario,
-        id_cuenta: r.id_cuenta,
-        id_perfil,
-        fecha_corte: r.fecha_corte,
-        suspendido: r.suspendido,
-        meses_contratados: r.meses_contratados,
-        corte_reemplazo: r.corte_reemplazo,
-      });
+      // Solo procesa filas con id_venta; upsert sin tocar fecha_pago
+      if (r.id_venta) {
+        ventasToUpsert.push({
+          id_venta: r.id_venta,
+          id_usuario,
+          id_cuenta: r.id_cuenta,
+          id_perfil,
+          fecha_corte: r.fecha_corte || null,
+          suspendido: r.suspendido,
+          meses_contratados: r.meses_contratados,
+          corte_reemplazo: r.corte_reemplazo,
+          fecha_pago: null, // no llenar fecha_pago desde importación
+        });
+      }
     });
 
-    // Manejo de duplicados en id_venta: actualiza y guarda versión previa
-    if (ventasToInsert.length) {
-      const ventasConIdMap = new Map();
-      const ventasSinId = [];
-      ventasToInsert.forEach((v) => {
-        if (v.id_venta) {
-          ventasConIdMap.set(v.id_venta, v);
-        } else {
-          ventasSinId.push(v);
-        }
-      });
-
-      const idsConValor = Array.from(ventasConIdMap.keys());
-      let existing = [];
-      if (idsConValor.length) {
-        const { data: existingRows, error: existErr } = await supabaseAdmin
-          .from("ventas")
-          .select("id_venta, id_cuenta, id_perfil")
-          .in("id_venta", idsConValor);
-        if (existErr) throw existErr;
-        existing = existingRows || [];
-      }
-
-      if (existing.length) {
-        const reemplazos = existing.map((row) => ({
-          id_item: row.id_venta,
-          id_usuario: idUsuario,
-          correo_anterior: row.id_cuenta ? String(row.id_cuenta) : null,
-          perfil_anterior: row.id_perfil ? String(row.id_perfil) : null,
-          correo_nuevo: null,
-          perfil_nuevo: null,
-          motivo: "Import clients overwrite",
-        }));
-        const { error: repErr } = await supabaseAdmin.from("historial_reemplazos").insert(reemplazos);
-        if (repErr) throw repErr;
-      }
-
-      const ventasConId = Array.from(ventasConIdMap.values());
-      if (ventasConId.length) {
-        const { error: ventaUpdErr } = await supabaseAdmin
-          .from("ventas")
-          .upsert(ventasConId, { onConflict: "id_venta" });
-        if (ventaUpdErr) throw ventaUpdErr;
-      }
-
-      if (ventasSinId.length) {
-        const { error: ventaInsErr } = await supabaseAdmin.from("ventas").insert(ventasSinId);
-        if (ventaInsErr) throw ventaInsErr;
-      }
+    // Upsert ventas con id_venta (sin tocar fecha_pago)
+    if (ventasToUpsert.length) {
+      console.log(
+        "[import-clientes] ventasToUpsert sample",
+        ventasToUpsert.slice(0, 5).map((v) => ({
+          id_venta: v.id_venta,
+          fecha_corte: v.fecha_corte,
+          id_cuenta: v.id_cuenta,
+          id_perfil: v.id_perfil,
+        }))
+      );
+      const { error: ventaErr } = await supabaseAdmin
+        .from("ventas")
+        .upsert(ventasToUpsert, { onConflict: "id_venta" });
+      if (ventaErr) throw ventaErr;
     }
 
     if (perfilesToUpdate.size) {
@@ -732,12 +703,53 @@ app.post("/api/admin/import-clientes", async (req, res) => {
 
     res.json({
       ok: true,
-      ventas: ventasToInsert.length,
+      ventas: ventasToUpsert.length,
       perfiles_ocupados: perfilesToUpdate.size,
       usuarios: Object.keys(usuarioByName).length,
     });
   } catch (err) {
     console.error("[admin:import-clientes] error", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Importar fechas: actualizar fecha_corte de ventas a partir de CSV (id_venta, fecha_corte)
+app.post("/api/admin/import-fechas", async (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: "rows es requerido" });
+  }
+  try {
+    const normalized = rows
+      .map((r) => {
+        const rawVenta = (r.id_venta || "").toString().replace(/#/g, "").trim();
+        const id_venta = rawVenta ? Number(rawVenta) : null;
+        const fecha_corte_str = (r.fecha_corte || "").trim();
+        const fecha_corte =
+          /^\d{4}-\d{2}-\d{2}$/.test(fecha_corte_str) ? fecha_corte_str : null;
+        return {
+          id_venta: Number.isFinite(id_venta) && id_venta > 0 ? id_venta : null,
+          fecha_corte,
+        };
+      })
+      .filter((r) => r.id_venta && r.fecha_corte);
+
+    console.log("[import-fechas] normalized sample", normalized.slice(0, 5));
+
+    if (!normalized.length) {
+      return res.status(400).json({ error: "No hay filas válidas" });
+    }
+
+    const updates = normalized.map((r) =>
+      supabaseAdmin.from("ventas").update({ fecha_corte: r.fecha_corte }).eq("id_venta", r.id_venta)
+    );
+    const results = await Promise.all(updates);
+    const errUpd = results.find((r) => r?.error);
+    if (errUpd?.error) throw errUpd.error;
+
+    res.json({ ok: true, actualizadas: normalized.length });
+  } catch (err) {
+    console.error("[admin:import-fechas] error", err);
     res.status(500).json({ error: err.message });
   }
 });
