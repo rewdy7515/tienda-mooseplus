@@ -1,4 +1,4 @@
-import { sendCartDelta } from "./api.js";
+import { sendCartDelta, fetchCart, loadCatalog, ensureServerSession } from "./api.js";
 
 let cartItems = [];
 let drawer;
@@ -10,6 +10,57 @@ let actionsEl;
 let btnCheckout;
 let btnViewCart;
 let btnAssign;
+let catalogCache = null;
+
+const mapCartItems = (items = [], catalog = {}) => {
+  const precios = catalog.precios || [];
+  const plataformas = catalog.plataformas || [];
+  const priceById = precios.reduce((acc, p) => {
+    acc[p.id_precio] = p;
+    return acc;
+  }, {});
+  const platformById = plataformas.reduce((acc, p) => {
+    acc[p.id_plataforma] = p;
+    return acc;
+  }, {});
+  return (items || []).map((item) => {
+    const price = priceById[item.id_precio] || {};
+    const platform = platformById[price.id_plataforma] || {};
+    const flags = {
+      por_pantalla: platform.por_pantalla,
+      por_acceso: platform.por_acceso,
+      tarjeta_de_regalo: platform.tarjeta_de_regalo,
+    };
+    const detalle = (() => {
+      if (flags.tarjeta_de_regalo) {
+        const region = price.region || "-";
+        const monto = `${price.valor_tarjeta_de_regalo || ""} ${price.moneda || ""} $${price.precio_usd_detal || ""}`;
+        return `Región: ${region} · Monto: ${monto}`;
+      }
+      const qty = item.cantidad || price.cantidad || 1;
+      const meses = item.meses || price.duracion || 1;
+      const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
+      const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
+      const mesesTxt = baseUnit === "mes" ? ` · ${meses} mes${meses === 1 ? "" : "es"}` : "";
+      return `${qty} ${baseUnit}${plural}${mesesTxt} $${price.precio_usd_detal || ""}`;
+    })();
+    return {
+      id_precio: item.id_precio,
+      id_item: item.id_item,
+      id_plataforma: price.id_plataforma,
+      nombre: platform.nombre || `Precio ${item.id_precio}`,
+      imagen: platform.imagen,
+      plan: price.plan,
+      precio: price.precio_usd_detal,
+      cantidad: item.cantidad,
+      meses: item.meses,
+      detalle,
+      flags,
+      renovacion: item.renovacion,
+      id_venta: item.id_venta,
+    };
+  });
+};
 
 const toggleCart = (open) => {
   if (!drawer) return;
@@ -47,11 +98,11 @@ const renderCart = () => {
               : ""
           }
         </div>
-        <div class="cart-controls">
-          <div class="cart-qty-inline" data-index="${idx}">
-            <button class="cart-minus" aria-label="Disminuir">-</button>
-            <span>${item.cantidad}</span>
-            <button class="cart-plus" aria-label="Aumentar">+</button>
+      <div class="cart-controls">
+        <div class="cart-qty-inline" data-index="${idx}">
+          <button class="cart-minus" aria-label="Disminuir">-</button>
+          <span>${item.cantidad}</span>
+          <button class="cart-plus" aria-label="Aumentar">+</button>
           </div>
           <button class="cart-remove" data-index="${idx}" data-id-item="${item.id_item || ""}" aria-label="Eliminar">×</button>
         </div>
@@ -83,7 +134,23 @@ export function initCart({
     btnAssign.classList.remove("hidden");
   }
 
-  iconBtn?.addEventListener("click", () => toggleCart(true));
+  const refreshFromServer = async () => {
+    try {
+      await ensureServerSession();
+      if (!catalogCache) catalogCache = await loadCatalog();
+      const cartResp = await fetchCart();
+      const items = cartResp?.items || [];
+      cartItems = mapCartItems(items, catalogCache);
+      renderCart();
+    } catch (err) {
+      console.error("refresh cart error", err);
+    }
+  };
+
+  iconBtn?.addEventListener("click", async () => {
+    await refreshFromServer();
+    toggleCart(true);
+  });
   closeBtn?.addEventListener("click", () => toggleCart(false));
   backdrop?.addEventListener("click", () => toggleCart(false));
 
