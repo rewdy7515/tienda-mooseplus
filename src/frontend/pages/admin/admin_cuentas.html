@@ -772,6 +772,7 @@
           .map((cta) => {
             const ventasCta = (ventas || []).filter((v) => v.id_cuenta === cta.id_cuenta);
             const perfilesCuenta = (opts.perfilesAll || []).filter((p) => p.id_cuenta === cta.id_cuenta);
+            const ventasSinPerfil = (opts.ventasSinPerfil || []).filter((v) => v.id_cuenta === cta.id_cuenta);
             const maxPerfilCuenta = perfilesCuenta.reduce((max, p) => {
               const n = Number(p.n_perfil) || 0;
               return Math.max(max, n);
@@ -790,24 +791,34 @@
                 `
                 )
                 .join("") || "";
-            const rowsArr =
-              perfilesCuenta.length
-                ? perfilesCuenta.map((p) => {
-                    const venta = ventasCta.find((v) => v.id_perfil === p.id_perfil);
-                    const userInfo = venta ? usersMap[venta.id_usuario] || {} : {};
-                    return `
-                      <tr>
-                        <td>${venta ? `#${venta.id_venta ?? ""}` : ""}</td>
-                        <td>${userInfo.nombre || ""}</td>
-                        <td>${userInfo.correo || ""}</td>
-                        <td>${p.n_perfil ? `M${p.n_perfil}` : ""}</td>
-                        <td>${p.pin || ""}</td>
-                        <td>${venta?.fecha_corte || ""}</td>
-                      </tr>
-                    `;
-                  })
-                : [];
-            const rows = rowsArr.join("") || `<tr><td colspan="6">Sin ventas asignadas.</td></tr>`;
+            const rowsArr = [];
+            perfilesCuenta.forEach((p) => {
+              const venta = ventasCta.find((v) => v.id_perfil === p.id_perfil);
+              const userInfo = venta ? usersMap[venta.id_usuario] || {} : {};
+              rowsArr.push(`
+                <tr>
+                  <td>${venta ? `#${venta.id_venta ?? ""}` : ""}</td>
+                  <td>${userInfo.nombre || ""}</td>
+                  <td>${userInfo.correo || ""}</td>
+                  <td>${p.n_perfil ? `M${p.n_perfil}` : ""}</td>
+                  <td>${p.pin || ""}</td>
+                  <td>${venta?.fecha_corte || ""}</td>
+                </tr>
+              `);
+            });
+            ventasSinPerfil.forEach((v) => {
+              rowsArr.push(`
+                <tr>
+                  <td>${v.id_venta ? `#${v.id_venta}` : ""}</td>
+                  <td>${v.ocupadoPor || ""}</td>
+                  <td>${cta.correo || ""}</td>
+                  <td>${cta.clave || ""}</td>
+                  <td></td>
+                  <td>${v.fecha_corte || ""}</td>
+                </tr>
+              `);
+            });
+            const rows = rowsArr.join("") || `<tr><td colspan="7">Sin ventas asignadas.</td></tr>`;
             let addRow = "";
             if (opts.masPerfiles) {
               const maxPerfiles = Number(opts.numMax) || Math.max(maxPerfilCuenta, 1);
@@ -834,6 +845,7 @@
                         <th>Perfil</th>
                         <th>PIN</th>
                         <th>Fecha corte</th>
+                        <th>Acción</th>
                       </tr>
                     </thead>
                     <tbody>${rows}${addRow}</tbody>
@@ -866,6 +878,8 @@
           ${html}
         `;
         plataformaResultadosEl.classList.remove("hidden");
+        plataformaResultadosEl.style.display = "block";
+        plataformaResultadosEl.style.visibility = "visible";
       };
 
       const loadPlataformaCuentas = async (platId) => {
@@ -903,6 +917,7 @@
           let usersMap = {};
           let perfilesMap = {};
           let perfilesAll = [];
+          let ventasSinPerfil = [];
           if (cuentaIds.length) {
           const { data: ventasData, error: vErr } = await supabase
             .from("ventas")
@@ -937,6 +952,17 @@
               acc[p.id_perfil] = p;
               return acc;
             }, {});
+            ventasSinPerfil = ventas
+              .filter((v) => !v.id_perfil)
+              .map((v) => ({
+                id_venta: v.id_venta,
+                fecha_corte: v.fecha_corte || "",
+                ocupadoPor: v.id_usuario
+                  ? usersMap[v.id_usuario]?.nombre || usersMap[v.id_usuario]?.correo || `Usuario ${v.id_usuario}`
+                  : "Vacío",
+                id_usuario: v.id_usuario || null,
+                id_cuenta: v.id_cuenta || null,
+              }));
           }
           const subActivas =
             platIdNum === 1
@@ -953,6 +979,7 @@
               masPerfiles: isTrue(platInfo?.mas_perfiles),
               numMax: platInfo?.num_max_dispositivos || null,
               perfilesAll,
+              ventasSinPerfil,
             }
           );
         } catch (err) {
@@ -1321,7 +1348,6 @@
           return;
         }
 
-        const rows = info.perfiles || [];
         const colMode = info.colMode || "ocupado";
         const showHogar = info.showHogar;
 
@@ -1348,6 +1374,24 @@
             <th>Fecha de corte</th>
             <th>Acción</th>
           </tr>`;
+        }
+
+        let rows = [...(info.perfiles || [])];
+        // Si no hay perfiles y hay ventas de cuenta completa, crear filas sintéticas
+        if (!rows.length && Array.isArray(info.ventasCuenta) && info.ventasCuenta.length) {
+          info.ventasCuenta.forEach((v) => {
+            rows.push({
+              perfil: "",
+              pin: "",
+              hogar: false,
+              id_perfil: null,
+              n_raw: null,
+              reemplazado: false,
+              ocupadoPor: info.usuariosCuenta?.[v.id_usuario] || info.correo || "",
+              id_venta: v.id_venta,
+              fecha_corte: v.fecha_corte || "",
+            });
+          });
         }
 
         const tbodyRows = rows
@@ -1594,6 +1638,12 @@
         }
 
         const recargarLabel = info.id_plataforma === 1 ? "Recargar cuenta" : "Renovar cuenta";
+        const tipoServicio =
+          info.venta_perfil === true
+            ? "Perfiles"
+            : info.venta_miembro === true
+            ? "Miembro"
+            : "Cuenta completa";
 
         detalleEl.innerHTML = `
           <h3 class="cuenta-title">Detalle de cuenta</h3>
@@ -1626,12 +1676,13 @@
           </div>
           <div class="cuenta-toggle">
             <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}" data-plat="${info.id_plataforma || ""}">${recargarLabel}</button>
+            <div class="cuenta-tipo-label">${tipoServicio}</div>
           </div>
           ${plat9Table}
           <h4>Perfiles</h4>
           ${table}
           ${
-            info.showMiembros
+            info.showMiembros && info.venta_miembro !== true
               ? `
           <h4>Miembros extras</h4>
           <div class="cuenta-table-wrap">
@@ -1698,7 +1749,12 @@
               </tbody>
             </table>
           </div>
-          `
+        `
+            : ""
+          }
+          ${
+            info.venta_miembro
+              ? `<p class="cuenta-miembro-label">Miembro de: ${info.correo_madre || ""}</p>`
               : ""
           }
         `;
@@ -1761,6 +1817,8 @@
           let perfiles = [];
           let ventasMap = {};
           let usersMap = {};
+          let ventasCuenta = [];
+          let usuariosCuenta = {};
 
           const colMode =
             cuenta.venta_perfil === true && cuenta.venta_miembro === false
@@ -1780,19 +1838,19 @@
 
           const perfilIds = perfiles.map((p) => p.id_perfil).filter(Boolean);
           if (perfilIds.length) {
-          const { data: ventas, error: ventErr } = await supabase
-            .from("ventas")
-            .select("id_perfil, id_usuario, id_venta, fecha_corte")
-            .in("id_perfil", perfilIds);
-          if (ventErr) throw ventErr;
-          ventasMap = (ventas || []).reduce((acc, v) => {
-            acc[v.id_perfil] = {
-              id_usuario: v.id_usuario,
-              id_venta: v.id_venta,
-              fecha_corte: v.fecha_corte,
-            };
-            return acc;
-          }, {});
+            const { data: ventas, error: ventErr } = await supabase
+              .from("ventas")
+              .select("id_perfil, id_usuario, id_venta, fecha_corte")
+              .in("id_perfil", perfilIds);
+            if (ventErr) throw ventErr;
+            ventasMap = (ventas || []).reduce((acc, v) => {
+              acc[v.id_perfil] = {
+                id_usuario: v.id_usuario,
+                id_venta: v.id_venta,
+                fecha_corte: v.fecha_corte,
+              };
+              return acc;
+            }, {});
 
             const userIds = Array.from(new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)));
             if (userIds.length) {
@@ -1803,6 +1861,29 @@
               if (userErr) throw userErr;
               usersMap = (users || []).reduce((acc, u) => {
                 acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+                return acc;
+              }, {});
+            }
+          }
+
+          // Ventas de cuenta completa (sin perfiles)
+          if (colMode === "ocupado" || colMode === "miembro") {
+            const { data: ventasCta, error: ventasCtaErr } = await supabase
+              .from("ventas")
+              .select("id_venta, id_usuario, fecha_corte")
+              .eq("id_cuenta", idCuenta);
+            if (ventasCtaErr) throw ventasCtaErr;
+            ventasCuenta = ventasCta || [];
+            const userIdsCta = Array.from(new Set((ventasCta || []).map((v) => v.id_usuario).filter(Boolean)));
+            if (userIdsCta.length) {
+              const { data: usuariosCta, error: usrErr } = await supabase
+                .from("usuarios")
+                .select("id_usuario, nombre, apellido, correo")
+                .in("id_usuario", userIdsCta);
+              if (usrErr) throw usrErr;
+              usuariosCuenta = (usuariosCta || []).reduce((acc, u) => {
+                acc[u.id_usuario] =
+                  [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || u.correo || `Usuario ${u.id_usuario}`;
                 return acc;
               }, {});
             }
@@ -1937,11 +2018,14 @@
             isPlat9,
             venta_perfil: cuenta.venta_perfil,
             venta_miembro: cuenta.venta_miembro,
-            por_acceso: plat?.por_acceso || false,
-            usa_pines: plat?.usa_pines || false,
-            mas_perfiles: isTrue(plat?.mas_perfiles),
-            num_max_dispositivos: plat?.num_max_dispositivos || null,
-          };
+        por_acceso: plat?.por_acceso || false,
+        usa_pines: plat?.usa_pines || false,
+        mas_perfiles: isTrue(plat?.mas_perfiles),
+        num_max_dispositivos: plat?.num_max_dispositivos || null,
+        ventasCuenta,
+        usuariosCuenta,
+        correo_madre: cuenta.id_cuenta_miembro ? cuentasActivas.find((c) => c.id_cuenta === cuenta.id_cuenta_miembro)?.correo || "" : "",
+      };
 
           renderDetalle(currentCuentaDetalle);
         } catch (err) {

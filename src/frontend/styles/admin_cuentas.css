@@ -72,6 +72,21 @@
 
 .cuenta-toggle {
   margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cuenta-tipo-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.cuenta-miembro-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 8px;
 }
 
 .toggle-label {

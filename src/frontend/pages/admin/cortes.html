@@ -142,6 +142,7 @@
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, supabase } from "../../scripts/api.js";
+      import { buildServiceCopyText } from "../../scripts/copy-format.js";
 
       requireSession();
       attachLogoHome();
@@ -302,7 +303,6 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin)"
               "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
             )
             .lte("fecha_corte", today)
