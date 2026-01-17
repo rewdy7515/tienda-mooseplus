@@ -5,6 +5,7 @@ import {
   submitCheckout,
   uploadComprobantes,
   fetchP2PRate,
+  loadCurrentUser,
 } from "./api.js";
 import { requireSession, attachLogoHome } from "./session.js";
 
@@ -31,6 +32,8 @@ let plataformas = [];
 let descuentos = [];
 let cartId = null;
 let tasaBs = null;
+let precioTierLabel = "";
+let userAcceso = null;
 const TASA_MARKUP = 1.015; // +1.5%
 
 const renderMetodos = () => {
@@ -247,11 +250,11 @@ dropzone?.addEventListener("drop", (e) => {
 
 const renderTotal = () => {
   if (!totalEl) return;
-  const lineUsd = `Total: $${totalUsd.toFixed(2)}`;
   const metodo = seleccionado !== null ? metodos[seleccionado] : null;
   const metodoId = metodo?.id_metodo_de_pago ?? metodo?.id;
   const isBs = metodo && Number(metodoId) === 1;
   const tasaVal = Number.isFinite(tasaBs) ? tasaBs : null;
+  const lineUsd = `Total: $${totalUsd.toFixed(2)} ${precioTierLabel ? `(${precioTierLabel})` : ""}`;
   const lineBs =
     isBs && tasaVal ? `<div>Bs. ${(totalUsd * tasaVal).toFixed(2)}</div>` : "";
   totalEl.innerHTML = `<div>${lineUsd}</div>${lineBs}`;
@@ -273,13 +276,30 @@ const calcularTotalRpc = async (id_carrito) => {
   }
 };
 
+const calcularTotalTier = (items = [], preciosMap = {}, acceso = null) => {
+  if (!items.length) return { total: 0, label: "" };
+  const useMayor = acceso === false;
+  const label = useMayor ? "Precio mayor" : "Precio detal";
+  const total = items.reduce((sum, it) => {
+    const price = preciosMap[it.id_precio] || {};
+    const unit = useMayor
+      ? Number(price.precio_usd_mayor) || Number(price.precio_usd_detal) || 0
+      : Number(price.precio_usd_detal) || 0;
+    const qty = Number(it.cantidad) || 0;
+    const meses = Number(it.meses) || 1;
+    return sum + unit * qty * meses;
+  }, 0);
+  return { total, label };
+};
+
 async function init() {
   try {
-    const [cartData, catalog, metodosResp, tasaResp] = await Promise.all([
+    const [cartData, catalog, metodosResp, tasaResp, user] = await Promise.all([
       fetchCart(),
       loadCatalog(),
       supabase.from("metodos_de_pago").select("id_metodo_de_pago, nombre, correo, id, cedula, telefono"),
       fetchP2PRate(),
+      loadCurrentUser(),
     ]);
     if (metodosResp.error) throw metodosResp.error;
     metodos = metodosResp.data || [];
@@ -289,8 +309,15 @@ async function init() {
     precios = catalog.precios;
     plataformas = catalog.plataformas;
     descuentos = catalog.descuentos || [];
+    userAcceso = user?.acceso_cliente;
+    const preciosMap = (precios || []).reduce((acc, p) => {
+      acc[p.id_precio] = p;
+      return acc;
+    }, {});
+    const tierTotal = calcularTotalTier(cartItems, preciosMap, userAcceso);
     const rpcTotal = await calcularTotalRpc(cartId);
-    totalUsd = rpcTotal ?? 0;
+    totalUsd = tierTotal.total || rpcTotal || 0;
+    precioTierLabel = tierTotal.label;
 
     // Selecciona por defecto el método con id 1 si existe
     // Prefill de pruebas: seleccionar índice 5 si existe, si no cae al método id 1
@@ -331,8 +358,14 @@ btnSendPayment?.addEventListener("click", async () => {
     const cartData = await fetchCart();
     cartItems = cartData.items || [];
     cartId = cartData.id_carrito || null;
+    const preciosMap = (precios || []).reduce((acc, p) => {
+      acc[p.id_precio] = p;
+      return acc;
+    }, {});
+    const tierTotal = calcularTotalTier(cartItems, preciosMap, userAcceso);
     const rpcTotal = await calcularTotalRpc(cartId);
-    totalUsd = rpcTotal ?? 0;
+    totalUsd = tierTotal.total || rpcTotal || 0;
+    precioTierLabel = tierTotal.label;
     renderTotal();
   } catch (err) {
     console.error("recalc checkout error", err);

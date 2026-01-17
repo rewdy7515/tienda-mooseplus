@@ -28,7 +28,7 @@
 
     <script type="module">
       import { requireSession, attachLogout, getSessionRoles, setSessionRoles, attachLogoHome } from "../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, fetchInventario, ensureServerSession, sendCartDelta } from "../scripts/api.js";
+      import { clearServerSession, loadCurrentUser, fetchInventario, ensureServerSession, sendCartDelta, supabase } from "../scripts/api.js";
 
       requireSession();
 
@@ -186,7 +186,7 @@
                       <td>${formatDate(v.fecha_corte)}</td>
                       <td>
                         <div class="actions-inline">
-                          <button class="btn-small btn-renovar" data-venta="${v.id_venta ?? ""}" data-precio="${v.id_precio ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
+                          <button class="btn-small btn-renovar" data-venta="${v.id_venta ?? ""}" data-precio="${v.id_precio ?? ""}" data-plan="${planName || ""}" data-plataforma="${v.id_plataforma ?? ""}" data-vperf="${v.venta_perfil ?? ""}" data-vmiem="${v.venta_miembro ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
                           <button class="btn-small btn-red-report" data-plataforma="${v.id_plataforma ?? ""}" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${v.id_perfil ?? ""}" style="background-color:#ef4444;color:white;">❕</button>
                           <button class="btn-small" style="background-color:#3b82f6;color:white;">📑</button>
                         </div>
@@ -375,6 +375,9 @@
       const btnRenovarAgregar = document.querySelector("#btn-renovar-agregar");
       let selectedRenovarVenta = null;
       let selectedRenovarPrecio = null;
+      let selectedRenovarPlan = "";
+      let selectedRenovarPlat = "";
+      let selectedVentaFlags = { venta_perfil: null, venta_miembro: null };
 
       const closeRenovarModal = () => {
         modalRenovar?.classList.add("hidden");
@@ -387,6 +390,12 @@
         if (!btn) return;
         selectedRenovarVenta = btn.dataset.venta || null;
         selectedRenovarPrecio = btn.dataset.precio || null;
+        selectedRenovarPlan = btn.dataset.plan || "";
+        selectedRenovarPlat = btn.dataset.plataforma || "";
+        selectedVentaFlags = {
+          venta_perfil: btn.dataset.vperf,
+          venta_miembro: btn.dataset.vmiem,
+        };
         modalRenovar?.classList.remove("hidden");
       });
 
@@ -403,11 +412,39 @@
           alert("Selecciona al menos 1 mes.");
           return;
         }
-        if (!selectedRenovarPrecio) {
-          alert("No se pudo identificar el precio de la venta.");
-          return;
-        }
-        sendCartDelta(selectedRenovarPrecio, 1, meses, { renovacion: true, id_venta: selectedRenovarVenta })
+        const agregar = async () => {
+          let precioId = selectedRenovarPrecio;
+          if (!precioId) {
+            try {
+              const platIdNum = Number(selectedRenovarPlat) || null;
+              const ventaPerfilFlag = selectedVentaFlags.venta_perfil === "true" || selectedVentaFlags.venta_perfil === true;
+              const ventaMiembroFlag = selectedVentaFlags.venta_miembro === "true" || selectedVentaFlags.venta_miembro === true;
+              let query = supabase
+                .from("precios")
+                .select("id_precio, completa, sub_cuenta")
+                .eq("id_plataforma", platIdNum)
+                .limit(1);
+              if (ventaPerfilFlag) {
+                query = query.eq("completa", false).eq("sub_cuenta", false);
+              } else if (!ventaPerfilFlag && !ventaMiembroFlag) {
+                query = query.eq("completa", true).eq("sub_cuenta", false);
+              } else if (ventaMiembroFlag) {
+                query = query.eq("sub_cuenta", true);
+              }
+              const { data, error } = await query;
+              if (error) throw error;
+              precioId = data?.[0]?.id_precio || null;
+            } catch (err) {
+              console.error("buscar precio para renovar error", err);
+            }
+          }
+          if (!precioId) {
+            alert("No se pudo identificar el precio de la venta.");
+            return;
+          }
+          return sendCartDelta(precioId, 1, meses, { renovacion: true, id_venta: selectedRenovarVenta });
+        };
+        agregar()
           .then(() => {
             alert("Agregado al carrito.");
             // Simula animación de carrito (requiere .carrito en DOM)

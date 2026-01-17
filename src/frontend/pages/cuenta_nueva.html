@@ -158,6 +158,7 @@
           <input type="text" id="cn-cliente" placeholder="Nombre del cliente" autocomplete="off" />
           <div id="cn-sugs" class="sugs-list hidden"></div>
           <p id="cn-cliente-id" class="status" style="margin:4px 0 0; font-size:12px; color:#444;">ID usuario: -</p>
+          <p id="cn-cliente-acceso" class="status" style="margin:0; font-size:12px; color:#444;">Acceso: -</p>
         </div>
         <div class="field">
           <label for="cn-ref">Nro de referencia</label>
@@ -201,6 +202,7 @@
       const clienteInput = document.querySelector("#cn-cliente");
       const clienteSugs = document.querySelector("#cn-sugs");
       const clienteIdLabel = document.querySelector("#cn-cliente-id");
+      const clienteAccesoLabel = document.querySelector("#cn-cliente-acceso");
       const modal = document.querySelector("#cn-modal");
       const modalSi = document.querySelector("#cn-modal-si");
       const modalNo = document.querySelector("#cn-modal-no");
@@ -235,7 +237,7 @@
         clienteSugs.innerHTML = items
           .map(
             (u) => `
-              <button type="button" data-id="${u.id_usuario || ""}" data-nombre="${(u.nombre || "").trim()}" data-apellido="${(u.apellido || "").trim()}">
+              <button type="button" data-id="${u.id_usuario || ""}" data-nombre="${(u.nombre || "").trim()}" data-apellido="${(u.apellido || "").trim()}" data-acceso="${u.acceso_cliente}">
                 ${(u.nombre || "")} ${(u.apellido || "")}
               </button>
             `
@@ -256,7 +258,7 @@
         const term = termRaw.toLowerCase();
         const current = ++sugsCounter;
         try {
-          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido").limit(10);
+          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido, acceso_cliente").limit(10);
           if (nombreTerm && apellidoTerm) {
             query = query.ilike("nombre", `%${nombreTerm}%`).ilike("apellido", `%${apellidoTerm}%`);
           } else {
@@ -291,12 +293,18 @@
       clienteSugs?.addEventListener("click", (e) => {
         const btn = e.target.closest("button");
         if (!btn || !clienteInput) return;
-        const nombre = btn.dataset.nombre || "";
-        const apellido = btn.dataset.apellido || "";
-        clienteInput.value = toTitleCase(`${nombre} ${apellido}`.trim());
-        suppressBlur = false;
-        clearSugs();
-      });
+          const nombre = btn.dataset.nombre || "";
+          const apellido = btn.dataset.apellido || "";
+          const acceso = btn.dataset.acceso;
+          clienteInput.value = toTitleCase(`${nombre} ${apellido}`.trim());
+          suppressBlur = false;
+          clearSugs();
+          if (clienteIdLabel) clienteIdLabel.textContent = `ID usuario: ${btn.dataset.id || "-"}`;
+          if (clienteAccesoLabel) {
+            const accesoTxt = acceso === "false" ? "Revendedor" : "Cliente final";
+            clienteAccesoLabel.textContent = `Acceso: ${accesoTxt}`;
+          }
+        });
 
       clienteSugs?.addEventListener("mousedown", () => {
         suppressBlur = true;
@@ -478,6 +486,55 @@
             tasa_bs: 400,
             id_usuario_override: idCliente,
           };
+          // Determinar monto según acceso_cliente
+          let totalOverride = null;
+          try {
+            const { data: userAcc, error: userErr } = await supabase
+              .from("usuarios")
+              .select("acceso_cliente")
+              .eq("id_usuario", idCliente)
+              .maybeSingle();
+            if (userErr) throw userErr;
+            const acceso = userAcc?.acceso_cliente;
+            const { data: carritoRow } = await supabase
+              .from("carritos")
+              .select("id_carrito")
+              .eq("id_usuario", idCliente)
+              .maybeSingle();
+            const carritoId = carritoRow?.id_carrito;
+            if (!carritoId) throw new Error("Carrito no encontrado para el cliente");
+            const { data: cartData, error: cartErr } = await supabase
+              .from("carrito_items")
+              .select("id_precio, cantidad, meses")
+              .eq("id_carrito", carritoId);
+            if (cartErr) throw cartErr;
+            const precioIds = (cartData || []).map((c) => c.id_precio);
+            let priceMap = {};
+            if (precioIds.length) {
+              const { data: precios, error: pErr } = await supabase
+                .from("precios")
+                .select("id_precio, precio_usd_detal, precio_usd_mayor")
+                .in("id_precio", precioIds);
+              if (pErr) throw pErr;
+              priceMap = (precios || []).reduce((acc, p) => {
+                acc[p.id_precio] = p;
+                return acc;
+              }, {});
+            }
+            const useMayor = acceso === false ? true : false;
+            totalOverride = (cartData || []).reduce((sum, it) => {
+              const price = priceMap[it.id_precio] || {};
+              const unit = useMayor ? price.precio_usd_mayor || price.precio_usd_detal || 0 : price.precio_usd_detal || 0;
+              const qty = it.cantidad || 0;
+              const meses = it.meses || 1;
+              return sum + unit * qty * meses;
+            }, 0);
+          } catch (calcErr) {
+            console.error("calc total override error", calcErr);
+          }
+          if (totalOverride !== null) {
+            payload.total = totalOverride;
+          }
           const { submitCheckout } = await import("../scripts/api.js");
           const resp = await submitCheckout(payload);
           if (resp?.error) {

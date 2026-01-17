@@ -22,11 +22,17 @@ export function buildServiceCopyText({
   const platLabel = showHogar ? `${platLabelRaw} (HOGAR ACTUALIZADO)` : platLabelRaw;
   const fmtFecha = (val) => {
     if (!val) return "";
+    if (typeof val === "string") {
+      const m = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) {
+        return `${m[3]}-${m[2]}-${m[1]}`;
+      }
+    }
     const d = new Date(val);
     if (Number.isNaN(d.valueOf())) return val;
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const yyyy = d.getUTCFullYear();
     return `${dd}-${mm}-${yyyy}`;
   };
   const fechaFmt = fmtFecha(fechaCorte);

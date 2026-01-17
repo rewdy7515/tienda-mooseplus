@@ -384,6 +384,8 @@ app.get("/api/inventario", async (req, res) => {
           id_plataforma,
           correo,
           clave,
+          venta_perfil,
+          venta_miembro,
           plataformas(nombre)
         ),
         perfiles:perfiles(
@@ -413,6 +415,8 @@ app.get("/api/inventario", async (req, res) => {
         n_perfil: row.perfiles?.n_perfil ?? null,
         pin: row.perfiles?.pin ?? null,
         fecha_corte: row.fecha_corte,
+        venta_perfil: row.cuentas?.venta_perfil,
+        venta_miembro: row.cuentas?.venta_miembro,
       };
     });
 
