@@ -238,6 +238,9 @@
                           type="checkbox"
                           data-venta="${it.id_venta ?? ""}"
                           data-correo="${it.correo || ""}"
+                          data-clave="${it.clave || ""}"
+                          data-nperfil="${it.n_perfil || ""}"
+                          data-pin="${it.pin || ""}"
                           data-plataforma="${plat}"
                           data-id-plataforma="${it.id_plataforma || ""}"
                           data-id-cuenta="${it.id_cuenta || ""}"
@@ -450,15 +453,15 @@
               }
             }
             let perfilMapa = {};
-            if (perfilIds.length) {
-              const { data: perfiles, error: perfErr } = await supabase
-                .from("perfiles")
-                .select("id_perfil, n_perfil, perfil_hogar")
-                .in("id_perfil", perfilIds);
-              if (perfErr) {
-                console.error("buscar perfiles error", perfErr);
-              } else {
-                perfilMapa = (perfiles || []).reduce((acc, p) => {
+          if (perfilIds.length) {
+            const { data: perfiles, error: perfErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil, n_perfil, perfil_hogar, pin")
+              .in("id_perfil", perfilIds);
+            if (perfErr) {
+              console.error("buscar perfiles error", perfErr);
+            } else {
+              perfilMapa = (perfiles || []).reduce((acc, p) => {
                   acc[p.id_perfil] = p;
                   return acc;
                 }, {});
@@ -483,6 +486,7 @@
                 id_usuario_cliente: v.id_usuario || null,
                 correo: cuentaInfo.correo || user.correo,
                 clave: cuentaInfo.clave || "",
+                pin: perfInfo?.pin || "",
                 nombreCompleto: user.nombreCompleto,
                 id_perfil: v.id_perfil,
                 n_perfil: v.id_perfil ? perfInfo?.n_perfil : "",
@@ -763,6 +767,9 @@
         seleccionActual = Array.from(checks).map((chk, idx) => ({
           id_venta: chk.dataset.venta || "",
           correo: chk.dataset.correo || "",
+          clave: chk.dataset.clave || "",
+          n_perfil: chk.dataset.nperfil || "",
+          pin: chk.dataset.pin || "",
           plataforma: chk.dataset.plataforma || "",
           id_plataforma: chk.dataset.idPlataforma || null,
           id_cuenta: chk.dataset.idCuenta || null,
@@ -780,6 +787,23 @@
           closeModalRenovarSel();
         }
       });
+
+      const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
+        const lines = ["*✅ Servicio renovado 🫡*"];
+        if (plataformaNombre || item.id_venta) {
+          lines.push(
+            `*${(plataformaNombre || "").toUpperCase()}*${item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""}`.trim()
+          );
+        }
+        if (item.correo) lines.push(`*Correo:* ${item.correo}`);
+        if (item.clave) lines.push(`*Clave:* ${item.clave}`);
+        if (item.n_perfil) lines.push(`*Perfil:* M${item.n_perfil}`);
+        if (item.pin) lines.push(`*PIN:* ${item.pin}`);
+        if (fechaCorte) {
+          lines.push("*Próxima fecha de pago:*", `_${formatFechaCorte(fechaCorte)}_`);
+        }
+        return lines.join("\n");
+      };
       modalRenovarSelClose?.addEventListener("click", closeModalRenovarSel);
 
       modalRenovarSelBody?.addEventListener("click", (e) => {
@@ -838,6 +862,71 @@
         }
 
         try {
+          const userIds = [...new Set(seleccionActual.map((it) => Number(it.id_usuario_cliente)).filter(Boolean))];
+          const cuentaIds = [...new Set(seleccionActual.map((it) => Number(it.id_cuenta)).filter(Boolean))];
+          const platIds = [...new Set(seleccionActual.map((it) => Number(it.id_plataforma)).filter(Boolean))];
+
+          const userMap = {};
+          if (userIds.length) {
+            const { data: usersData, error: usersErr } = await supabase
+              .from("usuarios")
+              .select("id_usuario, acceso_cliente")
+              .in("id_usuario", userIds);
+            if (usersErr) throw usersErr;
+            (usersData || []).forEach((u) => {
+              userMap[u.id_usuario] = u;
+            });
+          }
+
+          const cuentaMap = {};
+          if (cuentaIds.length) {
+            const { data: cuentasData, error: cuentasErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, venta_perfil, venta_miembro, id_plataforma")
+              .in("id_cuenta", cuentaIds);
+            if (cuentasErr) throw cuentasErr;
+            (cuentasData || []).forEach((c) => {
+              cuentaMap[c.id_cuenta] = c;
+            });
+          }
+
+          let preciosMap = {};
+          if (platIds.length) {
+            const { data: preciosData, error: preciosErr } = await supabase
+              .from("precios")
+              .select("id_precio, id_plataforma, completa, sub_cuenta, precio_usd_detal, precio_usd_mayor")
+              .in("id_plataforma", platIds);
+            if (preciosErr) throw preciosErr;
+            preciosMap = (preciosData || []).reduce((acc, p) => {
+              if (!acc[p.id_plataforma]) acc[p.id_plataforma] = [];
+              acc[p.id_plataforma].push(p);
+              return acc;
+            }, {});
+          }
+
+          const pickPrecio = (price, acceso) => {
+            const esMayorista = acceso === false || acceso === "false" || acceso === 0 || acceso === "0";
+            const detal = Number(price?.precio_usd_detal) || 0;
+            const mayor = Number(price?.precio_usd_mayor) || 0;
+            return esMayorista ? mayor || detal : detal || mayor;
+          };
+
+          const resolvePrecio = (platId, cuenta, acceso) => {
+            const preciosPlat = preciosMap[platId] || [];
+            const ventaPerfil = cuenta?.venta_perfil === true;
+            const ventaMiembro = cuenta?.venta_miembro === true;
+            let candidatos = [];
+            if (ventaPerfil) {
+              candidatos = preciosPlat.filter((p) => p.completa === false && p.sub_cuenta === false);
+            } else if (!ventaPerfil && !ventaMiembro) {
+              candidatos = preciosPlat.filter((p) => p.completa === true && p.sub_cuenta === false);
+            } else if (ventaMiembro) {
+              candidatos = preciosPlat.filter((p) => p.sub_cuenta === true);
+            }
+            const price = candidatos[0] || preciosPlat[0] || null;
+            return price ? pickPrecio(price, acceso) : 0;
+          };
+
           const hoy = new Date();
           const fechaPago = hoy.toISOString().slice(0, 10);
           const registradoPor = window.__RC_USER_ID__ || null;
@@ -854,8 +943,13 @@
               .eq("id_venta", it.id_venta);
             if (error) throw error;
 
+            const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
+            const accesoCliente = it.id_usuario_cliente ? userMap[it.id_usuario_cliente]?.acceso_cliente : null;
+            const platIdNum = it.id_plataforma ? Number(it.id_plataforma) : cuentaInfo?.id_plataforma || null;
+            const montoCalc = resolvePrecio(platIdNum, cuentaInfo, accesoCliente) * (it.meses || 1);
+
             const { error: histErr } = await supabase.from("historial_ventas").insert({
-              monto: 0,
+              monto: Number(montoCalc) || 0,
               fecha_pago: fechaPago,
               venta_cliente: true,
               renovacion: true,
@@ -868,9 +962,19 @@
               referencia: refValue,
             });
             if (histErr) throw histErr;
+            return { ...it, fecha_corte: nuevaCorte };
           });
-          await Promise.all(updates);
-          alert("Renovación aplicada.");
+          const resultados = await Promise.all(updates);
+          if (resultados?.length) {
+            const mensajes = resultados
+              .filter(Boolean)
+              .map((res) => buildRenovacionMensaje(res, res.fecha_corte, res.plataforma))
+              .join("\n\n");
+            if (modalRowConfirmText) modalRowConfirmText.textContent = mensajes;
+            if (modalRowConfirm) modalRowConfirm.classList.remove("hidden");
+          } else {
+            alert("Renovación aplicada.");
+          }
           // limpiar selección
           document.querySelectorAll('#buscador-resultado input[type="checkbox"]').forEach((c) => (c.checked = false));
           seleccionActual = [];

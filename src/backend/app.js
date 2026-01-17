@@ -15,16 +15,23 @@ app.use(express.json({ limit: "10mb" }));
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
-// Suma meses manteniendo el día; si el mes destino no tiene ese día, usa el último día de ese mes.
+// Suma meses manteniendo el día (sin desfase de zona horaria); si el mes destino no tiene ese día, usa el último día del mes.
 function addMonthsKeepDay(baseDate, months) {
-  const d = new Date(baseDate);
-  if (Number.isNaN(d.valueOf())) return null;
-  const day = d.getDate();
-  const targetMonth = d.getMonth() + months;
-  const targetYear = d.getFullYear();
-  const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-  const clampedDay = Math.min(day, daysInTargetMonth);
-  const result = new Date(targetYear, targetMonth, clampedDay);
+  const baseStr =
+    typeof baseDate === "string"
+      ? baseDate
+      : new Date(baseDate).toISOString().slice(0, 10);
+  const [y, m, d] = baseStr.split("-").map(Number);
+  let mm = (m - 1) + months;
+  let yy = y + Math.floor(mm / 12);
+  mm = mm % 12;
+  if (mm < 0) {
+    mm += 12;
+    yy -= 1;
+  }
+  const daysInTarget = new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate();
+  const day = Math.min(d, daysInTarget);
+  const result = new Date(Date.UTC(yy, mm, day));
   return result.toISOString().slice(0, 10);
 }
 
@@ -943,6 +950,20 @@ app.post("/api/checkout", async (req, res) => {
       id_usuario_override && Number.isFinite(Number(id_usuario_override))
         ? Number(id_usuario_override)
         : idUsuarioSesion;
+    const { data: usuarioVenta, error: userVentaErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("acceso_cliente")
+      .eq("id_usuario", idUsuarioVentas)
+      .single();
+    if (userVentaErr && userVentaErr.code !== "PGRST116") throw userVentaErr;
+    const accesoCliente = usuarioVenta?.acceso_cliente;
+    const esMayorista =
+      accesoCliente === false || accesoCliente === "false" || accesoCliente === 0 || accesoCliente === "0";
+    const pickPrecio = (price) => {
+      const detal = Number(price?.precio_usd_detal) || 0;
+      const mayor = Number(price?.precio_usd_mayor) || 0;
+      return esMayorista ? mayor || detal : detal || mayor;
+    };
     const carritoId = await getCurrentCarrito(idUsuarioSesion);
     if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
 
@@ -958,7 +979,7 @@ app.post("/api/checkout", async (req, res) => {
     const preciosIds = items.map((i) => i.id_precio);
     const { data: precios, error: precioErr } = await supabaseAdmin
       .from("precios")
-      .select("id_precio, precio_usd_detal, id_plataforma, completa, sub_cuenta")
+      .select("id_precio, precio_usd_detal, precio_usd_mayor, id_plataforma, completa, sub_cuenta")
       .in("id_precio", preciosIds);
     if (precioErr) throw precioErr;
     const priceMap = (precios || []).reduce((acc, p) => {
@@ -978,7 +999,7 @@ app.post("/api/checkout", async (req, res) => {
     }, {});
 
     const totalCalc = items.reduce((sum, it) => {
-      const unit = priceMap[it.id_precio]?.precio_usd_detal || 0;
+      const unit = pickPrecio(priceMap[it.id_precio]);
       const mesesVal = it.meses || 1;
       return sum + unit * (it.cantidad || 0) * mesesVal;
     }, 0);
@@ -1006,7 +1027,7 @@ app.post("/api/checkout", async (req, res) => {
       const price = priceMap[it.id_precio] || {};
       const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
       const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
-      const base = (Number(price.precio_usd_detal) || 0) * cantidadVal * mesesVal;
+      const base = pickPrecio(price) * cantidadVal * mesesVal;
       const monto = Number(base.toFixed(2));
       const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || isoHoy;
       const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
@@ -1026,7 +1047,7 @@ app.post("/api/checkout", async (req, res) => {
     }
 
     // Filtra items nuevos (no renovaciones) para asignación de stock
-    const itemsNuevos = (items || []).filter((it) => !(it.renovacion === true && it.id_venta));
+    const itemsNuevos = (items || []).filter((it) => !it.id_venta);
 
     // Verificación de stock y asignación de recursos
     const asignaciones = [];
@@ -1052,7 +1073,7 @@ app.post("/api/checkout", async (req, res) => {
         if (platId === 1) {
           const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
             .from("perfiles")
-            .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva)")
+            .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, ocupado)")
             .eq("perfil_hogar", true)
             .eq("cuentas.id_plataforma", platId)
             .or("ocupado.is.null,ocupado.eq.false")
@@ -1060,13 +1081,16 @@ app.post("/api/checkout", async (req, res) => {
             .limit(cantidad);
           if (perfErr) throw perfErr;
           const libresHogar = (perfilesHogar || []).filter(
-            (p) => p?.cuentas?.inactiva === false && (p.ocupado === false || p.ocupado === null)
+            (p) =>
+              p?.cuentas?.inactiva !== true &&
+              (p.ocupado === false || p.ocupado === null) &&
+              (p?.cuentas?.ocupado === false || p?.cuentas?.ocupado === null)
           );
           const takeHogar = libresHogar.slice(0, cantidad);
           takeHogar.forEach((p) => {
             asignaciones.push({
               id_precio: price.id_precio,
-              monto: price.precio_usd_detal || 0,
+              monto: pickPrecio(price),
               id_cuenta: p.id_cuenta,
               id_perfil: p.id_perfil,
               id_sub_cuenta: null,
@@ -1078,22 +1102,49 @@ app.post("/api/checkout", async (req, res) => {
 
           const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
           if (faltantesPerf > 0) {
-            // 3) sub_cuentas libres en cuentas venta_miembro o venta_perfil
-          const { data: subLibres, error: subErr } = await supabaseAdmin
-            .from("sub_cuentas")
-            .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
-            .eq("cuentas.id_plataforma", platId)
-            .or("venta_miembro.eq.true,venta_perfil.eq.true", { foreignTable: "cuentas" })
-            .or("ocupado.is.null,ocupado.eq.false")
-            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-            .limit(faltantesPerf);
-            if (subErr) throw subErr;
-            const disponibles = (subLibres || []).filter((s) => !s.ocupado && s?.cuentas?.inactiva === false);
-            const faltantes = Math.max(0, faltantesPerf - disponibles.length);
-            disponibles.slice(0, faltantesPerf).forEach((s) => {
+            // 2) cuentas libres venta_miembro (sin perf_hogar disponible)
+            const { data: cuentasMiembro, error: ctaMiembroErr } = await supabaseAdmin
+              .from("cuentas")
+              .select("id_cuenta, ocupado, inactiva, venta_miembro")
+              .eq("id_plataforma", platId)
+              .eq("venta_miembro", true)
+              .or("ocupado.is.null,ocupado.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false")
+              .limit(faltantesPerf);
+            if (ctaMiembroErr) throw ctaMiembroErr;
+            const cuentasLibres = (cuentasMiembro || []).filter(
+              (c) => c.inactiva === false && (c.ocupado === false || c.ocupado === null)
+            );
+            const takeCtas = cuentasLibres.slice(0, faltantesPerf);
+            takeCtas.forEach((cta) => {
               asignaciones.push({
                 id_precio: price.id_precio,
-                monto: price.precio_usd_detal || 0,
+                monto: pickPrecio(price),
+                id_cuenta: cta.id_cuenta,
+                id_perfil: null,
+                id_sub_cuenta: null,
+                meses: mesesItem,
+                pendiente: false,
+              });
+            });
+            const faltantesPerf2 = Math.max(0, faltantesPerf - takeCtas.length);
+            if (faltantesPerf2 > 0) {
+            // 3) sub_cuentas libres en cuentas venta_miembro o venta_perfil
+            const { data: subLibres, error: subErr } = await supabaseAdmin
+              .from("sub_cuentas")
+              .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
+              .eq("cuentas.id_plataforma", platId)
+              .or("venta_miembro.eq.true,venta_perfil.eq.true", { foreignTable: "cuentas" })
+              .or("ocupado.is.null,ocupado.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .limit(faltantesPerf2);
+            if (subErr) throw subErr;
+            const disponibles = (subLibres || []).filter((s) => !s.ocupado && s?.cuentas?.inactiva === false);
+            const faltantes = Math.max(0, faltantesPerf2 - disponibles.length);
+            disponibles.slice(0, faltantesPerf2).forEach((s) => {
+              asignaciones.push({
+                id_precio: price.id_precio,
+                monto: pickPrecio(price),
                 id_cuenta: s.id_cuenta,
                 id_sub_cuenta: s.id_sub_cuenta,
                 id_perfil: null,
@@ -1106,6 +1157,7 @@ app.post("/api/checkout", async (req, res) => {
               return res
                 .status(400)
                 .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
+            }
             }
           }
         } else {
@@ -1127,7 +1179,7 @@ app.post("/api/checkout", async (req, res) => {
           usadosPerf.forEach((p) => {
             asignaciones.push({
               id_precio: price.id_precio,
-              monto: price.precio_usd_detal || 0,
+              monto: pickPrecio(price),
               id_cuenta: p.id_cuenta,
               id_perfil: p.id_perfil,
               id_sub_cuenta: null,
@@ -1153,7 +1205,7 @@ app.post("/api/checkout", async (req, res) => {
             disponibles.slice(0, faltantesPerf).forEach((s) => {
               asignaciones.push({
                 id_precio: price.id_precio,
-                monto: price.precio_usd_detal || 0,
+                monto: pickPrecio(price),
                 id_cuenta: s.id_cuenta,
                 id_sub_cuenta: s.id_sub_cuenta,
                 id_perfil: null,
@@ -1185,7 +1237,7 @@ app.post("/api/checkout", async (req, res) => {
         disponibles.slice(0, cantidad).forEach((cta) => {
           asignaciones.push({
             id_precio: price.id_precio,
-            monto: price.precio_usd_detal || 0,
+            monto: pickPrecio(price),
             id_cuenta: cta.id_cuenta,
             id_perfil: null,
             id_sub_cuenta: null,
@@ -1218,7 +1270,7 @@ app.post("/api/checkout", async (req, res) => {
         disponibles.slice(0, cantidad).forEach((p) => {
           asignaciones.push({
             id_precio: price.id_precio,
-            monto: price.precio_usd_detal || 0,
+            monto: pickPrecio(price),
             id_cuenta: p.id_cuenta,
             id_perfil: p.id_perfil,
             id_sub_cuenta: null,
@@ -1313,7 +1365,7 @@ app.post("/api/checkout", async (req, res) => {
       const price = priceMap[it.id_precio] || {};
       const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
       const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
-      const base = (Number(price.precio_usd_detal) || 0) * cantidadVal * mesesVal;
+      const base = pickPrecio(price) * cantidadVal * mesesVal;
       histRows.push({
         id_usuario_cliente: usuarioAnt,
         id_proveedor: null,

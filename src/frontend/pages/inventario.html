@@ -12,6 +12,13 @@
 
     <main class="categorias-dinamicas">
       <h2>Inventario</h2>
+      <div class="cuentas-busqueda" style="margin:0 0 12px 0;">
+        <div class="input-wrap">
+          <input type="search" id="inv-search" placeholder="Buscar por correo" autocomplete="off" />
+          <div id="inv-sugs" class="sugerencias-cuentas hidden"></div>
+        </div>
+      </div>
+      <div id="inv-search-results"></div>
       <div class="inventario-actions">
         <button
           type="button"
@@ -38,6 +45,10 @@
       const logo = document.querySelector(".logo");
       const listEl = document.querySelector("#inventario-list");
       const statusEl = document.querySelector("#inventario-status");
+      const searchInput = document.querySelector("#inv-search");
+      const searchSugs = document.querySelector("#inv-sugs");
+      const searchResults = document.querySelector("#inv-search-results");
+      const actionsEl = document.querySelector(".inventario-actions");
       const btnProximas = document.querySelector("#btn-proximas");
       const modalProximas = document.querySelector("#modal-proximas");
       const modalProximasClose = document.querySelector(".modal-proximas-close");
@@ -45,6 +56,105 @@
       const btnProximasAdd = document.querySelector("#btn-proximas-add");
       let ultimasPlataformas = [];
       let proximasSeleccionadas = new Set();
+      let ventasIndex = [];
+
+      const buildVentasIndex = () => {
+        const rows = [];
+        (ultimasPlataformas || []).forEach((p) => {
+          const platNombre = p.nombre || "";
+          (p.planes || []).forEach((planObj) => {
+            const planNombre = planObj.plan || "";
+            (planObj.ventas || []).forEach((v) => {
+              rows.push({
+                id_venta: v.id_venta ?? "",
+                correo: v.correo || "",
+                clave: v.clave || "",
+                n_perfil: v.n_perfil ?? "",
+                pin: v.pin ?? "",
+                fecha_corte: v.fecha_corte || "",
+                plataforma: platNombre,
+                plan: planNombre,
+              });
+            });
+          });
+        });
+        ventasIndex = rows;
+      };
+
+      const renderSearchResults = (items = [], term = "") => {
+        if (!searchResults) return;
+        if (!term || !items.length) {
+          searchResults.innerHTML = term ? '<p class="status">No se encontraron resultados.</p>' : "";
+          return;
+        }
+        const rows = items
+          .map(
+            (it) => `
+            <tr>
+              <td>${it.id_venta}</td>
+              <td>${it.correo}</td>
+              <td>${it.clave}</td>
+              <td>${it.n_perfil ? `M${it.n_perfil}` : ""}</td>
+              <td>${it.pin || ""}</td>
+              <td>${formatDate(it.fecha_corte)}</td>
+              <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
+            </tr>
+          `
+          )
+          .join("");
+        searchResults.innerHTML = `
+          <div class="cuenta-table-wrap">
+            <table class="proximas-table">
+              <thead>
+                <tr>
+                  <th>ID Venta</th>
+                  <th>Correo</th>
+                  <th>Clave</th>
+                  <th>Perfil</th>
+                  <th>PIN</th>
+                  <th>Fecha corte</th>
+                  <th>Plataforma / Plan</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const showSuggestions = (items) => {
+        if (!searchSugs) return;
+        if (!items.length) {
+          searchSugs.classList.add("hidden");
+          searchSugs.innerHTML = "";
+          return;
+        }
+        searchSugs.innerHTML = items
+          .map((it) => `<div class="sugerencia-item" data-value="${it.correo}">${it.correo}</div>`)
+          .join("");
+        searchSugs.classList.remove("hidden");
+      };
+
+      const toggleInventoryView = (show) => {
+        const displayVal = show ? "" : "none";
+        if (actionsEl) actionsEl.style.display = displayVal;
+        if (statusEl) statusEl.style.display = displayVal;
+        if (listEl) listEl.style.display = displayVal;
+      };
+
+      const handleSearch = (termRaw) => {
+        const term = (termRaw || "").trim().toLowerCase();
+        if (!term) {
+          showSuggestions([]);
+          renderSearchResults([], "");
+          toggleInventoryView(true);
+          return;
+        }
+        const matches = ventasIndex.filter((v) => v.correo.toLowerCase().includes(term));
+        showSuggestions(matches.slice(0, 6));
+        renderSearchResults(matches, term);
+        toggleInventoryView(false);
+      };
 
       const formatDate = (iso) => {
         if (!iso) return "";
@@ -238,7 +348,9 @@
           return;
         }
         ultimasPlataformas = resp?.plataformas || [];
+        buildVentasIndex();
         renderPlataformas(ultimasPlataformas);
+        handleSearch(searchInput?.value || "");
       };
 
       async function init() {
@@ -315,6 +427,26 @@
           toast?.classList.remove("show");
         }, 1400);
       };
+
+      searchInput?.addEventListener("input", (e) => {
+        handleSearch(e.target.value);
+      });
+
+      searchSugs?.addEventListener("click", (e) => {
+        const item = e.target.closest(".sugerencia-item");
+        if (!item) return;
+        const val = item.dataset.value || "";
+        if (searchInput) searchInput.value = val;
+        handleSearch(val);
+        searchSugs.classList.add("hidden");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!searchSugs) return;
+        if (!searchSugs.contains(e.target) && e.target !== searchInput) {
+          searchSugs.classList.add("hidden");
+        }
+      });
 
       btnProximas?.addEventListener("click", () => {
         renderProximas(ultimasPlataformas);
