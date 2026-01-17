@@ -221,6 +221,11 @@
     <div class="cuentas-wrapper">
       <div class="cuentas-busqueda">
         <div class="input-wrap">
+          <select id="select-plataforma" class="form-select">
+            <option value="">Filtrar por plataforma</option>
+          </select>
+        </div>
+        <div class="input-wrap">
           <input type="search" id="input-cliente" placeholder="Buscar por cliente" autocomplete="off" />
           <div id="sugs-clientes" class="sugerencias-cuentas hidden"></div>
         </div>
@@ -233,6 +238,7 @@
           <button type="button" class="btn-add" id="btn-ir-agregar">Agregar servicio</button>
         </div>
       </div>
+      <div id="plataforma-resultados"></div>
       <div id="cuenta-detalle" class="cuenta-detalle"></div>
       <div id="cliente-ventas" class="cliente-ventas"></div>
     </div>
@@ -349,6 +355,8 @@
 
       const inputCuenta = document.querySelector("#input-cuenta");
       const inputCliente = document.querySelector("#input-cliente");
+      const selectPlataforma = document.querySelector("#select-plataforma");
+      const plataformaResultadosEl = document.querySelector("#plataforma-resultados");
       const sugs = document.querySelector("#sugs-cuentas");
       const sugsClientes = document.querySelector("#sugs-clientes");
       const btnBuscar = document.querySelector("#btn-buscar-cuenta");
@@ -578,6 +586,7 @@
             adminLink.classList.toggle("hidden", !isAdmin);
             adminLink.style.display = isAdmin ? "block" : "none";
           }
+          loadPlataformasSelect();
         } catch (err) {
           console.error("admin cuentas init error", err);
         }
@@ -597,6 +606,39 @@
           )
           .join("");
         sugs.classList.remove("hidden");
+      };
+
+      const clearPlataformaResultados = () => {
+        if (plataformaResultadosEl) {
+          plataformaResultadosEl.innerHTML = "";
+          plataformaResultadosEl.classList.add("hidden");
+        }
+      };
+
+      const toggleBusquedaViews = (showBusqueda) => {
+        const displayVal = showBusqueda ? "" : "none";
+        if (detalleEl) detalleEl.style.display = displayVal;
+        if (clienteVentasEl) clienteVentasEl.style.display = displayVal;
+      };
+
+      const loadPlataformasSelect = async () => {
+        if (!selectPlataforma) return;
+        try {
+          const { data, error } = await supabase
+            .from("plataformas")
+            .select("id_plataforma, nombre")
+            .order("id_plataforma", { ascending: true });
+          if (error) throw error;
+          selectPlataforma.innerHTML = '<option value="">Filtrar por plataforma</option>';
+          (data || []).forEach((p) => {
+            const opt = document.createElement("option");
+            opt.value = p.id_plataforma;
+            opt.textContent = p.nombre || `Plataforma ${p.id_plataforma}`;
+            selectPlataforma.appendChild(opt);
+          });
+        } catch (err) {
+          console.error("load plataformas select error", err);
+        }
       };
 
       const buscarCuentas = async (texto, forceHide = false) => {
@@ -711,6 +753,214 @@
         }
       };
 
+      const renderPlataformaCuentas = (
+        plataformaNombre,
+        cuentas,
+        ventas,
+        usersMap,
+        perfilesMap,
+        subCtas = [],
+        opts = {}
+      ) => {
+        if (!plataformaResultadosEl) return;
+        if (!cuentas.length) {
+          plataformaResultadosEl.innerHTML = '<p class="status">No hay cuentas para esta plataforma.</p>';
+          plataformaResultadosEl.classList.remove("hidden");
+          return;
+        }
+        const html = cuentas
+          .map((cta) => {
+            const ventasCta = (ventas || []).filter((v) => v.id_cuenta === cta.id_cuenta);
+            const perfilesCuenta = (opts.perfilesAll || []).filter((p) => p.id_cuenta === cta.id_cuenta);
+            const maxPerfilCuenta = perfilesCuenta.reduce((max, p) => {
+              const n = Number(p.n_perfil) || 0;
+              return Math.max(max, n);
+            }, 0);
+            const subRows =
+              subCtas
+                .filter((s) => s.id_cuenta === cta.id_cuenta)
+                .map(
+                  (s) => `
+                  <tr>
+                    <td>Sub-cuenta #${s.id_sub_cuenta}</td>
+                    <td>${s.correo || ""}</td>
+                    <td>${s.clave || ""}</td>
+                    <td>${s.pin || ""}</td>
+                  </tr>
+                `
+                )
+                .join("") || "";
+            const rowsArr =
+              perfilesCuenta.length
+                ? perfilesCuenta.map((p) => {
+                    const venta = ventasCta.find((v) => v.id_perfil === p.id_perfil);
+                    const userInfo = venta ? usersMap[venta.id_usuario] || {} : {};
+                    return `
+                      <tr>
+                        <td>${venta ? `#${venta.id_venta ?? ""}` : ""}</td>
+                        <td>${userInfo.nombre || ""}</td>
+                        <td>${userInfo.correo || ""}</td>
+                        <td>${p.n_perfil ? `M${p.n_perfil}` : ""}</td>
+                        <td>${p.pin || ""}</td>
+                        <td>${venta?.fecha_corte || ""}</td>
+                      </tr>
+                    `;
+                  })
+                : [];
+            const rows = rowsArr.join("") || `<tr><td colspan="6">Sin ventas asignadas.</td></tr>`;
+            let addRow = "";
+            if (opts.masPerfiles) {
+              const maxPerfiles = Number(opts.numMax) || Math.max(maxPerfilCuenta, 1);
+              const nextPerfil = ((maxPerfilCuenta % maxPerfiles) || 0) + 1;
+              addRow = `
+                <tr>
+                  <td colspan="6" style="text-align:center;">
+                    <button type="button" class="btn-add-perfil" data-cuenta="${cta.id_cuenta}" data-next="${nextPerfil}" data-max="${maxPerfiles}" style="width:100%;">+</button>
+                  </td>
+                </tr>
+              `;
+            }
+            return `
+              <div class="cuenta-detalle" style="margin-top:12px;">
+                <h3 class="cuenta-title">${cta.correo || "Cuenta"}</h3>
+                <p><strong>Clave:</strong> ${cta.clave || "-"}</p>
+                <div class="cuenta-table-wrap">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Cliente</th>
+                        <th>Correo</th>
+                        <th>Perfil</th>
+                        <th>PIN</th>
+                        <th>Fecha corte</th>
+                      </tr>
+                    </thead>
+                    <tbody>${rows}${addRow}</tbody>
+                  </table>
+                </div>
+                ${
+                  subRows
+                    ? `
+                <div class="cuenta-table-wrap" style="margin-top:8px;">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>
+                        <th>Sub-cuenta</th>
+                        <th>Correo</th>
+                        <th>Clave</th>
+                        <th>PIN</th>
+                      </tr>
+                    </thead>
+                    <tbody>${subRows}</tbody>
+                  </table>
+                </div>`
+                    : ""
+                }
+              </div>
+            `;
+          })
+          .join("");
+        plataformaResultadosEl.innerHTML = `
+          <h3 style="margin-bottom:8px;">${plataformaNombre || "Plataforma"}</h3>
+          ${html}
+        `;
+        plataformaResultadosEl.classList.remove("hidden");
+      };
+
+      const loadPlataformaCuentas = async (platId) => {
+        if (!platId || !plataformaResultadosEl) return;
+        plataformaResultadosEl.innerHTML = '<p class="status">Cargando cuentas...</p>';
+        plataformaResultadosEl.classList.remove("hidden");
+        try {
+          const platIdNum = Number(platId);
+          const [{ data: cuentas, error: cErr }, { data: platInfo, error: pErr }, { data: subCtas, error: subErr }] =
+            await Promise.all([
+              supabase
+                .from("cuentas")
+                .select("id_cuenta, correo, clave, inactiva")
+                .eq("id_plataforma", platIdNum)
+                .or("inactiva.is.null,inactiva.eq.false")
+                .order("correo"),
+              supabase
+                .from("plataformas")
+                .select("nombre, mas_perfiles, num_max_dispositivos, por_acceso, usa_pines, max_dig_pin")
+                .eq("id_plataforma", platIdNum)
+                .maybeSingle(),
+              platIdNum === 1
+                ? supabase
+                    .from("sub_cuentas")
+                    .select("id_sub_cuenta, id_cuenta, correo, clave, pin, inactiva")
+                    .order("id_sub_cuenta")
+                : Promise.resolve({ data: [], error: null }),
+            ]);
+          if (cErr) throw cErr;
+          if (pErr) throw pErr;
+          if (subErr) throw subErr;
+          const cuentasActivas = (cuentas || []).filter((c) => c.inactiva !== true);
+          const cuentaIds = cuentasActivas.map((c) => c.id_cuenta);
+          let ventas = [];
+          let usersMap = {};
+          let perfilesMap = {};
+          let perfilesAll = [];
+          if (cuentaIds.length) {
+          const { data: ventasData, error: vErr } = await supabase
+            .from("ventas")
+            .select("id_venta, id_cuenta, id_perfil, id_usuario, fecha_corte")
+            .in("id_cuenta", cuentaIds)
+            .order("id_perfil", { ascending: true });
+            if (vErr) throw vErr;
+            ventas = ventasData || [];
+            const { data: perfAll, error: perfAllErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil, id_cuenta, n_perfil, pin, correo")
+              .in("id_cuenta", cuentaIds)
+              .order("n_perfil", { ascending: true });
+            if (perfAllErr) throw perfAllErr;
+            perfilesAll = perfAll || [];
+            const userIds = Array.from(new Set(ventas.map((v) => v.id_usuario).filter(Boolean)));
+            if (userIds.length) {
+              const { data: usersData, error: uErr } = await supabase
+                .from("usuarios")
+                .select("id_usuario, nombre, apellido, correo")
+                .in("id_usuario", userIds);
+              if (uErr) throw uErr;
+              usersMap = (usersData || []).reduce((acc, u) => {
+                acc[u.id_usuario] = {
+                  nombre: [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || u.correo || "",
+                  correo: u.correo || "",
+                };
+                return acc;
+              }, {});
+            }
+            perfilesMap = (perfilesAll || []).reduce((acc, p) => {
+              acc[p.id_perfil] = p;
+              return acc;
+            }, {});
+          }
+          const subActivas =
+            platIdNum === 1
+              ? (subCtas || []).filter((s) => s.inactiva !== true)
+              : [];
+          renderPlataformaCuentas(
+            platInfo?.nombre,
+            cuentasActivas,
+            ventas,
+            usersMap,
+            perfilesMap,
+            subActivas,
+            {
+              masPerfiles: isTrue(platInfo?.mas_perfiles),
+              numMax: platInfo?.num_max_dispositivos || null,
+              perfilesAll,
+            }
+          );
+        } catch (err) {
+          console.error("load plataforma cuentas error", err);
+          plataformaResultadosEl.innerHTML = '<p class="status">No se pudieron cargar las cuentas.</p>';
+        }
+      };
+
       const resetClienteBusqueda = () => {
         if (inputCliente) {
           inputCliente.value = "";
@@ -729,6 +979,9 @@
         if (e.target.value?.length) {
           resetCuentaBusqueda();
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
+          if (selectPlataforma) selectPlataforma.value = "";
+          clearPlataformaResultados();
+          toggleBusquedaViews(true);
         }
         buscarClientes(e.target.value || "");
       });
@@ -754,6 +1007,9 @@
         if (e.target.value?.length) {
           resetClienteBusqueda();
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
+          if (selectPlataforma) selectPlataforma.value = "";
+          clearPlataformaResultados();
+          toggleBusquedaViews(true);
         }
         renderSugerenciasClientes([], true);
         buscarCuentas(e.target.value || "");
@@ -764,6 +1020,59 @@
         const insideClientes = sugsClientes?.contains(e.target) || inputCliente?.contains(e.target);
         if (!insideCuentas) renderSugerencias([], true);
         if (!insideClientes) renderSugerenciasClientes([], true);
+      });
+
+      detalleEl?.addEventListener("click", async (e) => {
+        const addBtn = e.target.closest(".btn-add-perfil");
+        if (addBtn) {
+          const cuentaId = addBtn.dataset.cuenta;
+          const next = Number(addBtn.dataset.next) || 1;
+          try {
+            const { error } = await supabase
+              .from("perfiles")
+              .insert({ id_cuenta: cuentaId, n_perfil: next, ocupado: false, perfil_hogar: false });
+            if (error) throw error;
+            if (cuentaId) loadCuentaDetalle(cuentaId);
+          } catch (err) {
+            console.error("add perfil error", err);
+            alert("No se pudo agregar el perfil.");
+          }
+          return;
+        }
+      });
+
+      selectPlataforma?.addEventListener("change", () => {
+        const val = selectPlataforma.value;
+        renderSugerencias([], true);
+        renderSugerenciasClientes([], true);
+        resetClienteBusqueda();
+        resetCuentaBusqueda();
+        if (!val) {
+          clearPlataformaResultados();
+          toggleBusquedaViews(true);
+          return;
+        }
+        toggleBusquedaViews(false);
+        loadPlataformaCuentas(val);
+      });
+
+      plataformaResultadosEl?.addEventListener("click", async (e) => {
+        const addBtn = e.target.closest(".btn-add-perfil");
+        if (!addBtn) return;
+        const cuentaId = addBtn.dataset.cuenta;
+        const next = Number(addBtn.dataset.next) || 1;
+        try {
+          const { error } = await supabase
+            .from("perfiles")
+            .insert({ id_cuenta: cuentaId, n_perfil: next, ocupado: false, perfil_hogar: false });
+          if (error) throw error;
+          if (selectPlataforma?.value) {
+            loadPlataformaCuentas(selectPlataforma.value);
+          }
+        } catch (err) {
+          console.error("add perfil plataforma view error", err);
+          alert("No se pudo agregar el perfil.");
+        }
       });
 
       // Inicializar modal de nuevo cliente
@@ -1041,7 +1350,7 @@
           </tr>`;
         }
 
-        const tbody = rows
+        const tbodyRows = rows
           .map((p) => {
             const ocupado = p.ocupadoPor || "Vacío";
             if (colMode === "perfil") {
@@ -1224,13 +1533,25 @@
           })
           .join("");
 
+        let addPerfilRow = "";
+        const colCountPerfil = showHogar ? 6 : 5;
+        if (colMode === "perfil" && info.mas_perfiles) {
+          const maxPerfiles = Number(info.num_max_dispositivos) || rows.length || 1;
+          const nextPerfil = ((rows.length % maxPerfiles) || 0) + 1;
+          addPerfilRow = `<tr>
+            <td colspan="${colCountPerfil}" style="text-align:center;">
+              <button type="button" class="btn-add-perfil" data-cuenta="${info.id_cuenta || ""}" data-next="${nextPerfil}" data-max="${maxPerfiles}" style="width:100%;">+</button>
+            </td>
+          </tr>`;
+        }
+
         const table =
           rows.length === 0
             ? "<p class=\"status\">Sin perfiles asociados.</p>"
             : `<div class="cuenta-table-wrap">
                 <table class="proximas-table">
                   <thead>${thead}</thead>
-                  <tbody>${tbody}</tbody>
+                  <tbody>${tbodyRows}${addPerfilRow}</tbody>
                 </table>
               </div>`;
 
@@ -1618,6 +1939,8 @@
             venta_miembro: cuenta.venta_miembro,
             por_acceso: plat?.por_acceso || false,
             usa_pines: plat?.usa_pines || false,
+            mas_perfiles: isTrue(plat?.mas_perfiles),
+            num_max_dispositivos: plat?.num_max_dispositivos || null,
           };
 
           renderDetalle(currentCuentaDetalle);

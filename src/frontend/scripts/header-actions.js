@@ -120,6 +120,10 @@ if (!window.__headerActionsInit) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
       }
+      if (adminHeaderBtn) {
+        adminHeaderBtn.classList.toggle("hidden", !isAdmin);
+        adminHeaderBtn.style.display = isAdmin ? "inline-flex" : "none";
+      }
       // Dot de inventario según notificacion_inventario
       if (user?.notificacion_inventario) {
         const inventarioLink = Array.from(document.querySelectorAll("a")).find(
@@ -165,6 +169,11 @@ if (!window.__headerActionsInit) {
   const btnViewCart = document.querySelector("#btn-view-cart");
   btnViewCart?.addEventListener("click", () => {
     window.location.href = `${pagesRoot}cart.html`;
+  });
+
+  const adminHeaderBtn = document.querySelector("#btn-admin-header");
+  adminHeaderBtn?.addEventListener("click", () => {
+    window.location.href = `${pagesRoot}admin/admin_cuentas.html`;
   });
 
   const btnCheckout = document.querySelector("#btn-checkout");

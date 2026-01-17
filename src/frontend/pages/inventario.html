@@ -249,6 +249,7 @@
         plataformas.forEach((p, idx) => {
           const wrapper = document.createElement("div");
           wrapper.className = "inventario-item";
+          if (p.color_1) wrapper.style.setProperty("--table-header-bg", p.color_1);
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "btn-outline inventario-btn";
@@ -270,7 +271,8 @@
             }
 
             const table = document.createElement("table");
-            table.className = `inventario-table ${hasPlanName ? "hidden" : ""}`;
+            table.className = "table-base";
+            table.style.display = hasPlanName ? "none" : "";
             table.innerHTML = `
               <thead>
                 <tr>
@@ -291,7 +293,7 @@
                       <td>${v.id_venta ?? ""}</td>
                       <td class="copyable" data-label="Correo">${v.correo || ""}</td>
                       <td class="copyable" data-label="Clave">${v.clave || ""}</td>
-                      <td>${v.n_perfil ?? ""}</td>
+                      <td>${v.n_perfil ? `M${v.n_perfil}` : ""}</td>
                       <td class="copyable" data-label="PIN">${v.pin ?? ""}</td>
                       <td>${formatDate(v.fecha_corte)}</td>
                       <td>
@@ -309,7 +311,7 @@
 
             if (planBtn) {
               planBtn.addEventListener("click", () => {
-                table.classList.toggle("hidden");
+                table.style.display = table.style.display === "none" ? "" : "none";
               });
               planWrapper.appendChild(planBtn);
             }
@@ -328,7 +330,7 @@
             // Si solo hay un plan, abrirlo directamente
             if ((p.planes || []).length === 1) {
               const singleTable = planList.querySelector("table");
-              singleTable?.classList.remove("hidden");
+              if (singleTable) singleTable.style.display = "";
             }
           });
 

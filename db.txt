@@ -91,6 +91,9 @@ CREATE TABLE public.historial_ventas (
   id_metodo_de_pago bigint,
   referencia bigint,
   CONSTRAINT historial_ventas_pkey PRIMARY KEY (id),
+  CONSTRAINT historial_ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT historial_ventas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
+  CONSTRAINT historial_ventas_id_usuario_cliente_fkey FOREIGN KEY (id_usuario_cliente) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago)
 );
 CREATE TABLE public.metodos_de_pago (
@@ -112,7 +115,9 @@ CREATE TABLE public.notificaciones (
   fecha date,
   leido boolean,
   id_usuario bigint,
+  id_cuenta bigint,
   CONSTRAINT notificaciones_pkey PRIMARY KEY (id_notificacion),
+  CONSTRAINT notificaciones_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT notificaciones_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.ordenes (
@@ -125,7 +130,7 @@ CREATE TABLE public.ordenes (
   id_carrito bigint,
   comprobante text,
   referencia text,
-  tasa_bs integer,
+  tasa_bs double precision,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito)
@@ -161,6 +166,7 @@ CREATE TABLE public.plataformas (
   correo_cliente boolean,
   clave_cliente boolean,
   no_disponible boolean,
+  mas_perfiles boolean,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
   CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );

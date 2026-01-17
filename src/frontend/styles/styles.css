@@ -28,11 +28,11 @@ body {
 
 .search {
   flex: 1 1 auto;
-  padding: 0 12px;
   border-radius: 6px;
   border: none;
   width: 100%;
   height: 30px;
+  text-indent: 4px;
 }
 
 .search-box {
@@ -454,24 +454,6 @@ body {
   font-weight: 700;
 }
 
-.inventario-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 10px;
-}
-
-.inventario-table th,
-.inventario-table td {
-  border: 1px solid #e5e5e5;
-  padding: 8px;
-  font-size: 13px;
-}
-
-.inventario-table th {
-  background: #f8f8f8;
-  text-align: left;
-}
-
 .inventario-plan {
   margin-top: 8px;
 }
@@ -483,7 +465,6 @@ body {
 
 .btn-outline,
 .btn-primary {
-  width: 100%;
   padding: 10px 14px;
   border-radius: 10px;
   font-weight: 700;
@@ -1115,6 +1096,40 @@ input[type="number"].input-inline {
 .modal-card-proximas {
   max-width: 720px;
   width: 95%;
+}
+
+.table-base {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.table-base th,
+.table-base td {
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 3px 10px;
+  text-align: left;
+  font-size: 16px;
+  font-weight: 500;
+}
+.table-base th {
+  background: var(--table-header-bg, #2c2f36);
+  color: #fff;
+  padding: 5px 10px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+/* Contenedor de tablas (datos de cuentas) */
+.cuenta-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
 }
 
 .modal-card-renovar-sel {

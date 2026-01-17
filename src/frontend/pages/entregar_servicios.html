@@ -53,17 +53,17 @@
         }
       };
 
-      const renderTablas = (grouped) => {
+      const renderTablas = (plataformas) => {
         if (!tablasEl) return;
-        const platEntries = Object.entries(grouped);
-        if (!platEntries.length) {
+        if (!plataformas.length) {
           setStatus("No hay servicios para entregar.");
           tablasEl.innerHTML = "";
           return;
         }
         setStatus("");
-        tablasEl.innerHTML = platEntries
-          .map(([plat, rows]) => {
+        tablasEl.innerHTML = plataformas
+          .map((platObj) => {
+            const rows = platObj.rows || [];
             const body = rows
               .map((r) => {
                 const perfilTxt = r.perfil || "";
@@ -106,9 +106,9 @@
               .join("");
             return `
               <div class="proximas-bloque">
-                <h3 class="proximas-title">${plat}</h3>
+                <h3 class="proximas-title">${platObj.nombre}</h3>
                 <div class="cuenta-table-wrap">
-                  <table class="proximas-table">
+                  <table class="table-base" style="${platObj.color_1 ? `--table-header-bg:${platObj.color_1};` : ""}">
                     <thead>
                       <tr>
                         <th>ID Venta</th>
@@ -117,10 +117,10 @@
                         <th>Perfil / Acceso</th>
                         <th>Fecha de corte</th>
                         <th>Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody>${body}</tbody>
-                  </table>
+                     </tr>
+                   </thead>
+                   <tbody>${body}</tbody>
+                 </table>
                 </div>
               </div>
             `;
@@ -156,7 +156,7 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, por_acceso, usa_pines")
+              .select("id_plataforma, nombre, por_acceso, usa_pines, color_1")
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
@@ -171,7 +171,7 @@
             if (!platId) return;
             const plat = platMap[platId] || {};
             const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
-            if (!grouped[platName]) grouped[platName] = [];
+            if (!grouped[platId]) grouped[platId] = { nombre: platName, color_1: plat.color_1 || null, rows: [] };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
             const ventaPerfil = v.cuentas?.venta_perfil;
@@ -181,7 +181,7 @@
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
-            grouped[platName].push({
+            grouped[platId].rows.push({
               id_venta: v.id_venta,
               correo: v.cuentas?.correo || "",
               clave: v.cuentas?.clave || "",
@@ -200,7 +200,7 @@
             });
           });
 
-          renderTablas(grouped);
+          renderTablas(Object.values(grouped));
         } catch (err) {
           console.error("entregar servicios error", err);
           setStatus("No se pudieron cargar los servicios.");
