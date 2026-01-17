@@ -1043,6 +1043,7 @@ input[type="number"].input-inline {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+  min-width: 720px;
 }
 
 .proximas-table td {
@@ -1083,6 +1084,7 @@ input[type="number"].input-inline {
 #buscador-resultado .proximas-table {
   margin: 0;
   table-layout: auto;
+  min-width: 640px;
 }
 #buscador-resultado .proximas-table th,
 #buscador-resultado .proximas-table td {

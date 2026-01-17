@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Entregar servicios</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Entregar servicios</h2>
+      <div id="entregar-status" class="status">Cargando servicios...</div>
+      <div id="entregar-tablas"></div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
+      import { buildServiceCopyText } from "../scripts/copy-format.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#entregar-status");
+      const tablasEl = document.querySelector("#entregar-tablas");
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const copyToClipboard = async (text, anchor) => {
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (err) {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        if (anchor) {
+          anchor.textContent = "Copiado";
+          setTimeout(() => (anchor.textContent = "Copiar"), 1200);
+        }
+      };
+
+      const renderTablas = (grouped) => {
+        if (!tablasEl) return;
+        const platEntries = Object.entries(grouped);
+        if (!platEntries.length) {
+          setStatus("No hay servicios para entregar.");
+          tablasEl.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        tablasEl.innerHTML = platEntries
+          .map(([plat, rows]) => {
+            const body = rows
+              .map((r) => {
+                const perfilTxt = r.perfil || "";
+                const isPendiente = r.pendiente;
+                const copyText = isPendiente
+                  ? ""
+                  : buildServiceCopyText({
+                      plataforma: r.plataforma,
+                      idVenta: r.id_venta,
+                      correo: r.correo,
+                      clave: r.clave,
+                      nPerfil: r.n_perfil,
+                      pin: r.pin,
+                      fechaCorte: r.fecha_corte,
+                      porAcceso: r.por_acceso,
+                      usaPines: r.usa_pines,
+                      ventaPerfil: r.venta_perfil,
+                      ventaMiembro: r.venta_miembro,
+                      idPlataforma: r.id_plataforma,
+                      perfilHogar: r.perfil_hogar,
+                      isSubCuenta: r.es_subcuenta,
+                    });
+                return `
+                  <tr>
+                    <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
+                    <td>${r.correo || ""}</td>
+                    <td>${r.clave || ""}</td>
+                    <td>${perfilTxt}</td>
+                    <td>${r.fecha_corte || (isPendiente ? "Pendiente" : "")}</td>
+                    <td>
+                      ${
+                        isPendiente
+                          ? '<span class="badge badge-warning">Pendiente</span>'
+                          : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
+                      }
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${plat}</h3>
+                <div class="cuenta-table-wrap">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Correo</th>
+                        <th>Clave</th>
+                        <th>Perfil / Acceso</th>
+                        <th>Fecha de corte</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>${body}</tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const loadServicios = async () => {
+        try {
+          const user = await loadCurrentUser();
+          const userId = user?.id_usuario;
+          if (!userId) {
+            setStatus("Usuario no autenticado.");
+            return;
+          }
+          const { data: ventas, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, fecha_corte, id_perfil, id_precio, pendiente, cuentas:cuentas(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)"
+            )
+            .eq("id_usuario", userId)
+            .order("id_venta", { ascending: false });
+          if (error) throw error;
+
+          const platIds = Array.from(
+            new Set(
+              (ventas || []).map((v) => v.cuentas?.id_plataforma || v.precios?.id_plataforma).filter(Boolean)
+            )
+          );
+          let platMap = {};
+          if (platIds.length) {
+            const { data: plats, error: platErr } = await supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre, por_acceso, usa_pines")
+              .in("id_plataforma", platIds);
+            if (platErr) throw platErr;
+            platMap = (plats || []).reduce((acc, p) => {
+              acc[p.id_plataforma] = p;
+              return acc;
+            }, {});
+          }
+
+          const grouped = {};
+          (ventas || []).forEach((v) => {
+            const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
+            if (!platId) return;
+            const plat = platMap[platId] || {};
+            const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
+            if (!grouped[platName]) grouped[platName] = [];
+            const porAcceso = !!plat.por_acceso;
+            const usaPines = !!plat.usa_pines;
+            const ventaPerfil = v.cuentas?.venta_perfil;
+            const ventaMiembro = v.cuentas?.venta_miembro;
+            const perfilTxt = porAcceso
+              ? "1 acceso"
+              : v.perfiles?.n_perfil
+              ? `M${v.perfiles.n_perfil}`
+              : "";
+            grouped[platName].push({
+              id_venta: v.id_venta,
+              correo: v.cuentas?.correo || "",
+              clave: v.cuentas?.clave || "",
+              n_perfil: v.perfiles?.n_perfil || "",
+              pin: v.perfiles?.pin || "",
+              fecha_corte: v.fecha_corte || "",
+              plataforma: platName,
+              id_plataforma: platId,
+              por_acceso: porAcceso,
+              usa_pines: usaPines,
+              venta_perfil: ventaPerfil,
+              venta_miembro: ventaMiembro,
+              perfil_hogar: v.perfiles?.perfil_hogar,
+              perfil: perfilTxt,
+              pendiente: !!v.pendiente,
+            });
+          });
+
+          renderTablas(grouped);
+        } catch (err) {
+          console.error("entregar servicios error", err);
+          setStatus("No se pudieron cargar los servicios.");
+        }
+      };
+
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-copy");
+        if (!btn) return;
+        const text = decodeURIComponent(btn.dataset.copy || "");
+        copyToClipboard(text, btn);
+      });
+
+      loadServicios();
+    </script>
+  </body>
+</html>

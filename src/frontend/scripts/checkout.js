@@ -391,7 +391,7 @@ btnSendPayment?.addEventListener("click", async () => {
       console.error("update notificacion_inventario error", flagErr);
     }
     alert("Pago enviado correctamente.");
-    window.location.href = "index.html";
+    window.location.href = "entregar_servicios.html";
   } catch (err) {
     console.error("checkout submit error", err);
     alert("No se pudo enviar el pago. Intenta de nuevo.");

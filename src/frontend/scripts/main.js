@@ -249,6 +249,14 @@ async function init() {
       acc[plat.id_categoria].push(plat);
       return acc;
     }, {});
+    Object.keys(plataformasPorCategoria).forEach((catId) => {
+      plataformasPorCategoria[catId].sort((a, b) => {
+        const ia = Number(a.id_plataforma);
+        const ib = Number(b.id_plataforma);
+        if (Number.isFinite(ia) && Number.isFinite(ib)) return ia - ib;
+        return 0;
+      });
+    });
 
     setEstado("");
     renderCategorias(contenedor, categorias, plataformasPorCategoria);

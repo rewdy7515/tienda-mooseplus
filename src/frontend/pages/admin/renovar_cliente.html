@@ -239,6 +239,9 @@
                           data-venta="${it.id_venta ?? ""}"
                           data-correo="${it.correo || ""}"
                           data-plataforma="${plat}"
+                          data-id-plataforma="${it.id_plataforma || ""}"
+                          data-id-cuenta="${it.id_cuenta || ""}"
+                          data-id-usuario="${it.id_usuario_cliente || ""}"
                           data-fechacorte="${it.fecha_corte_raw || ""}"
                         />
                       </label>
@@ -734,17 +737,19 @@
             return `
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${plat}</h3>
-                <table class="proximas-table">
-                  <thead>
-                    <tr>
-                      <th>Correo</th>
-                      <th>Duración</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${rowsHtml}
-                  </tbody>
-                </table>
+                <div class="proximas-table-wrap">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>
+                        <th>Correo</th>
+                        <th>Duración</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rowsHtml}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             `;
           })
@@ -759,6 +764,9 @@
           id_venta: chk.dataset.venta || "",
           correo: chk.dataset.correo || "",
           plataforma: chk.dataset.plataforma || "",
+          id_plataforma: chk.dataset.idPlataforma || null,
+          id_cuenta: chk.dataset.idCuenta || null,
+          id_usuario_cliente: chk.dataset.idUsuario || null,
           meses: 1,
           fecha_corte: chk.dataset.fechacorte || "",
           uid: idx,
@@ -832,6 +840,9 @@
         try {
           const hoy = new Date();
           const fechaPago = hoy.toISOString().slice(0, 10);
+          const registradoPor = window.__RC_USER_ID__ || null;
+          const metodoId = metodo ? Number(metodo) : null;
+          const refValue = ref || null;
           const updates = seleccionActual.map(async (it) => {
             let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
             if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
@@ -842,6 +853,21 @@
               .update({ fecha_corte: nuevaCorte, fecha_pago: fechaPago })
               .eq("id_venta", it.id_venta);
             if (error) throw error;
+
+            const { error: histErr } = await supabase.from("historial_ventas").insert({
+              monto: 0,
+              fecha_pago: fechaPago,
+              venta_cliente: true,
+              renovacion: true,
+              id_venta: it.id_venta,
+              id_plataforma: it.id_plataforma ? Number(it.id_plataforma) : null,
+              id_cuenta: it.id_cuenta ? Number(it.id_cuenta) : null,
+              registrado_por: registradoPor,
+              id_usuario_cliente: it.id_usuario_cliente ? Number(it.id_usuario_cliente) : null,
+              id_metodo_de_pago: metodoId,
+              referencia: refValue,
+            });
+            if (histErr) throw histErr;
           });
           await Promise.all(updates);
           alert("Renovación aplicada.");

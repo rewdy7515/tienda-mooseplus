@@ -2,30 +2,20 @@
   overflow-x: auto;
 }
 
-/* Anchos para tabla de admin_cuentas */
+/* Anchos flexibles para la tabla de admin_cuentas */
 #cuenta-detalle .proximas-table {
-  table-layout: fixed;
+  table-layout: auto;
   width: 100%;
 }
 #cuenta-detalle .proximas-table th {
   background: #444;
   color: #fff;
+  white-space: nowrap;
+  padding: 5px;
 }
-#cuenta-detalle .proximas-table th:nth-child(1),
-#cuenta-detalle .proximas-table td:nth-child(1) {
-  width: 120px;
-}
-#cuenta-detalle .proximas-table th:nth-child(2),
-#cuenta-detalle .proximas-table td:nth-child(2) {
-  width: 140px;
-}
-#cuenta-detalle .proximas-table th:nth-child(3),
-#cuenta-detalle .proximas-table td:nth-child(3) {
-  width: 100px;
-}
-#cuenta-detalle .proximas-table th:nth-child(4),
-#cuenta-detalle .proximas-table td:nth-child(4) {
-  width: 160px;
+#cuenta-detalle .proximas-table td {
+  white-space: nowrap;
+  padding: 5px;
 }
 
 #cuenta-detalle .proximas-table tbody tr:nth-child(1) {
@@ -234,19 +224,18 @@
   transform: translateX(20px);
 }
 
-.toggle-small {
+.toggle-label.toggle-small .toggle-switch {
   width: 46px;
   height: 22px;
 }
-.toggle-small::after {
+.toggle-label.toggle-small .toggle-switch::after {
   width: 18px;
   height: 18px;
   top: 2px;
   left: 2px;
 }
-.toggle-small input[type="checkbox"]:checked + .toggle-switch::after,
-.toggle-small .toggle-switch::after {
-  transform: none;
+.toggle-label.toggle-small input[type="checkbox"]:checked + .toggle-switch::after {
+  transform: translateX(18px);
 }
 
 .toggle-green {

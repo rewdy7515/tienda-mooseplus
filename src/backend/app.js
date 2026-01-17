@@ -15,6 +15,19 @@ app.use(express.json({ limit: "10mb" }));
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
+// Suma meses manteniendo el día; si el mes destino no tiene ese día, usa el último día de ese mes.
+function addMonthsKeepDay(baseDate, months) {
+  const d = new Date(baseDate);
+  if (Number.isNaN(d.valueOf())) return null;
+  const day = d.getDate();
+  const targetMonth = d.getMonth() + months;
+  const targetYear = d.getFullYear();
+  const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const clampedDay = Math.min(day, daysInTargetMonth);
+  const result = new Date(targetYear, targetMonth, clampedDay);
+  return result.toISOString().slice(0, 10);
+}
+
 // Usa el id de usuario autenticado que envíe el cliente.
 const parseSessionUserId = (req) => {
   const raw = req?.headers?.cookie || "";
@@ -176,7 +189,6 @@ app.post("/api/cart/item", async (req, res) => {
       if (selErr) throw selErr;
       existing = data || null;
     }
-    if (selErr) throw selErr;
     // Filtra por id_venta según sea null o definido
     const matchesVenta =
       id_venta === undefined || id_venta === null
@@ -948,10 +960,8 @@ app.post("/api/checkout", async (req, res) => {
       const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
       const base = (Number(price.precio_usd_detal) || 0) * cantidadVal * mesesVal;
       const monto = Number(base.toFixed(2));
-      const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || null;
-      const fechaBase = fechaBaseSrc ? new Date(fechaBaseSrc) : new Date();
-      fechaBase.setMonth(fechaBase.getMonth() + mesesVal);
-      const fecha_corte = fechaBase.toISOString().slice(0, 10);
+      const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || isoHoy;
+      const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
       return supabaseAdmin
         .from("ventas")
         .update({
@@ -1000,7 +1010,7 @@ app.post("/api/checkout", async (req, res) => {
               .eq("cuentas.id_plataforma", platId)
               .eq("cuentas.venta_perfil", ventaPerfilFlag)
               .or("ocupado.is.null,ocupado.eq.false")
-              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .eq("cuentas.inactiva", false)
               .limit(cantidad);
             if (error) throw error;
             return data || [];
@@ -1008,7 +1018,7 @@ app.post("/api/checkout", async (req, res) => {
 
           // 1) perfiles hogar en cuentas venta_perfil = true
           let perfilesDisp = await fetchPerf(true);
-          perfilesDisp = perfilesDisp.filter((p) => !p.ocupado);
+          perfilesDisp = perfilesDisp.filter((p) => !p.ocupado && p?.cuentas?.inactiva === false);
           const takePref = perfilesDisp.slice(0, cantidad - usedPerfiles.length);
           takePref.forEach((p) => {
             asignaciones.push({
@@ -1027,7 +1037,7 @@ app.post("/api/checkout", async (req, res) => {
           if (faltantesPref > 0) {
             // 2) perfiles hogar en cuentas venta_miembro = true
             let perfilesAlt = await fetchPerf(false);
-            perfilesAlt = perfilesAlt.filter((p) => !p.ocupado);
+            perfilesAlt = perfilesAlt.filter((p) => !p.ocupado && p?.cuentas?.inactiva === false);
             const takeAlt = perfilesAlt.slice(0, faltantesPref);
             takeAlt.forEach((p) => {
               asignaciones.push({
@@ -1050,12 +1060,12 @@ app.post("/api/checkout", async (req, res) => {
               .from("sub_cuentas")
               .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
               .eq("cuentas.id_plataforma", platId)
-              .or("cuentas.venta_miembro.eq.true,cuentas.venta_perfil.eq.true")
+              .or("venta_miembro.eq.true,venta_perfil.eq.true", { foreignTable: "cuentas" })
               .or("ocupado.is.null,ocupado.eq.false")
-              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .eq("cuentas.inactiva", false)
               .limit(faltantesPerf);
             if (subErr) throw subErr;
-            const disponibles = (subLibres || []).filter((s) => !s.ocupado);
+            const disponibles = (subLibres || []).filter((s) => !s.ocupado && s?.cuentas?.inactiva === false);
             const faltantes = Math.max(0, faltantesPerf - disponibles.length);
             disponibles.slice(0, faltantesPerf).forEach((s) => {
               asignaciones.push({
@@ -1093,11 +1103,11 @@ app.post("/api/checkout", async (req, res) => {
             .eq("cuentas.venta_miembro", true)
             .eq("cuentas.venta_perfil", false)
             .or("ocupado.is.null,ocupado.eq.false")
-            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+            .eq("cuentas.inactiva", false)
             .limit(cantidad);
           if (hogarErr) throw hogarErr;
 
-          const perfilesDisp = perfilesHogar || [];
+          const perfilesDisp = (perfilesHogar || []).filter((p) => p?.cuentas?.inactiva === false);
           const usadosPerf = perfilesDisp.slice(0, cantidad);
           usadosPerf.forEach((p) => {
             asignaciones.push({
@@ -1120,10 +1130,10 @@ app.post("/api/checkout", async (req, res) => {
               .eq("cuentas.venta_miembro", true)
               .eq("cuentas.venta_perfil", false)
               .or("ocupado.is.null,ocupado.eq.false")
-              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .eq("cuentas.inactiva", false)
               .limit(faltantesPerf);
             if (subErr) throw subErr;
-            const disponibles = subLibres || [];
+            const disponibles = (subLibres || []).filter((s) => s?.cuentas?.inactiva === false);
             const faltantes = Math.max(0, faltantesPerf - disponibles.length);
             disponibles.slice(0, faltantesPerf).forEach((s) => {
               asignaciones.push({
@@ -1160,7 +1170,7 @@ app.post("/api/checkout", async (req, res) => {
           .eq("venta_perfil", false)
           .eq("venta_miembro", false)
           .or("ocupado.is.null,ocupado.eq.false")
-          .or("inactiva.is.null,inactiva.eq.false")
+          .eq("inactiva", false)
           .limit(cantidad);
         if (ctaErr) throw ctaErr;
         const disponibles = cuentasLibres || [];
@@ -1196,7 +1206,7 @@ app.post("/api/checkout", async (req, res) => {
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", true)
           .or("ocupado.is.null,ocupado.eq.false")
-          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .eq("cuentas.inactiva", false)
           .limit(cantidad);
         if (perfErr) throw perfErr;
         const disponibles = perfilesLibres || [];
@@ -1248,6 +1258,9 @@ app.post("/api/checkout", async (req, res) => {
         Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
           ? Math.max(1, Math.round(Number(mesesValRaw)))
           : 1;
+      const fechaCorte = a.pendiente
+        ? null
+        : addMonthsKeepDay(new Date().toISOString().slice(0, 10), mesesVal);
       return {
         id_usuario: idUsuarioVentas,
         id_precio: a.id_precio,
@@ -1258,13 +1271,7 @@ app.post("/api/checkout", async (req, res) => {
         monto: Number(a.monto) || 0,
         pendiente: !!a.pendiente,
         meses_contratados: mesesVal,
-        fecha_corte: a.pendiente
-          ? null
-          : (() => {
-              const d = new Date();
-            d.setMonth(d.getMonth() + mesesVal);
-            return d.toISOString().slice(0, 10);
-          })(),
+        fecha_corte: fechaCorte,
       };
     });
     console.log("[checkout] asignaciones", asignaciones);

@@ -490,14 +490,14 @@
               .from("ventas")
               .update({ id_admin_venta: adminId })
               .eq("id_orden", resp.id_orden);
-            if (updVentaErr) {
-              console.error("set id_admin_venta error", updVentaErr);
-            }
+          if (updVentaErr) {
+            console.error("set id_admin_venta error", updVentaErr);
           }
-          alert("Pedido procesado y asignado al cliente.");
-          window.location.href = "index.html";
-        } catch (err) {
-          console.error("procesar cuenta nueva error", err);
+        }
+        alert("Pedido procesado y asignado al cliente.");
+        window.location.href = "entregar_servicios.html";
+      } catch (err) {
+        console.error("procesar cuenta nueva error", err);
           alert("No se pudo procesar el pedido.");
         }
       });

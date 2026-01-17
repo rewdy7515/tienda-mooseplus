@@ -49,6 +49,13 @@
       .cortes-table tbody tr:nth-child(even) {
         background: #fff;
       }
+      .cortes-row {
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+      }
+      .cortes-row.selected {
+        background: #e3f2ff !important;
+      }
       .cortes-hidden {
         display: none;
       }
@@ -175,8 +182,21 @@
                   const cuentaId = v.id_cuenta || "";
                   const perfilId = v.id_perfil || "";
                   const subId = v.id_sub_cuenta || "";
+                  const copyText = buildServiceCopyText({
+                    plataforma: plataforma.nombre,
+                    idVenta: null,
+                    correo: v.correo,
+                    clave: v.clave,
+                    nPerfil: v.perfil,
+                    pin: v.pin,
+                    fechaCorte: "",
+                    porAcceso: plataforma.por_acceso,
+                    usaPines: plataforma.usa_pines,
+                    ventaPerfil: v.cuentas?.venta_perfil,
+                    ventaMiembro: v.cuentas?.venta_miembro,
+                  });
                   return `
-                    <tr>
+                    <tr class="cortes-row" data-row-type="reemplazo">
                       <td>-</td>
                       <td>Reemplazado</td>
                       <td class="copy-cell" data-copy="${v.correo || ""}">${v.correo || "-"}</td>
@@ -190,7 +210,10 @@
                         <input type="text" class="input-inline" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
                       </td>
                       <td></td>
-                      <td><button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button></td>
+                      <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button type="button" class="btn-outline accion-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
+                        <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
+                      </td>
                     </tr>
                   `;
                 }
@@ -204,8 +227,21 @@
                 const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
                 const cuentaId = v.cuentas?.id_cuenta || "";
                 const perfilId = v.perfiles?.id_perfil || "";
+                const copyText = buildServiceCopyText({
+                  plataforma: plataforma.nombre,
+                  idVenta: v.id_venta,
+                  correo,
+                  clave,
+                  nPerfil: v.perfiles?.n_perfil,
+                  pin,
+                  fechaCorte: v.fecha_corte,
+                  porAcceso: plataforma.por_acceso,
+                  usaPines: plataforma.usa_pines,
+                  ventaPerfil: v.cuentas?.venta_perfil,
+                  ventaMiembro: v.cuentas?.venta_miembro,
+                });
                 return `
-                  <tr>
+                  <tr class="cortes-row" data-row-type="venta">
                     <td>${ventaId ? `#${ventaId}` : ""}</td>
                     <td>${cliente}</td>
                     <td class="copy-cell" data-copy="${correo}">${correo}</td>
@@ -217,7 +253,10 @@
                     <td>${perfil}</td>
                     <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
                     <td>${v.fecha_corte || ""}</td>
-                    <td><button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button></td>
+                    <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                      <button type="button" class="btn-outline accion-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
+                      <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
+                    </td>
                   </tr>
                 `;
               })
@@ -259,10 +298,12 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma), perfiles:perfiles(id_perfil, n_perfil, pin)"
+              "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin)"
+              "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
             )
             .lte("fecha_corte", today)
-            .or("suspendido.is.null,suspendido.eq.false");
+            .or("suspendido.is.null,suspendido.eq.false")
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
           if (error) throw error;
 
           const map = new Map();
@@ -283,8 +324,9 @@
           const { data: reemplazos, error: replErr } = await supabase
             .from("reemplazos")
             .select(
-              "id_reemplazo, id_cuenta, id_perfil, id_sub_cuenta, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma), perfiles:perfiles(id_perfil, n_perfil, pin), sub_cuentas:sub_cuentas(id_sub_cuenta, correo, clave, pin)"
-            );
+              "id_reemplazo, id_cuenta, id_perfil, id_sub_cuenta, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin), sub_cuentas:sub_cuentas(id_sub_cuenta, correo, clave, pin)"
+            )
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
           if (replErr) throw replErr;
           (reemplazos || []).forEach((r) => {
             const platId = r.cuentas?.id_plataforma;
@@ -311,7 +353,7 @@
 
           const { data: plataformasInfo, error: platErr } = await supabase
             .from("plataformas")
-            .select("id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave")
+            .select("id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, por_acceso")
             .in("id_plataforma", platIds);
           if (platErr) throw platErr;
           const platNameMap = (plataformasInfo || []).reduce((acc, p) => {
@@ -326,6 +368,10 @@
             acc[p.id_plataforma] = !!p.usa_pines;
             return acc;
           }, {});
+          const platAccessMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.por_acceso;
+            return acc;
+          }, {});
           platCorteClaveMap = (plataformasInfo || []).reduce((acc, p) => {
             acc[p.id_plataforma] = !!p.corte_por_clave;
             return acc;
@@ -337,6 +383,7 @@
               nombre: platNameMap[entry.plataforma.id_plataforma] || `Plataforma ${entry.plataforma.id_plataforma}`,
               max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
               usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
+              por_acceso: platAccessMap[entry.plataforma.id_plataforma] || false,
             },
             items: entry.items,
           }));
@@ -383,7 +430,18 @@
         setTimeout(() => toast?.remove(), 1200);
       };
 
+      const selectRow = (target) => {
+        const row = target?.closest(".cortes-row");
+        if (!row) return;
+        const tbody = row.closest("tbody");
+        if (tbody) {
+          tbody.querySelectorAll(".cortes-row.selected").forEach((r) => r.classList.remove("selected"));
+        }
+        row.classList.add("selected");
+      };
+
       tablasEl?.addEventListener("click", (e) => {
+        selectRow(e.target);
         const copyCell = e.target.closest(".copy-cell");
         if (copyCell) {
           copyToClipboard(copyCell.dataset.copy || copyCell.textContent.trim(), copyCell);
