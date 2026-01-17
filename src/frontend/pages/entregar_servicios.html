@@ -28,6 +28,9 @@
       const statusEl = document.querySelector("#entregar-status");
       const tablasEl = document.querySelector("#entregar-tablas");
 
+      const params = new URLSearchParams(window.location.search);
+      const idOrdenParam = params.get("id_orden");
+
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
@@ -129,17 +132,19 @@
         try {
           const user = await loadCurrentUser();
           const userId = user?.id_usuario;
-          if (!userId) {
-            setStatus("Usuario no autenticado.");
-            return;
+          const baseSelect =
+            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, cuentas:cuentas(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
+          let query = supabase.from("ventas").select(baseSelect).order("id_venta", { ascending: false });
+          if (idOrdenParam) {
+            query = query.eq("id_orden", idOrdenParam);
+          } else {
+            if (!userId) {
+              setStatus("Usuario no autenticado.");
+              return;
+            }
+            query = query.eq("id_usuario", userId);
           }
-          const { data: ventas, error } = await supabase
-            .from("ventas")
-            .select(
-              "id_venta, fecha_corte, id_perfil, id_precio, pendiente, cuentas:cuentas(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)"
-            )
-            .eq("id_usuario", userId)
-            .order("id_venta", { ascending: false });
+          const { data: ventas, error } = await query;
           if (error) throw error;
 
           const platIds = Array.from(

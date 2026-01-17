@@ -12,7 +12,174 @@
 
     <main class="categorias-dinamicas">
       <h2>Pedidos pendientes</h2>
-      <p class="status">Próximamente: listado de pedidos.</p>
+      <p id="pp-status" class="status">Cargando pedidos...</p>
+      <div id="pp-tablas"></div>
     </main>
+
+    <script type="module">
+      import { supabase, loadCurrentUser, clearServerSession } from "../../scripts/api.js";
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#pp-status");
+      const tablasEl = document.querySelector("#pp-tablas");
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const render = (grouped) => {
+        if (!tablasEl) return;
+        const entries = Object.entries(grouped);
+        if (!entries.length) {
+          setStatus("No hay pedidos pendientes.");
+          tablasEl.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        tablasEl.innerHTML = entries
+          .map(([plat, rows]) => {
+            const body = rows
+              .map(
+                (r) => `
+              <tr>
+                <td>#${String(r.id_venta).padStart(4, "0")}</td>
+                <td>${r.cliente || "-"}</td>
+                <td>${r.fecha_pago || "-"}</td>
+                <td>${r.servicio || "-"}</td>
+                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}">Entregar servicio</button></td>
+              </tr>
+            `
+              )
+              .join("");
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${plat}</h3>
+                <div class="cuenta-table-wrap">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Cliente</th>
+                        <th>Fecha de pago</th>
+                        <th>Servicio solicitado</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>${body}</tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const loadPendientes = async () => {
+        try {
+          const user = await loadCurrentUser();
+          if (!user) {
+            setStatus("Usuario no autenticado.");
+            return;
+          }
+          const { data: ventas, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, id_usuario, id_precio, fecha_pago, pendiente, precios:precios(id_plataforma, plan), cuentas:cuentas(id_plataforma, correo, clave)"
+            )
+            .eq("pendiente", true)
+            .order("id_venta", { ascending: false });
+          if (error) throw error;
+
+          if (!ventas?.length) {
+            render({});
+            return;
+          }
+
+          const precioIds = [...new Set(ventas.map((v) => v.id_precio).filter(Boolean))];
+          const userIds = [...new Set(ventas.map((v) => v.id_usuario).filter(Boolean))];
+
+          let precioMap = {};
+          if (precioIds.length) {
+            const { data: precios, error: pErr } = await supabase
+              .from("precios")
+              .select("id_precio, id_plataforma, plan")
+              .in("id_precio", precioIds);
+            if (pErr) throw pErr;
+            precioMap = (precios || []).reduce((acc, p) => {
+              acc[p.id_precio] = p;
+              return acc;
+            }, {});
+          }
+
+          let userMap = {};
+          if (userIds.length) {
+            const { data: usuarios, error: uErr } = await supabase
+              .from("usuarios")
+              .select("id_usuario, nombre, apellido")
+              .in("id_usuario", userIds);
+            if (uErr) throw uErr;
+            userMap = (usuarios || []).reduce((acc, u) => {
+              const full = [u.nombre, u.apellido].filter(Boolean).join(" ").trim();
+              acc[u.id_usuario] = full || `Usuario ${u.id_usuario}`;
+              return acc;
+            }, {});
+          }
+
+          let platMap = {};
+          const platIds = [
+            ...new Set(
+              ventas
+                .map((v) => v.precios?.id_plataforma || v.cuentas?.id_plataforma || precioMap[v.id_precio]?.id_plataforma)
+                .filter(Boolean)
+            ),
+          ];
+          if (platIds.length) {
+            const { data: plats, error: platErr } = await supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre")
+              .in("id_plataforma", platIds);
+            if (platErr) throw platErr;
+            platMap = (plats || []).reduce((acc, p) => {
+              acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
+              return acc;
+            }, {});
+          }
+
+          const grouped = {};
+          (ventas || []).forEach((v) => {
+            const precio = precioMap[v.id_precio] || v.precios || {};
+            const platId = precio.id_plataforma || v.cuentas?.id_plataforma;
+            const platName = platMap[platId] || `Plataforma ${platId || "-"}`;
+            const cliente = userMap[v.id_usuario] || "-";
+            const servicio = precio.plan ? `${platName} - ${precio.plan}` : platName;
+            if (!grouped[platName]) grouped[platName] = [];
+            grouped[platName].push({
+              id_venta: v.id_venta,
+              cliente,
+              fecha_pago: v.fecha_pago || "-",
+              servicio,
+            });
+          });
+
+          render(grouped);
+        } catch (err) {
+          console.error("pedidos pendientes error", err);
+          setStatus("No se pudieron cargar los pedidos.");
+        }
+      };
+
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-entregar");
+        if (!btn) return;
+        const idVenta = btn.dataset.venta;
+        alert(`Entregar servicio para venta ${idVenta}`);
+      });
+
+      loadPendientes();
+    </script>
   </body>
 </html>

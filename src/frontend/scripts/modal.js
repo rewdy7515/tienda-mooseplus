@@ -121,7 +121,13 @@ const renderPrecios = (plataformaId, flags) => {
   Object.entries(agrupados).forEach(([plan, items]) => {
     const wrapper = document.createElement("div");
     wrapper.className = "plan-bloque";
-    const stockPlan = stockByPlatform[plataformaId] ?? 0;
+    let stockPlan = stockByPlatform[plataformaId] ?? 0;
+    if (Number(plataformaId) === 1) {
+      const hasSubCuenta = items.some((op) => op.sub_cuenta === true || op.sub_cuenta === "true" || op.sub_cuenta === 1);
+      const planLower = (plan || "").toLowerCase();
+      const isPlan2 = hasSubCuenta || planLower.includes("hogar") || planLower.includes("extra");
+      stockPlan = stockByPlatform[isPlan2 ? "1_plan2" : "1_plan1"] ?? stockPlan;
+    }
     const stockText = `Perfiles disponibles: ${stockPlan}`;
     const planTitle = plan ? `${plan} · ${stockText}` : stockText;
     const planLabel = `<p class="plan-titulo">${planTitle}</p>`;

@@ -1002,25 +1002,20 @@ app.post("/api/checkout", async (req, res) => {
         const usedPerfiles = [];
         // Caso especial plataforma 1: prioriza perfiles hogar en cuentas venta_perfil, luego venta_miembro, luego sub_cuentas.
         if (platId === 1) {
-          const fetchPerf = async (ventaPerfilFlag) => {
-            const { data, error } = await supabaseAdmin
-              .from("perfiles")
-              .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
-              .eq("perfil_hogar", true)
-              .eq("cuentas.id_plataforma", platId)
-              .eq("cuentas.venta_perfil", ventaPerfilFlag)
-              .or("ocupado.is.null,ocupado.eq.false")
-              .eq("cuentas.inactiva", false)
-              .limit(cantidad);
-            if (error) throw error;
-            return data || [];
-          };
-
-          // 1) perfiles hogar en cuentas venta_perfil = true
-          let perfilesDisp = await fetchPerf(true);
-          perfilesDisp = perfilesDisp.filter((p) => !p.ocupado && p?.cuentas?.inactiva === false);
-          const takePref = perfilesDisp.slice(0, cantidad - usedPerfiles.length);
-          takePref.forEach((p) => {
+          const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
+            .from("perfiles")
+            .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva)")
+            .eq("perfil_hogar", true)
+            .eq("cuentas.id_plataforma", platId)
+            .or("ocupado.is.null,ocupado.eq.false")
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+            .limit(cantidad);
+          if (perfErr) throw perfErr;
+          const libresHogar = (perfilesHogar || []).filter(
+            (p) => p?.cuentas?.inactiva === false && (p.ocupado === false || p.ocupado === null)
+          );
+          const takeHogar = libresHogar.slice(0, cantidad);
+          takeHogar.forEach((p) => {
             asignaciones.push({
               id_precio: price.id_precio,
               monto: price.precio_usd_detal || 0,
@@ -1033,37 +1028,17 @@ app.post("/api/checkout", async (req, res) => {
             usedPerfiles.push(p.id_perfil);
           });
 
-          const faltantesPref = Math.max(0, cantidad - usedPerfiles.length);
-          if (faltantesPref > 0) {
-            // 2) perfiles hogar en cuentas venta_miembro = true
-            let perfilesAlt = await fetchPerf(false);
-            perfilesAlt = perfilesAlt.filter((p) => !p.ocupado && p?.cuentas?.inactiva === false);
-            const takeAlt = perfilesAlt.slice(0, faltantesPref);
-            takeAlt.forEach((p) => {
-              asignaciones.push({
-                id_precio: price.id_precio,
-                monto: price.precio_usd_detal || 0,
-                id_cuenta: p.id_cuenta,
-                id_perfil: p.id_perfil,
-                id_sub_cuenta: null,
-                meses: mesesItem,
-                pendiente: false,
-              });
-              usedPerfiles.push(p.id_perfil);
-            });
-          }
-
           const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
           if (faltantesPerf > 0) {
             // 3) sub_cuentas libres en cuentas venta_miembro o venta_perfil
-            const { data: subLibres, error: subErr } = await supabaseAdmin
-              .from("sub_cuentas")
-              .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
-              .eq("cuentas.id_plataforma", platId)
-              .or("venta_miembro.eq.true,venta_perfil.eq.true", { foreignTable: "cuentas" })
-              .or("ocupado.is.null,ocupado.eq.false")
-              .eq("cuentas.inactiva", false)
-              .limit(faltantesPerf);
+          const { data: subLibres, error: subErr } = await supabaseAdmin
+            .from("sub_cuentas")
+            .select("id_sub_cuenta, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
+            .eq("cuentas.id_plataforma", platId)
+            .or("venta_miembro.eq.true,venta_perfil.eq.true", { foreignTable: "cuentas" })
+            .or("ocupado.is.null,ocupado.eq.false")
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+            .limit(faltantesPerf);
             if (subErr) throw subErr;
             const disponibles = (subLibres || []).filter((s) => !s.ocupado && s?.cuentas?.inactiva === false);
             const faltantes = Math.max(0, faltantesPerf - disponibles.length);
@@ -1080,17 +1055,9 @@ app.post("/api/checkout", async (req, res) => {
               subCuentasAsignadas.push(s.id_sub_cuenta);
             });
             if (faltantes > 0) {
-              Array.from({ length: faltantes }).forEach(() => {
-                pendientes.push({
-                  id_precio: price.id_precio,
-                  monto: price.precio_usd_detal || 0,
-                  id_cuenta: null,
-                  id_perfil: null,
-                  id_sub_cuenta: null,
-                  meses: mesesItem,
-                  pendiente: true,
-                });
-              });
+              return res
+                .status(400)
+                .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
             }
           }
         } else {
@@ -1148,17 +1115,9 @@ app.post("/api/checkout", async (req, res) => {
               subCuentasAsignadas.push(s.id_sub_cuenta);
             });
             if (faltantes > 0) {
-              Array.from({ length: faltantes }).forEach(() => {
-                pendientes.push({
-                  id_precio: price.id_precio,
-                  monto: price.precio_usd_detal || 0,
-                  id_cuenta: null,
-                  id_perfil: null,
-                  id_sub_cuenta: null,
-                  meses: mesesItem,
-                  pendiente: true,
-                });
-              });
+              return res
+                .status(400)
+                .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
             }
           }
         }
@@ -1170,7 +1129,7 @@ app.post("/api/checkout", async (req, res) => {
           .eq("venta_perfil", false)
           .eq("venta_miembro", false)
           .or("ocupado.is.null,ocupado.eq.false")
-          .eq("inactiva", false)
+          .or("inactiva.is.null,inactiva.eq.false")
           .limit(cantidad);
         if (ctaErr) throw ctaErr;
         const disponibles = cuentasLibres || [];
@@ -1187,27 +1146,24 @@ app.post("/api/checkout", async (req, res) => {
           });
         });
         if (faltantes > 0) {
-          Array.from({ length: faltantes }).forEach(() => {
-            pendientes.push({
-              id_precio: price.id_precio,
-              monto: price.precio_usd_detal || 0,
-              id_cuenta: null,
-              id_perfil: null,
-              id_sub_cuenta: null,
-              meses: mesesItem,
-              pendiente: true,
-            });
-          });
+          return res
+            .status(400)
+            .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
         }
       } else {
-        const { data: perfilesLibres, error: perfErr } = await supabaseAdmin
+        let query = supabaseAdmin
           .from("perfiles")
-          .select("id_perfil, id_cuenta, cuentas!inner(id_plataforma, inactiva, venta_perfil)")
+          .select("id_perfil, id_cuenta, perfil_hogar, cuentas!inner(id_plataforma, inactiva, venta_perfil)")
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", true)
           .or("ocupado.is.null,ocupado.eq.false")
-          .eq("cuentas.inactiva", false)
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
           .limit(cantidad);
+        // Para Netflix (id_plataforma = 1) en plan normal, solo perfiles hogar = false
+        if (platId === 1) {
+          query = query.eq("perfil_hogar", false);
+        }
+        const { data: perfilesLibres, error: perfErr } = await query;
         if (perfErr) throw perfErr;
         const disponibles = perfilesLibres || [];
         const faltantes = Math.max(0, cantidad - disponibles.length);
@@ -1223,17 +1179,9 @@ app.post("/api/checkout", async (req, res) => {
           });
         });
         if (faltantes > 0) {
-          Array.from({ length: faltantes }).forEach(() => {
-            pendientes.push({
-              id_precio: price.id_precio,
-              monto: price.precio_usd_detal || 0,
-              id_cuenta: null,
-              id_perfil: null,
-              id_sub_cuenta: null,
-              meses: mesesItem,
-              pendiente: true,
-            });
-          });
+          return res
+            .status(400)
+            .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
         }
       }
     }

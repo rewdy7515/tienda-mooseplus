@@ -495,7 +495,10 @@
           }
         }
         alert("Pedido procesado y asignado al cliente.");
-        window.location.href = "entregar_servicios.html";
+        const dest = resp?.id_orden
+          ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+          : "entregar_servicios.html";
+        window.location.href = dest;
       } catch (err) {
         console.error("procesar cuenta nueva error", err);
           alert("No se pudo procesar el pedido.");

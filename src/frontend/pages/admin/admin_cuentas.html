@@ -1756,6 +1756,9 @@
               id_cuenta: Number(cuentaId),
               id_perfil: perfilId ? Number(perfilId) : null,
               fecha_corte: fechaVal,
+              fecha_pago: new Date().toISOString().slice(0, 10),
+              pendiente: false,
+              meses_contratados: 1,
             });
             if (error) throw error;
             alert("Servicio registrado.");
