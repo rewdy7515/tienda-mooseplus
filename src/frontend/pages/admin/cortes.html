@@ -194,6 +194,8 @@
                     usaPines: plataforma.usa_pines,
                     ventaPerfil: v.cuentas?.venta_perfil,
                     ventaMiembro: v.cuentas?.venta_miembro,
+                    idPlataforma: plataforma.id_plataforma,
+                    isSubCuenta: !!subId,
                   });
                   return `
                     <tr class="cortes-row" data-row-type="reemplazo">
@@ -239,6 +241,8 @@
                   usaPines: plataforma.usa_pines,
                   ventaPerfil: v.cuentas?.venta_perfil,
                   ventaMiembro: v.cuentas?.venta_miembro,
+                  idPlataforma: plataforma.id_plataforma,
+                  isSubCuenta: false,
                 });
                 return `
                   <tr class="cortes-row" data-row-type="venta">

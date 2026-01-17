@@ -457,6 +457,12 @@
           return;
         }
 
+        const insertCuenta = async (body, forceId = null) => {
+          const payloadCuenta = { ...body };
+          if (forceId !== null) payloadCuenta.id_cuenta = forceId;
+          return supabase.from("cuentas").insert(payloadCuenta).select("id_cuenta").single();
+        };
+
         setStatus("Agregando cuenta...");
         try {
           const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
@@ -505,12 +511,32 @@
             ocupado,
           };
 
-          const { data: cuentaInserted, error } = await supabase
-            .from("cuentas")
-            .insert(payload)
-            .select("id_cuenta")
-            .single();
-          if (error) throw error;
+          let cuentaInserted = null;
+          let insertError = null;
+          try {
+            const res = await insertCuenta(payload);
+            cuentaInserted = res.data;
+            insertError = res.error;
+          } catch (err) {
+            insertError = err;
+          }
+
+          // Si la secuencia está desfasada (23505 en cuentas_pkey), calculamos el siguiente ID y reintentamos
+          if (insertError?.code === "23505") {
+            const { data: lastRows, error: lastErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta")
+              .order("id_cuenta", { ascending: false })
+              .limit(1);
+            if (lastErr) throw insertError;
+            const lastId = lastRows?.[0]?.id_cuenta || 0;
+            const nextId = Number(lastId) + 1;
+            const retry = await insertCuenta(payload, nextId);
+            if (retry.error) throw retry.error;
+            cuentaInserted = retry.data;
+            insertError = null;
+          }
+          if (insertError) throw insertError;
 
           // Si es tipo "perfiles", crear perfiles asociados
           if (tipo === "perfiles" && cuentaInserted?.id_cuenta) {

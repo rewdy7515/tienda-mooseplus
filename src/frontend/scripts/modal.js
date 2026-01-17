@@ -121,7 +121,10 @@ const renderPrecios = (plataformaId, flags) => {
   Object.entries(agrupados).forEach(([plan, items]) => {
     const wrapper = document.createElement("div");
     wrapper.className = "plan-bloque";
-    const planLabel = plan ? `<p class="plan-titulo">${plan}</p>` : "";
+    const stockPlan = stockByPlatform[plataformaId] ?? 0;
+    const stockText = `Perfiles disponibles: ${stockPlan}`;
+    const planTitle = plan ? `${plan} · ${stockText}` : stockText;
+    const planLabel = `<p class="plan-titulo">${planTitle}</p>`;
     wrapper.innerHTML = planLabel;
 
     const list = document.createElement("div");

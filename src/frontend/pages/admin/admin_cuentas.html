@@ -552,6 +552,10 @@
       let modalState = { type: null, targetId: null, max: null, correo: "", nPerfil: null };
       let isSuperadmin = false;
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
+      const modalMiembroAdd = document.querySelector("#modal-miembro-add");
+      const btnMiembroSi = document.querySelector("#btn-miembro-si");
+      const btnMiembroNo = document.querySelector("#btn-miembro-no");
+      let pendingMiembroAdd = null;
       let fetchCounterClientes = 0;
       const modalDelete = document.querySelector("#modal-delete-venta");
       const btnConfirmDelete = document.querySelector("#btn-confirm-delete");
@@ -795,6 +799,9 @@
                       usaPines: r.usa_pines,
                       ventaPerfil: r.venta_perfil,
                       ventaMiembro: r.venta_miembro,
+                      idPlataforma: r.id_plataforma,
+                      perfilHogar: r.perfil_hogar,
+                      isSubCuenta: r.es_subcuenta,
                     })
                   )}">Copiar</button>
                   <button class="btn-delete" data-id-venta="${r.id_venta ?? ""}">Eliminar</button>
@@ -1083,7 +1090,7 @@
                             <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
                             <input type="date" class="fecha-input" data-venta="${p.id_venta}" />
                           </div>`
-                      : ""
+                      : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
                   }
                 </td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -1141,7 +1148,7 @@
                             <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
                             <input type="date" class="fecha-input" data-venta="${p.id_venta}" />
                           </div>`
-                      : ""
+                      : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
                   }
                 </td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -1194,7 +1201,7 @@
                           <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
                           <input type="date" class="fecha-input" data-venta="${p.id_venta}" />
                         </div>`
-                    : ""
+                    : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
                 }
               </td>
               <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -1274,9 +1281,9 @@
               <p><strong>Plataforma:</strong> ${info.plataformaNombre || "-"}</p>
               <p><strong>Proveedor:</strong> ${info.proveedorNombre || "-"}</p>
               <p><strong>Región:</strong> ${info.region || "-"}</p>
-              <p><strong>Correo:</strong> ${info.correo || "-"}</p>
+              <p><strong>Correo:</strong> <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span></p>
               <p>
-                <strong>Clave:</strong> <span>${info.clave || "-"}</span>
+                <strong>Clave:</strong> <span class="cred-copy" data-clipboard="${info.clave || ""}">${info.clave || "-"}</span>
                 <button type="button" class="btn-pin btn-clave" data-cuenta="${info.id_cuenta}" data-clave="${info.clave || ""}" data-correo="${info.correo || ""}">✏️</button>
               </p>
               <p><strong>Fecha de corte:</strong> <span class="fecha-corte-text">${info.fecha_corte || "-"}</span></p>
@@ -1307,30 +1314,65 @@
               ? `
           <h4>Miembros extras</h4>
           <div class="cuenta-table-wrap">
-            <table class="proximas-table">
+            <table class="proximas-table miembros-table">
               <thead>
                 <tr>
                   <th>Correo</th>
                   <th>Clave</th>
                   <th>Ocupado por</th>
+                  <th>Fecha de corte</th>
+                  <th>Acción</th>
                 </tr>
               </thead>
               <tbody>
                 ${
                   (info.miembrosExtras || [])
                     .map(
-                      (m) => `
+                      (m) => {
+                        const hasVenta = !!m.id_venta;
+                        const copyText = hasVenta
+                          ? buildServiceCopyText({
+                              plataforma: info.plataformaNombre,
+                              idVenta: m.id_venta,
+                              correo: m.correo,
+                              clave: m.clave,
+                              fechaCorte: m.fecha_corte,
+                              porAcceso: info.por_acceso,
+                              usaPines: info.usa_pines,
+                              ventaPerfil: m.venta_perfil ?? info.venta_perfil,
+                              ventaMiembro: m.venta_miembro ?? info.venta_miembro,
+                              idPlataforma: m.id_plataforma ?? info.plataformaId,
+                            })
+                          : "";
+                        return `
                         <tr>
                           <td>${m.correo || "-"}</td>
                           <td>${m.clave || "-"}</td>
-                          <td>${m.ocupado || "-"}</td>
+                          <td>${hasVenta ? m.ocupado || "-" : `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />`}</td>
+                          <td>
+                            ${
+                              hasVenta
+                                ? `<div class="fecha-wrap">
+                                    <span class="fecha-text">${m.fecha_corte || ""}</span>
+                                    <button type="button" class="btn-edit-fecha" data-venta="${m.id_venta}">✏️</button>
+                                    <input type="date" class="fecha-input" data-venta="${m.id_venta}" value="${m.fecha_corte || ""}" />
+                                  </div>`
+                                : `<input type="date" class="fecha-input" data-cuenta="${m.id_cuenta || ""}" />`
+                            }
+                          </td>
+                          <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                            <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${m.id_cuenta || ""}">Reemplazar</button>
+                            <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
+                            <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>
+                          </td>
                         </tr>
-                      `
+                      `;
+                      }
                     )
                     .join("") || ""
                 }
                 <tr class="row-add-miembro">
-                  <td colspan="3" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
+                  <td colspan="5" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
                 </tr>
               </tbody>
             </table>
@@ -1513,7 +1555,7 @@
           // Miembros extras por id_cuenta_miembro
           const { data: miembros, error: membErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, clave")
+            .select("id_cuenta, correo, clave, id_plataforma, venta_miembro, venta_perfil")
             .eq("id_cuenta_miembro", idCuenta);
           if (membErr) throw membErr;
 
@@ -1522,18 +1564,30 @@
             const cuentaIds = miembros.map((m) => m.id_cuenta).filter(Boolean);
             const { data: ventasM, error: ventMErr } = await supabase
               .from("ventas")
-              .select("id_cuenta, usuarios:usuarios(nombre, apellido)")
+              .select("id_cuenta, id_venta, fecha_corte, usuario:usuarios!ventas_id_usuario_fkey(nombre, apellido)")
               .in("id_cuenta", cuentaIds);
             if (ventMErr) throw ventMErr;
             const mapUser = (ventasM || []).reduce((acc, v) => {
-              const full = [v.usuarios?.nombre, v.usuarios?.apellido].filter(Boolean).join(" ").trim();
+              const full = [v.usuario?.nombre, v.usuario?.apellido].filter(Boolean).join(" ").trim();
               acc[v.id_cuenta] = full || "Vacío";
               return acc;
             }, {});
+            const mapVenta = (ventasM || []).reduce((acc, v) => {
+              if (!acc[v.id_cuenta]) {
+                acc[v.id_cuenta] = { id_venta: v.id_venta, fecha_corte: v.fecha_corte || "" };
+              }
+              return acc;
+            }, {});
             miembrosConUsuario = (miembros || []).map((m) => ({
+              id_cuenta: m.id_cuenta,
               correo: m.correo,
               clave: m.clave,
               ocupado: mapUser[m.id_cuenta] || "-",
+              id_venta: mapVenta[m.id_cuenta]?.id_venta || null,
+              fecha_corte: mapVenta[m.id_cuenta]?.fecha_corte || "",
+              id_plataforma: m.id_plataforma,
+              venta_miembro: m.venta_miembro,
+              venta_perfil: m.venta_perfil,
             }));
           }
 
@@ -1541,6 +1595,7 @@
             plataformaNombre: plat?.nombre || "",
             plataformaId: platId,
             proveedorNombre: prov?.nombre || "",
+            proveedorId: provId || null,
             region: cuenta.region || "",
             correo: cuenta.correo || "",
             clave: cuenta.clave || "",
@@ -1616,11 +1671,30 @@
         const idPerfil = hog.dataset.perfil;
         if (!idPerfil) return;
         try {
-          const { error } = await supabase.from("perfiles").update({ perfil_hogar: checked }).eq("id_perfil", idPerfil);
-          if (error) throw error;
-        } catch (err) {
-          console.error("toggle hogar error", err);
-          hog.checked = !checked;
+        const { error } = await supabase.from("perfiles").update({ perfil_hogar: checked }).eq("id_perfil", idPerfil);
+        if (error) throw error;
+      } catch (err) {
+        console.error("toggle hogar error", err);
+        hog.checked = !checked;
+      }
+    });
+
+      // Copiar correo/clave en detalle de cuenta
+      detalleEl?.addEventListener("click", (e) => {
+        const cred = e.target.closest(".cred-copy");
+        if (!cred) return;
+        const text = cred.dataset.clipboard || cred.textContent || "";
+        if (!text) return;
+        copyWithToast(cred);
+        try {
+          navigator.clipboard.writeText(text);
+        } catch (_err) {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
         }
       });
 
@@ -1671,7 +1745,7 @@
             return;
           }
           const perfilId = btnRegistrar.dataset.perfil || null;
-          const cuentaId = currentCuentaId;
+          const cuentaId = btnRegistrar.dataset.cuenta || currentCuentaId;
           if (!cuentaId) {
             alert("No se pudo identificar la cuenta.");
             return;
@@ -1755,11 +1829,11 @@
         const fechaInput = row.querySelector(".fecha-input");
         const btn = row.querySelector(".btn-registrar-servicio");
         if (!btn) return;
-        const hasName = nameInput && nameInput.value.trim().length > 0 && /\s+/.test(nameInput.value.trim());
-        const hasUser = nameInput && nameInput.dataset.userId;
-        const hasDate =
+          const hasName = nameInput && nameInput.value.trim().length > 0 && /\s+/.test(nameInput.value.trim());
+          const hasUser = nameInput && nameInput.dataset.userId;
+          const hasDate =
           fechaInput && fechaInput.value && !Number.isNaN(new Date(fechaInput.value).valueOf());
-        const enabled = !!(hasName && hasUser && hasDate);
+          const enabled = !!(hasName && hasUser && hasDate);
         btn.disabled = !enabled;
         btn.classList.toggle("btn-disabled", !enabled);
       };
@@ -2033,6 +2107,7 @@
             .join("");
           sugsBox.classList.remove("hidden");
         };
+        const platId = currentCuentaDetalle?.plataformaId || 1;
         const search = async (term) => {
           const t = term.trim();
           if (!t) {
@@ -2044,7 +2119,7 @@
             const { data, error } = await supabase
               .from("cuentas")
               .select("correo, clave")
-              .eq("id_plataforma", 1)
+              .eq("id_plataforma", platId)
               .ilike("correo", `%${t}%`)
               .limit(5);
             if (current !== sugsCounter) return;
@@ -2093,15 +2168,22 @@
           return;
         }
         try {
+          const platIdMiembro = currentCuentaDetalle?.plataformaId || 1;
           const { data: cuentaMiembro, error: cmErr } = await supabase
             .from("cuentas")
             .select("id_cuenta")
             .eq("correo", correoVal)
-            .eq("id_plataforma", 1)
+            .eq("id_plataforma", platIdMiembro)
             .maybeSingle();
           if (cmErr) throw cmErr;
           if (!cuentaMiembro?.id_cuenta) {
-            alert("No se encontró una cuenta con ese correo en plataforma 1.");
+            pendingMiembroAdd = {
+              correo: correoVal,
+              clave: claveVal,
+              plataformaId: currentCuentaDetalle?.plataformaId || 1,
+              idCuentaMiembro: currentCuentaId,
+            };
+            modalMiembroAdd?.classList.remove("hidden");
             return;
           }
           const payload = {
@@ -2131,6 +2213,73 @@
         } catch (err) {
           console.error("guardar miembro extra error", err);
           alert("No se pudo guardar el miembro.");
+        }
+      });
+
+      // Modal agregar miembro faltante
+      const hideMiembroModal = () => {
+        modalMiembroAdd?.classList.add("hidden");
+        pendingMiembroAdd = null;
+      };
+      btnMiembroNo?.addEventListener("click", hideMiembroModal);
+      modalMiembroAdd?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) hideMiembroModal();
+        if (e.target.classList.contains("modal-close")) hideMiembroModal();
+      });
+      btnMiembroSi?.addEventListener("click", async () => {
+        if (!pendingMiembroAdd) {
+          hideMiembroModal();
+          return;
+        }
+        const { correo, clave, plataformaId, idCuentaMiembro } = pendingMiembroAdd;
+        try {
+          const payload = {
+            id_plataforma: plataformaId,
+            correo,
+            clave: clave || null,
+            fecha_pagada: null,
+            fecha_corte: null,
+            inactiva: false,
+            venta_miembro: true,
+            venta_perfil: false,
+            id_cuenta_miembro: idCuentaMiembro,
+            id_proveedor: currentCuentaDetalle?.proveedorId || null,
+          };
+          const { data, error } = await supabase.from("cuentas").insert(payload).select("id_cuenta").single();
+          if (error) throw error;
+          // crear sub_cuenta básica asociada
+          if (data?.id_cuenta) {
+            await supabase.from("sub_cuentas").insert({
+              id_cuenta: data.id_cuenta,
+              ocupado: false,
+              inactiva: false,
+            });
+          }
+          const tbody = detalleEl?.querySelector(".miembros-table tbody");
+          const addRow = tbody?.querySelector(".row-add-miembro");
+          if (tbody && addRow) {
+            const newRow = document.createElement("tr");
+            newRow.innerHTML = `
+              <td>${correo}</td>
+              <td>${clave || "-"}</td>
+              <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" /></td>
+              <td><input type="date" class="fecha-input" data-cuenta="${data.id_cuenta || ""}" /></td>
+              <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${data.id_cuenta || ""}">Reemplazar</button>
+                <button type="button" class="btn-outline btn-copy-row" data-copy="" disabled>Copiar</button>
+                <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${data.id_cuenta || ""}">Registrar servicio</button>
+              </td>
+            `;
+            tbody.insertBefore(newRow, addRow);
+          }
+          const inputRow = detalleEl?.querySelector(".miembro-input-row");
+          inputRow?.remove();
+          alert("Servicio agregado como miembro.");
+        } catch (err) {
+          console.error("crear miembro extra error", err);
+          alert("No se pudo agregar el servicio.");
+        } finally {
+          hideMiembroModal();
         }
       });
 
@@ -2237,21 +2386,25 @@
             const perfilTxtOld = rowPerfil?.perfil || "-";
             const perfilTxtNew = dataDestino?.n_perfil ? `M${dataDestino.n_perfil}` : "-";
             const idVentaFmt = `#${String(ventaId).padStart(4, "0")}`;
-            const msgLines = [
-              "_*Reemplazo de:*",
-              `${currentCuentaDetalle.correo || "-"} ${perfilTxtOld}_`,
-              "",
-              `*${currentCuentaDetalle.plataformaNombre || "-"}* 🫎 \`ID Venta: ${idVentaFmt}\``,
-              "_Instagram: @moose.plus_",
-              "",
-              `*Correo:* ${dataDestino.correo || "-"}`,
-              `*Clave:* ${dataDestino.clave || "-"}`,
-              `*Perfil:* ${perfilTxtNew}`,
-              `*Pin:* ${dataDestino.pin || "-"}`,
-              "",
-              "*Próxima fecha de pago:*",
-              `_${rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte || "-"}_`,
-            ].join("\n");
+            const nuevoCopy = buildServiceCopyText({
+              plataforma: currentCuentaDetalle.plataformaNombre,
+              idVenta: idVentaFmt?.replace("#", "") || ventaId,
+              correo: dataDestino.correo,
+              clave: dataDestino.clave,
+              nPerfil: dataDestino.n_perfil,
+              pin: dataDestino.pin,
+              fechaCorte: rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte,
+              porAcceso: currentCuentaDetalle.por_acceso,
+              usaPines: currentCuentaDetalle.usa_pines,
+              ventaPerfil: currentCuentaDetalle.venta_perfil,
+              ventaMiembro: currentCuentaDetalle.venta_miembro,
+              idPlataforma: currentCuentaDetalle.plataformaId,
+              perfilHogar: dataDestino.perfil_hogar,
+              isSubCuenta: false,
+            });
+            const msgLines = [`_*Reemplazo de:*`, `${currentCuentaDetalle.correo || "-"} ${perfilTxtOld}_`, "", nuevoCopy].join(
+              "\n"
+            );
             modalReemplazoMsg.textContent = "Servicio reemplazado";
             const copyBtn = modalReemplazo.querySelector("#btn-reemplazo-copy");
             const copyContent = modalReemplazo.querySelector("#modal-reemplazo-copytext");
@@ -2496,6 +2649,21 @@
             Copiar resumen
           </button>
           <pre id="modal-reemplazo-copytext" style="white-space:pre-wrap; text-align:left; margin:6px 0 0 0;"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-miembro-add" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen" style="max-width:320px; text-align:center;">
+        <button class="modal-close" aria-label="Cerrar">×</button>
+        <div class="modal-body">
+          <p style="margin:0 0 10px 0;">No se encontró esta cuenta en la base de datos.</p>
+          <p style="margin:0 0 14px 0;">¿Deseas agregar este servicio?</p>
+          <div style="display:flex; gap:10px; justify-content:center;">
+            <button type="button" class="btn-primary" id="btn-miembro-si">Sí, agregar</button>
+            <button type="button" class="btn-outline" id="btn-miembro-no">Cancelar</button>
+          </div>
         </div>
       </div>
     </div>
