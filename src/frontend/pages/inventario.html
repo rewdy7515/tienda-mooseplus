@@ -186,7 +186,7 @@
                       <td>${formatDate(v.fecha_corte)}</td>
                       <td>
                         <div class="actions-inline">
-                          <button class="btn-small btn-renovar" data-venta="${v.id_venta ?? ""}" data-precio="${v.id_precio ?? ""}" data-plan="${planName || ""}" data-plataforma="${v.id_plataforma ?? ""}" data-vperf="${v.venta_perfil ?? ""}" data-vmiem="${v.venta_miembro ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
+                          <button class="btn-small btn-renovar" data-venta="${v.id_venta ?? ""}" data-precio="${v.id_precio ?? ""}" data-plan="${planName || ""}" data-plataforma="${v.id_plataforma ?? ""}" data-vperf="${v.venta_perfil ?? ""}" data-vmiem="${v.venta_miembro ?? ""}" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${v.id_perfil ?? ""}" data-correo="${v.correo || ""}" data-nperfil="${v.n_perfil ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
                           <button class="btn-small btn-red-report" data-plataforma="${v.id_plataforma ?? ""}" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${v.id_perfil ?? ""}" style="background-color:#ef4444;color:white;">❕</button>
                           <button class="btn-small" style="background-color:#3b82f6;color:white;">📑</button>
                         </div>
@@ -378,6 +378,10 @@
       let selectedRenovarPlan = "";
       let selectedRenovarPlat = "";
       let selectedVentaFlags = { venta_perfil: null, venta_miembro: null };
+      let selectedRenovarCuenta = null;
+      let selectedRenovarPerfil = null;
+      let selectedRenovarCorreo = "";
+      let selectedRenovarNPerfil = "";
 
       const closeRenovarModal = () => {
         modalRenovar?.classList.add("hidden");
@@ -396,6 +400,10 @@
           venta_perfil: btn.dataset.vperf,
           venta_miembro: btn.dataset.vmiem,
         };
+        selectedRenovarCuenta = btn.dataset.cuenta || null;
+        selectedRenovarPerfil = btn.dataset.perfil || null;
+        selectedRenovarCorreo = btn.dataset.correo || "";
+        selectedRenovarNPerfil = btn.dataset.nperfil || "";
         modalRenovar?.classList.remove("hidden");
       });
 
@@ -442,7 +450,14 @@
             alert("No se pudo identificar el precio de la venta.");
             return;
           }
-          return sendCartDelta(precioId, 1, meses, { renovacion: true, id_venta: selectedRenovarVenta });
+          return sendCartDelta(precioId, 1, meses, {
+            renovacion: true,
+            id_venta: selectedRenovarVenta,
+            id_cuenta: selectedRenovarCuenta || null,
+            id_perfil: selectedRenovarPerfil || null,
+            correo: selectedRenovarCorreo || null,
+            n_perfil: selectedRenovarNPerfil || null,
+          });
         };
         agregar()
           .then(() => {

@@ -832,11 +832,12 @@ async function confirmarReemplazo() {
         .insert([{ id_cuenta: cuentaOriginal, id_perfil: perfilOriginal || null }])
     );
 
+    const descripcionSol = `Razon del reemplazo: ${razon}`;
     updatesPromises.push(
       supabase
         .from("reportes")
         .update({
-          descripcion_solucion: `Razon del reemplazo: ${razon}`,
+          descripcion_solucion: descripcionSol,
           en_revision: false,
           solucionado: true,
           solucionado_por: id_usuario,
@@ -849,6 +850,21 @@ async function confirmarReemplazo() {
     if (err?.error) {
       alert("No se pudo realizar el reemplazo.");
       return;
+    }
+
+    // Notificación
+    try {
+      const notif = {
+        id_usuario: currentRow.id_usuario || null,
+        titulo: `Reporte ${currentRow.id_reporte}`,
+        mensaje: descripcionSol,
+        fecha: new Date().toISOString().slice(0, 10),
+        leido: false,
+        id_cuenta: nuevoCuenta || null,
+      };
+      await supabase.from("notificaciones").insert(notif);
+    } catch (nErr) {
+      console.error("insert notificacion error", nErr);
     }
 
     alert("Reemplazo realizado.");

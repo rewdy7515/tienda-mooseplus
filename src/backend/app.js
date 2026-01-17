@@ -140,7 +140,15 @@ app.get("/api/p2p/rate", async (_req, res) => {
 // Se maneja por delta: cantidad positiva suma, negativa resta; si el resultado es <=0 se elimina el item.
 app.post("/api/cart/item", async (req, res) => {
   console.log("[cart:item] body", req.body);
-  const { id_precio, delta, meses, renovacion = false, id_venta = null } = req.body || {};
+  const {
+    id_precio,
+    delta,
+    meses,
+    renovacion = false,
+    id_venta = null,
+    id_cuenta = null,
+    id_perfil = null,
+  } = req.body || {};
   if (!id_precio || delta === undefined) {
     return res
       .status(400)
@@ -171,7 +179,7 @@ app.post("/api/cart/item", async (req, res) => {
     if (bodyIdItem) {
       const { data, error } = await supabaseAdmin
         .from("carrito_items")
-        .select("id_item, cantidad, meses, renovacion, id_venta")
+        .select("id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
         .eq("id_carrito", idCarrito)
         .eq("id_item", bodyIdItem)
         .maybeSingle();
@@ -181,7 +189,7 @@ app.post("/api/cart/item", async (req, res) => {
     if (!existing) {
       const { data, error: selErr } = await supabaseAdmin
         .from("carrito_items")
-        .select("id_item, cantidad, meses, renovacion, id_venta")
+        .select("id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
         .eq("id_carrito", idCarrito)
         .eq("id_precio", id_precio)
         .eq("renovacion", renovacion === true)
@@ -194,9 +202,17 @@ app.post("/api/cart/item", async (req, res) => {
       id_venta === undefined || id_venta === null
         ? existing?.id_venta === null || existing?.id_venta === undefined
         : existing?.id_venta === id_venta;
+    const matchesCuenta =
+      id_cuenta === undefined || id_cuenta === null
+        ? existing?.id_cuenta === null || existing?.id_cuenta === undefined
+        : existing?.id_cuenta === id_cuenta;
+    const matchesPerfil =
+      id_perfil === undefined || id_perfil === null
+        ? existing?.id_perfil === null || existing?.id_perfil === undefined
+        : existing?.id_perfil === id_perfil;
     // También compara meses si viene en body
     const matchesMeses = mesesVal === null || mesesVal === undefined ? true : existing?.meses === mesesVal;
-    const matchExisting = existing && matchesVenta && matchesMeses;
+    const matchExisting = existing && matchesVenta && matchesMeses && matchesCuenta && matchesPerfil;
     
     const newQty = (matchExisting ? existing.cantidad : 0) + parsedDelta;
 
@@ -214,6 +230,8 @@ app.post("/api/cart/item", async (req, res) => {
           meses: mesesVal ?? existing.meses ?? null,
           renovacion: renovacion === true,
           id_venta: id_venta ?? existing.id_venta ?? null,
+          id_cuenta: id_cuenta ?? existing.id_cuenta ?? null,
+          id_perfil: id_perfil ?? existing.id_perfil ?? null,
         })
         .eq("id_item", existing.id_item);
       if (updErr) throw updErr;
@@ -227,6 +245,8 @@ app.post("/api/cart/item", async (req, res) => {
           meses: mesesVal,
           renovacion: renovacion === true,
           id_venta: id_venta ?? null,
+          id_cuenta: id_cuenta ?? null,
+          id_perfil: id_perfil ?? null,
         });
       if (insErr) throw insErr;
     }
@@ -278,11 +298,35 @@ app.get("/api/cart", async (_req, res) => {
 
     const { data: items, error: itemErr } = await supabaseAdmin
       .from("carrito_items")
-      .select("id_item, id_precio, cantidad, meses, renovacion, id_venta")
+      .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
       .eq("id_carrito", carritoId);
     if (itemErr) throw itemErr;
 
-    res.json({ id_carrito: carritoId, items });
+    // Enriquecer con datos de venta/cuenta/perfil para renovaciones
+    const ventaIds = (items || []).map((i) => i.id_venta).filter(Boolean);
+    let ventaMap = {};
+    if (ventaIds.length) {
+      const { data: ventasExtra, error: ventErr } = await supabaseAdmin
+        .from("ventas")
+        .select("id_venta, id_cuenta, id_perfil, cuentas:cuentas(correo), perfiles:perfiles(n_perfil)")
+        .in("id_venta", ventaIds);
+      if (ventErr) throw ventErr;
+      ventaMap = (ventasExtra || []).reduce((acc, v) => {
+        acc[v.id_venta] = v;
+        return acc;
+      }, {});
+    }
+
+    const enriched = (items || []).map((it) => {
+      const ventaInfo = it.id_venta ? ventaMap[it.id_venta] || {} : {};
+      return {
+        ...it,
+        correo: ventaInfo?.cuentas?.correo || null,
+        n_perfil: ventaInfo?.perfiles?.n_perfil || null,
+      };
+    });
+
+    res.json({ id_carrito: carritoId, items: enriched });
   } catch (err) {
     console.error("[cart:get] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -950,7 +994,7 @@ app.post("/api/checkout", async (req, res) => {
     if (idsVentasRenovar.length) {
       const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
         .from("ventas")
-        .select("id_venta, fecha_corte")
+        .select("id_venta, fecha_corte, id_cuenta, id_usuario")
         .in("id_venta", idsVentasRenovar);
       if (ventErr) throw ventErr;
       (ventasExistentes || []).forEach((v) => {
@@ -1262,13 +1306,16 @@ app.post("/api/checkout", async (req, res) => {
     // Renovaciones
     renovaciones.forEach((it) => {
       const platId = priceMap[it.id_precio]?.id_plataforma || null;
+      const ventaAnt = ventaMap[it.id_venta] || {};
+      const cuentaAnt = ventaAnt.id_cuenta || null;
+      const usuarioAnt = ventaAnt.id_usuario || idUsuarioVentas;
       // monto ya calculado arriba como base (unit * cantidad * meses)
       const price = priceMap[it.id_precio] || {};
       const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
       const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
       const base = (Number(price.precio_usd_detal) || 0) * cantidadVal * mesesVal;
       histRows.push({
-        id_usuario_cliente: idUsuarioVentas,
+        id_usuario_cliente: usuarioAnt,
         id_proveedor: null,
         monto: Number(base) || 0,
         fecha_pago: isoHoy,
@@ -1276,7 +1323,7 @@ app.post("/api/checkout", async (req, res) => {
         renovacion: true,
         id_venta: it.id_venta,
         id_plataforma: platId,
-        id_cuenta: null,
+        id_cuenta: cuentaAnt,
         registrado_por: idUsuarioSesion,
       });
     });

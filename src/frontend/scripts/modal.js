@@ -315,29 +315,12 @@ export const initModal = (elements) => {
       return;
     }
     animateAddToCart();
-    const detalle = buildCartDetalle(
-      { ...selectedPrecio, cantidad: currentQty },
-      currentFlags,
-      currentQty
-    );
-    addToCart({
-      id_precio: selectedPrecio.id_precio,
-      id_plataforma: currentPlatform.id_plataforma,
-      nombre: currentPlatform.nombre,
-      imagen: currentPlatform.imagen,
-      plan: selectedPrecio.plan,
-      precio: selectedPrecio.precio_usd_detal,
-      cantidad: currentQty,
-      meses: currentMonths,
-      detalle,
-      flags: { ...currentFlags },
+    sendCartDelta(selectedPrecio.id_precio, currentQty, currentMonths, {
+      renovacion: false,
+      id_venta: null,
+    }).finally(() => {
+      addToCart();
     });
-    sendCartDelta(
-      selectedPrecio.id_precio,
-      currentQty,
-      currentMonths,
-      { renovacion: false, id_venta: null }
-    );
     closeModal();
   });
 };

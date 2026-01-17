@@ -1,4 +1,4 @@
-import { sendCartDelta, fetchCart, loadCatalog, ensureServerSession } from "./api.js";
+import { sendCartDelta, fetchCart, loadCatalog, ensureServerSession, loadCurrentUser } from "./api.js";
 
 let cartItems = [];
 let drawer;
@@ -11,8 +11,10 @@ let btnCheckout;
 let btnViewCart;
 let btnAssign;
 let catalogCache = null;
+let userAcceso = null;
+let refreshFromServerFn = null;
 
-const mapCartItems = (items = [], catalog = {}) => {
+const mapCartItems = (items = [], catalog = {}, acceso = null) => {
   const precios = catalog.precios || [];
   const plataformas = catalog.plataformas || [];
   const priceById = precios.reduce((acc, p) => {
@@ -42,12 +44,19 @@ const mapCartItems = (items = [], catalog = {}) => {
       const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
       const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
       const mesesTxt = baseUnit === "mes" ? ` · ${meses} mes${meses === 1 ? "" : "es"}` : "";
-      return `${qty} ${baseUnit}${plural}${mesesTxt} $${price.precio_usd_detal || ""}`;
+      const useMayor = acceso === false;
+      const unit =
+        useMayor && price.precio_usd_mayor != null && price.precio_usd_mayor !== undefined
+          ? price.precio_usd_mayor
+          : price.precio_usd_detal;
+      return `${qty} ${baseUnit}${plural}${mesesTxt} $${unit || 0}`;
     })();
     return {
       id_precio: item.id_precio,
       id_item: item.id_item,
       id_plataforma: price.id_plataforma,
+      id_cuenta: item.id_cuenta || null,
+      id_perfil: item.id_perfil || null,
       nombre: platform.nombre || `Precio ${item.id_precio}`,
       imagen: platform.imagen,
       plan: price.plan,
@@ -58,6 +67,8 @@ const mapCartItems = (items = [], catalog = {}) => {
       flags,
       renovacion: item.renovacion,
       id_venta: item.id_venta,
+      correo: item.correo || null,
+      n_perfil: item.n_perfil || null,
     };
   });
 };
@@ -92,6 +103,12 @@ const renderCart = () => {
         <div class="cart-info">
           <p class="cart-name">${item.nombre}</p>
           <p class="cart-detail">${item.plan || ""} · ${item.detalle}</p>
+          ${item.id_cuenta ? `<p class="cart-detail renewal-detail">Renovación: ${item.correo || ""}</p>` : ""}
+          ${
+            item.id_perfil
+              ? `<p class="cart-detail renewal-detail">Perfil: M${item.n_perfil || ""}</p>`
+              : ""
+          }
           ${
             item.meses
               ? `<p class="cart-duration">${item.meses} mes${item.meses === 1 ? "" : "es"}</p>`
@@ -137,15 +154,24 @@ export function initCart({
   const refreshFromServer = async () => {
     try {
       await ensureServerSession();
+      if (!userAcceso) {
+        try {
+          const user = await loadCurrentUser();
+          userAcceso = user?.acceso_cliente;
+        } catch (err) {
+          console.error("load user acceso error", err);
+        }
+      }
       if (!catalogCache) catalogCache = await loadCatalog();
       const cartResp = await fetchCart();
       const items = cartResp?.items || [];
-      cartItems = mapCartItems(items, catalogCache);
+      cartItems = mapCartItems(items, catalogCache, userAcceso);
       renderCart();
     } catch (err) {
       console.error("refresh cart error", err);
     }
   };
+  refreshFromServerFn = refreshFromServer;
 
   iconBtn?.addEventListener("click", async () => {
     await refreshFromServer();
@@ -169,7 +195,9 @@ export function initCart({
       const idItem = btn.dataset.idItem || null;
       cartItems.splice(idx, 1);
       if (key && qtyToRemove > 0)
-        sendCartDelta(key, -qtyToRemove, meses, { id_venta: idVenta, id_item: idItem, renovacion: item?.renovacion });
+        sendCartDelta(key, -qtyToRemove, meses, { id_venta: idVenta, id_item: idItem, renovacion: item?.renovacion }).finally(
+          () => refreshFromServerFn && refreshFromServerFn()
+        );
       renderCart();
       return;
     }
@@ -187,37 +215,32 @@ export function initCart({
       } else {
         item.cantidad = newQty;
       }
-      if (key) sendCartDelta(key, delta);
+      if (key)
+        sendCartDelta(key, delta).finally(() => {
+          if (refreshFromServerFn) refreshFromServerFn();
+        });
       renderCart();
     }
   });
 
   cartItems = initialItems;
   renderCart();
+  // Refresca con datos reales del backend + precio por tier
+  refreshFromServer();
 }
 
-export function addToCart(newItem) {
-  const key = newItem.id_precio || newItem.id_plataforma;
-  const existing = cartItems.find(
-    (item) =>
-      (item.id_precio || item.id_plataforma) === key &&
-      item.plan === newItem.plan &&
-      (item.meses || 1) === (newItem.meses || 1) &&
-      (!!item.renovacion) === (!!newItem.renovacion) &&
-      (item.id_venta || null) === (newItem.id_venta || null)
-  );
-  if (existing) {
-    existing.cantidad += newItem.cantidad;
-    existing.detalle = newItem.detalle;
-    existing.meses = newItem.meses;
-  } else {
-    cartItems.push(newItem);
-  }
-  renderCart();
-  // abrir el carrito para feedback
-  openCart();
+export function addToCart() {
+  // Forzamos sincronizar con el servidor; no añadimos items optimistas
+  if (refreshFromServerFn) refreshFromServerFn().then(() => openCart());
+  else openCart();
 }
 
 export function openCart() {
   toggleCart(true);
+}
+
+export async function refreshCartFromServer() {
+  if (refreshFromServerFn) {
+    await refreshFromServerFn();
+  }
 }
