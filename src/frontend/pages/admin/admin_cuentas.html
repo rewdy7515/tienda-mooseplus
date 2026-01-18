@@ -526,12 +526,12 @@
         renewOverlay?.classList.remove("show");
       };
 
-      const copyWithToast = async (el) => {
-        if (!el) return;
-        const text = el.textContent.trim();
+      const copyTextNotify = async (text) => {
         if (!text) return;
+        let copied = false;
         try {
           await navigator.clipboard.writeText(text);
+          copied = true;
         } catch (_) {
           try {
             const ta = document.createElement("textarea");
@@ -540,19 +540,20 @@
             ta.select();
             document.execCommand("copy");
             ta.remove();
+            copied = true;
           } catch (err) {
             console.error("copy error", err);
-            return;
           }
         }
-        let toast = el.querySelector(".copy-toast");
-        if (!toast) {
-          toast = document.createElement("div");
-          toast.className = "copy-toast";
-          toast.textContent = "Copiado al portapapeles";
-          el.appendChild(toast);
-        }
-        setTimeout(() => toast?.remove(), 1200);
+        // Ya no mostramos notificación de copiado
+        return copied;
+      };
+
+      const copyWithToast = async (el) => {
+        if (!el) return;
+        const text = el.dataset?.clipboard || el.textContent?.trim() || "";
+        if (!text) return;
+        await copyTextNotify(text);
       };
       let fetchCounter = 0;
       let currentCuentaId = null;
@@ -2092,17 +2093,7 @@
         if (!cred) return;
         const text = cred.dataset.clipboard || cred.textContent || "";
         if (!text) return;
-        copyWithToast(cred);
-        try {
-          navigator.clipboard.writeText(text);
-        } catch (_err) {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-        }
+        copyTextNotify(text);
       });
 
       // Recargar cuenta modal
@@ -2110,17 +2101,7 @@
         const copyRowBtn = e.target.closest(".btn-copy-row");
         if (copyRowBtn) {
           const text = decodeURIComponent(copyRowBtn.dataset.copy || "");
-          copyWithToast(copyRowBtn);
-          try {
-            await navigator.clipboard.writeText(text);
-          } catch (_err) {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-          }
+          await copyTextNotify(text);
           return;
         }
 
@@ -2750,12 +2731,23 @@
             let nuevoPerfil = null;
             let dataDestino = {};
 
+            console.log("[reemplazo] request", {
+              plataformaId,
+              cuentaId,
+              perfilHogar,
+              ventaPerfil,
+              ventaMiembro,
+            });
             const { data: perfilDestino, error: perfilErr } = await findPerfilLibre(plataformaId, cuentaId, {
               perfilHogar,
               ventaPerfil,
               ventaMiembro,
             });
-            if (perfilErr) throw perfilErr;
+            if (perfilErr) {
+              console.error("[reemplazo] findPerfilLibre error", perfilErr);
+              throw perfilErr;
+            }
+            console.log("[reemplazo] perfilDestino", perfilDestino);
             if (!perfilDestino) {
               alert("Sin stock");
               return;
@@ -2775,16 +2767,31 @@
               id_sub_cuenta: null,
             };
             const { error: updVentaErr } = await supabase.from("ventas").update(updates).eq("id_venta", ventaId);
-            if (updVentaErr) throw updVentaErr;
+            if (updVentaErr) {
+              console.error("[reemplazo] update venta error", updVentaErr);
+              throw updVentaErr;
+            }
 
             if (rowPerfil?.id_perfil) {
-              await supabase.from("perfiles").update({ ocupado: false }).eq("id_perfil", rowPerfil.id_perfil);
+              const { error: freeErr } = await supabase
+                .from("perfiles")
+                .update({ ocupado: false })
+                .eq("id_perfil", rowPerfil.id_perfil);
+              if (freeErr) console.error("[reemplazo] liberar perfil previo error", freeErr);
             }
             if (nuevoPerfil) {
-              await supabase.from("perfiles").update({ ocupado: true }).eq("id_perfil", nuevoPerfil);
+              const { error: occErr } = await supabase
+                .from("perfiles")
+                .update({ ocupado: true })
+                .eq("id_perfil", nuevoPerfil);
+              if (occErr) console.error("[reemplazo] marcar perfil nuevo error", occErr);
             }
             if (nuevoCuenta) {
-              await supabase.from("cuentas").update({ ocupado: true }).eq("id_cuenta", nuevoCuenta);
+              const { error: occCuentaErr } = await supabase
+                .from("cuentas")
+                .update({ ocupado: true })
+                .eq("id_cuenta", nuevoCuenta);
+              if (occCuentaErr) console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
             }
 
             await supabase.from("reemplazos").insert({
@@ -2864,35 +2871,11 @@
 
       const copyWithToastAt = (text, anchor) => {
         if (!text) return;
-        try {
-          navigator.clipboard.writeText(text);
-        } catch (err) {
-          try {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-          } catch (_err) {
-            console.error("copy error", err);
-            return;
-          }
-        }
-        if (!anchor) return;
-        let toast = anchor.querySelector(".copy-toast");
-        if (!toast) {
-          toast = document.createElement("div");
-          toast.className = "copy-toast";
-          toast.textContent = "Copiado al portapapeles";
-          anchor.appendChild(toast);
-        }
-        toast.classList.add("visible");
-        setTimeout(() => toast?.remove(), 1200);
+        copyTextNotify(text);
       };
 
       // Helpers de reemplazo (versión simplificada, sin reporte)
-      const findPerfilLibre = async (plataformaId, excludeCuenta, opts = {}) => {
+      const findPerfilLibre = async (plataformaId, _excludeCuenta, opts = {}) => {
         const { perfilHogar = null, ventaPerfil = null, ventaMiembro = null } = opts;
         let excluidos = [];
         try {
@@ -2901,24 +2884,19 @@
         } catch (err) {
           console.error("reemplazos lookup error", err);
         }
-        let query = supabase
+        const { data, error } = await supabase
           .from("perfiles")
           .select(
             "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!inner(id_plataforma, venta_perfil, venta_miembro, inactiva, ocupado, correo, clave)"
           )
           .eq("cuentas.id_plataforma", plataformaId)
-          .eq("cuentas.inactiva", false)
-          .or("ocupado.is.null,ocupado.eq.false")
-          .or("ocupado.is.null,ocupado.eq.false", { foreignTable: "cuentas" })
           .order("id_perfil", { ascending: true })
-          .limit(1);
-        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
-        if (perfilHogar !== null) query = query.eq("perfil_hogar", perfilHogar);
-        if (ventaPerfil !== null) query = query.eq("cuentas.venta_perfil", ventaPerfil);
-        if (ventaMiembro !== null) query = query.eq("cuentas.venta_miembro", ventaMiembro);
-        const { data, error } = await query;
+          .limit(1000);
         if (error) return { error };
-        let rows = (data || []).filter((r) => r.id_cuenta !== excludeCuenta);
+        let rows = data || [];
+        if (perfilHogar !== null) rows = rows.filter((r) => r.perfil_hogar === perfilHogar);
+        if (ventaPerfil !== null) rows = rows.filter((r) => r.cuentas?.venta_perfil === ventaPerfil);
+        if (ventaMiembro !== null) rows = rows.filter((r) => r.cuentas?.venta_miembro === ventaMiembro);
         if (excluidos.length) {
           rows = rows.filter((r) => !excluidos.includes(r.id_perfil));
         }

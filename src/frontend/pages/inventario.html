@@ -387,49 +387,6 @@
       attachLogout(clearServerSession);
 
       attachLogoHome();
-      // Estilos para copia
-      const styleCopy = document.createElement("style");
-      styleCopy.textContent = `
-        .copyable { cursor: pointer; }
-        .copy-toast {
-          position: fixed;
-          top: 70px;
-          right: 16px;
-          background: rgba(17,17,17,0.9);
-          color: #fff;
-          padding: 10px 14px;
-          border-radius: 10px;
-          font-weight: 500;
-          font-size: 13px;
-          box-shadow: 0 6px 18px rgba(0,0,0,0.2);
-          z-index: 2000;
-          opacity: 0;
-          transform: translateY(-6px);
-          transition: opacity 0.2s ease, transform 0.2s ease;
-        }
-        .copy-toast.show {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      `;
-      document.head.appendChild(styleCopy);
-
-      let toastTimeout = null;
-      const showCopyToast = (label = "Dato") => {
-        let toast = document.querySelector(".copy-toast");
-        if (!toast) {
-          toast = document.createElement("div");
-          toast.className = "copy-toast";
-          document.body.appendChild(toast);
-        }
-        toast.textContent = `${label} copiado al portapapeles`;
-        toast.classList.add("show");
-        clearTimeout(toastTimeout);
-        toastTimeout = setTimeout(() => {
-          toast?.classList.remove("show");
-        }, 1400);
-      };
-
       searchInput?.addEventListener("input", (e) => {
         handleSearch(e.target.value);
       });
@@ -470,11 +427,9 @@
         const copyCell = e.target.closest(".copyable");
         if (copyCell) {
           const txt = copyCell.textContent?.trim() || "";
-          const label = copyCell.dataset.label || "Dato";
           if (txt) {
             try {
               navigator.clipboard.writeText(txt);
-              showCopyToast(label);
             } catch (_err) {
               const textarea = document.createElement("textarea");
               textarea.value = txt;
@@ -482,7 +437,6 @@
               textarea.select();
               document.execCommand("copy");
               document.body.removeChild(textarea);
-              showCopyToast(label);
             }
           }
           return;

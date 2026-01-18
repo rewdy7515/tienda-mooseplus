@@ -151,19 +151,6 @@
   flex: 1;
   background: #f8f9fa;
 }
-.copy-toast {
-  position: absolute;
-  top: -22px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #111;
-  color: #fff;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
-}
 .rec-actions {
   display: flex;
   justify-content: flex-end;

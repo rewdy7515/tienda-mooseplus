@@ -1107,6 +1107,7 @@ input[type="number"].input-inline {
   border-radius: 10px;
   overflow: hidden;
 }
+
 .table-base th,
 .table-base td {
   border-left: 1px solid rgba(0, 0, 0, 0.08);

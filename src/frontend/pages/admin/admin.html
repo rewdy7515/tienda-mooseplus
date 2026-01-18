@@ -76,12 +76,16 @@
         try {
           const today = new Date().toISOString().slice(0, 10);
           const [{ count: repCount }, { count: cortesCount }, { count: pedidosCount }] = await Promise.all([
-            supabase.from("reportes").select("id_reporte", { count: "exact", head: true }),
+            supabase
+              .from("reportes")
+              .select("id_reporte", { count: "exact", head: true })
+              .eq("solucionado", false),
             supabase
               .from("ventas")
-              .select("id_venta", { count: "exact", head: true })
+              .select("id_venta, cuentas!inner(inactiva)", { count: "exact", head: true })
               .lte("fecha_corte", today)
-              .or("suspendido.is.null,suspendido.eq.false"),
+              .or("suspendido.is.null,suspendido.eq.false")
+              .eq("cuentas.inactiva", false),
             supabase
               .from("ventas")
               .select("id_venta", { count: "exact", head: true })

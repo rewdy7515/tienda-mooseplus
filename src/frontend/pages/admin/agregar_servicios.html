@@ -176,6 +176,10 @@
             </div>
           </div>
           <div class="field">
+            <label for="fecha-corte-input">Fecha de corte</label>
+            <input type="date" id="fecha-corte-input" />
+          </div>
+          <div class="field">
             <label for="precio-cuenta">Precio</label>
             <input type="number" step="0.01" min="0" id="precio-cuenta" placeholder="Precio" />
           </div>
@@ -210,6 +214,7 @@
       const durMenos = document.querySelector("#duracion-menos");
       const durMas = document.querySelector("#duracion-mas");
       const durSpan = document.querySelector("#duracion-meses");
+      const fechaCorteInput = document.querySelector("#fecha-corte-input");
       const btnAdd = document.querySelector("#btn-add-cuenta");
       const statusEl = document.querySelector("#add-status");
       const tipoCuentaSelect = document.querySelector("#tipo-cuenta");
@@ -394,6 +399,19 @@
         }
       });
 
+      const setFechaCorteDefault = (meses) => {
+        const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
+        const base = new Date();
+        base.setHours(12, 0, 0, 0);
+        const target = new Date(base);
+        target.setMonth(target.getMonth() + monthsVal);
+        const pad = (n) => String(n).padStart(2, "0");
+        const iso = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
+        if (fechaCorteInput) fechaCorteInput.value = iso;
+      };
+
+      setFechaCorteDefault(Number(durSpan?.textContent || 1));
+
       provBtn?.addEventListener("click", (e) => {
         e.preventDefault();
         buscarProveedores(provInput?.value || "", false);
@@ -423,8 +441,16 @@
         }
       });
 
-      durMas?.addEventListener("click", () => adjustDuracion(1));
-      durMenos?.addEventListener("click", () => adjustDuracion(-1));
+      durMas?.addEventListener("click", () => {
+        adjustDuracion(1);
+        const next = Math.max(1, Number(durSpan?.textContent || 1));
+        setFechaCorteDefault(next);
+      });
+      durMenos?.addEventListener("click", () => {
+        adjustDuracion(-1);
+        const next = Math.max(1, Number(durSpan?.textContent || 1));
+        setFechaCorteDefault(next);
+      });
 
       btnAdd?.addEventListener("click", async () => {
         const plataforma = platSelect?.value || "";
@@ -465,12 +491,16 @@
 
         setStatus("Agregando cuenta...");
         try {
-          const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
-          const today = new Date();
-          const fechaPagada = today.toISOString().slice(0, 10);
-          const fechaCorteDate = new Date(today);
-          fechaCorteDate.setMonth(fechaCorteDate.getMonth() + monthsVal);
-          const fechaCorte = fechaCorteDate.toISOString().slice(0, 10);
+        const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
+        const today = new Date();
+        const fechaPagada = today.toISOString().slice(0, 10);
+        const fechaCorte =
+          fechaCorteInput?.value?.trim() ||
+          (() => {
+            const fechaCorteDate = new Date(today);
+            fechaCorteDate.setMonth(fechaCorteDate.getMonth() + monthsVal);
+            return fechaCorteDate.toISOString().slice(0, 10);
+          })();
 
           let venta_perfil = false;
           let venta_miembro = false;

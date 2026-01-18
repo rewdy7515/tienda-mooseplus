@@ -106,25 +106,6 @@
         margin-left: 12px;
         line-height: 1;
       }
-      .copy-wrap,
-      .copy-cell {
-        position: relative;
-        cursor: pointer;
-      }
-      .copy-toast {
-        position: absolute;
-        top: -22px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: #111;
-        color: #fff;
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-size: 12px;
-        white-space: nowrap;
-        pointer-events: none;
-        z-index: 5;
-      }
     </style>
   </head>
   <body>
@@ -133,6 +114,9 @@
 
     <main class="categorias-dinamicas">
       <h2>Cortes</h2>
+      <button id="btn-delete-cortes" class="btn-outline hidden" style="margin-bottom: 12px; display:none;">
+        Eliminar filas cortadas
+      </button>
       <div class="cortes-wrapper">
         <div id="cortes-status" class="status">Cargando plataformas...</div>
         <div id="cortes-tablas"></div>
@@ -141,12 +125,68 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, supabase } from "../../scripts/api.js";
+      import { clearServerSession, supabase, loadCurrentUser } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
 
       requireSession();
       attachLogoHome();
       attachLogout(clearServerSession);
+
+      // Mostrar botón de eliminación solo para superadmin
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+          const isSuper = isTrue(user?.permiso_superadmin);
+          const btnDelete = document.querySelector("#btn-delete-cortes");
+          if (isSuper && btnDelete) {
+            btnDelete.classList.remove("hidden");
+            btnDelete.style.display = "inline-flex";
+            btnDelete.addEventListener("click", async () => {
+              const ok = confirm("¿Eliminar todas las ventas con suspendido = true?");
+              if (!ok) return;
+              try {
+                const { error } = await supabase.from("ventas").delete().eq("suspendido", true);
+                if (error) throw error;
+
+                // Recalcular ocupados en cuentas y perfiles
+                const { data: ventasIds, error: ventasErr } = await supabase
+                  .from("ventas")
+                  .select("id_cuenta, id_perfil");
+                if (ventasErr) throw ventasErr;
+                const cuentasIds = Array.from(
+                  new Set((ventasIds || []).map((v) => v.id_cuenta).filter(Boolean))
+                );
+                const perfilesIds = Array.from(
+                  new Set((ventasIds || []).map((v) => v.id_perfil).filter(Boolean))
+                );
+
+                const updates = [
+                  supabase.from("cuentas").update({ ocupado: false }),
+                  cuentasIds.length
+                    ? supabase.from("cuentas").update({ ocupado: true }).in("id_cuenta", cuentasIds)
+                    : Promise.resolve({ error: null }),
+                  supabase.from("perfiles").update({ ocupado: false }),
+                  perfilesIds.length
+                    ? supabase.from("perfiles").update({ ocupado: true }).in("id_perfil", perfilesIds)
+                    : Promise.resolve({ error: null }),
+                ];
+                const results = await Promise.all(updates);
+                const errRecalc = results.find((r) => r.error)?.error;
+                if (errRecalc) throw errRecalc;
+
+                alert("Filas cortadas eliminadas.");
+                init(); // recarga la tabla
+              } catch (err) {
+                console.error("delete suspendidos error", err);
+                alert("No se pudieron eliminar las filas cortadas.");
+              }
+            });
+          }
+        } catch (err) {
+          console.error("init superadmin check error", err);
+        }
+      })();
 
       const tablasEl = document.querySelector("#cortes-tablas");
       const statusEl = document.querySelector("#cortes-status");
@@ -214,7 +254,6 @@
                       </td>
                       <td></td>
                       <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button type="button" class="btn-outline accion-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                         <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
                       </td>
                     </tr>
@@ -259,7 +298,6 @@
                     <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
                     <td>${v.fecha_corte || ""}</td>
                     <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                      <button type="button" class="btn-outline accion-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                       <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
                     </td>
                   </tr>
@@ -299,7 +337,10 @@
 
       const init = async () => {
         try {
-          const today = new Date().toISOString().slice(0, 10);
+          // Fecha de hoy en zona local (yyyy-mm-dd)
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, "0");
+          const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
@@ -403,7 +444,7 @@
       }
     };
 
-      const copyToClipboard = async (text, anchor) => {
+      const copyToClipboard = async (text) => {
         if (!text) return;
         try {
           await navigator.clipboard.writeText(text);
@@ -417,21 +458,8 @@
             temp.remove();
           } catch (_) {
             console.error("No se pudo copiar al portapapeles");
-            return;
           }
         }
-        if (!anchor) return;
-        const holder = anchor.closest(".copy-wrap, .copy-cell") || anchor.parentElement;
-        if (!holder) return;
-        let toast = holder.querySelector(".copy-toast");
-        if (!toast) {
-          toast = document.createElement("div");
-          toast.className = "copy-toast";
-          toast.textContent = "Copiado al portapapeles";
-          holder.appendChild(toast);
-        }
-        toast.classList.add("visible");
-        setTimeout(() => toast?.remove(), 1200);
       };
 
       const selectRow = (target) => {
@@ -458,6 +486,17 @@
         }
         const cortarBtn = e.target.closest(".cortar-btn");
         if (cortarBtn) {
+          const markCortado = () => {
+            cortarBtn.style.display = "none";
+            const label = document.createElement("span");
+            label.textContent = "Cortado";
+            label.className = "badge";
+            label.style.background = "#16a34a";
+            label.style.color = "#fff";
+            label.style.padding = "4px 8px";
+            label.style.borderRadius = "8px";
+            cortarBtn.parentElement?.appendChild(label);
+          };
           const row = cortarBtn.closest("tr");
           if (!row) return;
           const ventaId = cortarBtn.dataset.venta;
@@ -592,6 +631,7 @@
                 inputs.forEach((inp) => (inp.disabled = true));
                 cortarBtn.classList.add("disabled");
                 cortarBtn.disabled = true;
+                markCortado();
               } else if (replId) {
                 await updateReemplazo();
                 row.classList.add("row-disabled");
@@ -599,6 +639,7 @@
                 inputs.forEach((inp) => (inp.disabled = true));
                 cortarBtn.classList.add("disabled");
                 cortarBtn.disabled = true;
+                markCortado();
               }
             } catch (err) {
               console.error("cortar update error", err);
