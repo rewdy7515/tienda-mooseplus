@@ -127,6 +127,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, supabase, loadCurrentUser } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
       attachLogoHome();
@@ -296,7 +297,7 @@
                     </td>
                     <td>${perfil}</td>
                     <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
-                    <td>${v.fecha_corte || ""}</td>
+                    <td>${formatDDMMYYYY(v.fecha_corte)}</td>
                     <td style="display:flex; gap:6px; flex-wrap:wrap;">
                       <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
                     </td>

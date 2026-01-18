@@ -437,7 +437,7 @@ app.get("/api/inventario", async (req, res) => {
           clave,
           venta_perfil,
           venta_miembro,
-          plataformas(nombre, color_1)
+          plataformas(nombre, color_1, color_2)
         ),
         perfiles:perfiles(
           id_perfil,
@@ -453,10 +453,12 @@ app.get("/api/inventario", async (req, res) => {
     const items = (data || []).map((row) => {
       const plataforma = row.cuentas?.plataformas?.nombre || "Sin plataforma";
       const color_1 = row.cuentas?.plataformas?.color_1 || null;
+      const color_2 = row.cuentas?.plataformas?.color_2 || null;
       const plan = row.precios?.plan || "Sin plan";
       return {
         plataforma,
         color_1,
+        color_2,
         plan,
         id_venta: row.id_venta,
         id_precio: row.id_precio || null,
@@ -474,15 +476,25 @@ app.get("/api/inventario", async (req, res) => {
     });
 
     const grouped = items.reduce((acc, item) => {
-      if (!acc[item.plataforma]) acc[item.plataforma] = { color_1: item.color_1, planes: {} };
-      if (!acc[item.plataforma].planes[item.plan]) acc[item.plataforma].planes[item.plan] = [];
-      acc[item.plataforma].planes[item.plan].push(item);
+      const key = item.plataforma || "Sin plataforma";
+      if (!acc[key]) {
+        acc[key] = {
+          color_1: item.color_1,
+          color_2: item.color_2,
+          id_plataforma: item.id_plataforma,
+          planes: {},
+        };
+      }
+      if (!acc[key].planes[item.plan]) acc[key].planes[item.plan] = [];
+      acc[key].planes[item.plan].push(item);
       return acc;
     }, {});
 
     const plataformas = Object.entries(grouped).map(([nombre, payload]) => ({
       nombre,
       color_1: payload.color_1 || null,
+      color_2: payload.color_2 || null,
+      id_plataforma: payload.id_plataforma || null,
       planes: Object.entries(payload.planes).map(([plan, ventas]) => ({ plan, ventas })),
     }));
 

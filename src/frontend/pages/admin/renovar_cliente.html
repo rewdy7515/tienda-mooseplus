@@ -105,6 +105,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
       import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
       attachLogoHome();
@@ -616,12 +617,7 @@
 
       const formatFechaCorte = (dateStr) => {
         if (!dateStr) return "-";
-        const d = new Date(dateStr);
-        if (Number.isNaN(d.valueOf())) return dateStr;
-        const dd = String(d.getDate()).padStart(2, "0");
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const yyyy = d.getFullYear();
-        return `${dd}/${mm}/${yyyy}`;
+        return formatDDMMYYYY(dateStr) || "-";
       };
 
       inputBuscar?.addEventListener("input", (e) => {
@@ -790,14 +786,14 @@
       });
 
       const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
-        const lines = ["*✅ Servicio renovado 🫡*"];
+        const lines = ["*✅ Servicio renovado 🫡*", ""];
         if (plataformaNombre || item.id_venta) {
           lines.push(
             `*${(plataformaNombre || "").toUpperCase()}*${item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""}`.trim()
           );
         }
         if (item.correo) lines.push(`*Correo:* ${item.correo}`);
-        if (item.clave) lines.push(`*Clave:* ${item.clave}`);
+        lines.push(`*Clave:* ${item.clave || "-"}`);
         if (item.n_perfil) lines.push(`*Perfil:* M${item.n_perfil}`);
         if (item.pin) lines.push(`*PIN:* ${item.pin}`);
         if (fechaCorte) {
@@ -1165,13 +1161,14 @@
           alert("Renovación aplicada.");
           // Mostrar modal de confirmación con texto copiables
           const lines = ["*✅ Servicio renovado 🫡*"];
+          lines.push("");
           if (modalRowContext.plataforma_nombre || modalRowContext.id_venta) {
             lines.push(
               `*${modalRowContext.plataforma_nombre || ""}*${modalRowContext.id_venta ? ` 🫎 \`ID Venta: #${modalRowContext.id_venta}\`` : ""}`.trim()
             );
           }
           if (modalRowContext.correo) lines.push(`*Correo:* ${modalRowContext.correo}`);
-          if (modalRowContext.clave) lines.push(`*Contraseña:* ${modalRowContext.clave}`);
+          lines.push(`*Clave:* ${modalRowContext.clave || "-"}`);
           if (modalRowContext.n_perfil) lines.push(`*Perfil:* M${modalRowContext.n_perfil}`);
           if (modalRowContext.pin) lines.push(`*PIN:* ${modalRowContext.pin}`);
           if (nuevaFecha) {

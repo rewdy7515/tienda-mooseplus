@@ -6,6 +6,7 @@ import {
   attachLogoHome,
 } from "./session.js";
 import { clearServerSession, loadCurrentUser, supabase, ensureServerSession } from "./api.js";
+import { formatDDMMYYYY } from "./date-format.js";
 
 requireSession();
 
@@ -61,12 +62,7 @@ const motifLabel = (row) => {
   return "Otro...";
 };
 
-const formatDate = (iso) => {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.valueOf())) return "-";
-  return d.toISOString().slice(0, 10);
-};
+const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
 
 const getDescripcion = (row) => {
   if (row.por_clave || row.por_pin || row.por_suscripcion) return motifLabel(row);

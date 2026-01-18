@@ -43,6 +43,76 @@
       .table-base button:active {
         filter: brightness(0.9);
       }
+      .table-base .btn-copy-row {
+        background: #111 !important;
+        border-color: #111 !important;
+      }
+      .table-base .btn-copy-row:hover {
+        background: #1f2937 !important;
+        border-color: #1f2937 !important;
+        filter: none;
+      }
+      .table-base .btn-copy-row:active {
+        background: #0b0b0b !important;
+        border-color: #0b0b0b !important;
+        filter: none;
+      }
+      .table-base th,
+      .table-base td {
+        height: 30px;
+      }
+      /* Unificar fondo de los botones de plataformas */
+      .inventario-list {
+        background: #fff;
+        padding: 12px;
+        border-radius: 12px;
+      }
+      .inventario-item {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+      }
+      .inventario-item + .inventario-item {
+        margin-top: 8px;
+      }
+      .inventario-btn {
+        display: block;
+        width: 100%;
+        margin: 0;
+        border-radius: 8px;
+        background: var(--btn-plat-bg, #111);
+        color: #fff;
+        border: 1px solid var(--btn-plat-bg, #111);
+        transition: filter 0.15s ease, opacity 0.15s ease;
+        /* Evita que estilos globales de btn-outline alteren el color base */
+        box-shadow: none;
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .inventario-btn:hover {
+        background: var(--btn-plat-bg, #111);
+        border-color: var(--btn-plat-bg, #111);
+        filter: brightness(1.15);
+      }
+      .inventario-btn:active {
+        background: var(--btn-plat-bg, #111);
+        border-color: var(--btn-plat-bg, #111);
+        filter: brightness(0.9);
+      }
+      .inventario-plan-list {
+        margin-top: 0;
+      }
+      .inventario-plan {
+        margin-top: 0;
+      }
+      /* Quitar borde curvo superior de tablas en inventario */
+      .inventario-plan .table-base {
+        border-radius: 0 0 8px 8px;
+      }
+      .inventario-item.open .inventario-btn {
+        border-radius: 8px 8px 0 0;
+      }
     </style>
   </head>
   <body>
@@ -88,6 +158,7 @@
         setSessionRoles,
         attachLogoHome,
       } from "../scripts/session.js";
+      import { formatDDMMYYYY } from "../scripts/date-format.js";
       import {
         clearServerSession,
         loadCurrentUser,
@@ -122,12 +193,29 @@
       let proximasSeleccionadas = new Set();
       let ventasIndex = [];
 
+      const getPlatId = (p) =>
+        p?.id_plataforma ??
+        p?.idPlataforma ??
+        p?.plataforma_id ??
+        p?.id ??
+        null;
+      const getColor2 = (p) => p?.color_2 ?? p?.color2 ?? null;
       const buildVentasIndex = () => {
         const rows = [];
         (ultimasPlataformas || []).forEach((p) => {
           const platNombre = p.nombre || "";
-          const color1 = p.color_1 || "";
-          const platId = p.id_plataforma || null;
+          const platId = getPlatId(p);
+          const color2 = getColor2(p) || "";
+          console.log(
+            "[inventario] plataforma idx",
+            p?.idx,
+            "id",
+            platId,
+            "color_2",
+            color2,
+            "keys",
+            Object.keys(p || {})
+          );
           (p.planes || []).forEach((planObj) => {
             const planNombre = planObj.plan || "";
             (planObj.ventas || []).forEach((v) => {
@@ -141,7 +229,7 @@
                 plataforma: platNombre,
                 plan: planNombre,
                 id_plataforma: platId,
-                color_1: color1,
+                color_2: color2,
               });
             });
           });
@@ -185,13 +273,16 @@
           `
           )
           .join("");
-        const headerColor = items[0]?.color_1 || "";
+        const headerColor = items[0]?.color_2 || items[0]?.color2 || "";
+        if (Number(items[0]?.id_plataforma) === 1) {
+          console.log("[inventario] search header color_2 plat1:", headerColor);
+        }
         const headerStyle = headerColor
           ? `style="--table-header-bg:${headerColor};"`
           : "";
         searchResults.innerHTML = `
-          <div class="cuenta-table-wrap" ${headerStyle}>
-            <table class="table-base">
+          <div class="cuenta-table-wrap">
+            <table class="table-base" ${headerStyle}>
               <thead>
                 <tr>
                   <th>ID Venta</th>
@@ -293,12 +384,7 @@
         copyToClipboard(txt);
       });
 
-      const formatDate = (iso) => {
-        if (!iso) return "";
-        const d = new Date(iso);
-        if (Number.isNaN(d.valueOf())) return "";
-        return d.toISOString().slice(0, 10);
-      };
+      const formatDate = (iso) => formatDDMMYYYY(iso);
 
       const diffDias = (iso) => {
         if (!iso) return null;
@@ -390,34 +476,38 @@
         plataformas.forEach((p, idx) => {
           const wrapper = document.createElement("div");
           wrapper.className = "inventario-item";
-          if (p.color_1)
-            wrapper.style.setProperty("--table-header-bg", p.color_1);
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "btn-outline inventario-btn";
           btn.textContent = p.nombre || `Plataforma ${idx + 1}`;
+          if (p.color_1) {
+            btn.style.setProperty("--btn-plat-bg", p.color_1);
+          }
+          const headerColor = getColor2(p) || "";
+          if (Number(p.id_plataforma) === 1) {
+            console.log("[inventario] headerColor tabla plat1:", headerColor);
+          }
 
           const planList = document.createElement("div");
           planList.className = "inventario-plan-list hidden";
 
-          (p.planes || []).forEach((planObj, pIdx) => {
+          (p.planes || []).forEach((planObj) => {
             const planWrapper = document.createElement("div");
             planWrapper.className = "inventario-plan";
             const planName = (planObj.plan || "").trim();
-            const hasPlanName =
-              planName && planName.toLowerCase() !== "sin plan";
-            const planBtn = hasPlanName
-              ? document.createElement("button")
-              : null;
-            if (planBtn) {
-              planBtn.type = "button";
-              planBtn.className = "btn-outline inventario-plan-btn";
-              planBtn.textContent = planName || `Plan ${pIdx + 1}`;
-            }
 
             const table = document.createElement("table");
             table.className = "table-base";
-            table.style.display = hasPlanName ? "none" : "";
+            table.style.display = "";
+            if (headerColor) {
+              table.style.setProperty("--table-header-bg", headerColor);
+              if (Number(p.id_plataforma) === 1) {
+                console.log(
+                  "[inventario] aplicando header color_2 plat1 en tabla:",
+                  headerColor
+                );
+              }
+            }
             table.innerHTML = `
               <thead>
                 <tr>
@@ -480,14 +570,6 @@
               </tbody>
             `;
 
-            if (planBtn) {
-              planBtn.addEventListener("click", () => {
-                table.style.display =
-                  table.style.display === "none" ? "" : "none";
-              });
-              planWrapper.appendChild(planBtn);
-            }
-
             const tableWrap = document.createElement("div");
             tableWrap.style.overflowX = "auto";
             tableWrap.style.width = "100%";
@@ -499,11 +581,8 @@
 
           btn.addEventListener("click", () => {
             planList.classList.toggle("hidden");
-            // Si solo hay un plan, abrirlo directamente
-            if ((p.planes || []).length === 1) {
-              const singleTable = planList.querySelector("table");
-              if (singleTable) singleTable.style.display = "";
-            }
+            const isOpen = !planList.classList.contains("hidden");
+            wrapper.classList.toggle("open", isOpen);
           });
 
           wrapper.appendChild(btn);
@@ -521,7 +600,23 @@
           statusEl.textContent = resp.error;
           return;
         }
-        ultimasPlataformas = resp?.plataformas || [];
+        console.log("[inventario] resp raw inventario:", resp);
+        const plats =
+          resp?.plataformas ||
+          resp?.plataformas?.plataformas ||
+          resp?.data?.plataformas ||
+          [];
+        ultimasPlataformas = plats;
+        console.log(
+          "[inventario] plataformas colores:",
+          (ultimasPlataformas || []).map((p) => ({
+            id: p.id_plataforma,
+            nombre: p.nombre,
+            color_1: p.color_1,
+            color_2: p.color_2,
+            keys: Object.keys(p || {}),
+          }))
+        );
         buildVentasIndex();
         renderPlataformas(ultimasPlataformas);
         handleSearch(searchInput?.value || "");
