@@ -5,16 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Inventario</title>
     <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .copyable {
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 80px;
+        right: 16px;
+        background: #111;
+        color: #fff;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 14px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+        z-index: 1200;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      /* Estilo para botones dentro de tablas */
+      .table-base button {
+        border-radius: 8px;
+        border: 1px solid #cccccc;
+        outline: none;
+        box-shadow: none;
+        transition: filter 0.15s ease, opacity 0.15s ease;
+      }
+      .table-base button:hover {
+        filter: brightness(1.08);
+      }
+      .table-base button:active {
+        filter: brightness(0.9);
+      }
+    </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../" data-header-pages=""></div>
     <script src="../scripts/header-loader.js"></script>
+    <div id="copy-toast" class="copy-toast" aria-live="polite">
+      Texto copiado al portapapeles
+    </div>
 
     <main class="categorias-dinamicas">
       <h2>Inventario</h2>
-      <div class="cuentas-busqueda" style="margin:0 0 12px 0;">
+      <div class="cuentas-busqueda" style="margin: 0 0 12px 0">
         <div class="input-wrap">
-          <input type="search" id="inv-search" placeholder="Buscar por correo" autocomplete="off" />
+          <input
+            type="search"
+            id="inv-search"
+            placeholder="Buscar por correo"
+            autocomplete="off"
+          />
           <div id="inv-sugs" class="sugerencias-cuentas hidden"></div>
         </div>
       </div>
@@ -24,7 +71,7 @@
           type="button"
           id="btn-proximas"
           class="btn-primary"
-          style="background-color:#22c55e;border-color:#22c55e;"
+          style="background-color: #22c55e; border-color: #22c55e"
         >
           Renovar cuentas
         </button>
@@ -34,24 +81,41 @@
     </main>
 
     <script type="module">
-      import { requireSession, attachLogout, getSessionRoles, setSessionRoles, attachLogoHome } from "../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, fetchInventario, ensureServerSession, sendCartDelta, supabase } from "../scripts/api.js";
+      import {
+        requireSession,
+        attachLogout,
+        getSessionRoles,
+        setSessionRoles,
+        attachLogoHome,
+      } from "../scripts/session.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        fetchInventario,
+        ensureServerSession,
+        sendCartDelta,
+        supabase,
+      } from "../scripts/api.js";
 
       requireSession();
 
       const usernameEl = document.querySelector(".username");
       const adminLink = document.querySelector(".admin-link");
-      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const isTrue = (v) =>
+        v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const logo = document.querySelector(".logo");
       const listEl = document.querySelector("#inventario-list");
       const statusEl = document.querySelector("#inventario-status");
       const searchInput = document.querySelector("#inv-search");
       const searchSugs = document.querySelector("#inv-sugs");
       const searchResults = document.querySelector("#inv-search-results");
+      const copyToast = document.querySelector("#copy-toast");
       const actionsEl = document.querySelector(".inventario-actions");
       const btnProximas = document.querySelector("#btn-proximas");
       const modalProximas = document.querySelector("#modal-proximas");
-      const modalProximasClose = document.querySelector(".modal-proximas-close");
+      const modalProximasClose = document.querySelector(
+        ".modal-proximas-close"
+      );
       const proximasContent = document.querySelector("#proximas-content");
       const btnProximasAdd = document.querySelector("#btn-proximas-add");
       let ultimasPlataformas = [];
@@ -62,6 +126,8 @@
         const rows = [];
         (ultimasPlataformas || []).forEach((p) => {
           const platNombre = p.nombre || "";
+          const color1 = p.color_1 || "";
+          const platId = p.id_plataforma || null;
           (p.planes || []).forEach((planObj) => {
             const planNombre = planObj.plan || "";
             (planObj.ventas || []).forEach((v) => {
@@ -74,6 +140,8 @@
                 fecha_corte: v.fecha_corte || "",
                 plataforma: platNombre,
                 plan: planNombre,
+                id_plataforma: platId,
+                color_1: color1,
               });
             });
           });
@@ -84,7 +152,9 @@
       const renderSearchResults = (items = [], term = "") => {
         if (!searchResults) return;
         if (!term || !items.length) {
-          searchResults.innerHTML = term ? '<p class="status">No se encontraron resultados.</p>' : "";
+          searchResults.innerHTML = term
+            ? '<p class="status">No se encontraron resultados.</p>'
+            : "";
           return;
         }
         const rows = items
@@ -92,19 +162,36 @@
             (it) => `
             <tr>
               <td>${it.id_venta}</td>
-              <td>${it.correo}</td>
-              <td>${it.clave}</td>
+              <td class="copyable" data-label="Correo">${it.correo}</td>
+              <td class="copyable" data-label="Clave">${it.clave}</td>
               <td>${it.n_perfil ? `M${it.n_perfil}` : ""}</td>
-              <td>${it.pin || ""}</td>
+              <td class="copyable" data-label="PIN">${it.pin || ""}</td>
               <td>${formatDate(it.fecha_corte)}</td>
               <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
+              <td>
+                <div class="actions-inline">
+                  <button class="btn-small btn-renovar" style="background-color:#22c55e;color:white;">🔄</button>
+                  <button class="btn-small btn-red-report" style="background-color:#ef4444;color:white;">❕</button>
+                  <button class="btn-small btn-copy-row" data-copy="Correo: ${
+                    it.correo
+                  }\nClave: ${it.clave}\nPIN: ${
+              it.pin || ""
+            }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
+                    <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:14px;height:14px;filter:invert(1);" />
+                  </button>
+                </div>
+              </td>
             </tr>
           `
           )
           .join("");
+        const headerColor = items[0]?.color_1 || "";
+        const headerStyle = headerColor
+          ? `style="--table-header-bg:${headerColor};"`
+          : "";
         searchResults.innerHTML = `
-          <div class="cuenta-table-wrap">
-            <table class="proximas-table">
+          <div class="cuenta-table-wrap" ${headerStyle}>
+            <table class="table-base">
               <thead>
                 <tr>
                   <th>ID Venta</th>
@@ -114,6 +201,7 @@
                   <th>PIN</th>
                   <th>Fecha corte</th>
                   <th>Plataforma / Plan</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -130,7 +218,10 @@
           return;
         }
         searchSugs.innerHTML = items
-          .map((it) => `<div class="sugerencia-item" data-value="${it.correo}">${it.correo}</div>`)
+          .map(
+            (it) =>
+              `<div class="sugerencia-item" data-value="${it.correo}">${it.correo}</div>`
+          )
           .join("");
         searchSugs.classList.remove("hidden");
       };
@@ -142,6 +233,41 @@
         if (listEl) listEl.style.display = displayVal;
       };
 
+      const copyToClipboard = (text) => {
+        if (!text) return;
+        const doFallbackCopy = () => {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        };
+        const done = () => showCopyToast();
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard
+            .writeText(text)
+            .then(done)
+            .catch(() => {
+              doFallbackCopy();
+              done();
+            });
+        } else {
+          doFallbackCopy();
+          done();
+        }
+      };
+
+      let toastTimer = null;
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          copyToast.classList.remove("show");
+        }, 1000);
+      };
+
       const handleSearch = (termRaw) => {
         const term = (termRaw || "").trim().toLowerCase();
         if (!term) {
@@ -150,11 +276,22 @@
           toggleInventoryView(true);
           return;
         }
-        const matches = ventasIndex.filter((v) => v.correo.toLowerCase().includes(term));
+        const matches = ventasIndex.filter((v) =>
+          v.correo.toLowerCase().includes(term)
+        );
         showSuggestions(matches.slice(0, 6));
         renderSearchResults(matches, term);
         toggleInventoryView(false);
       };
+
+      // Copiar valores de celdas marcadas como copyable
+      document.addEventListener("click", (e) => {
+        const cell = e.target.closest(".copyable");
+        const btnCopy = e.target.closest(".btn-copy-row");
+        const txt = cell?.textContent?.trim() || btnCopy?.dataset.copy;
+        if (!txt) return;
+        copyToClipboard(txt);
+      });
 
       const formatDate = (iso) => {
         if (!iso) return "";
@@ -176,7 +313,8 @@
         if (!proximasContent) return;
         proximasContent.innerHTML = "";
         if (!plataformas.length) {
-          proximasContent.innerHTML = '<p class="status">Sin datos de próximas renovaciones.</p>';
+          proximasContent.innerHTML =
+            '<p class="status">Sin datos de próximas renovaciones.</p>';
           return;
         }
 
@@ -204,7 +342,9 @@
                   <tr>
                     <td>
                       <label class="proximas-check">
-                        <input type="checkbox" data-venta="${it.id_venta ?? ""}" data-precio="${it.id_precio ?? ""}" />
+                        <input type="checkbox" data-venta="${
+                          it.id_venta ?? ""
+                        }" data-precio="${it.id_precio ?? ""}" />
                         <span>${it.correo}</span>
                       </label>
                     </td>
@@ -217,7 +357,7 @@
             bloques.push(`
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${p.nombre || "Plataforma"}</h3>
-                <table class="proximas-table">
+                <table class="table-base">
                   <tbody>
                     ${rows}
                   </tbody>
@@ -228,7 +368,8 @@
         });
 
         if (!bloques.length) {
-          proximasContent.innerHTML = '<p class="status">Sin datos de próximas renovaciones.</p>';
+          proximasContent.innerHTML =
+            '<p class="status">Sin datos de próximas renovaciones.</p>';
           return;
         }
 
@@ -249,7 +390,8 @@
         plataformas.forEach((p, idx) => {
           const wrapper = document.createElement("div");
           wrapper.className = "inventario-item";
-          if (p.color_1) wrapper.style.setProperty("--table-header-bg", p.color_1);
+          if (p.color_1)
+            wrapper.style.setProperty("--table-header-bg", p.color_1);
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "btn-outline inventario-btn";
@@ -262,8 +404,11 @@
             const planWrapper = document.createElement("div");
             planWrapper.className = "inventario-plan";
             const planName = (planObj.plan || "").trim();
-            const hasPlanName = planName && planName.toLowerCase() !== "sin plan";
-            const planBtn = hasPlanName ? document.createElement("button") : null;
+            const hasPlanName =
+              planName && planName.toLowerCase() !== "sin plan";
+            const planBtn = hasPlanName
+              ? document.createElement("button")
+              : null;
             if (planBtn) {
               planBtn.type = "button";
               planBtn.className = "btn-outline inventario-plan-btn";
@@ -291,16 +436,42 @@
                     (v) => `
                     <tr>
                       <td>${v.id_venta ?? ""}</td>
-                      <td class="copyable" data-label="Correo">${v.correo || ""}</td>
-                      <td class="copyable" data-label="Clave">${v.clave || ""}</td>
+                      <td class="copyable" data-label="Correo">${
+                        v.correo || ""
+                      }</td>
+                      <td class="copyable" data-label="Clave">${
+                        v.clave || ""
+                      }</td>
                       <td>${v.n_perfil ? `M${v.n_perfil}` : ""}</td>
                       <td class="copyable" data-label="PIN">${v.pin ?? ""}</td>
                       <td>${formatDate(v.fecha_corte)}</td>
                       <td>
                         <div class="actions-inline">
-                          <button class="btn-small btn-renovar" data-venta="${v.id_venta ?? ""}" data-precio="${v.id_precio ?? ""}" data-plan="${planName || ""}" data-plataforma="${v.id_plataforma ?? ""}" data-vperf="${v.venta_perfil ?? ""}" data-vmiem="${v.venta_miembro ?? ""}" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${v.id_perfil ?? ""}" data-correo="${v.correo || ""}" data-nperfil="${v.n_perfil ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
-                          <button class="btn-small btn-red-report" data-plataforma="${v.id_plataforma ?? ""}" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${v.id_perfil ?? ""}" style="background-color:#ef4444;color:white;">❕</button>
-                          <button class="btn-small" style="background-color:#3b82f6;color:white;">📑</button>
+                          <button class="btn-small btn-renovar" data-venta="${
+                            v.id_venta ?? ""
+                          }" data-precio="${v.id_precio ?? ""}" data-plan="${
+                      planName || ""
+                    }" data-plataforma="${v.id_plataforma ?? ""}" data-vperf="${
+                      v.venta_perfil ?? ""
+                    }" data-vmiem="${v.venta_miembro ?? ""}" data-cuenta="${
+                      v.id_cuenta ?? ""
+                    }" data-perfil="${v.id_perfil ?? ""}" data-correo="${
+                      v.correo || ""
+                    }" data-nperfil="${
+                      v.n_perfil ?? ""
+                    }" style="background-color:#22c55e;color:white;">🔄</button>
+                          <button class="btn-small btn-red-report" data-plataforma="${
+                            v.id_plataforma ?? ""
+                          }" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${
+                      v.id_perfil ?? ""
+                    }" style="background-color:#ef4444;color:white;">❕</button>
+                          <button class="btn-small btn-copy-row" data-copy="Correo: ${
+                            v.correo || ""
+                          }\nClave: ${v.clave || ""}\nPIN: ${
+                      v.pin || ""
+                    }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
+                            <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:14px;height:14px;filter:invert(1);" />
+                          </button>
                         </div>
                       </td>
                     </tr>`
@@ -311,7 +482,8 @@
 
             if (planBtn) {
               planBtn.addEventListener("click", () => {
-                table.style.display = table.style.display === "none" ? "" : "none";
+                table.style.display =
+                  table.style.display === "none" ? "" : "none";
               });
               planWrapper.appendChild(planBtn);
             }
@@ -359,7 +531,10 @@
         try {
           const user = await loadCurrentUser();
           if (user && usernameEl) {
-            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            const fullName = [user.nombre, user.apellido]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
             usernameEl.textContent = fullName || user.correo || "Usuario";
           }
           setSessionRoles(user || {});
@@ -379,7 +554,8 @@
           await loadInventario();
         } catch (err) {
           console.error("inventario init error", err);
-          if (statusEl) statusEl.textContent = "No se pudo cargar el inventario.";
+          if (statusEl)
+            statusEl.textContent = "No se pudo cargar el inventario.";
         }
       }
 
@@ -417,7 +593,10 @@
       };
 
       modalProximas?.addEventListener("click", (e) => {
-        if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
+        if (
+          e.target.classList.contains("modal-backdrop") ||
+          e.target.classList.contains("modal-close")
+        ) {
           closeProximas();
         }
       });
@@ -450,7 +629,9 @@
         if (plat) params.set("plataforma", plat);
         if (cuenta) params.set("cuenta", cuenta);
         if (perfil) params.set("perfil", perfil);
-        const url = `reportes/crear_reporte.html${params.toString() ? `?${params.toString()}` : ""}`;
+        const url = `reportes/crear_reporte.html${
+          params.toString() ? `?${params.toString()}` : ""
+        }`;
         window.location.href = url;
       });
 
@@ -496,7 +677,10 @@
       });
 
       modalRenovar?.addEventListener("click", (e) => {
-        if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
+        if (
+          e.target.classList.contains("modal-backdrop") ||
+          e.target.classList.contains("modal-close")
+        ) {
           closeRenovarModal();
         }
       });
@@ -513,8 +697,12 @@
           if (!precioId) {
             try {
               const platIdNum = Number(selectedRenovarPlat) || null;
-              const ventaPerfilFlag = selectedVentaFlags.venta_perfil === "true" || selectedVentaFlags.venta_perfil === true;
-              const ventaMiembroFlag = selectedVentaFlags.venta_miembro === "true" || selectedVentaFlags.venta_miembro === true;
+              const ventaPerfilFlag =
+                selectedVentaFlags.venta_perfil === "true" ||
+                selectedVentaFlags.venta_perfil === true;
+              const ventaMiembroFlag =
+                selectedVentaFlags.venta_miembro === "true" ||
+                selectedVentaFlags.venta_miembro === true;
               let query = supabase
                 .from("precios")
                 .select("id_precio, completa, sub_cuenta")
@@ -575,7 +763,9 @@
       // Agregar renovaciones seleccionadas
       btnProximasAdd?.addEventListener("click", () => {
         if (!proximasContent) return;
-        const checks = proximasContent.querySelectorAll('input[type="checkbox"]:checked');
+        const checks = proximasContent.querySelectorAll(
+          'input[type="checkbox"]:checked'
+        );
         if (!checks.length) {
           alert("Selecciona al menos una cuenta.");
           return;
@@ -584,8 +774,10 @@
           const idVenta = chk.dataset.venta || null;
           const idPrecio = chk.dataset.precio || null;
           if (!idVenta || !idPrecio) return;
-          sendCartDelta(idPrecio, 1, 1, { renovacion: true, id_venta: idVenta })
-            .catch((err) => console.error("add renovaciones error", err));
+          sendCartDelta(idPrecio, 1, 1, {
+            renovacion: true,
+            id_venta: idVenta,
+          }).catch((err) => console.error("add renovaciones error", err));
         });
         alert("Renovaciones agregadas al carrito.");
         closeProximas();
@@ -594,7 +786,9 @@
     <div id="modal-renovar" class="modal hidden">
       <div class="modal-backdrop"></div>
       <div class="modal-card modal-card-renovar">
-        <button class="modal-close modal-renovar-close" aria-label="Cerrar">×</button>
+        <button class="modal-close modal-renovar-close" aria-label="Cerrar">
+          ×
+        </button>
         <div class="modal-body modal-renovar-stack">
           <h3>Renovar</h3>
           <p>¿Cuántos meses quieres renovar?</p>
@@ -603,20 +797,30 @@
             <span id="renovar-meses">1</span>
             <button type="button" id="renovar-mas">+</button>
           </div>
-          <button class="btn-primary" id="btn-renovar-agregar">Agregar al carrito</button>
+          <button class="btn-primary" id="btn-renovar-agregar">
+            Agregar al carrito
+          </button>
         </div>
       </div>
     </div>
     <div id="modal-proximas" class="modal hidden">
       <div class="modal-backdrop"></div>
       <div class="modal-card modal-card-resumen modal-card-proximas">
-        <button class="modal-close modal-proximas-close" aria-label="Cerrar">×</button>
+        <button class="modal-close modal-proximas-close" aria-label="Cerrar">
+          ×
+        </button>
         <div class="modal-body modal-proximas-body">
-          <h3 class="proximas-header modal-proximas-title">Cuentas próximas a vencerse:</h3>
+          <h3 class="proximas-header modal-proximas-title">
+            Cuentas próximas a vencerse:
+          </h3>
           <div id="proximas-content" class="proximas-panel"></div>
           <div class="proximas-actions">
-            <button type="button" class="btn-primary" id="btn-proximas-add">Añadir renovaciones al carrito</button>
-            <p class="proximas-footnote">(Puedes modificar la duración en el carrito)</p>
+            <button type="button" class="btn-primary" id="btn-proximas-add">
+              Añadir renovaciones al carrito
+            </button>
+            <p class="proximas-footnote">
+              (Puedes modificar la duración en el carrito)
+            </p>
           </div>
         </div>
       </div>
