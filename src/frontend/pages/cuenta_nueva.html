@@ -195,6 +195,7 @@
     <script type="module">
       import { requireSession, attachLogoHome } from "../scripts/session.js";
       import { supabase, loadCurrentUser } from "../scripts/api.js";
+      import { buildNotificationPayload, pickNotificationUserIds } from "../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
@@ -550,6 +551,44 @@
           if (updVentaErr) {
             console.error("set id_admin_venta error", updVentaErr);
           }
+        }
+
+        // Notificaciones de nuevo servicio por cada venta de la orden
+        try {
+          if (resp?.id_orden) {
+            const { data: ventasOrden, error: ventasOrdErr } = await supabase
+              .from("ventas")
+              .select(
+                "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuentas:cuentas!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+              )
+              .eq("id_orden", resp.id_orden);
+            if (ventasOrdErr) throw ventasOrdErr;
+            const rowsNotif = [];
+            (ventasOrden || []).forEach((v) => {
+              const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: v.id_usuario });
+              if (!userIds.length) return;
+              const platName = v.cuentas?.plataformas?.nombre || "Plataforma";
+              const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
+              const notif = buildNotificationPayload(
+                "nuevo_servicio",
+                {
+                  plataforma: platName,
+                  correoCuenta: v.cuentas?.correo || "",
+                  perfil: perfilTxt,
+                  fechaCorte: v.fecha_corte || "",
+                  idOrden: resp.id_orden,
+                },
+                { idCuenta: v.id_cuenta }
+              );
+              userIds.forEach((uid) => rowsNotif.push({ ...notif, id_usuario: uid }));
+            });
+            if (rowsNotif.length) {
+              const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);
+              if (notifErr) throw notifErr;
+            }
+          }
+        } catch (nErr) {
+          console.error("nuevo_servicio notif error", nErr);
         }
         alert("Pedido procesado y asignado al cliente.");
         const dest = resp?.id_orden

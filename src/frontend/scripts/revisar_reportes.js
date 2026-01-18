@@ -852,21 +852,6 @@ async function confirmarReemplazo() {
       return;
     }
 
-    // Notificación
-    try {
-      const notif = {
-        id_usuario: currentRow.id_usuario || null,
-        titulo: `Reporte ${currentRow.id_reporte}`,
-        mensaje: descripcionSol,
-        fecha: new Date().toISOString().slice(0, 10),
-        leido: false,
-        id_cuenta: nuevoCuenta || null,
-      };
-      await supabase.from("notificaciones").insert(notif);
-    } catch (nErr) {
-      console.error("insert notificacion error", nErr);
-    }
-
     alert("Reemplazo realizado.");
     closeReemplazoModal();
     closeModal();

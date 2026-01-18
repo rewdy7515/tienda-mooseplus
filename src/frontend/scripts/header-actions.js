@@ -14,6 +14,33 @@ import { loadCurrentUser, supabase } from "./api.js";
 if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
   const pagesRoot = window.__headerPages || "";
+  const basePagesUrl = (() => {
+    try {
+      return new URL(pagesRoot || "./", window.location.href);
+    } catch (_) {
+      return new URL(window.location.href);
+    }
+  })();
+
+  const toAbs = (path) => {
+    try {
+      return new URL(path, basePagesUrl).href;
+    } catch (_) {
+      return path;
+    }
+  };
+
+  const normalizeHeaderLinks = () => {
+    const headerEl = document.querySelector(".header");
+    if (!headerEl) return;
+    headerEl.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href") || "";
+      if (!href || href === "#" || href.startsWith("http") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        return;
+      }
+      a.setAttribute("href", toAbs(href));
+    });
+  };
 
   const bindCartFallback = () => {
     if (window.__cartFallbackBound) return;
@@ -69,7 +96,7 @@ if (!window.__headerActionsInit) {
         if (loginBtn) {
           loginBtn.classList.remove("hidden");
           loginBtn.addEventListener("click", () => {
-            window.location.href = `${pagesRoot}login.html`;
+            window.location.href = toAbs("login.html");
           });
         }
         if (userMenu) {
@@ -164,21 +191,22 @@ if (!window.__headerActionsInit) {
   initUser();
 
   attachLogoHome();
+  normalizeHeaderLinks();
 
   // Botones de carrito / checkout / stock
   const btnViewCart = document.querySelector("#btn-view-cart");
   btnViewCart?.addEventListener("click", () => {
-    window.location.href = `${pagesRoot}cart.html`;
+    window.location.href = toAbs("cart.html");
   });
 
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
   adminHeaderBtn?.addEventListener("click", () => {
-    window.location.href = `${pagesRoot}admin/admin_cuentas.html`;
+    window.location.href = toAbs("admin/admin_cuentas.html");
   });
 
   const btnCheckout = document.querySelector("#btn-checkout");
   btnCheckout?.addEventListener("click", () => {
-    window.location.href = `${pagesRoot}checkout.html`;
+    window.location.href = toAbs("checkout.html");
   });
 
   // Búsqueda en el header (usa catálogo para autocompletar)
@@ -194,7 +222,7 @@ if (!window.__headerActionsInit) {
           data: plataformas,
           onSelectItem: (plat) => {
             const id = plat.id_plataforma;
-            if (id) window.location.href = `${pagesRoot}index.html?plataforma=${id}`;
+            if (id) window.location.href = toAbs(`index.html?plataforma=${id}`);
           },
         });
       })

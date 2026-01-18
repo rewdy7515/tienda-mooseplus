@@ -104,6 +104,7 @@
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
@@ -966,6 +967,31 @@
           });
           const resultados = await Promise.all(updates);
           if (resultados?.length) {
+            const notifRows = [];
+            resultados.forEach((res) => {
+              const uids = pickNotificationUserIds("servicio_renovado", {
+                ventaUserId: res?.id_usuario_cliente ? Number(res.id_usuario_cliente) : null,
+              });
+              const payload = buildNotificationPayload(
+                "servicio_renovado",
+                {
+                  plataforma: res.plataforma || res.plataforma_nombre || "",
+                  correoCuenta: res.correo || "",
+                  fechaCorte: res.fecha_corte || "",
+                },
+                { idCuenta: res.id_cuenta ? Number(res.id_cuenta) : null }
+              );
+              uids.forEach((uid) => notifRows.push({ ...payload, id_usuario: uid }));
+            });
+            if (notifRows.length) {
+              try {
+                await supabase.from("notificaciones").insert(notifRows);
+              } catch (notifErr) {
+                console.error("notificacion servicio_renovado (seleccion) error", notifErr);
+              }
+            }
+          }
+          if (resultados?.length) {
             const mensajes = resultados
               .filter(Boolean)
               .map((res) => buildRenovacionMensaje(res, res.fecha_corte, res.plataforma))
@@ -1113,6 +1139,28 @@
             referencia: ref,
           });
           if (histErr) throw histErr;
+
+          // Notificación de servicio renovado para el cliente de esta venta
+          try {
+            const uids = pickNotificationUserIds("servicio_renovado", {
+              ventaUserId: modalRowContext.id_usuario_cliente ? Number(modalRowContext.id_usuario_cliente) : null,
+            });
+            const payload = buildNotificationPayload(
+              "servicio_renovado",
+              {
+                plataforma: modalRowContext.plataforma_nombre || "",
+                correoCuenta: modalRowContext.correo || "",
+                fechaCorte: nuevaFecha || "",
+              },
+              { idCuenta: modalRowContext.id_cuenta ? Number(modalRowContext.id_cuenta) : null }
+            );
+            if (uids.length) {
+              const rows = uids.map((uid) => ({ ...payload, id_usuario: uid }));
+              await supabase.from("notificaciones").insert(rows);
+            }
+          } catch (notifErr) {
+            console.error("notificacion servicio_renovado (fila) error", notifErr);
+          }
 
           alert("Renovación aplicada.");
           // Mostrar modal de confirmación con texto copiables

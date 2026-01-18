@@ -344,6 +344,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
+      import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
@@ -2722,6 +2723,12 @@
               alert("No se encontró la venta asociada.");
               return;
             }
+            const { data: ventaInfo, error: ventaInfoErr } = await supabase
+              .from("ventas")
+              .select("id_usuario, fecha_corte")
+              .eq("id_venta", ventaId)
+              .maybeSingle();
+            if (ventaInfoErr) throw ventaInfoErr;
 
             const ventaPerfil = currentCuentaDetalle.venta_perfil === true;
             const ventaMiembro = currentCuentaDetalle.venta_miembro === true;
@@ -2799,6 +2806,30 @@
               id_perfil: rowPerfil?.id_perfil || null,
               id_sub_cuenta: null,
             });
+
+            // Notificar servicio reemplazado al usuario de la venta
+            try {
+              const userIds = pickNotificationUserIds("servicio_reemplazado", {
+                ventaUserId: ventaInfo?.id_usuario,
+              });
+              if (userIds.length) {
+                const notif = buildNotificationPayload(
+                  "servicio_reemplazado",
+                  {
+                    correoViejo: currentCuentaDetalle.correo || "",
+                    perfilViejo: rowPerfil?.perfil || (rowPerfil?.n_raw ? `M${rowPerfil.n_raw}` : ""),
+                    correoNuevo: dataDestino.correo || "",
+                    perfilNuevo: dataDestino.n_perfil ? `M${dataDestino.n_perfil}` : "",
+                    fechaCorte: ventaInfo?.fecha_corte || rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte || "",
+                  },
+                  { idCuenta: nuevoCuenta || null }
+                );
+                const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
+                await supabase.from("notificaciones").insert(rows);
+              }
+            } catch (nErr) {
+              console.error("notificacion servicio_reemplazado error", nErr);
+            }
 
             const perfilTxtOld = rowPerfil?.perfil || "-";
             const perfilTxtNew = dataDestino?.n_perfil ? `M${dataDestino.n_perfil}` : "-";
@@ -2964,23 +2995,29 @@
               .eq("id_perfil", modalState.targetId);
             if (error) throw error;
 
-            // Notificar al usuario de este perfil
-            const today = new Date().toISOString().slice(0, 10);
+            // Notificar cambio de PIN al usuario de la venta del perfil
             const { data: ventaPerfil, error: ventaErr } = await supabase
               .from("ventas")
-              .select("id_usuario")
+              .select("id_usuario, id_cuenta, fecha_corte")
               .eq("id_perfil", modalState.targetId)
               .maybeSingle();
             if (ventaErr) throw ventaErr;
-            const uid = ventaPerfil?.id_usuario;
-            if (uid) {
-              const { error: notifErr } = await supabase.from("notificaciones").insert({
-                id_usuario: uid,
-                titulo: "Actualización de PIN",
-                mensaje: `Se ha actualizado el PIN de la cuenta ${modalState.correo || ""}. El nuevo PIN del perfil ${modalState.nPerfil ? `M${modalState.nPerfil}` : ""} es ${newPin || ""}`,
-                fecha: today,
-                leido: false,
-              });
+
+            const userIds = pickNotificationUserIds("pin_actualizado", {
+              ventaUserId: ventaPerfil?.id_usuario,
+            });
+            if (userIds.length) {
+              const notif = buildNotificationPayload(
+                "pin_actualizado",
+                {
+                  correoCuenta: modalState.correo || "",
+                  perfil: modalState.nPerfil ? `M${modalState.nPerfil}` : "",
+                  pin: newPin || "",
+                },
+                { idCuenta: ventaPerfil?.id_cuenta || currentCuentaId }
+              );
+              const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
+              const { error: notifErr } = await supabase.from("notificaciones").insert(rows);
               if (notifErr) throw notifErr;
             }
           } else if (modalState.type === "clave") {
@@ -2990,26 +3027,24 @@
               .eq("id_cuenta", modalState.targetId);
             if (error) throw error;
 
-            // Notificaciones a usuarios de la cuenta cuyo corte no sea hoy
-            const today = new Date().toISOString().slice(0, 10);
+            // Notificar cambio de clave a usuarios con fecha_corte anterior a hoy
             const { data: ventasUsuarios, error: ventErr } = await supabase
               .from("ventas")
               .select("id_usuario, fecha_corte")
-              .eq("id_cuenta", modalState.targetId)
-              .neq("fecha_corte", today);
+              .eq("id_cuenta", modalState.targetId);
             if (ventErr) throw ventErr;
-            const userIds = Array.from(
-              new Set((ventasUsuarios || []).map((v) => v.id_usuario).filter(Boolean))
-            );
+
+            const userIds = pickNotificationUserIds("clave_actualizada", {
+              cuentaVentas: ventasUsuarios || [],
+            });
             if (userIds.length) {
-              const payload = userIds.map((uid) => ({
-                id_usuario: uid,
-                titulo: "Actualización de clave",
-                mensaje: `Se ha actualizado la clave de la cuenta ${modalState.correo || ""} a ${newPin || ""}`,
-                fecha: today,
-                leido: false,
-              }));
-              const { error: notifErr } = await supabase.from("notificaciones").insert(payload);
+              const notif = buildNotificationPayload(
+                "clave_actualizada",
+                { correoCuenta: modalState.correo || "", clave: newPin || "" },
+                { idCuenta: modalState.targetId }
+              );
+              const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
+              const { error: notifErr } = await supabase.from("notificaciones").insert(rows);
               if (notifErr) throw notifErr;
             }
           }

@@ -255,6 +255,7 @@
           return;
         }
         const tokens = pinesRaw.split(/\s+/).filter(Boolean);
+        const today = new Date().toISOString().slice(0, 10);
         const paraVenta = document.getElementById("toggle-venta")?.checked || false;
         const rows = tokens.map((t) => ({
           pin: t,
@@ -263,6 +264,8 @@
           costo,
           monto: valor,
           para_venta: paraVenta,
+          usado: false,
+          fecha_compra: today,
         }));
         if (!rows.length) {
           alert("No se encontraron pines válidos.");

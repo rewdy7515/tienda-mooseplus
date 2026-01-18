@@ -7,6 +7,13 @@
 
   window.__headerRoot = root;
   window.__headerPages = pages;
+  try {
+    window.__headerPagesAbs = new URL(pages || "./", window.location.href).pathname;
+    window.__headerRootAbs = new URL(root || "./", window.location.href).pathname;
+  } catch (_) {
+    window.__headerPagesAbs = pages;
+    window.__headerRootAbs = root;
+  }
 
   try {
     const xhr = new XMLHttpRequest();

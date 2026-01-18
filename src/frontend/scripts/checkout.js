@@ -8,6 +8,7 @@ import {
   loadCurrentUser,
 } from "./api.js";
 import { requireSession, attachLogoHome } from "./session.js";
+import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
 
 requireSession();
 attachLogoHome();
@@ -416,15 +417,57 @@ btnSendPayment?.addEventListener("click", async () => {
       alert(`Error en checkout: ${resp.error}`);
       return;
     }
+    const userId = requireSession();
     // Marcar notificación de inventario para el usuario en sesión
     try {
-      const userId = requireSession();
       await supabase.from("usuarios").update({ notificacion_inventario: true }).eq("id_usuario", userId);
     } catch (flagErr) {
       console.error("update notificacion_inventario error", flagErr);
     }
+
+    // Notificaciones de nuevo servicio al usuario en sesión por cada venta de la orden
+    try {
+      if (resp?.id_orden) {
+        const { data: ventasOrden, error: ventasOrdErr } = await supabase
+          .from("ventas")
+          .select(
+            "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuentas:cuentas!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+          )
+          .eq("id_orden", resp.id_orden);
+        if (ventasOrdErr) throw ventasOrdErr;
+        const rowsNotif = [];
+        (ventasOrden || []).forEach((v) => {
+          const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: userId || v.id_usuario });
+          if (!userIds.length) return;
+          const platName = v.cuentas?.plataformas?.nombre || "Plataforma";
+          const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
+          const notif = buildNotificationPayload(
+            "nuevo_servicio",
+            {
+              plataforma: platName,
+              correoCuenta: v.cuentas?.correo || "",
+              perfil: perfilTxt,
+              fechaCorte: v.fecha_corte || "",
+              idOrden: resp.id_orden,
+            },
+            { idCuenta: v.id_cuenta }
+          );
+          userIds.forEach((uid) => rowsNotif.push({ ...notif, id_usuario: uid }));
+        });
+        if (rowsNotif.length) {
+          const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);
+          if (notifErr) throw notifErr;
+        }
+      }
+    } catch (nErr) {
+      console.error("nuevo_servicio notif checkout error", nErr);
+    }
+
     alert("Pago enviado correctamente.");
-    window.location.href = "entregar_servicios.html";
+    const nextUrl = resp?.id_orden
+      ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+      : "entregar_servicios.html";
+    window.location.href = nextUrl;
   } catch (err) {
     console.error("checkout submit error", err);
     alert("No se pudo enviar el pago. Intenta de nuevo.");
