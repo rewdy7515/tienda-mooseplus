@@ -2903,7 +2903,6 @@
         rows = rows.filter(
           (r) =>
             (r.ocupado === false || r.ocupado === null || typeof r.ocupado === "undefined") &&
-            (r.cuentas?.ocupado === false || r.cuentas?.ocupado === null || typeof r.cuentas?.ocupado === "undefined") &&
             (r.cuentas?.inactiva === false || r.cuentas?.inactiva === null || typeof r.cuentas?.inactiva === "undefined")
         );
         return { data: rows[0] || null };
