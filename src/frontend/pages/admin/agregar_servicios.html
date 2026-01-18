@@ -104,6 +104,7 @@
               <div id="prov-sugerencias" class="proveedor-sugerencias hidden"></div>
             </div>
             <button type="button" id="prov-buscar-btn" class="btn-primary">🔍</button>
+            <button type="button" id="btn-netflix" class="btn-outline" title="Autocompletar Netflix">Netflix</button>
           </div>
         </div>
 
@@ -126,6 +127,7 @@
           <div class="field">
             <label for="correo-cuenta">Correo</label>
             <input type="text" id="correo-cuenta" placeholder="Correo" />
+            <p id="ultimo-correo" class="status" style="margin:4px 0 0; font-size:13px; color:#374151; display:none;"></p>
           </div>
           <div class="field">
             <label for="clave-cuenta">Clave</label>
@@ -215,6 +217,21 @@
       const durMas = document.querySelector("#duracion-mas");
       const durSpan = document.querySelector("#duracion-meses");
       const fechaCorteInput = document.querySelector("#fecha-corte-input");
+      const ultimoCorreoEl = document.querySelector("#ultimo-correo");
+      const pinRecargaEl = document.createElement("p");
+      pinRecargaEl.className = "status";
+      pinRecargaEl.style.margin = "6px 0 0";
+      pinRecargaEl.style.fontSize = "15px";
+      pinRecargaEl.style.fontWeight = "700";
+      pinRecargaEl.style.color = "#111";
+      pinRecargaEl.style.cursor = "pointer";
+      pinRecargaEl.style.display = "none";
+      const claveField = document.querySelector("#clave-cuenta")?.parentElement;
+      if (claveField) {
+        claveField.appendChild(pinRecargaEl);
+      }
+      let pinRecargaSeleccionado = null;
+      const btnNetflix = document.querySelector("#btn-netflix");
       const btnAdd = document.querySelector("#btn-add-cuenta");
       const statusEl = document.querySelector("#add-status");
       const tipoCuentaSelect = document.querySelector("#tipo-cuenta");
@@ -224,6 +241,7 @@
       const correoAccesoEl = document.querySelector("#correo-acceso");
       const pinEl = document.querySelector("#pin-codigo");
       const direccionEl = document.querySelector("#direccion-cuenta");
+      const precioInput = document.querySelector("#precio-cuenta");
 
       let selectedProveedor = null;
       let fetchProvCounter = 0;
@@ -232,6 +250,26 @@
       const toTitleCase = (str) =>
         (str || "").replace(/(\S+)/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
       let dirTimeout = null;
+
+      const copyText = async (text) => {
+        if (!text) return false;
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (err) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            return true;
+          } catch (_err) {
+            return false;
+          }
+        }
+      };
 
       const tryAutofillDireccion = async () => {
         if (String(platSelect?.value) !== "9") return;
@@ -257,6 +295,87 @@
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
+
+      const setUltimoCorreoText = (text, show = false) => {
+        if (!ultimoCorreoEl) return;
+        if (!show) {
+          ultimoCorreoEl.style.display = "none";
+          ultimoCorreoEl.textContent = "";
+          return;
+        }
+        ultimoCorreoEl.textContent = text || "";
+        ultimoCorreoEl.style.display = "block";
+      };
+
+      const fetchUltimoCorreo = async (platId) => {
+        if (!platId || platId !== "1") {
+          setUltimoCorreoText("", false);
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.style.display = "none";
+          pinRecargaEl.textContent = "";
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("correo")
+            .eq("id_plataforma", 1)
+            .order("id_cuenta", { ascending: false })
+            .limit(3);
+          if (error) throw error;
+          const correos = (data || []).map((c) => c.correo).filter(Boolean);
+          const label = correos.length ? correos.join(", ") : "-";
+          setUltimoCorreoText(`Últimos correos: ${label}`, true);
+          // Si el proveedor es 2, intenta buscar pin
+          if (String(selectedProveedor) === "2") {
+            await fetchPinRecarga();
+          } else {
+            pinRecargaSeleccionado = null;
+            pinRecargaEl.style.display = "none";
+            pinRecargaEl.textContent = "";
+          }
+        } catch (err) {
+          console.error("fetch ultimo correo error", err);
+          setUltimoCorreoText("Últimos correos: -", true);
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.style.display = "none";
+          pinRecargaEl.textContent = "";
+        }
+      };
+
+      const fetchPinRecarga = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("tarjetas_de_regalo")
+            .select("id_tarjeta_de_regalo, pin")
+            .eq("id_plataforma", 21)
+            .eq("para_venta", false)
+            .eq("usado", false)
+            .order("id_tarjeta_de_regalo", { ascending: true })
+            .limit(1);
+          if (error) throw error;
+          const pinRow = data?.[0] || null;
+          pinRecargaSeleccionado = pinRow;
+          if (pinRecargaSeleccionado?.pin) {
+            pinRecargaEl.textContent = `Pin de recarga: ${pinRecargaSeleccionado.pin}`;
+            pinRecargaEl.style.display = "block";
+          } else {
+            pinRecargaEl.textContent = "Pin de recarga: -";
+            pinRecargaEl.style.display = "block";
+          }
+        } catch (err) {
+          console.error("fetch pin recarga error", err);
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.textContent = "Pin de recarga: -";
+          pinRecargaEl.style.display = "block";
+        }
+      };
+
+      pinRecargaEl?.addEventListener("click", () => {
+        if (pinRecargaSeleccionado?.pin) {
+          copyText(pinRecargaSeleccionado.pin);
+        }
+      });
 
       const renderProveedorSugs = (items, forceHide = false) => {
         if (!provSugs) return;
@@ -381,6 +500,13 @@
         provInput.value = btn.dataset.nombre || "";
         selectedProveedor = btn.dataset.id || null;
         renderProveedorSugs([], true);
+        if (String(platSelect?.value) === "1" && String(selectedProveedor) === "2") {
+          fetchPinRecarga();
+        } else {
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.style.display = "none";
+          pinRecargaEl.textContent = "";
+        }
       });
 
       regionEl?.addEventListener("input", () => {
@@ -417,6 +543,25 @@
         buscarProveedores(provInput?.value || "", false);
       });
 
+      btnNetflix?.addEventListener("click", () => {
+        selectedProveedor = "2";
+        if (provInput) provInput.value = "Netflix";
+        if (platSelect) {
+          platSelect.value = "1";
+          const changeEvt = new Event("change");
+          platSelect.dispatchEvent(changeEvt);
+        }
+        // Forzar tipo de cuenta
+        if (tipoCuentaSelect) {
+          tipoCuentaSelect.disabled = false;
+          tipoCuentaSelect.classList.remove("input-disabled");
+          tipoCuentaSelect.value = "perfiles";
+        }
+        if (precioInput) {
+          precioInput.value = "0";
+        }
+      });
+
       platSelect?.addEventListener("change", async () => {
         const sel = platSelect.selectedOptions?.[0];
         const meta = plataformaInfo.get(String(platSelect.value)) || {};
@@ -439,6 +584,7 @@
           const regionVal = regionEl.value.trim();
           if (regionVal) tryAutofillDireccion();
         }
+        fetchUltimoCorreo(String(platSelect.value || ""));
       });
 
       durMas?.addEventListener("click", () => {
@@ -469,6 +615,7 @@
         const numDispositivos = Number(platMeta.num_max_dispositivos) > 0 ? Number(platMeta.num_max_dispositivos) : 1;
         const usaPines = platMeta.usa_pines === true || platMeta.usa_pines === "true" || platMeta.usa_pines === 1 || platMeta.usa_pines === "1";
         const maxDigPin = Number(platMeta.max_dig_pin) > 0 ? Number(platMeta.max_dig_pin) : 4;
+        const requierePinRecarga = String(plataforma) === "1" && String(selectedProveedor) === "2";
 
         if (!selectedProveedor) {
           alert("Selecciona un proveedor.");
@@ -480,6 +627,10 @@
         }
         if (!correo || !clave) {
           alert("Ingresa correo y clave.");
+          return;
+        }
+        if (requierePinRecarga && !pinRecargaSeleccionado?.id_tarjeta_de_regalo) {
+          alert("No hay pin de recarga disponible.");
           return;
         }
 
@@ -607,6 +758,24 @@
             registrado_por: currentUser?.id_usuario || null,
           });
           if (histErr) throw histErr;
+
+          // Marcar pin de recarga como usado si aplica
+          if (requierePinRecarga && cuentaInserted?.id_cuenta && pinRecargaSeleccionado?.id_tarjeta_de_regalo) {
+            try {
+              const todayMark = new Date().toISOString().slice(0, 10);
+              const { error: updPinErr } = await supabase
+                .from("tarjetas_de_regalo")
+                .update({
+                  usado: true,
+                  fecha_uso: todayMark,
+                  id_cuenta: cuentaInserted.id_cuenta,
+                })
+                .eq("id_tarjeta_de_regalo", pinRecargaSeleccionado.id_tarjeta_de_regalo);
+              if (updPinErr) throw updPinErr;
+            } catch (err) {
+              console.error("marcar pin recarga error", err);
+            }
+          }
 
           setStatus("Cuenta agregada correctamente.");
           // limpia
