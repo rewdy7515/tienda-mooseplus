@@ -426,13 +426,13 @@
             if (cuentasIds.length) {
               const { data: cuentas, error: ctaErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo")
+                .select("id_cuenta, id_plataforma, correo, clave")
                 .in("id_cuenta", cuentasIds);
               if (ctaErr) {
                 console.error("buscar cuentas error", ctaErr);
               } else {
                 cuentaMapa = (cuentas || []).reduce((acc, c) => {
-                  acc[c.id_cuenta] = { id_plataforma: c.id_plataforma, correo: c.correo };
+                  acc[c.id_cuenta] = { id_plataforma: c.id_plataforma, correo: c.correo, clave: c.clave };
                   return acc;
                 }, {});
                 const platIds = [

@@ -35,6 +35,16 @@
         border-radius: 10px;
         font-size: 14px;
       }
+      .prefill-btn {
+        align-self: flex-start;
+        padding: 10px 14px;
+        border: none;
+        border-radius: 10px;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 700;
+      }
       .toggle {
         position: relative;
         width: 50px;
@@ -82,6 +92,9 @@
     <main class="categorias-dinamicas">
       <h2>Agregar pines</h2>
       <div class="pines-wrapper">
+        <button id="btn-prefill-netflix" class="prefill-btn" type="button">
+          Netflix 15USD
+        </button>
         <div class="pines-field">
           <label for="select-proveedor">Proveedor</label>
           <select id="select-proveedor">
@@ -136,6 +149,7 @@
       const inputPines = document.getElementById("input-pines");
       const btnAgregar = document.getElementById("btn-agregar-pines");
       const inputCosto = document.getElementById("input-costo");
+      const btnPrefillNetflix = document.getElementById("btn-prefill-netflix");
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
@@ -228,6 +242,19 @@
         cargarValores(platId);
       });
 
+      btnPrefillNetflix?.addEventListener("click", async () => {
+        if (selectProveedor) selectProveedor.value = "3";
+        if (selectPlataforma) selectPlataforma.value = "21";
+        // Cargar valores y seleccionar el primero disponible
+        await cargarValores("21");
+        const opts = Array.from(selectValor?.options || []).filter((o) => o.value);
+        if (opts.length && selectValor) {
+          selectValor.value = opts[0].value;
+          selectValor.disabled = false;
+        }
+        setEstado("Prefijo Netflix 15USD seleccionado.");
+      });
+
       btnAgregar?.addEventListener("click", async () => {
         const proveedorId = selectProveedor.value;
         const platId = selectPlataforma.value;
@@ -257,11 +284,12 @@
         const tokens = pinesRaw.split(/\s+/).filter(Boolean);
         const today = new Date().toISOString().slice(0, 10);
         const paraVenta = document.getElementById("toggle-venta")?.checked || false;
+        const costoUnitario = tokens.length ? costo / tokens.length : costo;
         const rows = tokens.map((t) => ({
           pin: t,
           id_proveedor: Number(proveedorId),
           id_plataforma: Number(platId),
-          costo,
+          costo: costoUnitario,
           monto: valor,
           para_venta: paraVenta,
           usado: false,

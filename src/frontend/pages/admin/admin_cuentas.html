@@ -1392,7 +1392,8 @@
               reemplazado: false,
               ocupadoPor: info.usuariosCuenta?.[v.id_usuario] || info.correo || "",
               id_venta: v.id_venta,
-              fecha_corte: formatDDMMYYYY(v.fecha_corte) || "",
+              fecha_corte: v.fecha_corte || "",
+              fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
             });
           });
         }
@@ -1437,7 +1438,7 @@
                     p.id_venta
                       ? p.fecha_corte
                         ? `<div class="fecha-wrap">
-                            <span class="fecha-text">${p.fecha_corte}</span>
+                            <span class="fecha-text">${p.fecha_corte_fmt || formatDDMMYYYY(p.fecha_corte) || ""}</span>
                             <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
                             <input type="date" class="fecha-input" data-venta="${p.id_venta}" value="${p.fecha_corte}" />
                           </div>`
@@ -1495,7 +1496,7 @@
                     p.id_venta
                       ? p.fecha_corte
                         ? `<div class="fecha-wrap">
-                            <span class="fecha-text">${p.fecha_corte}</span>
+                            <span class="fecha-text">${p.fecha_corte_fmt || formatDDMMYYYY(p.fecha_corte) || ""}</span>
                             <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
                             <input type="date" class="fecha-input" data-venta="${p.id_venta}" value="${p.fecha_corte}" />
                           </div>`
@@ -1548,7 +1549,7 @@
                   p.id_venta
                     ? p.fecha_corte
                       ? `<div class="fecha-wrap">
-                          <span class="fecha-text">${p.fecha_corte}</span>
+                          <span class="fecha-text">${p.fecha_corte_fmt || formatDDMMYYYY(p.fecha_corte) || ""}</span>
                           <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
                           <input type="date" class="fecha-input" data-venta="${p.id_venta}" value="${p.fecha_corte}" />
                         </div>`
@@ -1660,7 +1661,7 @@
                 <strong>Clave:</strong> <span class="cred-copy" data-clipboard="${info.clave || ""}">${info.clave || "-"}</span>
                 <button type="button" class="btn-pin btn-clave" data-cuenta="${info.id_cuenta}" data-clave="${info.clave || ""}" data-correo="${info.correo || ""}">✏️</button>
               </p>
-              <p><strong>Fecha de corte:</strong> <span class="fecha-corte-text">${info.fecha_corte || "-"}</span></p>
+              <p><strong>Fecha de corte:</strong> <span class="fecha-corte-text">${info.fecha_corte_fmt || formatDDMMYYYY(info.fecha_corte) || "-"}</span></p>
             </div>
             <div>
               <p><strong>Acceso a códigos</strong></p>
@@ -1728,7 +1729,7 @@
                             ${
                               hasVenta
                                 ? `<div class="fecha-wrap">
-                                    <span class="fecha-text">${m.fecha_corte || ""}</span>
+                                    <span class="fecha-text">${m.fecha_corte_fmt || formatDDMMYYYY(m.fecha_corte) || ""}</span>
                                     <button type="button" class="btn-edit-fecha" data-venta="${m.id_venta}">✏️</button>
                                     <input type="date" class="fecha-input" data-venta="${m.id_venta}" value="${m.fecha_corte || ""}" />
                                   </div>`
@@ -1922,6 +1923,7 @@
               ocupadoPor: enReemplazos ? "Reemplazado" : ocupadoCell,
               id_venta: ventasMap[p.id_perfil]?.id_venta || null,
               fecha_corte: ventasMap[p.id_perfil]?.fecha_corte || "",
+              fecha_corte_fmt: formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
               reemplazado: enReemplazos,
             };
           });
@@ -1953,6 +1955,7 @@
               clave: cuenta.clave || "-",
               usuario: v.id_usuario ? `#${v.id_usuario}` : "-",
               fecha_corte: v.fecha_corte || "-",
+              fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
               estado: v.pendiente ? "Pendiente" : "Activo",
             }));
           }
@@ -1990,21 +1993,24 @@
               ocupado: mapUser[m.id_cuenta] || "-",
               id_venta: mapVenta[m.id_cuenta]?.id_venta || null,
               fecha_corte: mapVenta[m.id_cuenta]?.fecha_corte || "",
+              fecha_corte_fmt: formatDDMMYYYY(mapVenta[m.id_cuenta]?.fecha_corte) || "",
               id_plataforma: m.id_plataforma,
               venta_miembro: m.venta_miembro,
               venta_perfil: m.venta_perfil,
             }));
           }
 
-          currentCuentaDetalle = {
-            plataformaNombre: plat?.nombre || "",
-            plataformaId: platId,
-            proveedorNombre: prov?.nombre || "",
+        currentCuentaDetalle = {
+          plataformaNombre: plat?.nombre || "",
+          plataformaId: platId,
+          id_plataforma: platId,
+          proveedorNombre: prov?.nombre || "",
             proveedorId: provId || null,
             region: cuenta.region || "",
             correo: cuenta.correo || "",
             clave: cuenta.clave || "",
             fecha_corte: cuenta.fecha_corte || "",
+            fecha_corte_fmt: formatDDMMYYYY(cuenta.fecha_corte) || "",
             perfiles: perfilesRows,
             colMode,
             showHogar,
@@ -2299,7 +2305,7 @@
           const { error } = await supabase.from("ventas").update({ fecha_corte: newDate }).eq("id_venta", ventaId);
           if (error) throw error;
           const span = row.querySelector(".fecha-text");
-          if (span) span.textContent = newDate;
+          if (span) span.textContent = formatDDMMYYYY(newDate) || newDate;
           input.classList.remove("show");
         } catch (err) {
           console.error("update fecha corte error", err);
@@ -2380,7 +2386,7 @@
           hideModalRenovar();
           alert("Renovación registrada.");
           const fechaSpan = detalleEl?.querySelector(".fecha-corte-text");
-          if (fechaSpan) fechaSpan.textContent = nuevaFecha;
+          if (fechaSpan) fechaSpan.textContent = formatDDMMYYYY(nuevaFecha) || nuevaFecha;
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
           });
@@ -2423,7 +2429,7 @@
           hideModalRecargar();
           alert("Recarga registrada");
           const fechaSpan = detalleEl?.querySelector(".fecha-corte-text");
-          if (fechaSpan) fechaSpan.textContent = nuevaFecha;
+          if (fechaSpan) fechaSpan.textContent = formatDDMMYYYY(nuevaFecha) || nuevaFecha;
           // actualizar dataset corte en botones recargar visibles
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
