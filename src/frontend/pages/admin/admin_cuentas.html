@@ -344,6 +344,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
       import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
 
       requireSession();
@@ -804,7 +805,7 @@
                   <td>${userInfo.correo || ""}</td>
                   <td>${p.n_perfil ? `M${p.n_perfil}` : ""}</td>
                   <td>${p.pin || ""}</td>
-                  <td>${venta?.fecha_corte || ""}</td>
+                  <td>${formatDDMMYYYY(venta?.fecha_corte) || ""}</td>
                 </tr>
               `);
             });
@@ -816,7 +817,7 @@
                   <td>${cta.correo || ""}</td>
                   <td>${cta.clave || ""}</td>
                   <td></td>
-                  <td>${v.fecha_corte || ""}</td>
+                  <td>${formatDDMMYYYY(v.fecha_corte) || ""}</td>
                 </tr>
               `);
             });
@@ -1257,7 +1258,7 @@
               clave: cuenta.clave || "",
               n_perfil: perfilInfo.n_perfil ?? "",
               pin: perfilInfo.pin ?? "",
-              fecha_corte: v.fecha_corte || "",
+              fecha_corte: formatDDMMYYYY(v.fecha_corte) || "",
               id_plataforma: platId,
               perfil_hogar: perfilInfo.perfil_hogar,
               es_subcuenta: false,
@@ -1391,7 +1392,7 @@
               reemplazado: false,
               ocupadoPor: info.usuariosCuenta?.[v.id_usuario] || info.correo || "",
               id_venta: v.id_venta,
-              fecha_corte: v.fecha_corte || "",
+              fecha_corte: formatDDMMYYYY(v.fecha_corte) || "",
             });
           });
         }

@@ -1,3 +1,5 @@
+import { formatDDMMYYYY } from "./date-format.js";
+
 export function buildServiceCopyText({
   plataforma = "",
   idVenta = "",
@@ -20,22 +22,7 @@ export function buildServiceCopyText({
     Number(idPlataforma) === 1 &&
     (perfilHogar === true || isSubCuenta === true || ventaMiembro === true);
   const platLabel = showHogar ? `${platLabelRaw} (HOGAR ACTUALIZADO)` : platLabelRaw;
-  const fmtFecha = (val) => {
-    if (!val) return "";
-    if (typeof val === "string") {
-      const m = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      if (m) {
-        return `${m[3]}-${m[2]}-${m[1]}`;
-      }
-    }
-    const d = new Date(val);
-    if (Number.isNaN(d.valueOf())) return val;
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const yyyy = d.getUTCFullYear();
-    return `${dd}-${mm}-${yyyy}`;
-  };
-  const fechaFmt = fmtFecha(fechaCorte);
+  const fechaFmt = formatDDMMYYYY(fechaCorte);
   lines.push(`*${platLabel}* 🫎 \`ID Venta: #${idVenta || ""}\``);
   lines.push("_Instagram: @moose.plus_");
   lines.push("");
