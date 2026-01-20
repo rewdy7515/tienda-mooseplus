@@ -163,11 +163,11 @@
                 );
 
                 const updates = [
-                  supabase.from("cuentas").update({ ocupado: false }),
+                  supabase.from("cuentas").update({ ocupado: false }).not("id_cuenta", "is", null),
                   cuentasIds.length
                     ? supabase.from("cuentas").update({ ocupado: true }).in("id_cuenta", cuentasIds)
                     : Promise.resolve({ error: null }),
-                  supabase.from("perfiles").update({ ocupado: false }),
+                  supabase.from("perfiles").update({ ocupado: false }).not("id_perfil", "is", null),
                   perfilesIds.length
                     ? supabase.from("perfiles").update({ ocupado: true }).in("id_perfil", perfilesIds)
                     : Promise.resolve({ error: null }),

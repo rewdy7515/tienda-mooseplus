@@ -490,6 +490,8 @@
           // Determinar monto según acceso_cliente
           let totalOverride = null;
           try {
+            const sessionUserId = requireSession();
+            // usa carrito del usuario actual (admin/logueado), la venta se asigna al cliente seleccionado
             const { data: userAcc, error: userErr } = await supabase
               .from("usuarios")
               .select("acceso_cliente")
@@ -500,19 +502,21 @@
             const { data: carritoRow } = await supabase
               .from("carritos")
               .select("id_carrito")
-              .eq("id_usuario", idCliente)
+              .eq("id_usuario", sessionUserId)
               .maybeSingle();
-            const carritoId = carritoRow?.id_carrito;
-            if (!carritoId) throw new Error("Carrito no encontrado para el cliente");
-            const { data: cartData, error: cartErr } = await supabase
-              .from("carrito_items")
-              .select("id_precio, cantidad, meses")
-              .eq("id_carrito", carritoId);
-            if (cartErr) throw cartErr;
-            const precioIds = (cartData || []).map((c) => c.id_precio);
-            let priceMap = {};
-            if (precioIds.length) {
-              const { data: precios, error: pErr } = await supabase
+            const carritoId = carritoRow?.id_carrito || null;
+            if (!carritoId) {
+              totalOverride = null;
+            } else {
+              const { data: cartData, error: cartErr } = await supabase
+                .from("carrito_items")
+                .select("id_precio, cantidad, meses")
+                .eq("id_carrito", carritoId);
+              if (cartErr) throw cartErr;
+              const precioIds = (cartData || []).map((c) => c.id_precio);
+              let priceMap = {};
+              if (precioIds.length) {
+                const { data: precios, error: pErr } = await supabase
                 .from("precios")
                 .select("id_precio, precio_usd_detal, precio_usd_mayor")
                 .in("id_precio", precioIds);
@@ -521,15 +525,16 @@
                 acc[p.id_precio] = p;
                 return acc;
               }, {});
+              }
+              const useMayor = acceso === false ? true : false;
+              totalOverride = (cartData || []).reduce((sum, it) => {
+                const price = priceMap[it.id_precio] || {};
+                const unit = useMayor ? price.precio_usd_mayor || price.precio_usd_detal || 0 : price.precio_usd_detal || 0;
+                const qty = it.cantidad || 0;
+                const meses = it.meses || 1;
+                return sum + unit * qty * meses;
+              }, 0);
             }
-            const useMayor = acceso === false ? true : false;
-            totalOverride = (cartData || []).reduce((sum, it) => {
-              const price = priceMap[it.id_precio] || {};
-              const unit = useMayor ? price.precio_usd_mayor || price.precio_usd_detal || 0 : price.precio_usd_detal || 0;
-              const qty = it.cantidad || 0;
-              const meses = it.meses || 1;
-              return sum + unit * qty * meses;
-            }, 0);
           } catch (calcErr) {
             console.error("calc total override error", calcErr);
           }

@@ -88,6 +88,7 @@
       requireSession();
       attachLogoHome();
 
+      const btnHoy = document.querySelector("#btn-hoy");
       const btnManana = document.querySelector("#btn-manana");
       const statusEl = document.querySelector("#rec-status");
       const resultsEl = document.querySelector("#rec-results");
@@ -134,12 +135,10 @@
         });
       };
 
-      const loadManana = async () => {
-        setStatus("Cargando fechas de mañana...");
+      const loadFechas = async (targetDate, label) => {
+        setStatus(`Cargando fechas de ${label}...`);
         resultsEl.innerHTML = "";
-        const mañana = new Date();
-        mañana.setDate(mañana.getDate() + 1);
-        const fecha = fmtDate(mañana);
+        const fecha = fmtDate(targetDate);
         try {
           const { data: ventas, error: ventErr } = await supabase
             .from("ventas")
@@ -240,13 +239,25 @@ ${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
           });
 
           renderCards(messages);
-          setStatus(messages.length ? "" : "Sin resultados para mañana.");
+          setStatus(messages.length ? "" : `Sin resultados para ${label}.`);
         } catch (err) {
-          console.error("recordatorios mañana error", err);
-          setStatus("No se pudieron cargar las fechas de mañana.");
+          console.error(`recordatorios ${label} error`, err);
+          setStatus(`No se pudieron cargar las fechas de ${label}.`);
         }
       };
 
+      const loadHoy = () => {
+        const hoy = new Date();
+        loadFechas(hoy, "hoy");
+      };
+
+      const loadManana = () => {
+        const mañana = new Date();
+        mañana.setDate(mañana.getDate() + 1);
+        loadFechas(mañana, "mañana");
+      };
+
+      btnHoy?.addEventListener("click", loadHoy);
       btnManana?.addEventListener("click", loadManana);
     </script>
   </body>

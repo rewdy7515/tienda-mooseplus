@@ -149,7 +149,7 @@ const attachPlatformClicks = (onClick) => {
   });
 };
 
-const loadStockSummary = async () => {
+const loadStockSummary = async (hasSession = false) => {
   const [{ data, error }, { data: cuentasMiembro, error: ctaErr }] = await Promise.all([
     supabase
       .from("perfiles")
@@ -177,8 +177,11 @@ const loadStockSummary = async () => {
     const ventaPerfil = p.cuentas?.venta_perfil;
     const ventaMiembro = p.cuentas?.venta_miembro;
     const correoCuenta = p.cuentas?.correo || "";
-    if (!platId || inactiva) return;
-    const libre = p.ocupado === false || p.ocupado === null;
+    if (!platId) return;
+    // No contar cuentas marcadas inactivas
+    if (inactiva === true) return;
+    // Sin sesión, solo confiar en ocupado === false (no null); con sesión se permiten null como libre.
+    const libre = hasSession ? (p.ocupado === false || p.ocupado === null) : p.ocupado === false;
     if (platId === 1 && libre) {
       const hogar = p.perfil_hogar === true;
       // Plan 2: hogar true (libre) en plataforma 1
@@ -197,13 +200,12 @@ const loadStockSummary = async () => {
       stockObj[platId] += 1;
     }
   });
-  const libresMiembro = (cuentasMiembro || []).filter(
-    (c) =>
-      c.id_plataforma === 1 &&
-      c.venta_miembro === true &&
-      c.inactiva !== true &&
-      (c.ocupado === false || c.ocupado === null)
-  );
+  const libresMiembro = (cuentasMiembro || []).filter((c) => {
+    if (c.id_plataforma !== 1) return false;
+    if (c.venta_miembro !== true) return false;
+    if (c.inactiva === true) return false;
+    return hasSession ? c.ocupado === false || c.ocupado === null : c.ocupado === false;
+  });
   if (libresMiembro.length) {
     netflixPlan2 += libresMiembro.length;
     stockObj[1] = (stockObj[1] || 0) + libresMiembro.length;
@@ -273,9 +275,11 @@ async function init() {
     const cachedCart = getCachedCart();
     const cartData = await fetchCart();
     setCachedCart(cartData);
-    const [catalog, stockMap] = await Promise.all([loadCatalog(), loadStockSummary()]);
+    const [catalog, stockMap] = await Promise.all([loadCatalog(), loadStockSummary(!!currentUser)]);
     const { categorias, plataformas, precios, descuentos } = catalog;
+    // Si no hay sesión, mostrar precios detal por defecto.
     const esCliente =
+      !currentUser ||
       isTrue(sessionRoles?.acceso_cliente) ||
       isTrue(currentUser?.acceso_cliente);
     const usarMayor = !esCliente;

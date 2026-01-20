@@ -1091,16 +1091,21 @@ app.post("/api/checkout", async (req, res) => {
             .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, ocupado)")
             .eq("perfil_hogar", true)
             .eq("cuentas.id_plataforma", platId)
+            .or("cuentas.inactiva.is.null,cuentas.inactiva.eq.false")
             .or("ocupado.is.null,ocupado.eq.false")
-            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
             .limit(cantidad);
           if (perfErr) throw perfErr;
-          const libresHogar = (perfilesHogar || []).filter(
-            (p) =>
-              p?.cuentas?.inactiva !== true &&
-              (p.ocupado === false || p.ocupado === null) &&
-              (p?.cuentas?.ocupado === false || p?.cuentas?.ocupado === null)
-          );
+          const libresHogar =
+            platId === 1
+              ? (perfilesHogar || []).filter(
+                  (p) => p?.cuentas?.inactiva !== true && (p.ocupado === false || p.ocupado === null)
+                )
+              : (perfilesHogar || []).filter(
+                  (p) =>
+                    p?.cuentas?.inactiva !== true &&
+                    (p.ocupado === false || p.ocupado === null) &&
+                    (p?.cuentas?.ocupado === false || p?.cuentas?.ocupado === null)
+                );
           const takeHogar = libresHogar.slice(0, cantidad);
           takeHogar.forEach((p) => {
             asignaciones.push({
@@ -1123,12 +1128,12 @@ app.post("/api/checkout", async (req, res) => {
               .select("id_cuenta, ocupado, inactiva, venta_miembro")
               .eq("id_plataforma", platId)
               .eq("venta_miembro", true)
-              .or("ocupado.is.null,ocupado.eq.false")
               .or("inactiva.is.null,inactiva.eq.false")
+              .or("ocupado.is.null,ocupado.eq.false")
               .limit(faltantesPerf);
             if (ctaMiembroErr) throw ctaMiembroErr;
             const cuentasLibres = (cuentasMiembro || []).filter(
-              (c) => c.inactiva === false && (c.ocupado === false || c.ocupado === null)
+              (c) => c.inactiva !== true && (c.ocupado === false || c.ocupado === null)
             );
             const takeCtas = cuentasLibres.slice(0, faltantesPerf);
             takeCtas.forEach((cta) => {
@@ -1151,10 +1156,10 @@ app.post("/api/checkout", async (req, res) => {
               .eq("cuentas.id_plataforma", platId)
               .or("venta_miembro.eq.true,venta_perfil.eq.true", { foreignTable: "cuentas" })
               .or("ocupado.is.null,ocupado.eq.false")
-              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+              .or("cuentas.inactiva.is.null,cuentas.inactiva.eq.false")
               .limit(faltantesPerf2);
             if (subErr) throw subErr;
-            const disponibles = (subLibres || []).filter((s) => !s.ocupado && s?.cuentas?.inactiva === false);
+            const disponibles = (subLibres || []).filter((s) => !s.ocupado && s?.cuentas?.inactiva !== true);
             const faltantes = Math.max(0, faltantesPerf2 - disponibles.length);
             disponibles.slice(0, faltantesPerf2).forEach((s) => {
               asignaciones.push({
@@ -1185,11 +1190,13 @@ app.post("/api/checkout", async (req, res) => {
             .eq("cuentas.venta_miembro", true)
             .eq("cuentas.venta_perfil", false)
             .or("ocupado.is.null,ocupado.eq.false")
-            .eq("cuentas.inactiva", false)
             .limit(cantidad);
           if (hogarErr) throw hogarErr;
 
-          const perfilesDisp = (perfilesHogar || []).filter((p) => p?.cuentas?.inactiva === false);
+          const perfilesDisp =
+            platId === 1
+              ? perfilesHogar || []
+              : (perfilesHogar || []).filter((p) => p?.cuentas?.inactiva === false);
           const usadosPerf = perfilesDisp.slice(0, cantidad);
           usadosPerf.forEach((p) => {
             asignaciones.push({
@@ -1212,10 +1219,10 @@ app.post("/api/checkout", async (req, res) => {
               .eq("cuentas.venta_miembro", true)
               .eq("cuentas.venta_perfil", false)
               .or("ocupado.is.null,ocupado.eq.false")
-              .eq("cuentas.inactiva", false)
               .limit(faltantesPerf);
             if (subErr) throw subErr;
-            const disponibles = (subLibres || []).filter((s) => s?.cuentas?.inactiva === false);
+            const disponibles =
+              platId === 1 ? subLibres || [] : (subLibres || []).filter((s) => s?.cuentas?.inactiva === false);
             const faltantes = Math.max(0, faltantesPerf - disponibles.length);
             disponibles.slice(0, faltantesPerf).forEach((s) => {
               asignaciones.push({
