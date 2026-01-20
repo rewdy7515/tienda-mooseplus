@@ -83,6 +83,7 @@
     <script type="module">
       import { requireSession, attachLogoHome } from "../../scripts/session.js";
       import { supabase } from "../../scripts/api.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
       attachLogoHome();
@@ -222,10 +223,11 @@
             if (!acc[key]) {
               acc[key] = { cliente, bloques: [] };
             }
+            const fechaPago = v.fecha_corte ? formatDDMMYYYY(v.fecha_corte) : "-";
             acc[key].bloques.push(
               `*${platNombre}${hogarTxt}* \`ID VENTA: #${v.id_venta}\`
 Correo: ${correo}
-${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${v.fecha_corte || "-"}`
+${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
             );
           return acc;
         }, {});

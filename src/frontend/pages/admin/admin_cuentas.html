@@ -218,13 +218,19 @@
 
     <main class="categorias-dinamicas">
       <h2>Administrar cuentas</h2>
-    <div class="cuentas-wrapper">
-      <div class="cuentas-busqueda">
+      <div class="cuentas-wrapper">
+        <div class="cuentas-busqueda">
         <div class="input-wrap">
-          <select id="select-plataforma" class="form-select">
-            <option value="">Filtrar por plataforma</option>
-          </select>
+          <input type="search" id="input-venta-id" placeholder="Buscar por ID de venta" autocomplete="off" />
+          <div class="cuentas-acciones" style="margin-top:6px;">
+            <button type="button" id="btn-buscar-venta">🔍</button>
+          </div>
         </div>
+          <div class="input-wrap">
+            <select id="select-plataforma" class="form-select">
+              <option value="">Filtrar por plataforma</option>
+            </select>
+          </div>
         <div class="input-wrap">
           <input type="search" id="input-cliente" placeholder="Buscar por cliente" autocomplete="off" />
           <div id="sugs-clientes" class="sugerencias-cuentas hidden"></div>
@@ -239,6 +245,7 @@
         </div>
       </div>
       <div id="plataforma-resultados"></div>
+      <div id="venta-resultado"></div>
       <div id="cuenta-detalle" class="cuenta-detalle"></div>
       <div id="cliente-ventas" class="cliente-ventas"></div>
     </div>
@@ -359,9 +366,12 @@
       const inputCliente = document.querySelector("#input-cliente");
       const selectPlataforma = document.querySelector("#select-plataforma");
       const plataformaResultadosEl = document.querySelector("#plataforma-resultados");
+      const ventaResultadoEl = document.querySelector("#venta-resultado");
       const sugs = document.querySelector("#sugs-cuentas");
       const sugsClientes = document.querySelector("#sugs-clientes");
       const btnBuscar = document.querySelector("#btn-buscar-cuenta");
+      const btnBuscarVenta = document.querySelector("#btn-buscar-venta");
+      const inputVentaId = document.querySelector("#input-venta-id");
       const btnIrAgregar = document.querySelector("#btn-ir-agregar");
       const detalleEl = document.querySelector("#cuenta-detalle");
       const clienteVentasEl = document.querySelector("#cliente-ventas");
@@ -749,10 +759,105 @@
             apellido: u.apellido,
             correo: u.correo,
           }));
-          renderSugerenciasClientes(parsed, false);
+        renderSugerenciasClientes(parsed, false);
+      } catch (err) {
+        console.error("buscar clientes error", err);
+        renderSugerenciasClientes([], true);
+      }
+    };
+
+      const renderVentaResultado = (ventaData, notFound = false) => {
+        if (!ventaResultadoEl) return;
+        if (!ventaData) {
+          ventaResultadoEl.innerHTML = notFound
+            ? '<p class="status">No se encontró la venta.</p>'
+            : "";
+          return;
+        }
+        const { usuarioNombre, perfil, pin, fecha_corte, id_venta } = ventaData;
+        const rows = `
+          <tr>
+            <td>${usuarioNombre || "Vacío"}</td>
+            <td>${perfil || ""}</td>
+            <td>${pin || ""}</td>
+            <td>${formatDDMMYYYY(fecha_corte) || ""}</td>
+            <td><button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${ventaData.id_cuenta || ""}">Ver cuenta</button></td>
+          </tr>
+        `;
+        ventaResultadoEl.innerHTML = `
+          <div class="cuenta-table-wrap" style="margin-top:12px;">
+            <table class="table-base">
+              <thead>
+                <tr>
+                  <th>Ocupado por</th>
+                  <th>Perfil</th>
+                  <th>PIN</th>
+                  <th>Fecha de corte</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const buscarVentaPorId = async (id) => {
+        if (!id) {
+          renderVentaResultado(null);
+          return;
+        }
+        try {
+          const cleaned = String(id).replace(/[^0-9]/g, "");
+          const idNum = Number(cleaned);
+          if (!idNum) {
+            renderVentaResultado(null, true);
+            return;
+          }
+          const { data: venta, error } = await supabase
+            .from("ventas")
+            .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte")
+            .eq("id_venta", idNum)
+            .maybeSingle();
+          if (error) throw error;
+          if (!venta) {
+            renderVentaResultado(null, true);
+            return;
+          }
+          let usuarioNombre = "Vacío";
+          if (venta.id_usuario) {
+            const { data: userRow } = await supabase
+              .from("usuarios")
+              .select("nombre, apellido")
+              .eq("id_usuario", venta.id_usuario)
+              .maybeSingle();
+            if (userRow) {
+              usuarioNombre =
+                [userRow.nombre, userRow.apellido].filter(Boolean).join(" ").trim() || usuarioNombre;
+            }
+          }
+          let perfil = "";
+          let pin = "";
+          if (venta.id_perfil) {
+            const { data: perfilRow } = await supabase
+              .from("perfiles")
+              .select("n_perfil, pin")
+              .eq("id_perfil", venta.id_perfil)
+              .maybeSingle();
+            perfil = perfilRow?.n_perfil ? `M${perfilRow.n_perfil}` : "";
+            pin = perfilRow?.pin || "";
+          }
+          renderVentaResultado({
+            usuarioNombre,
+            perfil,
+            pin,
+            fecha_corte: venta.fecha_corte || "",
+            id_cuenta: venta.id_cuenta,
+            id_venta: venta.id_venta,
+          });
         } catch (err) {
-          console.error("buscar clientes error", err);
-          renderSugerenciasClientes([], true);
+          console.error("buscar venta por id error", err);
+          renderVentaResultado(null, true);
         }
       };
 
@@ -1052,6 +1157,18 @@
         if (!insideClientes) renderSugerenciasClientes([], true);
       });
 
+      btnBuscarVenta?.addEventListener("click", (e) => {
+        e.preventDefault();
+        buscarVentaPorId(inputVentaId?.value || "");
+      });
+
+      inputVentaId?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          buscarVentaPorId(inputVentaId?.value || "");
+        }
+      });
+
       detalleEl?.addEventListener("click", async (e) => {
         const addBtn = e.target.closest(".btn-add-perfil");
         if (addBtn) {
@@ -1343,6 +1460,13 @@
         }
       });
 
+      ventaResultadoEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-ver-cuenta");
+        if (!btn) return;
+        const cuentaId = btn.dataset.cuenta;
+        if (cuentaId) loadCuentaDetalle(cuentaId);
+      });
+
       const renderDetalle = (info) => {
         currentCuentaId = info.id_cuenta || null;
         if (!detalleEl) return;
@@ -1357,6 +1481,7 @@
         let thead = "";
         if (colMode === "perfil") {
           thead = `<tr>
+            <th>ID Venta</th>
             <th>Perfil</th>
             <th>PIN</th>
             ${showHogar ? "<th>Perfil hogar</th>" : ""}
@@ -1366,6 +1491,7 @@
           </tr>`;
         } else if (colMode === "miembro") {
           thead = `<tr>
+            <th>ID Venta</th>
             <th>PIN</th>
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
@@ -1373,6 +1499,7 @@
           </tr>`;
         } else {
           thead = `<tr>
+            <th>ID Venta</th>
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Acción</th>
@@ -1426,6 +1553,7 @@
                 isSubCuenta: false,
               });
               return `<tr>
+                <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
                 <td>${p.perfil}</td>
                 <td class="pin-cell">
                   <span>${p.pin ?? ""}</span>
@@ -1486,6 +1614,7 @@
                 isSubCuenta: false,
               });
               return `<tr>
+                <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
                 <td class="pin-cell">
                   <span>${p.pin ?? ""}</span>
                   <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
@@ -1543,6 +1672,7 @@
               isSubCuenta: false,
             });
             return `<tr>
+              <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
               <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
               <td>
                 ${
@@ -1582,7 +1712,7 @@
           .join("");
 
         let addPerfilRow = "";
-        const colCountPerfil = showHogar ? 6 : 5;
+        const colCountPerfil = showHogar ? 7 : 6;
         if (colMode === "perfil" && info.mas_perfiles) {
           const maxPerfiles = Number(info.num_max_dispositivos) || rows.length || 1;
           const nextPerfil = ((rows.length % maxPerfiles) || 0) + 1;

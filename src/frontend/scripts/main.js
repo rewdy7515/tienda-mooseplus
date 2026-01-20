@@ -150,22 +150,33 @@ const attachPlatformClicks = (onClick) => {
 };
 
 const loadStockSummary = async () => {
-  const { data, error } = await supabase
-    .from("perfiles")
-    .select("id_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, venta_miembro)")
-    .not("id_cuenta", "is", null);
-  if (error) {
-    console.error("stock summary error", error);
+  const [{ data, error }, { data: cuentasMiembro, error: ctaErr }] = await Promise.all([
+    supabase
+      .from("perfiles")
+      .select(
+        "id_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, venta_miembro, correo)"
+      )
+      .not("id_cuenta", "is", null),
+    supabase
+      .from("cuentas")
+      .select("id_cuenta, id_plataforma, venta_miembro, ocupado, inactiva, correo")
+      .eq("id_plataforma", 1),
+  ]);
+  if (error || ctaErr) {
+    console.error("stock summary error", error || ctaErr);
     return {};
   }
   let stockObj = {};
   let netflixPlan1 = 0;
   let netflixPlan2 = 0;
+  const libresPlan1Correos = [];
+  const libresPlan2Correos = [];
   (data || []).forEach((p) => {
     const platId = p.cuentas?.id_plataforma;
     const inactiva = p.cuentas?.inactiva;
     const ventaPerfil = p.cuentas?.venta_perfil;
     const ventaMiembro = p.cuentas?.venta_miembro;
+    const correoCuenta = p.cuentas?.correo || "";
     if (!platId || inactiva) return;
     const libre = p.ocupado === false || p.ocupado === null;
     if (platId === 1 && libre) {
@@ -173,10 +184,12 @@ const loadStockSummary = async () => {
       // Plan 2: hogar true (libre) en plataforma 1
       if (hogar && libre) {
         netflixPlan2 += 1;
+        if (correoCuenta) libresPlan2Correos.push(correoCuenta);
       }
       // Plan 1: hogar false + venta_perfil true (libre)
       if (!hogar && ventaPerfil === true) {
         netflixPlan1 += 1;
+        if (correoCuenta) libresPlan1Correos.push(correoCuenta);
       }
     }
     if (!stockObj[platId]) stockObj[platId] = 0;
@@ -184,11 +197,25 @@ const loadStockSummary = async () => {
       stockObj[platId] += 1;
     }
   });
+  const libresMiembro = (cuentasMiembro || []).filter(
+    (c) =>
+      c.id_plataforma === 1 &&
+      c.venta_miembro === true &&
+      c.inactiva !== true &&
+      (c.ocupado === false || c.ocupado === null)
+  );
+  if (libresMiembro.length) {
+    netflixPlan2 += libresMiembro.length;
+    stockObj[1] = (stockObj[1] || 0) + libresMiembro.length;
+    libresMiembro.forEach((c) => {
+      if (c.correo) libresPlan2Correos.push(c.correo);
+    });
+  }
   stockObj["1_plan1"] = netflixPlan1;
   stockObj["1_plan2"] = netflixPlan2;
   stockObj[1] = netflixPlan1 + netflixPlan2;
-  console.log("[stock] Netflix plan 1 libres:", netflixPlan1);
-  console.log("[stock] Netflix plan 2 (hogar actualizado) libres:", netflixPlan2);
+  console.log("[stock] Netflix plan 1 libres:", netflixPlan1, libresPlan1Correos);
+  console.log("[stock] Netflix plan 2 (hogar actualizado) libres:", netflixPlan2, libresPlan2Correos);
   return stockObj;
 };
 
