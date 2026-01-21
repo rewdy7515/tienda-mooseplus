@@ -15,6 +15,17 @@ app.use(express.json({ limit: "10mb" }));
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
+const todayInVenezuela = () => {
+  // Retorna fecha actual en huso horario de Venezuela (America/Caracas) en formato YYYY-MM-DD
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date());
+};
+
 // Suma meses manteniendo el día (sin desfase de zona horaria); si el mes destino no tiene ese día, usa el último día del mes.
 function addMonthsKeepDay(baseDate, months) {
   const baseStr =
@@ -1037,7 +1048,7 @@ app.post("/api/checkout", async (req, res) => {
         ventaMap[v.id_venta] = v;
       });
     }
-    const isoHoy = new Date().toISOString().slice(0, 10);
+    const isoHoy = todayInVenezuela();
     const renovPromises = renovaciones.map((it) => {
       const price = priceMap[it.id_precio] || {};
       const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;

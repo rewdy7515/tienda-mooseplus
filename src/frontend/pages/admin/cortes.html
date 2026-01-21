@@ -255,11 +255,11 @@
                       </td>
                       <td></td>
                       <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                        <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
-                      </td>
-                    </tr>
-                  `;
-                }
+                      <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
+                    </td>
+                  </tr>
+                `;
+              }
                 const cliente = v.usuarios
                   ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
                   : "-";
@@ -299,7 +299,7 @@
                     <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
                     <td>${formatDDMMYYYY(v.fecha_corte)}</td>
                     <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                      <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}">Cortar</button>
+                      <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
                     </td>
                   </tr>
                 `;
@@ -505,6 +505,9 @@
           const claveInput = row.querySelector('input[data-field="clave"]');
           const pinInput = row.querySelector('input[data-field="pin"]');
           const usaPines = cortarBtn.dataset.usapines === "true";
+          const ventaPerfil = cortarBtn.dataset.vperf === "true";
+          const ventaMiembro = cortarBtn.dataset.vmiem === "true";
+          const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
           const pinChanged = pinInput && pinInput.dataset.original !== pinInput.value;
           const claveChanged = claveInput && claveInput.dataset.original !== claveInput.value;
           if (usaPines && pinInput && !pinChanged) {
@@ -522,7 +525,7 @@
               }
             }
           }
-          const needsClaveChange = !claveChanged && (!usaPines || !pinInput || !pinChanged);
+          const needsClaveChange = !esCuentaCompleta && !claveChanged && (!usaPines || !pinInput || !pinChanged);
           if (needsClaveChange) {
             alert("Debes modificar la contraseña para poder cortar");
             return;
