@@ -1279,7 +1279,7 @@ app.post("/api/checkout", async (req, res) => {
           : 1;
       const fechaCorte = a.pendiente
         ? null
-        : addMonthsKeepDay(new Date().toISOString().slice(0, 10), mesesVal);
+        : addMonthsKeepDay(isoHoy, mesesVal);
       return {
         id_usuario: idUsuarioVentas,
         id_precio: a.id_precio,
