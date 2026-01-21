@@ -147,34 +147,38 @@
               const ok = confirm("¿Eliminar todas las ventas con suspendido = true?");
               if (!ok) return;
               try {
-                const { error } = await supabase.from("ventas").delete().eq("suspendido", true);
-                if (error) throw error;
-
-                // Recalcular ocupados en cuentas y perfiles
-                const { data: ventasIds, error: ventasErr } = await supabase
+                const { data: ventasSusp, error: ventasErr } = await supabase
                   .from("ventas")
-                  .select("id_cuenta, id_perfil");
+                  .select("id_venta, id_cuenta, id_perfil")
+                  .eq("suspendido", true);
                 if (ventasErr) throw ventasErr;
+
                 const cuentasIds = Array.from(
-                  new Set((ventasIds || []).map((v) => v.id_cuenta).filter(Boolean))
+                  new Set((ventasSusp || []).map((v) => v.id_cuenta).filter(Boolean))
                 );
                 const perfilesIds = Array.from(
-                  new Set((ventasIds || []).map((v) => v.id_perfil).filter(Boolean))
+                  new Set((ventasSusp || []).map((v) => v.id_perfil).filter(Boolean))
                 );
 
-                const updates = [
-                  supabase.from("cuentas").update({ ocupado: false }).not("id_cuenta", "is", null),
-                  cuentasIds.length
-                    ? supabase.from("cuentas").update({ ocupado: true }).in("id_cuenta", cuentasIds)
-                    : Promise.resolve({ error: null }),
-                  supabase.from("perfiles").update({ ocupado: false }).not("id_perfil", "is", null),
-                  perfilesIds.length
-                    ? supabase.from("perfiles").update({ ocupado: true }).in("id_perfil", perfilesIds)
-                    : Promise.resolve({ error: null }),
-                ];
-                const results = await Promise.all(updates);
-                const errRecalc = results.find((r) => r.error)?.error;
-                if (errRecalc) throw errRecalc;
+                const updates = [];
+                if (cuentasIds.length) {
+                  updates.push(
+                    supabase.from("cuentas").update({ ocupado: false }).in("id_cuenta", cuentasIds)
+                  );
+                }
+                if (perfilesIds.length) {
+                  updates.push(
+                    supabase.from("perfiles").update({ ocupado: false }).in("id_perfil", perfilesIds)
+                  );
+                }
+                if (updates.length) {
+                  const results = await Promise.all(updates);
+                  const errUpdates = results.find((r) => r.error)?.error;
+                  if (errUpdates) throw errUpdates;
+                }
+
+                const { error } = await supabase.from("ventas").delete().eq("suspendido", true);
+                if (error) throw error;
 
                 alert("Filas cortadas eliminadas.");
                 init(); // recarga la tabla
@@ -193,6 +197,7 @@
       const statusEl = document.querySelector("#cortes-status");
       let platMaxMap = {};
       let platCorteClaveMap = {};
+      let platCorteDirectoMap = {};
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -216,6 +221,7 @@
             });
             const usaPines = !!plataforma.usa_pines;
             const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
+            const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
             const rows = sortedItems
               .map((v) => {
                 const maxPin = plataforma.max_dig_pin || "";
@@ -255,7 +261,7 @@
                       </td>
                       <td></td>
                       <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                      <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
+                      <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
                     </td>
                   </tr>
                 `;
@@ -299,7 +305,7 @@
                     <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
                     <td>${formatDDMMYYYY(v.fecha_corte)}</td>
                     <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                      <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
+                      <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
                     </td>
                   </tr>
                 `;
@@ -399,7 +405,7 @@
 
           const { data: plataformasInfo, error: platErr } = await supabase
             .from("plataformas")
-            .select("id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, por_acceso")
+            .select("id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso")
             .in("id_plataforma", platIds);
           if (platErr) throw platErr;
           const platNameMap = (plataformasInfo || []).reduce((acc, p) => {
@@ -420,6 +426,10 @@
           }, {});
           platCorteClaveMap = (plataformasInfo || []).reduce((acc, p) => {
             acc[p.id_plataforma] = !!p.corte_por_clave;
+            return acc;
+          }, {});
+          platCorteDirectoMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.corte_directo;
             return acc;
           }, {});
 
@@ -505,12 +515,13 @@
           const claveInput = row.querySelector('input[data-field="clave"]');
           const pinInput = row.querySelector('input[data-field="pin"]');
           const usaPines = cortarBtn.dataset.usapines === "true";
+          const corteDirecto = cortarBtn.dataset.cortedirecto === "true";
           const ventaPerfil = cortarBtn.dataset.vperf === "true";
           const ventaMiembro = cortarBtn.dataset.vmiem === "true";
           const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
           const pinChanged = pinInput && pinInput.dataset.original !== pinInput.value;
           const claveChanged = claveInput && claveInput.dataset.original !== claveInput.value;
-          if (usaPines && pinInput && !pinChanged) {
+          if (!corteDirecto && !esCuentaCompleta && usaPines && pinInput && !pinChanged) {
             alert("Debes modificar el pin del perfil para poder cortar");
             return; // si hay pin pero no cambió, no se actualiza nada
           }
@@ -526,7 +537,11 @@
             }
           }
           const needsClaveChange = !esCuentaCompleta && !claveChanged && (!usaPines || !pinInput || !pinChanged);
-          if (needsClaveChange) {
+          if (!corteDirecto && esCuentaCompleta && !claveChanged) {
+            alert("Debes modificar la contraseña para poder cortar");
+            return;
+          }
+          if (!corteDirecto && needsClaveChange) {
             alert("Debes modificar la contraseña para poder cortar");
             return;
           }
@@ -534,9 +549,28 @@
           const updateVenta = async () => {
             const updates = [];
             if (ventaId) {
-              updates.push(
-                supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
-              );
+              // Determina si la venta es de hoy/ayer (zona Caracas)
+              const todayVe = new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
+              const ventaRow = await supabase
+                .from("ventas")
+                .select("fecha_corte")
+                .eq("id_venta", ventaId)
+                .maybeSingle();
+              const fechaCorte = ventaRow.data?.fecha_corte || null;
+              const ayerVe = (() => {
+                const d = new Date(todayVe);
+                d.setDate(d.getDate() - 1);
+                return d.toISOString().slice(0, 10);
+              })();
+              const isHoyOAyer = fechaCorte === todayVe || fechaCorte === ayerVe;
+              if (isHoyOAyer) {
+                updates.push(
+                  supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
+                );
+              } else {
+                // fecha_corte anterior a ayer: eliminar venta
+                updates.push(supabase.from("ventas").delete().eq("id_venta", ventaId));
+              }
             }
             if (claveInput && claveInput.dataset.original !== claveInput.value) {
               const cuentaId = claveInput.dataset.cuenta;
@@ -545,20 +579,8 @@
                   supabase.from("cuentas").update({ clave: claveInput.value }).eq("id_cuenta", cuentaId)
                 );
                 const cortePorClave = cortarBtn.dataset.corteclave === "true";
-                if (cortePorClave) {
-                  const today = new Date().toISOString().slice(0, 10);
-                  updates.push(
-                    supabase
-                      .from("ventas")
-                      .update({ suspendido: true })
-                      .eq("id_cuenta", cuentaId)
-                      .lte("fecha_corte", today)
-                      .or("suspendido.is.null,suspendido.eq.false")
-                  );
-                } else if (!usaPines) {
-                  updates.push(
-                    supabase.from("ventas").update({ suspendido: true }).eq("id_cuenta", cuentaId)
-                  );
+                if (cortePorClave && !usaPines) {
+                  // Ya se maneja la suspensión/eliminación individual arriba
                 }
               }
             }

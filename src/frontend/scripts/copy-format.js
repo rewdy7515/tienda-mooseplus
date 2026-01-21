@@ -30,13 +30,14 @@ export function buildServiceCopyText({
   lines.push(`*Clave:* ${clave || ""}`);
   const hideExtras = !ventaPerfil && !ventaMiembro;
   if (porAcceso && !hideExtras) {
-    lines.push(`*Acceso:* 1 acceso`);
+    lines.push("*1 acceso*");
+  } else {
+    if (nPerfil && (ventaPerfil || usaPines) && !hideExtras) {
+      const perfilTxt = String(nPerfil).startsWith("M") ? String(nPerfil) : `M${nPerfil}`;
+      lines.push(`*Perfil:* ${perfilTxt}`);
+    }
+    if (pin && usaPines && !hideExtras) lines.push(`*Pin:* ${pin}`);
   }
-  if (nPerfil && (ventaPerfil || usaPines) && !hideExtras) {
-    const perfilTxt = String(nPerfil).startsWith("M") ? String(nPerfil) : `M${nPerfil}`;
-    lines.push(`*Perfil:* ${perfilTxt}`);
-  }
-  if (pin && usaPines && !hideExtras) lines.push(`*Pin:* ${pin}`);
   if (!hideExtras) {
     lines.push("");
     lines.push("*Próxima fecha de pago:*");
