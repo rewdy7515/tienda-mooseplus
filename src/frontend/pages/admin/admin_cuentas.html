@@ -1186,6 +1186,57 @@
           }
           return;
         }
+        const convertBtn = e.target.closest(".btn-convertir-perfiles");
+        if (convertBtn) {
+          if (!currentCuentaDetalle) {
+            alert("No se pudo obtener la cuenta actual.");
+            return;
+          }
+          if (currentCuentaDetalle.ocupado !== false) {
+            alert("La cuenta debe estar desocupada para convertirla.");
+            return;
+          }
+          if ((currentCuentaDetalle.perfiles || []).length) {
+            alert("La cuenta ya tiene perfiles asociados.");
+            return;
+          }
+          const totalPerfiles = Math.max(1, Number(currentCuentaDetalle.num_max_dispositivos) || 1);
+          const usaPines = currentCuentaDetalle.usa_pines === true;
+          const maxDigPin = Number(currentCuentaDetalle.max_dig_pin) || 0;
+          const perfiles = Array.from({ length: totalPerfiles }).map((_, idx) => {
+            let pinVal = null;
+            if (usaPines) {
+              const digits = Math.max(1, maxDigPin);
+              const min = digits === 1 ? 0 : Math.pow(10, digits - 1);
+              const max = Math.pow(10, digits) - 1;
+              pinVal = Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+            const isHogar = Number(currentCuentaDetalle.id_plataforma) === 1 && idx === 0;
+            return {
+              id_cuenta: currentCuentaDetalle.id_cuenta,
+              n_perfil: idx + 1,
+              ocupado: false,
+              pin: pinVal,
+              perfil_hogar: isHogar,
+              correo: null,
+            };
+          });
+          try {
+            const { error: updErr } = await supabase
+              .from("cuentas")
+              .update({ venta_perfil: true, venta_miembro: false })
+              .eq("id_cuenta", currentCuentaDetalle.id_cuenta);
+            if (updErr) throw updErr;
+            const { error: perfErr } = await supabase.from("perfiles").insert(perfiles);
+            if (perfErr) throw perfErr;
+            alert("Cuenta convertida a perfiles.");
+            loadCuentaDetalle(currentCuentaDetalle.id_cuenta);
+          } catch (err) {
+            console.error("convertir cuenta perfiles error", err);
+            alert("No se pudo convertir la cuenta.");
+          }
+          return;
+        }
       });
 
       selectPlataforma?.addEventListener("change", () => {
@@ -1812,6 +1863,15 @@
             <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}" data-plat="${info.id_plataforma || ""}">${recargarLabel}</button>
             <div class="cuenta-tipo-label">${tipoServicio}</div>
           </div>
+          ${
+            info.venta_perfil === false && info.venta_miembro === false
+              ? `
+          <div class="cuenta-toggle">
+            <button type="button" class="btn-outline btn-convertir-perfiles" data-cuenta="${info.id_cuenta}">Convertir a cuenta por perfiles</button>
+          </div>
+          `
+              : ""
+          }
           ${plat9Table}
           <h4>Perfiles</h4>
           ${table}
@@ -1922,7 +1982,7 @@
         try {
           const { data: cuenta, error } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva")
+            .select("id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado")
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
           if (error) throw error;
@@ -1941,7 +2001,7 @@
             platId
               ? supabase
                   .from("plataformas")
-                  .select("nombre, usa_pines, max_dig_pin, por_acceso")
+                  .select("nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos")
                   .eq("id_plataforma", platId)
                   .maybeSingle()
               : Promise.resolve({ data: null, error: null }),
@@ -2166,6 +2226,7 @@
             link_codigo: cuenta.link_codigo,
             correo_codigo: cuenta.correo_codigo,
             pin_codigo: cuenta.pin_codigo,
+            ocupado: cuenta.ocupado,
             id_cuenta: cuenta.id_cuenta,
             max_dig_pin: plat?.max_dig_pin || null,
             showMiembros: platId === 1,
