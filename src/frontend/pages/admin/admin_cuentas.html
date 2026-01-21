@@ -1883,6 +1883,7 @@
               </tbody>
             </table>
           </div>
+          <div class="miembros-footnote" id="miembros-footnote-${info.id_cuenta || ""}"></div>
         `
             : ""
           }
@@ -2130,6 +2131,22 @@
             }));
           }
 
+        // Obtener últimos 3 correos agregados en plataforma 1
+        let ultimosCorreosPlat1 = [];
+        try {
+          const { data: ultimos, error: ultErr } = await supabase
+            .from("cuentas")
+            .select("correo")
+            .eq("id_plataforma", 1)
+            .not("correo", "is", null)
+            .order("id_cuenta", { ascending: false })
+            .limit(3);
+          if (ultErr) throw ultErr;
+          ultimosCorreosPlat1 = (ultimos || []).map((c) => c.correo).filter(Boolean);
+        } catch (err) {
+          console.error("ultimos correos plat1 error", err);
+        }
+
         currentCuentaDetalle = {
           plataformaNombre: plat?.nombre || "",
           plataformaId: platId,
@@ -2157,6 +2174,7 @@
             isPlat9,
             venta_perfil: cuenta.venta_perfil,
             venta_miembro: cuenta.venta_miembro,
+        ultimosCorreosPlat1,
         por_acceso: plat?.por_acceso || false,
         usa_pines: plat?.usa_pines || false,
         mas_perfiles: isTrue(plat?.mas_perfiles),
@@ -2167,6 +2185,14 @@
       };
 
           renderDetalle(currentCuentaDetalle);
+
+          // Pie de tabla de miembros extras: últimos correos agregados en plataforma 1
+          if (platId === 1 && detalleEl) {
+            const foot = detalleEl.querySelector(`#miembros-footnote-${idCuenta}`);
+            if (foot && currentCuentaDetalle.ultimosCorreosPlat1?.length) {
+              foot.textContent = `Ultimos correos registrados: ${currentCuentaDetalle.ultimosCorreosPlat1.join(", ")}`;
+            }
+          }
         } catch (err) {
           console.error("detalle cuenta error", err);
           if (detalleEl) detalleEl.innerHTML = "<p class=\"status\">No se pudo cargar el detalle.</p>";
@@ -2711,6 +2737,7 @@
               clave: claveVal,
               plataformaId: currentCuentaDetalle?.plataformaId || 1,
               idCuentaMiembro: currentCuentaId,
+              ocupado: false,
             };
             modalMiembroAdd?.classList.remove("hidden");
             return;
@@ -2760,7 +2787,7 @@
           hideMiembroModal();
           return;
         }
-        const { correo, clave, plataformaId, idCuentaMiembro } = pendingMiembroAdd;
+        const { correo, clave, plataformaId, idCuentaMiembro, ocupado } = pendingMiembroAdd;
         try {
           const payload = {
             id_plataforma: plataformaId,
@@ -2773,6 +2800,7 @@
             venta_perfil: false,
             id_cuenta_miembro: idCuentaMiembro,
             id_proveedor: currentCuentaDetalle?.proveedorId || null,
+            ocupado: ocupado === false ? false : null,
           };
           const { data, error } = await supabase.from("cuentas").insert(payload).select("id_cuenta").single();
           if (error) throw error;
