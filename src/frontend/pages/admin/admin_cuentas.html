@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
@@ -210,82 +210,155 @@
         color: #fff;
         cursor: pointer;
       }
+      .copy-toast {
+        position: fixed;
+        top: 80px;
+        right: 18px;
+        background: #000;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        z-index: 999;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
     </style>
   </head>
   <body>
-    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <div
+      id="app-header"
+      data-header-root="../../"
+      data-header-pages="../"
+    ></div>
     <script src="../../scripts/header-loader.js"></script>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
 
     <main class="categorias-dinamicas">
       <h2>Administrar cuentas</h2>
       <div class="cuentas-wrapper">
         <div class="cuentas-busqueda">
-        <div class="input-wrap">
-          <input type="search" id="input-venta-id" placeholder="Buscar por ID de venta" autocomplete="off" />
-          <div class="cuentas-acciones" style="margin-top:6px;">
-            <button type="button" id="btn-buscar-venta">🔍</button>
+          <div class="input-wrap">
+            <input
+              type="search"
+              id="input-venta-id"
+              placeholder="Buscar por ID de venta"
+              autocomplete="off"
+            />
+            <div class="cuentas-acciones" style="margin-top: 6px">
+              <button type="button" id="btn-buscar-venta">🔍</button>
+            </div>
           </div>
-        </div>
           <div class="input-wrap">
             <select id="select-plataforma" class="form-select">
               <option value="">Filtrar por plataforma</option>
             </select>
           </div>
-        <div class="input-wrap">
-          <input type="search" id="input-cliente" placeholder="Buscar por cliente" autocomplete="off" />
-          <div id="sugs-clientes" class="sugerencias-cuentas hidden"></div>
+          <div class="input-wrap">
+            <input
+              type="search"
+              id="input-cliente"
+              placeholder="Buscar por cliente"
+              autocomplete="off"
+            />
+            <div id="sugs-clientes" class="sugerencias-cuentas hidden"></div>
+          </div>
+          <div class="input-wrap">
+            <input
+              type="search"
+              id="input-cuenta"
+              placeholder="Buscar por correo"
+              autocomplete="off"
+            />
+            <div id="sugs-cuentas" class="sugerencias-cuentas hidden"></div>
+          </div>
+          <div class="cuentas-acciones">
+            <button type="button" id="btn-buscar-cuenta">🔍</button>
+            <button type="button" class="btn-add" id="btn-ir-agregar">
+              Agregar servicio
+            </button>
+          </div>
         </div>
-        <div class="input-wrap">
-          <input type="search" id="input-cuenta" placeholder="Buscar por correo" autocomplete="off" />
-          <div id="sugs-cuentas" class="sugerencias-cuentas hidden"></div>
-        </div>
-        <div class="cuentas-acciones">
-          <button type="button" id="btn-buscar-cuenta">🔍</button>
-          <button type="button" class="btn-add" id="btn-ir-agregar">Agregar servicio</button>
+        <div id="plataforma-resultados"></div>
+        <div id="venta-resultado"></div>
+        <div id="cuenta-detalle" class="cuenta-detalle"></div>
+        <div id="cliente-ventas" class="cliente-ventas"></div>
+      </div>
+      <datalist id="sugs-ocupado"></datalist>
+      <div id="cn-modal" class="cn-overlay" style="display: none">
+        <div class="cn-modal">
+          <div id="cn-modal-step1">
+            <p>No se encontró cliente en la base de datos.</p>
+            <p>¿Añadir nuevo cliente?</p>
+            <div class="cn-actions">
+              <button type="button" class="cn-btn cn-primary" id="cn-modal-si">
+                Sí
+              </button>
+              <button type="button" class="cn-btn cn-close" id="cn-modal-no">
+                No
+              </button>
+            </div>
+          </div>
+          <div id="cn-modal-step2" style="display: none">
+            <p>Agregar nuevo cliente</p>
+            <div class="cn-form">
+              <input type="text" id="cn-nombre" placeholder="Nombre" />
+              <input type="text" id="cn-apellido" placeholder="Apellido" />
+              <input type="email" id="cn-correo" placeholder="Correo" />
+              <input type="tel" id="cn-telefono" placeholder="Teléfono" />
+            </div>
+            <div class="cn-actions">
+              <button
+                type="button"
+                class="cn-btn cn-primary"
+                id="cn-modal-guardar"
+              >
+                Guardar
+              </button>
+              <button
+                type="button"
+                class="cn-btn cn-close"
+                id="cn-modal-cancelar"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-      <div id="plataforma-resultados"></div>
-      <div id="venta-resultado"></div>
-      <div id="cuenta-detalle" class="cuenta-detalle"></div>
-      <div id="cliente-ventas" class="cliente-ventas"></div>
-    </div>
-    <datalist id="sugs-ocupado"></datalist>
-    <div id="cn-modal" class="cn-overlay" style="display:none;">
-      <div class="cn-modal">
-        <div id="cn-modal-step1">
-          <p>No se encontró cliente en la base de datos.</p>
-          <p>¿Añadir nuevo cliente?</p>
-          <div class="cn-actions">
-            <button type="button" class="cn-btn cn-primary" id="cn-modal-si">Sí</button>
-            <button type="button" class="cn-btn cn-close" id="cn-modal-no">No</button>
-          </div>
-        </div>
-        <div id="cn-modal-step2" style="display:none;">
-          <p>Agregar nuevo cliente</p>
-          <div class="cn-form">
-            <input type="text" id="cn-nombre" placeholder="Nombre" />
-            <input type="text" id="cn-apellido" placeholder="Apellido" />
-            <input type="email" id="cn-correo" placeholder="Correo" />
-            <input type="tel" id="cn-telefono" placeholder="Teléfono" />
-          </div>
-          <div class="cn-actions">
-            <button type="button" class="cn-btn cn-primary" id="cn-modal-guardar">Guardar</button>
-            <button type="button" class="cn-btn cn-close" id="cn-modal-cancelar">Cancelar</button>
-          </div>
-        </div>
-      </div>
-    </div>
     </main>
 
     <div id="modal-delete-venta" class="modal hidden">
       <div class="modal-backdrop"></div>
-      <div class="modal-card" style="max-width:320px;">
-        <button class="modal-close modal-delete-close" aria-label="Cerrar">×</button>
+      <div class="modal-card" style="max-width: 320px">
+        <button class="modal-close modal-delete-close" aria-label="Cerrar">
+          ×
+        </button>
         <div class="modal-body">
-          <p style="margin-top:0;">¿Estás seguro de que quieres eliminar este servicio?</p>
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button type="button" id="btn-confirm-delete" class="btn-primary" style="background:#dc2626; border-color:#dc2626;">Sí, eliminar</button>
-            <button type="button" id="btn-cancel-delete" class="btn-outline">Volver</button>
+          <p style="margin-top: 0">
+            ¿Estás seguro de que quieres eliminar este servicio?
+          </p>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap">
+            <button
+              type="button"
+              id="btn-confirm-delete"
+              class="btn-primary"
+              style="background: #dc2626; border-color: #dc2626"
+            >
+              Sí, eliminar
+            </button>
+            <button type="button" id="btn-cancel-delete" class="btn-outline">
+              Volver
+            </button>
           </div>
         </div>
       </div>
@@ -311,8 +384,12 @@
           <input type="date" class="rec-date" id="rec-corte" />
         </div>
         <div class="rec-actions">
-          <button type="button" class="rec-btn rec-primary" id="rec-do">Recargar</button>
-          <button type="button" class="rec-btn rec-close" id="rec-close">Cerrar</button>
+          <button type="button" class="rec-btn rec-primary" id="rec-do">
+            Recargar
+          </button>
+          <button type="button" class="rec-btn rec-close" id="rec-close">
+            Cerrar
+          </button>
         </div>
         <div class="rec-actions">
           <!-- spacer for layout -->
@@ -321,51 +398,99 @@
     </div>
 
     <div id="renew-overlay" class="rec-overlay">
-      <div class="rec-modal" style="max-width:360px;">
+      <div class="rec-modal" style="max-width: 360px">
         <h4>Renovar cuenta</h4>
         <div class="rec-row">
           <span class="rec-label">Costo</span>
-          <input type="number" step="0.01" min="0" id="renew-costo" class="form-input" placeholder="Monto" style="width: 100%; box-sizing: border-box;" />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            id="renew-costo"
+            class="form-input"
+            placeholder="Monto"
+            style="width: 100%; box-sizing: border-box"
+          />
         </div>
-        <div class="rec-row" style="align-items:center; gap:8px;">
+        <div class="rec-row" style="align-items: center; gap: 8px">
           <span class="rec-label">Meses</span>
           <div class="modal-qty">
-            <button type="button" class="row-menos" id="renew-menos" aria-label="menos">-</button>
+            <button
+              type="button"
+              class="row-menos"
+              id="renew-menos"
+              aria-label="menos"
+            >
+              -
+            </button>
             <span id="renew-meses">1</span>
-            <button type="button" class="row-mas" id="renew-mas" aria-label="más">+</button>
+            <button
+              type="button"
+              class="row-mas"
+              id="renew-mas"
+              aria-label="más"
+            >
+              +
+            </button>
             <span class="modal-duration-suffix">meses</span>
           </div>
         </div>
         <div class="rec-row">
           <span class="rec-label">Próx. corte</span>
-          <input type="date" id="renew-corte" class="form-input" style="width: 100%; box-sizing: border-box;" />
+          <input
+            type="date"
+            id="renew-corte"
+            class="form-input"
+            style="width: 100%; box-sizing: border-box"
+          />
         </div>
-        <div class="rec-actions" style="margin-top:12px; justify-content:flex-end; gap:8px;">
-          <button type="button" class="rec-btn rec-close" id="renew-cancel">Cancelar</button>
-          <button type="button" class="rec-btn rec-primary" id="renew-do">Renovar</button>
+        <div
+          class="rec-actions"
+          style="margin-top: 12px; justify-content: flex-end; gap: 8px"
+        >
+          <button type="button" class="rec-btn rec-close" id="renew-cancel">
+            Cancelar
+          </button>
+          <button type="button" class="rec-btn rec-primary" id="renew-do">
+            Renovar
+          </button>
         </div>
       </div>
     </div>
 
     <script type="module">
-      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import {
+        requireSession,
+        attachLogout,
+        attachLogoHome,
+      } from "../../scripts/session.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        supabase,
+      } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
-      import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
+      import {
+        buildNotificationPayload,
+        pickNotificationUserIds,
+      } from "../../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
 
       const usernameEl = document.querySelector(".username");
       const adminLink = document.querySelector(".admin-link");
-      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const isTrue = (v) =>
+        v === true || v === 1 || v === "1" || v === "true" || v === "t";
       let currentUserId = null;
 
       const inputCuenta = document.querySelector("#input-cuenta");
       const inputCliente = document.querySelector("#input-cliente");
       const selectPlataforma = document.querySelector("#select-plataforma");
-      const plataformaResultadosEl = document.querySelector("#plataforma-resultados");
+      const plataformaResultadosEl = document.querySelector(
+        "#plataforma-resultados",
+      );
       const ventaResultadoEl = document.querySelector("#venta-resultado");
       const sugs = document.querySelector("#sugs-cuentas");
       const sugsClientes = document.querySelector("#sugs-clientes");
@@ -411,6 +536,8 @@
       let modalCancelar = null;
       let modalSi = null;
       let modalNo = null;
+      const copyToast = document.querySelector("#copy-toast");
+      let copyToastTimer = null;
       let pendingOcupadoInput = null;
       const findClienteByTerm = async (term) => {
         const txt = (term || "").trim();
@@ -419,8 +546,12 @@
         const nombreTerm = parts.shift() || "";
         const apellidoTerm = parts.join(" ").trim();
         try {
-          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido").ilike("nombre", `%${nombreTerm}%`);
-          if (apellidoTerm) query = query.ilike("apellido", `%${apellidoTerm}%`);
+          let query = supabase
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido")
+            .ilike("nombre", `%${nombreTerm}%`);
+          if (apellidoTerm)
+            query = query.ilike("apellido", `%${apellidoTerm}%`);
           const { data, error } = await query.limit(1);
           if (error) throw error;
           return data?.[0] || null;
@@ -436,8 +567,12 @@
         const nombreTerm = parts.shift() || "";
         const apellidoTerm = parts.join(" ").trim();
         try {
-          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido").ilike("nombre", `%${nombreTerm}%`);
-          if (apellidoTerm) query = query.ilike("apellido", `%${apellidoTerm}%`);
+          let query = supabase
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido")
+            .ilike("nombre", `%${nombreTerm}%`);
+          if (apellidoTerm)
+            query = query.ilike("apellido", `%${apellidoTerm}%`);
           const { data, error } = await query.limit(5);
           if (error) throw error;
           return data || [];
@@ -447,9 +582,14 @@
         }
       };
 
-      const toTitleCase = (str) => (str || "").replace(/(\S+)/g, (w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ""));
-      const showModal = () => modalOverlay && (modalOverlay.style.display = "flex");
-      const hideModal = () => modalOverlay && (modalOverlay.style.display = "none");
+      const toTitleCase = (str) =>
+        (str || "").replace(/(\S+)/g, (w) =>
+          w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : "",
+        );
+      const showModal = () =>
+        modalOverlay && (modalOverlay.style.display = "flex");
+      const hideModal = () =>
+        modalOverlay && (modalOverlay.style.display = "none");
       const goStep1 = () => {
         if (modalStep1) modalStep1.style.display = "block";
         if (modalStep2) modalStep2.style.display = "none";
@@ -538,6 +678,16 @@
         renewOverlay?.classList.remove("show");
       };
 
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (copyToastTimer) clearTimeout(copyToastTimer);
+        copyToastTimer = setTimeout(
+          () => copyToast.classList.remove("show"),
+          2000,
+        );
+      };
+
       const copyTextNotify = async (text) => {
         if (!text) return;
         let copied = false;
@@ -557,7 +707,7 @@
             console.error("copy error", err);
           }
         }
-        // Ya no mostramos notificación de copiado
+        if (copied) showCopyToast();
         return copied;
       };
 
@@ -570,7 +720,13 @@
       let fetchCounter = 0;
       let currentCuentaId = null;
       let currentCuentaDetalle = null;
-      let modalState = { type: null, targetId: null, max: null, correo: "", nPerfil: null };
+      let modalState = {
+        type: null,
+        targetId: null,
+        max: null,
+        correo: "",
+        nPerfil: null,
+      };
       let isSuperadmin = false;
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
       const modalMiembroAdd = document.querySelector("#modal-miembro-add");
@@ -589,12 +745,16 @@
         try {
           const user = await loadCurrentUser();
           if (user && usernameEl) {
-            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            const fullName = [user.nombre, user.apellido]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
             usernameEl.textContent = fullName || user.correo || "Usuario";
           }
           currentUserId = user?.id_usuario || null;
           isSuperadmin = isTrue(user?.permiso_superadmin);
-          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          const isAdmin =
+            isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
           if (adminLink) {
             adminLink.classList.toggle("hidden", !isAdmin);
             adminLink.style.display = isAdmin ? "block" : "none";
@@ -615,7 +775,7 @@
         sugs.innerHTML = items
           .map(
             (c) =>
-              `<button type="button" data-id="${c.id_cuenta}" data-correo="${c.correo || ""}">${c.correo || ""}</button>`
+              `<button type="button" data-id="${c.id_cuenta}" data-correo="${c.correo || ""}">${c.correo || ""}</button>`,
           )
           .join("");
         sugs.classList.remove("hidden");
@@ -642,7 +802,8 @@
             .select("id_plataforma, nombre")
             .order("id_plataforma", { ascending: true });
           if (error) throw error;
-          selectPlataforma.innerHTML = '<option value="">Filtrar por plataforma</option>';
+          selectPlataforma.innerHTML =
+            '<option value="">Filtrar por plataforma</option>';
           (data || []).forEach((p) => {
             const opt = document.createElement("option");
             opt.value = p.id_plataforma;
@@ -665,14 +826,18 @@
         try {
           const { data, error } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, id_plataforma, id_proveedor, region, clave, fecha_corte, venta_perfil, venta_miembro")
+            .select(
+              "id_cuenta, correo, id_plataforma, id_proveedor, region, clave, fecha_corte, venta_perfil, venta_miembro",
+            )
             .ilike("correo", `%${term}%`)
             .order("correo", { ascending: true })
             .limit(10);
           if (current !== fetchCounter) return;
           if (error) throw error;
           const unique = Array.from(
-            new Map((data || []).filter((c) => c.correo).map((c) => [c.correo, c])).values()
+            new Map(
+              (data || []).filter((c) => c.correo).map((c) => [c.correo, c]),
+            ).values(),
           ).slice(0, 5);
           renderSugerencias(unique, forceHide);
         } catch (err) {
@@ -729,7 +894,7 @@
             <button type="button" data-id="${c.id_usuario}" data-correo="${c.correo || ""}">
               ${[c.nombre, c.apellido].filter(Boolean).join(" ").trim()} (${c.correo || ""})
             </button>
-          `
+          `,
           )
           .join("");
         sugsClientes.classList.remove("hidden");
@@ -746,7 +911,10 @@
         const apellidoTerm = parts.join(" ").trim();
         const current = ++fetchCounterClientes;
         try {
-          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido, correo").ilike("nombre", `%${nombreTerm}%`);
+          let query = supabase
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido, correo")
+            .ilike("nombre", `%${nombreTerm}%`);
           if (apellidoTerm) {
             query = query.ilike("apellido", `%${apellidoTerm}%`);
           }
@@ -759,12 +927,12 @@
             apellido: u.apellido,
             correo: u.correo,
           }));
-        renderSugerenciasClientes(parsed, false);
-      } catch (err) {
-        console.error("buscar clientes error", err);
-        renderSugerenciasClientes([], true);
-      }
-    };
+          renderSugerenciasClientes(parsed, false);
+        } catch (err) {
+          console.error("buscar clientes error", err);
+          renderSugerenciasClientes([], true);
+        }
+      };
 
       const renderVentaResultado = (ventaData, notFound = false) => {
         if (!ventaResultadoEl) return;
@@ -833,7 +1001,10 @@
               .maybeSingle();
             if (userRow) {
               usuarioNombre =
-                [userRow.nombre, userRow.apellido].filter(Boolean).join(" ").trim() || usuarioNombre;
+                [userRow.nombre, userRow.apellido]
+                  .filter(Boolean)
+                  .join(" ")
+                  .trim() || usuarioNombre;
             }
           }
           let perfil = "";
@@ -868,19 +1039,26 @@
         usersMap,
         perfilesMap,
         subCtas = [],
-        opts = {}
+        opts = {},
       ) => {
         if (!plataformaResultadosEl) return;
         if (!cuentas.length) {
-          plataformaResultadosEl.innerHTML = '<p class="status">No hay cuentas para esta plataforma.</p>';
+          plataformaResultadosEl.innerHTML =
+            '<p class="status">No hay cuentas para esta plataforma.</p>';
           plataformaResultadosEl.classList.remove("hidden");
           return;
         }
         const html = cuentas
           .map((cta) => {
-            const ventasCta = (ventas || []).filter((v) => v.id_cuenta === cta.id_cuenta);
-            const perfilesCuenta = (opts.perfilesAll || []).filter((p) => p.id_cuenta === cta.id_cuenta);
-            const ventasSinPerfil = (opts.ventasSinPerfil || []).filter((v) => v.id_cuenta === cta.id_cuenta);
+            const ventasCta = (ventas || []).filter(
+              (v) => v.id_cuenta === cta.id_cuenta,
+            );
+            const perfilesCuenta = (opts.perfilesAll || []).filter(
+              (p) => p.id_cuenta === cta.id_cuenta,
+            );
+            const ventasSinPerfil = (opts.ventasSinPerfil || []).filter(
+              (v) => v.id_cuenta === cta.id_cuenta,
+            );
             const maxPerfilCuenta = perfilesCuenta.reduce((max, p) => {
               const n = Number(p.n_perfil) || 0;
               return Math.max(max, n);
@@ -896,7 +1074,7 @@
                     <td>${s.clave || ""}</td>
                     <td>${s.pin || ""}</td>
                   </tr>
-                `
+                `,
                 )
                 .join("") || "";
             const rowsArr = [];
@@ -926,11 +1104,14 @@
                 </tr>
               `);
             });
-            const rows = rowsArr.join("") || `<tr><td colspan="7">Sin ventas asignadas.</td></tr>`;
+            const rows =
+              rowsArr.join("") ||
+              `<tr><td colspan="7">Sin ventas asignadas.</td></tr>`;
             let addRow = "";
             if (opts.masPerfiles) {
-              const maxPerfiles = Number(opts.numMax) || Math.max(maxPerfilCuenta, 1);
-              const nextPerfil = ((maxPerfilCuenta % maxPerfiles) || 0) + 1;
+              const maxPerfiles =
+                Number(opts.numMax) || Math.max(maxPerfilCuenta, 1);
+              const nextPerfil = (maxPerfilCuenta % maxPerfiles || 0) + 1;
               addRow = `
                 <tr>
                   <td colspan="6" style="text-align:center;">
@@ -992,34 +1173,44 @@
 
       const loadPlataformaCuentas = async (platId) => {
         if (!platId || !plataformaResultadosEl) return;
-        plataformaResultadosEl.innerHTML = '<p class="status">Cargando cuentas...</p>';
+        plataformaResultadosEl.innerHTML =
+          '<p class="status">Cargando cuentas...</p>';
         plataformaResultadosEl.classList.remove("hidden");
         try {
           const platIdNum = Number(platId);
-          const [{ data: cuentas, error: cErr }, { data: platInfo, error: pErr }, { data: subCtas, error: subErr }] =
-            await Promise.all([
-              supabase
-                .from("cuentas")
-                .select("id_cuenta, correo, clave, inactiva")
-                .eq("id_plataforma", platIdNum)
-                .or("inactiva.is.null,inactiva.eq.false")
-                .order("correo"),
-              supabase
-                .from("plataformas")
-                .select("nombre, mas_perfiles, num_max_dispositivos, por_acceso, usa_pines, max_dig_pin")
-                .eq("id_plataforma", platIdNum)
-                .maybeSingle(),
-              platIdNum === 1
-                ? supabase
-                    .from("sub_cuentas")
-                    .select("id_sub_cuenta, id_cuenta, correo, clave, pin, inactiva")
-                    .order("id_sub_cuenta")
-                : Promise.resolve({ data: [], error: null }),
-            ]);
+          const [
+            { data: cuentas, error: cErr },
+            { data: platInfo, error: pErr },
+            { data: subCtas, error: subErr },
+          ] = await Promise.all([
+            supabase
+              .from("cuentas")
+              .select("id_cuenta, correo, clave, inactiva")
+              .eq("id_plataforma", platIdNum)
+              .or("inactiva.is.null,inactiva.eq.false")
+              .order("correo"),
+            supabase
+              .from("plataformas")
+              .select(
+                "nombre, mas_perfiles, num_max_dispositivos, por_acceso, usa_pines, max_dig_pin",
+              )
+              .eq("id_plataforma", platIdNum)
+              .maybeSingle(),
+            platIdNum === 1
+              ? supabase
+                  .from("sub_cuentas")
+                  .select(
+                    "id_sub_cuenta, id_cuenta, correo, clave, pin, inactiva",
+                  )
+                  .order("id_sub_cuenta")
+              : Promise.resolve({ data: [], error: null }),
+          ]);
           if (cErr) throw cErr;
           if (pErr) throw pErr;
           if (subErr) throw subErr;
-          const cuentasActivas = (cuentas || []).filter((c) => c.inactiva !== true);
+          const cuentasActivas = (cuentas || []).filter(
+            (c) => c.inactiva !== true,
+          );
           const cuentaIds = cuentasActivas.map((c) => c.id_cuenta);
           let ventas = [];
           let usersMap = {};
@@ -1027,11 +1218,11 @@
           let perfilesAll = [];
           let ventasSinPerfil = [];
           if (cuentaIds.length) {
-          const { data: ventasData, error: vErr } = await supabase
-            .from("ventas")
-            .select("id_venta, id_cuenta, id_perfil, id_usuario, fecha_corte")
-            .in("id_cuenta", cuentaIds)
-            .order("id_perfil", { ascending: true });
+            const { data: ventasData, error: vErr } = await supabase
+              .from("ventas")
+              .select("id_venta, id_cuenta, id_perfil, id_usuario, fecha_corte")
+              .in("id_cuenta", cuentaIds)
+              .order("id_perfil", { ascending: true });
             if (vErr) throw vErr;
             ventas = ventasData || [];
             const { data: perfAll, error: perfAllErr } = await supabase
@@ -1041,7 +1232,9 @@
               .order("n_perfil", { ascending: true });
             if (perfAllErr) throw perfAllErr;
             perfilesAll = perfAll || [];
-            const userIds = Array.from(new Set(ventas.map((v) => v.id_usuario).filter(Boolean)));
+            const userIds = Array.from(
+              new Set(ventas.map((v) => v.id_usuario).filter(Boolean)),
+            );
             if (userIds.length) {
               const { data: usersData, error: uErr } = await supabase
                 .from("usuarios")
@@ -1050,7 +1243,10 @@
               if (uErr) throw uErr;
               usersMap = (usersData || []).reduce((acc, u) => {
                 acc[u.id_usuario] = {
-                  nombre: [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || u.correo || "",
+                  nombre:
+                    [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
+                    u.correo ||
+                    "",
                   correo: u.correo || "",
                 };
                 return acc;
@@ -1066,7 +1262,9 @@
                 id_venta: v.id_venta,
                 fecha_corte: v.fecha_corte || "",
                 ocupadoPor: v.id_usuario
-                  ? usersMap[v.id_usuario]?.nombre || usersMap[v.id_usuario]?.correo || `Usuario ${v.id_usuario}`
+                  ? usersMap[v.id_usuario]?.nombre ||
+                    usersMap[v.id_usuario]?.correo ||
+                    `Usuario ${v.id_usuario}`
                   : "Vacío",
                 id_usuario: v.id_usuario || null,
                 id_cuenta: v.id_cuenta || null,
@@ -1088,11 +1286,12 @@
               numMax: platInfo?.num_max_dispositivos || null,
               perfilesAll,
               ventasSinPerfil,
-            }
+            },
           );
         } catch (err) {
           console.error("load plataforma cuentas error", err);
-          plataformaResultadosEl.innerHTML = '<p class="status">No se pudieron cargar las cuentas.</p>';
+          plataformaResultadosEl.innerHTML =
+            '<p class="status">No se pudieron cargar las cuentas.</p>';
         }
       };
 
@@ -1151,8 +1350,10 @@
       });
 
       document.addEventListener("click", (e) => {
-        const insideCuentas = sugs?.contains(e.target) || inputCuenta?.contains(e.target);
-        const insideClientes = sugsClientes?.contains(e.target) || inputCliente?.contains(e.target);
+        const insideCuentas =
+          sugs?.contains(e.target) || inputCuenta?.contains(e.target);
+        const insideClientes =
+          sugsClientes?.contains(e.target) || inputCliente?.contains(e.target);
         if (!insideCuentas) renderSugerencias([], true);
         if (!insideClientes) renderSugerenciasClientes([], true);
       });
@@ -1177,7 +1378,12 @@
           try {
             const { error } = await supabase
               .from("perfiles")
-              .insert({ id_cuenta: cuentaId, n_perfil: next, ocupado: false, perfil_hogar: false });
+              .insert({
+                id_cuenta: cuentaId,
+                n_perfil: next,
+                ocupado: false,
+                perfil_hogar: false,
+              });
             if (error) throw error;
             if (cuentaId) loadCuentaDetalle(cuentaId);
           } catch (err) {
@@ -1200,34 +1406,42 @@
             alert("La cuenta ya tiene perfiles asociados.");
             return;
           }
-          const totalPerfiles = Math.max(1, Number(currentCuentaDetalle.num_max_dispositivos) || 1);
+          const totalPerfiles = Math.max(
+            1,
+            Number(currentCuentaDetalle.num_max_dispositivos) || 1,
+          );
           const usaPines = currentCuentaDetalle.usa_pines === true;
           const maxDigPin = Number(currentCuentaDetalle.max_dig_pin) || 0;
-          const perfiles = Array.from({ length: totalPerfiles }).map((_, idx) => {
-            let pinVal = null;
-            if (usaPines) {
-              const digits = Math.max(1, maxDigPin);
-              const min = digits === 1 ? 0 : Math.pow(10, digits - 1);
-              const max = Math.pow(10, digits) - 1;
-              pinVal = Math.floor(Math.random() * (max - min + 1)) + min;
-            }
-            const isHogar = Number(currentCuentaDetalle.id_plataforma) === 1 && idx === 0;
-            return {
-              id_cuenta: currentCuentaDetalle.id_cuenta,
-              n_perfil: idx + 1,
-              ocupado: false,
-              pin: pinVal,
-              perfil_hogar: isHogar,
-              correo: null,
-            };
-          });
+          const perfiles = Array.from({ length: totalPerfiles }).map(
+            (_, idx) => {
+              let pinVal = null;
+              if (usaPines) {
+                const digits = Math.max(1, maxDigPin);
+                const min = digits === 1 ? 0 : Math.pow(10, digits - 1);
+                const max = Math.pow(10, digits) - 1;
+                pinVal = Math.floor(Math.random() * (max - min + 1)) + min;
+              }
+              const isHogar =
+                Number(currentCuentaDetalle.id_plataforma) === 1 && idx === 0;
+              return {
+                id_cuenta: currentCuentaDetalle.id_cuenta,
+                n_perfil: idx + 1,
+                ocupado: false,
+                pin: pinVal,
+                perfil_hogar: isHogar,
+                correo: null,
+              };
+            },
+          );
           try {
             const { error: updErr } = await supabase
               .from("cuentas")
               .update({ venta_perfil: true, venta_miembro: false })
               .eq("id_cuenta", currentCuentaDetalle.id_cuenta);
             if (updErr) throw updErr;
-            const { error: perfErr } = await supabase.from("perfiles").insert(perfiles);
+            const { error: perfErr } = await supabase
+              .from("perfiles")
+              .insert(perfiles);
             if (perfErr) throw perfErr;
             alert("Cuenta convertida a perfiles.");
             loadCuentaDetalle(currentCuentaDetalle.id_cuenta);
@@ -1262,7 +1476,12 @@
         try {
           const { error } = await supabase
             .from("perfiles")
-            .insert({ id_cuenta: cuentaId, n_perfil: next, ocupado: false, perfil_hogar: false });
+            .insert({
+              id_cuenta: cuentaId,
+              n_perfil: next,
+              ocupado: false,
+              perfil_hogar: false,
+            });
           if (error) throw error;
           if (selectPlataforma?.value) {
             loadPlataformaCuentas(selectPlataforma.value);
@@ -1282,10 +1501,10 @@
           clienteVentasEl.innerHTML = "";
           return;
         }
-          const blocks = Object.entries(grouped).map(([platName, rows]) => {
-            const trs = rows
-              .map(
-                (r) => `
+        const blocks = Object.entries(grouped).map(([platName, rows]) => {
+          const trs = rows
+            .map(
+              (r) => `
               <tr>
                 <td>${r.id_venta ?? ""}</td>
                 <td>${r.correo || ""}</td>
@@ -1309,14 +1528,14 @@
                       idPlataforma: r.id_plataforma,
                       perfilHogar: r.perfil_hogar,
                       isSubCuenta: r.es_subcuenta,
-                    })
+                    }),
                   )}">Copiar</button>
                   <button class="btn-delete" data-id-venta="${r.id_venta ?? ""}">Eliminar</button>
                 </td>
               </tr>
-            `
-              )
-              .join("");
+            `,
+            )
+            .join("");
           return `
             <div class="ventas-bloque">
               <h3>${platName}</h3>
@@ -1347,16 +1566,24 @@
         try {
           const { data: ventas, error } = await supabase
             .from("ventas")
-            .select("id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio")
+            .select(
+              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio",
+            )
             .eq("id_usuario", idUsuario);
           if (error) throw error;
-          const cuentasIds = [...new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean))];
-          const perfilesIds = [...new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean))];
+          const cuentasIds = [
+            ...new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)),
+          ];
+          const perfilesIds = [
+            ...new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean)),
+          ];
           let cuentaMap = {};
           if (cuentasIds.length) {
             const { data: cuentas } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro")
+              .select(
+                "id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro",
+              )
               .in("id_cuenta", cuentasIds);
             cuentaMap =
               (cuentas || []).reduce((acc, c) => {
@@ -1377,7 +1604,9 @@
               }, {}) || {};
           }
           let precioMap = {};
-          const precioIds = [...new Set((ventas || []).map((v) => v.id_precio).filter(Boolean))];
+          const precioIds = [
+            ...new Set((ventas || []).map((v) => v.id_precio).filter(Boolean)),
+          ];
           if (precioIds.length) {
             const { data: precios } = await supabase
               .from("precios")
@@ -1393,8 +1622,12 @@
           const platIds = [
             ...new Set(
               (ventas || [])
-                .map((v) => cuentaMap[v.id_cuenta]?.id_plataforma || precioMap[v.id_precio])
-                .filter(Boolean)
+                .map(
+                  (v) =>
+                    cuentaMap[v.id_cuenta]?.id_plataforma ||
+                    precioMap[v.id_precio],
+                )
+                .filter(Boolean),
             ),
           ];
           if (platIds.length) {
@@ -1415,7 +1648,8 @@
           const grouped = {};
           (ventas || []).forEach((v) => {
             const cuenta = cuentaMap[v.id_cuenta] || {};
-            const platId = cuenta.id_plataforma || precioMap[v.id_precio] || "desconocida";
+            const platId =
+              cuenta.id_plataforma || precioMap[v.id_precio] || "desconocida";
             const platInfo = plataformaMap[platId] || {};
             const platName = platInfo.nombre || `Plataforma ${platId}`;
             if (!grouped[platName]) grouped[platName] = [];
@@ -1439,7 +1673,9 @@
           renderVentasCliente(grouped);
         } catch (err) {
           console.error("loadVentasByCliente error", err);
-          if (clienteVentasEl) clienteVentasEl.innerHTML = '<p class="status">No se pudo cargar ventas.</p>';
+          if (clienteVentasEl)
+            clienteVentasEl.innerHTML =
+              '<p class="status">No se pudo cargar ventas.</p>';
         }
       };
 
@@ -1481,7 +1717,10 @@
       btnConfirmDelete?.addEventListener("click", async () => {
         if (!deleteTargetId) return;
         try {
-          const { error } = await supabase.from("ventas").delete().eq("id_venta", deleteTargetId);
+          const { error } = await supabase
+            .from("ventas")
+            .delete()
+            .eq("id_venta", deleteTargetId);
           if (error) throw error;
           if (inputCliente?.dataset.selectedId) {
             loadVentasByCliente(inputCliente.dataset.selectedId);
@@ -1522,7 +1761,7 @@
         currentCuentaId = info.id_cuenta || null;
         if (!detalleEl) return;
         if (!info) {
-          detalleEl.innerHTML = "<p class=\"status\">Sin datos.</p>";
+          detalleEl.innerHTML = '<p class="status">Sin datos.</p>';
           return;
         }
 
@@ -1559,7 +1798,11 @@
 
         let rows = [...(info.perfiles || [])];
         // Si no hay perfiles y hay ventas de cuenta completa, crear filas sintéticas
-        if (!rows.length && Array.isArray(info.ventasCuenta) && info.ventasCuenta.length) {
+        if (
+          !rows.length &&
+          Array.isArray(info.ventasCuenta) &&
+          info.ventasCuenta.length
+        ) {
           info.ventasCuenta.forEach((v) => {
             rows.push({
               perfil: "",
@@ -1568,7 +1811,8 @@
               id_perfil: null,
               n_raw: null,
               reemplazado: false,
-              ocupadoPor: info.usuariosCuenta?.[v.id_usuario] || info.correo || "",
+              ocupadoPor:
+                info.usuariosCuenta?.[v.id_usuario] || info.correo || "",
               id_venta: v.id_venta,
               fecha_corte: v.fecha_corte || "",
               fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
@@ -1607,7 +1851,7 @@
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
                 <td>${p.perfil}</td>
                 <td class="pin-cell">
-                  <span>${p.pin ?? ""}</span>
+                  <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
                   <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
                 </td>
                 ${showHogar ? `<td>${toggleHtml}</td>` : ""}
@@ -1667,7 +1911,7 @@
               return `<tr>
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
                 <td class="pin-cell">
-                  <span>${p.pin ?? ""}</span>
+                  <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
                   <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
                 </td>
                 <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
@@ -1765,8 +2009,9 @@
         let addPerfilRow = "";
         const colCountPerfil = showHogar ? 7 : 6;
         if (colMode === "perfil" && info.mas_perfiles) {
-          const maxPerfiles = Number(info.num_max_dispositivos) || rows.length || 1;
-          const nextPerfil = ((rows.length % maxPerfiles) || 0) + 1;
+          const maxPerfiles =
+            Number(info.num_max_dispositivos) || rows.length || 1;
+          const nextPerfil = (rows.length % maxPerfiles || 0) + 1;
           addPerfilRow = `<tr>
             <td colspan="${colCountPerfil}" style="text-align:center;">
               <button type="button" class="btn-add-perfil" data-cuenta="${info.id_cuenta || ""}" data-next="${nextPerfil}" data-max="${maxPerfiles}" style="width:100%;">+</button>
@@ -1776,7 +2021,7 @@
 
         const table =
           rows.length === 0
-            ? "<p class=\"status\">Sin perfiles asociados.</p>"
+            ? '<p class="status">Sin perfiles asociados.</p>'
             : `<div class="cuenta-table-wrap">
                 <table class="proximas-table">
                   <thead>${thead}</thead>
@@ -1788,20 +2033,21 @@
         if (info.isPlat9) {
           const filas = info.plat9Rows || [];
           const needsPlus = filas.length < 5;
-          const bodyRows =
-            filas
-              .map(
-                (r) => `<tr>
+          const bodyRows = filas
+            .map(
+              (r) => `<tr>
               <td>${r.cliente || "-"}</td>
               <td>${r.correo || "-"}</td>
               <td>${r.clave || "-"}</td>
               <td>${r.usuario || "-"}</td>
               <td>${r.fecha_corte || "-"}</td>
               <td>${r.estado || "-"}</td>
-            </tr>`
-              )
-              .join("");
-          const plus = needsPlus ? `<tr class="row-add-miembro plat9-plus-row"><td colspan="6">+</td></tr>` : "";
+            </tr>`,
+            )
+            .join("");
+          const plus = needsPlus
+            ? `<tr class="row-add-miembro plat9-plus-row"><td colspan="6">+</td></tr>`
+            : "";
           plat9Table = `
             <h4>Clientes</h4>
             <div class="cuenta-table-wrap">
@@ -1822,13 +2068,14 @@
           `;
         }
 
-        const recargarLabel = info.id_plataforma === 1 ? "Recargar cuenta" : "Renovar cuenta";
+        const recargarLabel =
+          info.id_plataforma === 1 ? "Recargar cuenta" : "Renovar cuenta";
         const tipoServicio =
           info.venta_perfil === true
             ? "Perfiles"
             : info.venta_miembro === true
-            ? "Miembro"
-            : "Cuenta completa";
+              ? "Miembro"
+              : "Cuenta completa";
 
         detalleEl.innerHTML = `
           <h3 class="cuenta-title">Detalle de cuenta</h3>
@@ -1893,24 +2140,23 @@
               <tbody>
                 ${
                   (info.miembrosExtras || [])
-                    .map(
-                      (m) => {
-                        const hasVenta = !!m.id_venta;
-                        const copyText = hasVenta
-                          ? buildServiceCopyText({
-                              plataforma: info.plataformaNombre,
-                              idVenta: m.id_venta,
-                              correo: m.correo,
-                              clave: m.clave,
-                              fechaCorte: m.fecha_corte,
-                              porAcceso: info.por_acceso,
-                              usaPines: info.usa_pines,
-                              ventaPerfil: m.venta_perfil ?? info.venta_perfil,
-                              ventaMiembro: m.venta_miembro ?? info.venta_miembro,
-                              idPlataforma: m.id_plataforma ?? info.plataformaId,
-                            })
-                          : "";
-                        return `
+                    .map((m) => {
+                      const hasVenta = !!m.id_venta;
+                      const copyText = hasVenta
+                        ? buildServiceCopyText({
+                            plataforma: info.plataformaNombre,
+                            idVenta: m.id_venta,
+                            correo: m.correo,
+                            clave: m.clave,
+                            fechaCorte: m.fecha_corte,
+                            porAcceso: info.por_acceso,
+                            usaPines: info.usa_pines,
+                            ventaPerfil: m.venta_perfil ?? info.venta_perfil,
+                            ventaMiembro: m.venta_miembro ?? info.venta_miembro,
+                            idPlataforma: m.id_plataforma ?? info.plataformaId,
+                          })
+                        : "";
+                      return `
                         <tr>
                           <td>${m.correo || "-"}</td>
                           <td>${m.clave || "-"}</td>
@@ -1933,8 +2179,7 @@
                           </td>
                         </tr>
                       `;
-                      }
-                    )
+                    })
                     .join("") || ""
                 }
                 <tr class="row-add-miembro">
@@ -1945,7 +2190,7 @@
           </div>
           <div class="miembros-footnote" id="miembros-footnote-${info.id_cuenta || ""}"></div>
         `
-            : ""
+              : ""
           }
           ${
             info.venta_miembro
@@ -1964,44 +2209,58 @@
                 .from("cuentas")
                 .update({ inactiva: checked })
                 .eq("id_cuenta", id);
-            if (error) throw error;
-            const labelText = e.target.closest(".toggle-label")?.querySelector(".toggle-text");
-            if (labelText) labelText.textContent = checked ? "Inactivada" : "Activa";
-          } catch (err) {
-            console.error("toggle inactiva error", err);
-            e.target.checked = !checked;
-          }
-        });
-      }
+              if (error) throw error;
+              const labelText = e.target
+                .closest(".toggle-label")
+                ?.querySelector(".toggle-text");
+              if (labelText)
+                labelText.textContent = checked ? "Inactivada" : "Activa";
+            } catch (err) {
+              console.error("toggle inactiva error", err);
+              e.target.checked = !checked;
+            }
+          });
+        }
       };
 
       const loadCuentaDetalle = async (idCuenta) => {
         if (!detalleEl) return;
         if (clienteVentasEl) clienteVentasEl.innerHTML = "";
-        detalleEl.innerHTML = "<p class=\"status\">Cargando cuenta...</p>";
+        detalleEl.innerHTML = '<p class="status">Cargando cuenta...</p>';
         try {
           const { data: cuenta, error } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado")
+            .select(
+              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado",
+            )
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
           if (error) throw error;
           if (!cuenta) {
-            detalleEl.innerHTML = "<p class=\"status\">Cuenta no encontrada.</p>";
+            detalleEl.innerHTML = '<p class="status">Cuenta no encontrada.</p>';
             return;
           }
 
           const platId = cuenta.id_plataforma;
           const provId = cuenta.id_proveedor;
 
-          const [{ data: prov, error: provErr }, { data: plat, error: platErr }] = await Promise.all([
+          const [
+            { data: prov, error: provErr },
+            { data: plat, error: platErr },
+          ] = await Promise.all([
             provId
-              ? supabase.from("proveedores").select("nombre").eq("id_proveedor", provId).maybeSingle()
+              ? supabase
+                  .from("proveedores")
+                  .select("nombre")
+                  .eq("id_proveedor", provId)
+                  .maybeSingle()
               : Promise.resolve({ data: null, error: null }),
             platId
               ? supabase
                   .from("plataformas")
-                  .select("nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos")
+                  .select(
+                    "nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos",
+                  )
                   .eq("id_plataforma", platId)
                   .maybeSingle()
               : Promise.resolve({ data: null, error: null }),
@@ -2019,8 +2278,8 @@
             cuenta.venta_perfil === true && cuenta.venta_miembro === false
               ? "perfil"
               : cuenta.venta_perfil === false && cuenta.venta_miembro === true
-              ? "miembro"
-              : "ocupado";
+                ? "miembro"
+                : "ocupado";
           const showHogar = platId === 1 && colMode === "perfil";
 
           const { data: perfData, error: perfErr } = await supabase
@@ -2047,7 +2306,9 @@
               return acc;
             }, {});
 
-            const userIds = Array.from(new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)));
+            const userIds = Array.from(
+              new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)),
+            );
             if (userIds.length) {
               const { data: users, error: userErr } = await supabase
                 .from("usuarios")
@@ -2055,7 +2316,9 @@
                 .in("id_usuario", userIds);
               if (userErr) throw userErr;
               usersMap = (users || []).reduce((acc, u) => {
-                acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+                acc[u.id_usuario] =
+                  [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
+                  `Usuario ${u.id_usuario}`;
                 return acc;
               }, {});
             }
@@ -2069,7 +2332,11 @@
               .eq("id_cuenta", idCuenta);
             if (ventasCtaErr) throw ventasCtaErr;
             ventasCuenta = ventasCta || [];
-            const userIdsCta = Array.from(new Set((ventasCta || []).map((v) => v.id_usuario).filter(Boolean)));
+            const userIdsCta = Array.from(
+              new Set(
+                (ventasCta || []).map((v) => v.id_usuario).filter(Boolean),
+              ),
+            );
             if (userIdsCta.length) {
               const { data: usuariosCta, error: usrErr } = await supabase
                 .from("usuarios")
@@ -2078,7 +2345,9 @@
               if (usrErr) throw usrErr;
               usuariosCuenta = (usuariosCta || []).reduce((acc, u) => {
                 acc[u.id_usuario] =
-                  [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || u.correo || `Usuario ${u.id_usuario}`;
+                  [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
+                  u.correo ||
+                  `Usuario ${u.id_usuario}`;
                 return acc;
               }, {});
             }
@@ -2114,7 +2383,8 @@
               ocupadoPor: enReemplazos ? "Reemplazado" : ocupadoCell,
               id_venta: ventasMap[p.id_perfil]?.id_venta || null,
               fecha_corte: ventasMap[p.id_perfil]?.fecha_corte || "",
-              fecha_corte_fmt: formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
+              fecha_corte_fmt:
+                formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
               reemplazado: enReemplazos,
             };
           });
@@ -2127,7 +2397,9 @@
               .select("id_usuario, fecha_corte, pendiente")
               .eq("id_cuenta", idCuenta);
             if (vent9Err) throw vent9Err;
-            const userIds9 = Array.from(new Set((ventas9 || []).map((v) => v.id_usuario).filter(Boolean)));
+            const userIds9 = Array.from(
+              new Set((ventas9 || []).map((v) => v.id_usuario).filter(Boolean)),
+            );
             let userNames9 = {};
             if (userIds9.length) {
               const { data: users9, error: u9Err } = await supabase
@@ -2136,7 +2408,9 @@
                 .in("id_usuario", userIds9);
               if (u9Err) throw u9Err;
               userNames9 = (users9 || []).reduce((acc, u) => {
-                acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+                acc[u.id_usuario] =
+                  [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
+                  `Usuario ${u.id_usuario}`;
                 return acc;
               }, {});
             }
@@ -2154,7 +2428,9 @@
           // Miembros extras por id_cuenta_miembro
           const { data: miembros, error: membErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, clave, id_plataforma, venta_miembro, venta_perfil")
+            .select(
+              "id_cuenta, correo, clave, id_plataforma, venta_miembro, venta_perfil",
+            )
             .eq("id_cuenta_miembro", idCuenta);
           if (membErr) throw membErr;
 
@@ -2163,17 +2439,25 @@
             const cuentaIds = miembros.map((m) => m.id_cuenta).filter(Boolean);
             const { data: ventasM, error: ventMErr } = await supabase
               .from("ventas")
-              .select("id_cuenta, id_venta, fecha_corte, usuario:usuarios!ventas_id_usuario_fkey(nombre, apellido)")
+              .select(
+                "id_cuenta, id_venta, fecha_corte, usuario:usuarios!ventas_id_usuario_fkey(nombre, apellido)",
+              )
               .in("id_cuenta", cuentaIds);
             if (ventMErr) throw ventMErr;
             const mapUser = (ventasM || []).reduce((acc, v) => {
-              const full = [v.usuario?.nombre, v.usuario?.apellido].filter(Boolean).join(" ").trim();
+              const full = [v.usuario?.nombre, v.usuario?.apellido]
+                .filter(Boolean)
+                .join(" ")
+                .trim();
               acc[v.id_cuenta] = full || "Vacío";
               return acc;
             }, {});
             const mapVenta = (ventasM || []).reduce((acc, v) => {
               if (!acc[v.id_cuenta]) {
-                acc[v.id_cuenta] = { id_venta: v.id_venta, fecha_corte: v.fecha_corte || "" };
+                acc[v.id_cuenta] = {
+                  id_venta: v.id_venta,
+                  fecha_corte: v.fecha_corte || "",
+                };
               }
               return acc;
             }, {});
@@ -2184,34 +2468,37 @@
               ocupado: mapUser[m.id_cuenta] || "-",
               id_venta: mapVenta[m.id_cuenta]?.id_venta || null,
               fecha_corte: mapVenta[m.id_cuenta]?.fecha_corte || "",
-              fecha_corte_fmt: formatDDMMYYYY(mapVenta[m.id_cuenta]?.fecha_corte) || "",
+              fecha_corte_fmt:
+                formatDDMMYYYY(mapVenta[m.id_cuenta]?.fecha_corte) || "",
               id_plataforma: m.id_plataforma,
               venta_miembro: m.venta_miembro,
               venta_perfil: m.venta_perfil,
             }));
           }
 
-        // Obtener últimos 3 correos agregados en plataforma 1
-        let ultimosCorreosPlat1 = [];
-        try {
-          const { data: ultimos, error: ultErr } = await supabase
-            .from("cuentas")
-            .select("correo")
-            .eq("id_plataforma", 1)
-            .not("correo", "is", null)
-            .order("id_cuenta", { ascending: false })
-            .limit(3);
-          if (ultErr) throw ultErr;
-          ultimosCorreosPlat1 = (ultimos || []).map((c) => c.correo).filter(Boolean);
-        } catch (err) {
-          console.error("ultimos correos plat1 error", err);
-        }
+          // Obtener últimos 3 correos agregados en plataforma 1
+          let ultimosCorreosPlat1 = [];
+          try {
+            const { data: ultimos, error: ultErr } = await supabase
+              .from("cuentas")
+              .select("correo")
+              .eq("id_plataforma", 1)
+              .not("correo", "is", null)
+              .order("id_cuenta", { ascending: false })
+              .limit(3);
+            if (ultErr) throw ultErr;
+            ultimosCorreosPlat1 = (ultimos || [])
+              .map((c) => c.correo)
+              .filter(Boolean);
+          } catch (err) {
+            console.error("ultimos correos plat1 error", err);
+          }
 
-        currentCuentaDetalle = {
-          plataformaNombre: plat?.nombre || "",
-          plataformaId: platId,
-          id_plataforma: platId,
-          proveedorNombre: prov?.nombre || "",
+          currentCuentaDetalle = {
+            plataformaNombre: plat?.nombre || "",
+            plataformaId: platId,
+            id_plataforma: platId,
+            proveedorNombre: prov?.nombre || "",
             proveedorId: provId || null,
             region: cuenta.region || "",
             correo: cuenta.correo || "",
@@ -2235,28 +2522,36 @@
             isPlat9,
             venta_perfil: cuenta.venta_perfil,
             venta_miembro: cuenta.venta_miembro,
-        ultimosCorreosPlat1,
-        por_acceso: plat?.por_acceso || false,
-        usa_pines: plat?.usa_pines || false,
-        mas_perfiles: isTrue(plat?.mas_perfiles),
-        num_max_dispositivos: plat?.num_max_dispositivos || null,
-        ventasCuenta,
-        usuariosCuenta,
-        correo_madre: cuenta.id_cuenta_miembro ? cuentasActivas.find((c) => c.id_cuenta === cuenta.id_cuenta_miembro)?.correo || "" : "",
-      };
+            ultimosCorreosPlat1,
+            por_acceso: plat?.por_acceso || false,
+            usa_pines: plat?.usa_pines || false,
+            mas_perfiles: isTrue(plat?.mas_perfiles),
+            num_max_dispositivos: plat?.num_max_dispositivos || null,
+            ventasCuenta,
+            usuariosCuenta,
+            correo_madre: cuenta.id_cuenta_miembro
+              ? cuentasActivas.find(
+                  (c) => c.id_cuenta === cuenta.id_cuenta_miembro,
+                )?.correo || ""
+              : "",
+          };
 
           renderDetalle(currentCuentaDetalle);
 
           // Pie de tabla de miembros extras: últimos correos agregados en plataforma 1
           if (platId === 1 && detalleEl) {
-            const foot = detalleEl.querySelector(`#miembros-footnote-${idCuenta}`);
+            const foot = detalleEl.querySelector(
+              `#miembros-footnote-${idCuenta}`,
+            );
             if (foot && currentCuentaDetalle.ultimosCorreosPlat1?.length) {
               foot.textContent = `Ultimos correos registrados: ${currentCuentaDetalle.ultimosCorreosPlat1.join(", ")}`;
             }
           }
         } catch (err) {
           console.error("detalle cuenta error", err);
-          if (detalleEl) detalleEl.innerHTML = "<p class=\"status\">No se pudo cargar el detalle.</p>";
+          if (detalleEl)
+            detalleEl.innerHTML =
+              '<p class="status">No se pudo cargar el detalle.</p>';
         }
       };
 
@@ -2304,21 +2599,32 @@
         const idPerfil = hog.dataset.perfil;
         if (!idPerfil) return;
         try {
-        const { error } = await supabase.from("perfiles").update({ perfil_hogar: checked }).eq("id_perfil", idPerfil);
-        if (error) throw error;
-      } catch (err) {
-        console.error("toggle hogar error", err);
-        hog.checked = !checked;
-      }
-    });
+          const { error } = await supabase
+            .from("perfiles")
+            .update({ perfil_hogar: checked })
+            .eq("id_perfil", idPerfil);
+          if (error) throw error;
+        } catch (err) {
+          console.error("toggle hogar error", err);
+          hog.checked = !checked;
+        }
+      });
 
       // Copiar correo/clave en detalle de cuenta
       detalleEl?.addEventListener("click", (e) => {
         const cred = e.target.closest(".cred-copy");
-        if (!cred) return;
-        const text = cred.dataset.clipboard || cred.textContent || "";
-        if (!text) return;
-        copyTextNotify(text);
+        if (cred) {
+          const text = cred.dataset.clipboard || cred.textContent || "";
+          if (!text) return;
+          copyTextNotify(text);
+          return;
+        }
+        const pinEl = e.target.closest(".pin-copy");
+        if (pinEl) {
+          const text = pinEl.dataset.clipboard || pinEl.textContent || "";
+          if (!text) return;
+          copyTextNotify(text);
+        }
       });
 
       // Recargar cuenta modal
@@ -2392,7 +2698,9 @@
           const corteBase = btnRec.dataset.corte || "";
           if (recCorte) {
             const baseDate = corteBase ? new Date(corteBase) : new Date();
-            const plus30 = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+            const plus30 = new Date(
+              baseDate.getTime() + 30 * 24 * 60 * 60 * 1000,
+            );
             recCorte.value = plus30.toISOString().slice(0, 10);
           }
           recPin.textContent = "Buscando...";
@@ -2409,15 +2717,21 @@
         } else {
           renewMeses = 1;
           renewFechaTouched = false;
-          renewBaseDate = btnRec.dataset.corte ? new Date(btnRec.dataset.corte) : new Date();
+          renewBaseDate = btnRec.dataset.corte
+            ? new Date(btnRec.dataset.corte)
+            : new Date();
           if (renewCosto) renewCosto.value = "";
           if (renewMesesEl) renewMesesEl.textContent = renewMeses;
           const next = new Date(renewBaseDate);
           next.setMonth(next.getMonth() + renewMeses);
           if (renewCorte) renewCorte.value = next.toISOString().slice(0, 10);
-          renewCorte?.addEventListener("input", () => {
-            renewFechaTouched = true;
-          }, { once: true });
+          renewCorte?.addEventListener(
+            "input",
+            () => {
+              renewFechaTouched = true;
+            },
+            { once: true },
+          );
           showModalRenovar();
         }
       });
@@ -2445,17 +2759,25 @@
         const fechaInput = row.querySelector(".fecha-input");
         const btn = row.querySelector(".btn-registrar-servicio");
         if (!btn) return;
-          const hasName = nameInput && nameInput.value.trim().length > 0 && /\s+/.test(nameInput.value.trim());
-          const hasUser = nameInput && nameInput.dataset.userId;
-          const hasDate =
-          fechaInput && fechaInput.value && !Number.isNaN(new Date(fechaInput.value).valueOf());
-          const enabled = !!(hasName && hasUser && hasDate);
+        const hasName =
+          nameInput &&
+          nameInput.value.trim().length > 0 &&
+          /\s+/.test(nameInput.value.trim());
+        const hasUser = nameInput && nameInput.dataset.userId;
+        const hasDate =
+          fechaInput &&
+          fechaInput.value &&
+          !Number.isNaN(new Date(fechaInput.value).valueOf());
+        const enabled = !!(hasName && hasUser && hasDate);
         btn.disabled = !enabled;
         btn.classList.toggle("btn-disabled", !enabled);
       };
 
       detalleEl?.addEventListener("input", (e) => {
-        if (e.target.matches(".ocupado-input") || e.target.matches(".fecha-input")) {
+        if (
+          e.target.matches(".ocupado-input") ||
+          e.target.matches(".fecha-input")
+        ) {
           const row = e.target.closest("tr");
           if (!row) return;
           if (e.target.matches(".ocupado-input")) {
@@ -2465,7 +2787,10 @@
               const dl = document.querySelector("#sugs-ocupado");
               if (dl) {
                 dl.innerHTML = list
-                  .map((u) => `<option data-id="${u.id_usuario}" value="${[u.nombre, u.apellido].filter(Boolean).join(" ").trim()}"></option>`)
+                  .map(
+                    (u) =>
+                      `<option data-id="${u.id_usuario}" value="${[u.nombre, u.apellido].filter(Boolean).join(" ").trim()}"></option>`,
+                  )
                   .join("");
               }
             });
@@ -2493,7 +2818,9 @@
           const input = e.target;
           const row = input.closest("tr");
           const match = (ocupadoSuggestions || []).find(
-            (u) => [u.nombre, u.apellido].filter(Boolean).join(" ").trim() === input.value.trim()
+            (u) =>
+              [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ===
+              input.value.trim(),
           );
           if (match) {
             input.dataset.userId = match.id_usuario;
@@ -2519,7 +2846,10 @@
         const newDate = input.value;
         if (!newDate) return;
         try {
-          const { error } = await supabase.from("ventas").update({ fecha_corte: newDate }).eq("id_venta", ventaId);
+          const { error } = await supabase
+            .from("ventas")
+            .update({ fecha_corte: newDate })
+            .eq("id_venta", ventaId);
           if (error) throw error;
           const span = row.querySelector(".fecha-text");
           if (span) span.textContent = formatDDMMYYYY(newDate) || newDate;
@@ -2534,7 +2864,8 @@
       const updateRenewFecha = () => {
         if (!renewCorte) return;
         if (renewFechaTouched) return;
-        const base = renewBaseDate instanceof Date ? new Date(renewBaseDate) : new Date();
+        const base =
+          renewBaseDate instanceof Date ? new Date(renewBaseDate) : new Date();
         const next = new Date(base);
         next.setMonth(next.getMonth() + renewMeses);
         renewCorte.value = next.toISOString().slice(0, 10);
@@ -2583,27 +2914,30 @@
             .eq("id_cuenta", currentCuentaId);
           if (updErr) throw updErr;
 
-          const { error: histErr } = await supabase.from("historial_ventas").insert({
-            monto,
-            fecha_pago: today,
-            venta_cliente: false,
-            renovacion: true,
-            id_venta: null,
-            id_plataforma: currentCuentaDetalle?.plataformaId
-              ? Number(currentCuentaDetalle.plataformaId)
-              : renewPlatId
-              ? Number(renewPlatId)
-              : null,
-            id_cuenta: currentCuentaId,
-            registrado_por: currentUserId,
-            referencia: null,
-          });
+          const { error: histErr } = await supabase
+            .from("historial_ventas")
+            .insert({
+              monto,
+              fecha_pago: today,
+              venta_cliente: false,
+              renovacion: true,
+              id_venta: null,
+              id_plataforma: currentCuentaDetalle?.plataformaId
+                ? Number(currentCuentaDetalle.plataformaId)
+                : renewPlatId
+                  ? Number(renewPlatId)
+                  : null,
+              id_cuenta: currentCuentaId,
+              registrado_por: currentUserId,
+              referencia: null,
+            });
           if (histErr) throw histErr;
 
           hideModalRenovar();
           alert("Renovación registrada.");
           const fechaSpan = detalleEl?.querySelector(".fecha-corte-text");
-          if (fechaSpan) fechaSpan.textContent = formatDDMMYYYY(nuevaFecha) || nuevaFecha;
+          if (fechaSpan)
+            fechaSpan.textContent = formatDDMMYYYY(nuevaFecha) || nuevaFecha;
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
           });
@@ -2638,7 +2972,11 @@
           if (pinId) {
             const { error: cardErr } = await supabase
               .from("tarjetas_de_regalo")
-              .update({ usado: true, fecha_uso: today, id_cuenta: currentCuentaId })
+              .update({
+                usado: true,
+                fecha_uso: today,
+                id_cuenta: currentCuentaId,
+              })
               .eq("id_tarjeta_de_regalo", pinId);
             if (cardErr) throw cardErr;
           }
@@ -2646,7 +2984,8 @@
           hideModalRecargar();
           alert("Recarga registrada");
           const fechaSpan = detalleEl?.querySelector(".fecha-corte-text");
-          if (fechaSpan) fechaSpan.textContent = formatDDMMYYYY(nuevaFecha) || nuevaFecha;
+          if (fechaSpan)
+            fechaSpan.textContent = formatDDMMYYYY(nuevaFecha) || nuevaFecha;
           // actualizar dataset corte en botones recargar visibles
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
@@ -2718,7 +3057,7 @@
           sugsBox.innerHTML = items
             .map(
               (c) =>
-                `<button type="button" data-correo="${c.correo || ""}" data-clave="${c.clave || ""}">${c.correo || ""}</button>`
+                `<button type="button" data-correo="${c.correo || ""}" data-clave="${c.clave || ""}">${c.correo || ""}</button>`,
             )
             .join("");
           sugsBox.classList.remove("hidden");
@@ -2761,7 +3100,7 @@
               renderSugs([]);
             }
           },
-          { once: true }
+          { once: true },
         );
         inp?.focus();
       });
@@ -2848,7 +3187,8 @@
           hideMiembroModal();
           return;
         }
-        const { correo, clave, plataformaId, idCuentaMiembro, ocupado } = pendingMiembroAdd;
+        const { correo, clave, plataformaId, idCuentaMiembro, ocupado } =
+          pendingMiembroAdd;
         try {
           const payload = {
             id_plataforma: plataformaId,
@@ -2863,7 +3203,11 @@
             id_proveedor: currentCuentaDetalle?.proveedorId || null,
             ocupado: ocupado === false ? false : null,
           };
-          const { data, error } = await supabase.from("cuentas").insert(payload).select("id_cuenta").single();
+          const { data, error } = await supabase
+            .from("cuentas")
+            .insert(payload)
+            .select("id_cuenta")
+            .single();
           if (error) throw error;
           // crear sub_cuenta básica asociada
           if (data?.id_cuenta) {
@@ -2921,12 +3265,21 @@
           const max = Number(btnPin.dataset.max) || null;
           const nPerfil = btnPin.dataset.nperfil || "";
           const correoVal = btnPin.dataset.correo || "";
-          modalState = { type: "pin", targetId: idPerfil, max, nPerfil, correo: correoVal };
+          modalState = {
+            type: "pin",
+            targetId: idPerfil,
+            max,
+            nPerfil,
+            correo: correoVal,
+          };
           if (modalPinTitle) modalPinTitle.textContent = "Cambiar PIN";
           if (modalPinInput) {
             modalPinInput.value = pinVal;
             if (max) modalPinInput.maxLength = max;
             else modalPinInput.removeAttribute("maxLength");
+          }
+          if (pinVal) {
+            await copyTextNotify(pinVal);
           }
           modalPin?.classList.remove("hidden");
           return;
@@ -2942,9 +3295,11 @@
             const plataformaId = currentCuentaDetalle.plataformaId;
             const cuentaId = currentCuentaDetalle.id_cuenta;
             const rowPerfil = currentCuentaDetalle.perfiles?.find(
-              (p) => String(p.id_perfil) === String(btnRepl.dataset.perfil || "")
+              (p) =>
+                String(p.id_perfil) === String(btnRepl.dataset.perfil || ""),
             );
-            const ventaId = rowPerfil?.id_venta || obtenerVentaPerfil(btnRepl.dataset.perfil);
+            const ventaId =
+              rowPerfil?.id_venta || obtenerVentaPerfil(btnRepl.dataset.perfil);
             if (!ventaId) {
               alert("No se encontró la venta asociada.");
               return;
@@ -2971,11 +3326,12 @@
               ventaPerfil,
               ventaMiembro,
             });
-            const { data: perfilDestino, error: perfilErr } = await findPerfilLibre(plataformaId, cuentaId, {
-              perfilHogar,
-              ventaPerfil,
-              ventaMiembro,
-            });
+            const { data: perfilDestino, error: perfilErr } =
+              await findPerfilLibre(plataformaId, cuentaId, {
+                perfilHogar,
+                ventaPerfil,
+                ventaMiembro,
+              });
             if (perfilErr) {
               console.error("[reemplazo] findPerfilLibre error", perfilErr);
               throw perfilErr;
@@ -2999,7 +3355,10 @@
               id_perfil: nuevoPerfil || null,
               id_sub_cuenta: null,
             };
-            const { error: updVentaErr } = await supabase.from("ventas").update(updates).eq("id_venta", ventaId);
+            const { error: updVentaErr } = await supabase
+              .from("ventas")
+              .update(updates)
+              .eq("id_venta", ventaId);
             if (updVentaErr) {
               console.error("[reemplazo] update venta error", updVentaErr);
               throw updVentaErr;
@@ -3010,21 +3369,30 @@
                 .from("perfiles")
                 .update({ ocupado: false })
                 .eq("id_perfil", rowPerfil.id_perfil);
-              if (freeErr) console.error("[reemplazo] liberar perfil previo error", freeErr);
+              if (freeErr)
+                console.error(
+                  "[reemplazo] liberar perfil previo error",
+                  freeErr,
+                );
             }
             if (nuevoPerfil) {
               const { error: occErr } = await supabase
                 .from("perfiles")
                 .update({ ocupado: true })
                 .eq("id_perfil", nuevoPerfil);
-              if (occErr) console.error("[reemplazo] marcar perfil nuevo error", occErr);
+              if (occErr)
+                console.error("[reemplazo] marcar perfil nuevo error", occErr);
             }
             if (nuevoCuenta) {
               const { error: occCuentaErr } = await supabase
                 .from("cuentas")
                 .update({ ocupado: true })
                 .eq("id_cuenta", nuevoCuenta);
-              if (occCuentaErr) console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
+              if (occCuentaErr)
+                console.error(
+                  "[reemplazo] marcar cuenta nueva error",
+                  occCuentaErr,
+                );
             }
 
             await supabase.from("reemplazos").insert({
@@ -3043,14 +3411,25 @@
                   "servicio_reemplazado",
                   {
                     correoViejo: currentCuentaDetalle.correo || "",
-                    perfilViejo: rowPerfil?.perfil || (rowPerfil?.n_raw ? `M${rowPerfil.n_raw}` : ""),
+                    perfilViejo:
+                      rowPerfil?.perfil ||
+                      (rowPerfil?.n_raw ? `M${rowPerfil.n_raw}` : ""),
                     correoNuevo: dataDestino.correo || "",
-                    perfilNuevo: dataDestino.n_perfil ? `M${dataDestino.n_perfil}` : "",
-                    fechaCorte: ventaInfo?.fecha_corte || rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte || "",
+                    perfilNuevo: dataDestino.n_perfil
+                      ? `M${dataDestino.n_perfil}`
+                      : "",
+                    fechaCorte:
+                      ventaInfo?.fecha_corte ||
+                      rowPerfil?.fecha_corte ||
+                      currentCuentaDetalle.fecha_corte ||
+                      "",
                   },
-                  { idCuenta: nuevoCuenta || null }
+                  { idCuenta: nuevoCuenta || null },
                 );
-                const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
+                const rows = userIds.map((uid) => ({
+                  ...notif,
+                  id_usuario: uid,
+                }));
                 await supabase.from("notificaciones").insert(rows);
               }
             } catch (nErr) {
@@ -3058,7 +3437,9 @@
             }
 
             const perfilTxtOld = rowPerfil?.perfil || "-";
-            const perfilTxtNew = dataDestino?.n_perfil ? `M${dataDestino.n_perfil}` : "-";
+            const perfilTxtNew = dataDestino?.n_perfil
+              ? `M${dataDestino.n_perfil}`
+              : "-";
             const idVentaFmt = `#${String(ventaId).padStart(4, "0")}`;
             const nuevoCopy = buildServiceCopyText({
               plataforma: currentCuentaDetalle.plataformaNombre,
@@ -3067,7 +3448,8 @@
               clave: dataDestino.clave,
               nPerfil: dataDestino.n_perfil,
               pin: dataDestino.pin,
-              fechaCorte: rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte,
+              fechaCorte:
+                rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte,
               porAcceso: currentCuentaDetalle.por_acceso,
               usaPines: currentCuentaDetalle.usa_pines,
               ventaPerfil: currentCuentaDetalle.venta_perfil,
@@ -3076,12 +3458,17 @@
               perfilHogar: dataDestino.perfil_hogar,
               isSubCuenta: false,
             });
-            const msgLines = [`_*Reemplazo de:*`, `${currentCuentaDetalle.correo || "-"} ${perfilTxtOld}_`, "", nuevoCopy].join(
-              "\n"
-            );
+            const msgLines = [
+              `_*Reemplazo de:*`,
+              `${currentCuentaDetalle.correo || "-"} ${perfilTxtOld}_`,
+              "",
+              nuevoCopy,
+            ].join("\n");
             modalReemplazoMsg.textContent = "Servicio reemplazado";
             const copyBtn = modalReemplazo.querySelector("#btn-reemplazo-copy");
-            const copyContent = modalReemplazo.querySelector("#modal-reemplazo-copytext");
+            const copyContent = modalReemplazo.querySelector(
+              "#modal-reemplazo-copytext",
+            );
             if (copyBtn) copyBtn.dataset.copy = msgLines;
             if (copyContent) copyContent.textContent = msgLines;
             modalReemplazo.classList.remove("hidden");
@@ -3100,7 +3487,12 @@
         const idCuenta = btn.dataset.cuenta || null;
         const claveVal = btn.dataset.clave || "";
         const correoVal = btn.dataset.correo || "";
-        modalState = { type: "clave", targetId: idCuenta, max: null, correo: correoVal };
+        modalState = {
+          type: "clave",
+          targetId: idCuenta,
+          max: null,
+          correo: correoVal,
+        };
         if (modalPinTitle) modalPinTitle.textContent = "Cambiar clave";
         if (modalPinInput) {
           modalPinInput.value = claveVal;
@@ -3120,11 +3512,13 @@
         }
       });
 
-      document.querySelector("#btn-reemplazo-copy")?.addEventListener("click", (e) => {
-        const btn = e.currentTarget;
-        const text = btn?.dataset?.copy || "";
-        copyWithToastAt(text, btn);
-      });
+      document
+        .querySelector("#btn-reemplazo-copy")
+        ?.addEventListener("click", (e) => {
+          const btn = e.currentTarget;
+          const text = btn?.dataset?.copy || "";
+          copyWithToastAt(text, btn);
+        });
 
       const copyWithToastAt = (text, anchor) => {
         if (!text) return;
@@ -3132,11 +3526,22 @@
       };
 
       // Helpers de reemplazo (versión simplificada, sin reporte)
-      const findPerfilLibre = async (plataformaId, _excludeCuenta, opts = {}) => {
-        const { perfilHogar = null, ventaPerfil = null, ventaMiembro = null } = opts;
+      const findPerfilLibre = async (
+        plataformaId,
+        _excludeCuenta,
+        opts = {},
+      ) => {
+        const {
+          perfilHogar = null,
+          ventaPerfil = null,
+          ventaMiembro = null,
+        } = opts;
         let excluidos = [];
         try {
-          const { data: repData } = await supabase.from("reemplazos").select("id_perfil").not("id_perfil", "is", null);
+          const { data: repData } = await supabase
+            .from("reemplazos")
+            .select("id_perfil")
+            .not("id_perfil", "is", null);
           excluidos = (repData || []).map((r) => r.id_perfil);
         } catch (err) {
           console.error("reemplazos lookup error", err);
@@ -3144,23 +3549,30 @@
         const { data, error } = await supabase
           .from("perfiles")
           .select(
-            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!inner(id_plataforma, venta_perfil, venta_miembro, inactiva, ocupado, correo, clave)"
+            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!inner(id_plataforma, venta_perfil, venta_miembro, inactiva, ocupado, correo, clave)",
           )
           .eq("cuentas.id_plataforma", plataformaId)
           .order("id_perfil", { ascending: true })
           .limit(1000);
         if (error) return { error };
         let rows = data || [];
-        if (perfilHogar !== null) rows = rows.filter((r) => r.perfil_hogar === perfilHogar);
-        if (ventaPerfil !== null) rows = rows.filter((r) => r.cuentas?.venta_perfil === ventaPerfil);
-        if (ventaMiembro !== null) rows = rows.filter((r) => r.cuentas?.venta_miembro === ventaMiembro);
+        if (perfilHogar !== null)
+          rows = rows.filter((r) => r.perfil_hogar === perfilHogar);
+        if (ventaPerfil !== null)
+          rows = rows.filter((r) => r.cuentas?.venta_perfil === ventaPerfil);
+        if (ventaMiembro !== null)
+          rows = rows.filter((r) => r.cuentas?.venta_miembro === ventaMiembro);
         if (excluidos.length) {
           rows = rows.filter((r) => !excluidos.includes(r.id_perfil));
         }
         rows = rows.filter(
           (r) =>
-            (r.ocupado === false || r.ocupado === null || typeof r.ocupado === "undefined") &&
-            (r.cuentas?.inactiva === false || r.cuentas?.inactiva === null || typeof r.cuentas?.inactiva === "undefined")
+            (r.ocupado === false ||
+              r.ocupado === null ||
+              typeof r.ocupado === "undefined") &&
+            (r.cuentas?.inactiva === false ||
+              r.cuentas?.inactiva === null ||
+              typeof r.cuentas?.inactiva === "undefined"),
         );
         return { data: rows[0] || null };
       };
@@ -3168,7 +3580,9 @@
       const findSubCuentaLibre = async (plataformaId, excludeCuenta) => {
         let query = supabase
           .from("sub_cuentas")
-          .select("id_sub_cuenta, id_cuenta, ocupado, correo, clave, pin, cuentas!inner(id_plataforma, inactiva)")
+          .select(
+            "id_sub_cuenta, id_cuenta, ocupado, correo, clave, pin, cuentas!inner(id_plataforma, inactiva)",
+          )
           .eq("cuentas.id_plataforma", plataformaId)
           .eq("cuentas.inactiva", false)
           .or("ocupado.is.null,ocupado.eq.false")
@@ -3199,7 +3613,9 @@
 
       const obtenerVentaPerfil = (perfilId) => {
         if (!currentCuentaDetalle?.perfiles) return null;
-        const row = currentCuentaDetalle.perfiles.find((p) => String(p.id_perfil) === String(perfilId));
+        const row = currentCuentaDetalle.perfiles.find(
+          (p) => String(p.id_perfil) === String(perfilId),
+        );
         return row?.id_venta || null;
       };
 
@@ -3209,7 +3625,11 @@
           return;
         }
         const newPin = modalPinInput?.value.trim() || "";
-        if (modalState.type === "pin" && modalState.max && newPin.length > modalState.max) {
+        if (
+          modalState.type === "pin" &&
+          modalState.max &&
+          newPin.length > modalState.max
+        ) {
           alert(`El PIN no debe exceder ${modalState.max} dígitos.`);
           return;
         }
@@ -3240,10 +3660,15 @@
                   perfil: modalState.nPerfil ? `M${modalState.nPerfil}` : "",
                   pin: newPin || "",
                 },
-                { idCuenta: ventaPerfil?.id_cuenta || currentCuentaId }
+                { idCuenta: ventaPerfil?.id_cuenta || currentCuentaId },
               );
-              const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
-              const { error: notifErr } = await supabase.from("notificaciones").insert(rows);
+              const rows = userIds.map((uid) => ({
+                ...notif,
+                id_usuario: uid,
+              }));
+              const { error: notifErr } = await supabase
+                .from("notificaciones")
+                .insert(rows);
               if (notifErr) throw notifErr;
             }
           } else if (modalState.type === "clave") {
@@ -3267,15 +3692,22 @@
               const notif = buildNotificationPayload(
                 "clave_actualizada",
                 { correoCuenta: modalState.correo || "", clave: newPin || "" },
-                { idCuenta: modalState.targetId }
+                { idCuenta: modalState.targetId },
               );
-              const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
-              const { error: notifErr } = await supabase.from("notificaciones").insert(rows);
+              const rows = userIds.map((uid) => ({
+                ...notif,
+                id_usuario: uid,
+              }));
+              const { error: notifErr } = await supabase
+                .from("notificaciones")
+                .insert(rows);
               if (notifErr) throw notifErr;
             }
           }
           if (modalState.type === "clave") {
-            const btn = detalleEl?.querySelector(`.btn-clave[data-cuenta="${modalState.targetId}"]`);
+            const btn = detalleEl?.querySelector(
+              `.btn-clave[data-cuenta="${modalState.targetId}"]`,
+            );
             const span = btn?.previousElementSibling;
             if (span) span.textContent = newPin || "-";
           }
@@ -3289,28 +3721,55 @@
 
     <div id="modal-reemplazo-row" class="modal hidden">
       <div class="modal-backdrop"></div>
-      <div class="modal-card modal-card-resumen" style="max-width:280px; text-align:center;">
+      <div
+        class="modal-card modal-card-resumen"
+        style="max-width: 280px; text-align: center"
+      >
         <button class="modal-close" aria-label="Cerrar">×</button>
         <div class="modal-body">
-          <p id="modal-reemplazo-msg" style="margin:0; font-weight:600;">Reemplazando...</p>
-          <button type="button" id="btn-reemplazo-copy" class="btn-outline" style="margin-top:10px; white-space:pre-wrap; text-align:left; width:100%;">
+          <p id="modal-reemplazo-msg" style="margin: 0; font-weight: 600">
+            Reemplazando...
+          </p>
+          <button
+            type="button"
+            id="btn-reemplazo-copy"
+            class="btn-outline"
+            style="
+              margin-top: 10px;
+              white-space: pre-wrap;
+              text-align: left;
+              width: 100%;
+            "
+          >
             Copiar resumen
           </button>
-          <pre id="modal-reemplazo-copytext" style="white-space:pre-wrap; text-align:left; margin:6px 0 0 0;"></pre>
+          <pre
+            id="modal-reemplazo-copytext"
+            style="white-space: pre-wrap; text-align: left; margin: 6px 0 0 0"
+          ></pre>
         </div>
       </div>
     </div>
 
     <div id="modal-miembro-add" class="modal hidden">
       <div class="modal-backdrop"></div>
-      <div class="modal-card modal-card-resumen" style="max-width:320px; text-align:center;">
+      <div
+        class="modal-card modal-card-resumen"
+        style="max-width: 320px; text-align: center"
+      >
         <button class="modal-close" aria-label="Cerrar">×</button>
         <div class="modal-body">
-          <p style="margin:0 0 10px 0;">No se encontró esta cuenta en la base de datos.</p>
-          <p style="margin:0 0 14px 0;">¿Deseas agregar este servicio?</p>
-          <div style="display:flex; gap:10px; justify-content:center;">
-            <button type="button" class="btn-primary" id="btn-miembro-si">Sí, agregar</button>
-            <button type="button" class="btn-outline" id="btn-miembro-no">Cancelar</button>
+          <p style="margin: 0 0 10px 0">
+            No se encontró esta cuenta en la base de datos.
+          </p>
+          <p style="margin: 0 0 14px 0">¿Deseas agregar este servicio?</p>
+          <div style="display: flex; gap: 10px; justify-content: center">
+            <button type="button" class="btn-primary" id="btn-miembro-si">
+              Sí, agregar
+            </button>
+            <button type="button" class="btn-outline" id="btn-miembro-no">
+              Cancelar
+            </button>
           </div>
         </div>
       </div>
@@ -3318,12 +3777,16 @@
 
     <div id="modal-pin" class="modal hidden">
       <div class="modal-backdrop"></div>
-      <div class="modal-card modal-card-resumen" style="max-width:320px;">
-        <button class="modal-close" id="btn-cerrar-pin" aria-label="Cerrar">×</button>
+      <div class="modal-card modal-card-resumen" style="max-width: 320px">
+        <button class="modal-close" id="btn-cerrar-pin" aria-label="Cerrar">
+          ×
+        </button>
         <div class="modal-body modal-renovar-sel-body">
           <h3 id="modal-pin-title">Cambiar PIN</h3>
           <input type="text" id="input-pin" class="input" />
-          <button type="button" class="btn-primary" id="btn-guardar-pin">Guardar</button>
+          <button type="button" class="btn-primary" id="btn-guardar-pin">
+            Guardar
+          </button>
         </div>
       </div>
     </div>

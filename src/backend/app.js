@@ -964,6 +964,7 @@ app.post("/api/checkout", async (req, res) => {
     id_usuario_override,
   } = req.body || {};
   const archivos = Array.isArray(comprobantes) ? comprobantes : Array.isArray(comprobante) ? comprobante : [];
+  const comprobanteHist = archivos?.[0] || null;
   if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
     return res
       .status(400)
@@ -1325,6 +1326,9 @@ app.post("/api/checkout", async (req, res) => {
         id_plataforma: platId,
         id_cuenta: v.id_cuenta,
         registrado_por: idUsuarioSesion,
+        id_metodo_de_pago,
+        referencia,
+        comprobante: comprobanteHist,
       });
     });
     // Renovaciones
@@ -1349,6 +1353,9 @@ app.post("/api/checkout", async (req, res) => {
         id_plataforma: platId,
         id_cuenta: cuentaAnt,
         registrado_por: idUsuarioSesion,
+        id_metodo_de_pago,
+        referencia,
+        comprobante: comprobanteHist,
       });
     });
     if (histRows.length) {
