@@ -49,6 +49,15 @@
       .cortes-table tbody tr:nth-child(even) {
         background: #fff;
       }
+      .perfil-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-left: 6px;
+        border-radius: 50%;
+        background: #f97316;
+        vertical-align: middle;
+      }
       .cortes-row {
         cursor: pointer;
         transition: background-color 0.15s ease;
@@ -227,6 +236,11 @@
                 const maxPin = plataforma.max_dig_pin || "";
                 if (v.tipo === "reemplazo") {
                   const perfilLabel = v.perfil ? `M${v.perfil}` : "-";
+                  const showDot =
+                    plataforma.id_plataforma === 1 &&
+                    ((v.cuentas?.venta_perfil === true && v.perfil_hogar === true) ||
+                      v.cuentas?.venta_miembro === true);
+                  const perfilCell = `${perfilLabel}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
                   const cuentaId = v.id_cuenta || "";
                   const perfilId = v.id_perfil || "";
                   const subId = v.id_sub_cuenta || "";
@@ -255,7 +269,7 @@
                           <input type="text" class="input-inline copy-input" value="${v.clave || ""}" data-reemplazo="${v.id_reemplazo || ""}" data-cuenta="${cuentaId}" data-subcuenta="${subId}" data-field="clave" data-original="${v.clave || ""}">
                         </div>
                       </td>
-                      <td>${perfilLabel}</td>
+                      <td>${perfilCell}</td>
                       <td>
                         <input type="text" class="input-inline" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
                       </td>
@@ -272,6 +286,11 @@
                 const correo = v.cuentas?.correo || "-";
                 const clave = v.cuentas?.clave || "";
                 const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
+                const showDot =
+                  plataforma.id_plataforma === 1 &&
+                  ((v.cuentas?.venta_perfil === true && v.perfiles?.perfil_hogar === true) ||
+                    v.cuentas?.venta_miembro === true);
+                const perfilCell = `${perfil}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
                 const pin = v.perfiles?.pin ?? "";
                 const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
                 const cuentaId = v.cuentas?.id_cuenta || "";
@@ -301,7 +320,7 @@
                         <input type="text" class="input-inline copy-input" value="${clave}" data-venta="${v.id_venta}" data-cuenta="${cuentaId}" data-field="clave" data-original="${clave}">
                       </div>
                     </td>
-                    <td>${perfil}</td>
+                    <td>${perfilCell}</td>
                     <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
                     <td>${formatDDMMYYYY(v.fecha_corte)}</td>
                     <td style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -376,7 +395,7 @@
           const { data: reemplazos, error: replErr } = await supabase
             .from("reemplazos")
             .select(
-              "id_reemplazo, id_cuenta, id_perfil, id_sub_cuenta, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin), sub_cuentas:sub_cuentas(id_sub_cuenta, correo, clave, pin)"
+              "id_reemplazo, id_cuenta, id_perfil, id_sub_cuenta, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), sub_cuentas:sub_cuentas(id_sub_cuenta, correo, clave, pin)"
             )
             .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
           if (replErr) throw replErr;
@@ -393,6 +412,7 @@
               correo: r.cuentas?.correo || r.sub_cuentas?.correo || "-",
               clave: r.cuentas?.clave || r.sub_cuentas?.clave || "",
               perfil: r.perfiles?.n_perfil || null,
+              perfil_hogar: r.perfiles?.perfil_hogar === true,
               pin: r.perfiles?.pin ?? r.sub_cuentas?.pin ?? "",
             });
           });
