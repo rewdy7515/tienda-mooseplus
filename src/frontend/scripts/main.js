@@ -154,7 +154,7 @@ const loadStockSummary = async (hasSession = false) => {
     supabase
       .from("perfiles")
       .select(
-        "id_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, venta_miembro, correo)"
+        "id_perfil, n_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, venta_miembro, correo, plataformas(nombre))"
       )
       .not("id_cuenta", "is", null),
     supabase
@@ -171,12 +171,17 @@ const loadStockSummary = async (hasSession = false) => {
   let netflixPlan2 = 0;
   const libresPlan1Correos = [];
   const libresPlan2Correos = [];
+  const libresPlan1Perf = [];
+  const libresPlan2Perf = [];
+  const libresPorPlataforma = {};
   (data || []).forEach((p) => {
     const platId = p.cuentas?.id_plataforma;
     const inactiva = p.cuentas?.inactiva;
     const ventaPerfil = p.cuentas?.venta_perfil;
     const ventaMiembro = p.cuentas?.venta_miembro;
     const correoCuenta = p.cuentas?.correo || "";
+    const platNombre = p.cuentas?.plataformas?.nombre || `Plataforma ${platId || "-"}`;
+    const perfilLabel = p.n_perfil != null ? `M${p.n_perfil}` : "";
     if (!platId) return;
     // No contar cuentas marcadas inactivas
     if (inactiva === true) return;
@@ -188,16 +193,24 @@ const loadStockSummary = async (hasSession = false) => {
       if (hogar && libre) {
         netflixPlan2 += 1;
         if (correoCuenta) libresPlan2Correos.push(correoCuenta);
+        if (correoCuenta || perfilLabel) libresPlan2Perf.push({ correo: correoCuenta, perfil: perfilLabel });
       }
       // Plan 1: hogar false + venta_perfil true (libre)
       if (!hogar && ventaPerfil === true) {
         netflixPlan1 += 1;
         if (correoCuenta) libresPlan1Correos.push(correoCuenta);
+        if (correoCuenta || perfilLabel) libresPlan1Perf.push({ correo: correoCuenta, perfil: perfilLabel });
       }
     }
     if (!stockObj[platId]) stockObj[platId] = 0;
     if (libre && ventaPerfil === true) {
       stockObj[platId] += 1;
+    }
+    if (libre) {
+      if (!libresPorPlataforma[platId]) {
+        libresPorPlataforma[platId] = { nombre: platNombre, items: [] };
+      }
+      libresPorPlataforma[platId].items.push({ correo: correoCuenta, perfil: perfilLabel });
     }
   });
   const libresMiembro = (cuentasMiembro || []).filter((c) => {
@@ -218,6 +231,28 @@ const loadStockSummary = async (hasSession = false) => {
   stockObj[1] = netflixPlan1 + netflixPlan2;
   console.log("[stock] Netflix plan 1 libres:", netflixPlan1, libresPlan1Correos);
   console.log("[stock] Netflix plan 2 (hogar actualizado) libres:", netflixPlan2, libresPlan2Correos);
+  if (libresPlan1Correos.length) {
+    console.log("[stock] Netflix plan 1 correo libre:", libresPlan1Correos[0]);
+  }
+  if (libresPlan2Correos.length) {
+    console.log("[stock] Netflix plan 2 correo libre:", libresPlan2Correos[0]);
+  }
+  if (libresPlan1Perf.length) {
+    console.log("[stock] Netflix plan 1 perfil libre:", libresPlan1Perf[0]);
+  }
+  if (libresPlan2Perf.length) {
+    console.log("[stock] Netflix plan 2 perfil libre:", libresPlan2Perf[0]);
+  }
+  if (typeof stockObj[2] !== "undefined") {
+    const plat2 = libresPorPlataforma[2];
+    const nombre2 = plat2?.nombre || "Plataforma 2";
+    console.log("[stock] Plataforma 2 libres:", stockObj[2]);
+    if (plat2?.items?.length) {
+      console.log("[stock] Plataforma 2 libres (detalle):", nombre2, plat2.items);
+    }
+  } else {
+    console.log("[stock] Plataforma 2 libres: 0");
+  }
   return stockObj;
 };
 

@@ -991,6 +991,7 @@ app.post("/api/checkout", async (req, res) => {
       const mayor = Number(price?.precio_usd_mayor) || 0;
       return esMayorista ? mayor || detal : detal || mayor;
     };
+    const isInactive = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
     const carritoId = await getCurrentCarrito(idUsuarioSesion);
     if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
 
@@ -1094,117 +1095,20 @@ app.post("/api/checkout", async (req, res) => {
         : 1;
       console.log("[checkout] item", it, "mesesRaw", mesesItemRaw, "meses", mesesItem);
 
-      if (price.sub_cuenta) {
-        const usedPerfiles = [];
-        // Caso especial plataforma 1: prioriza perfiles hogar en cuentas venta_perfil, luego cuentas venta_miembro (sin usar sub_cuentas).
-        if (platId === 1) {
-          const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
-            .from("perfiles")
-            .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, ocupado)")
-            .eq("perfil_hogar", true)
-            .eq("cuentas.id_plataforma", platId)
-            .eq("cuentas.inactiva", false)
-            .or("ocupado.is.null,ocupado.eq.false")
-            .limit(cantidad);
-          if (perfErr) throw perfErr;
-          const libresHogar = (perfilesHogar || []).filter(
-            (p) => p?.cuentas?.inactiva === false && (p.ocupado === false || p.ocupado === null)
-          );
-          const takeHogar = libresHogar.slice(0, cantidad);
-          takeHogar.forEach((p) => {
-            asignaciones.push({
-              id_precio: price.id_precio,
-              monto: pickPrecio(price),
-              id_cuenta: p.id_cuenta,
-              id_perfil: p.id_perfil,
-              id_sub_cuenta: null,
-              meses: mesesItem,
-              pendiente: false,
-            });
-            usedPerfiles.push(p.id_perfil);
-          });
+      const isNetflixPlan2 = platId === 1 && [4, 5].includes(Number(price.id_precio));
 
-          const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
-          if (faltantesPerf > 0) {
-            // 2) cuentas libres venta_miembro (sin perf_hogar disponible)
-            const { data: cuentasMiembro, error: ctaMiembroErr } = await supabaseAdmin
-              .from("cuentas")
-              .select("id_cuenta, ocupado, inactiva, venta_miembro")
-              .eq("id_plataforma", platId)
-              .eq("venta_miembro", true)
-              .eq("inactiva", false)
-              .or("ocupado.is.null,ocupado.eq.false")
-              .limit(faltantesPerf);
-            if (ctaMiembroErr) throw ctaMiembroErr;
-            const cuentasLibres = (cuentasMiembro || []).filter(
-              (c) => c.inactiva === false && (c.ocupado === false || c.ocupado === null)
-            );
-            const takeCtas = cuentasLibres.slice(0, faltantesPerf);
-            takeCtas.forEach((cta) => {
-              asignaciones.push({
-                id_precio: price.id_precio,
-                monto: pickPrecio(price),
-                id_cuenta: cta.id_cuenta,
-                id_perfil: null,
-                id_sub_cuenta: null,
-                meses: mesesItem,
-                pendiente: false,
-              });
-            });
-            const faltantesPerf2 = Math.max(0, faltantesPerf - takeCtas.length);
-            if (faltantesPerf2 > 0) {
-              return res
-                .status(400)
-                .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
-            }
-          }
-        } else {
-          // Flujo normal para otras plataformas: solo perfiles hogar en cuentas venta_miembro; no usar sub_cuentas.
-          const { data: perfilesHogar, error: hogarErr } = await supabaseAdmin
-            .from("perfiles")
-            .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_miembro, venta_perfil)")
-            .eq("perfil_hogar", true)
-            .eq("cuentas.id_plataforma", platId)
-            .eq("cuentas.venta_miembro", true)
-            .eq("cuentas.venta_perfil", false)
-            .eq("cuentas.inactiva", false)
-            .or("ocupado.is.null,ocupado.eq.false")
-            .limit(cantidad);
-          if (hogarErr) throw hogarErr;
-
-          const perfilesDisp = (perfilesHogar || []).filter((p) => p?.cuentas?.inactiva === false);
-          const usadosPerf = perfilesDisp.slice(0, cantidad);
-          usadosPerf.forEach((p) => {
-            asignaciones.push({
-              id_precio: price.id_precio,
-              monto: pickPrecio(price),
-              id_cuenta: p.id_cuenta,
-              id_perfil: p.id_perfil,
-              id_sub_cuenta: null,
-              meses: mesesItem,
-              pendiente: false,
-            });
-          });
-
-          const faltantesPerf = Math.max(0, cantidad - usadosPerf.length);
-          if (faltantesPerf > 0) {
-            return res
-              .status(400)
-              .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
-          }
-        }
-      } else if (price.completa) {
+      if (price.completa) {
         const { data: cuentasLibres, error: ctaErr } = await supabaseAdmin
           .from("cuentas")
           .select("id_cuenta, id_plataforma, ocupado, inactiva")
           .eq("id_plataforma", platId)
           .eq("venta_perfil", false)
           .eq("venta_miembro", false)
-          .eq("inactiva", false)
-          .or("ocupado.is.null,ocupado.eq.false")
+          .eq("ocupado", false)
+          .or("inactiva.is.null,inactiva.eq.false")
           .limit(cantidad);
         if (ctaErr) throw ctaErr;
-        const disponibles = cuentasLibres || [];
+        const disponibles = (cuentasLibres || []).filter((c) => !isInactive(c.inactiva));
         const faltantes = Math.max(0, cantidad - disponibles.length);
         disponibles.slice(0, cantidad).forEach((cta) => {
           asignaciones.push({
@@ -1222,22 +1126,81 @@ app.post("/api/checkout", async (req, res) => {
             .status(400)
             .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
         }
+      } else if (isNetflixPlan2) {
+        const usedPerfiles = [];
+        const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
+          .from("perfiles")
+          .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil)")
+          .eq("perfil_hogar", true)
+          .eq("cuentas.id_plataforma", platId)
+          .eq("cuentas.venta_perfil", true)
+          .eq("ocupado", false)
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .limit(cantidad);
+        if (perfErr) throw perfErr;
+        const libresHogar = (perfilesHogar || []).filter(
+          (p) => !isInactive(p?.cuentas?.inactiva) && p.ocupado === false
+        );
+        const takeHogar = libresHogar.slice(0, cantidad);
+        takeHogar.forEach((p) => {
+          asignaciones.push({
+            id_precio: price.id_precio,
+            monto: pickPrecio(price),
+            id_cuenta: p.id_cuenta,
+            id_perfil: p.id_perfil,
+            id_sub_cuenta: null,
+            meses: mesesItem,
+            pendiente: false,
+          });
+          usedPerfiles.push(p.id_perfil);
+        });
+
+        const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
+        if (faltantesPerf > 0) {
+          const { data: cuentasMiembro, error: ctaMiembroErr } = await supabaseAdmin
+            .from("cuentas")
+            .select("id_cuenta, ocupado, inactiva, venta_miembro, venta_perfil")
+            .eq("id_plataforma", platId)
+            .eq("venta_perfil", false)
+            .eq("venta_miembro", true)
+            .eq("ocupado", false)
+            .or("inactiva.is.null,inactiva.eq.false")
+            .limit(faltantesPerf);
+          if (ctaMiembroErr) throw ctaMiembroErr;
+          const cuentasLibres = (cuentasMiembro || []).filter(
+            (c) => !isInactive(c.inactiva) && c.ocupado === false
+          );
+          const takeCtas = cuentasLibres.slice(0, faltantesPerf);
+          takeCtas.forEach((cta) => {
+            asignaciones.push({
+              id_precio: price.id_precio,
+              monto: pickPrecio(price),
+              id_cuenta: cta.id_cuenta,
+              id_perfil: null,
+              id_sub_cuenta: null,
+              meses: mesesItem,
+              pendiente: false,
+            });
+          });
+          const faltantesPerf2 = Math.max(0, faltantesPerf - takeCtas.length);
+          if (faltantesPerf2 > 0) {
+            return res
+              .status(400)
+              .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
+          }
+        }
       } else {
-        let query = supabaseAdmin
+        const { data: perfilesLibres, error: perfErr } = await supabaseAdmin
           .from("perfiles")
           .select("id_perfil, id_cuenta, perfil_hogar, cuentas!inner(id_plataforma, inactiva, venta_perfil)")
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", true)
-          .eq("cuentas.inactiva", false)
-          .or("ocupado.is.null,ocupado.eq.false")
+          .eq("perfil_hogar", false)
+          .eq("ocupado", false)
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
           .limit(cantidad);
-        // Para Netflix (id_plataforma = 1) en plan normal, solo perfiles hogar = false
-        if (platId === 1) {
-          query = query.eq("perfil_hogar", false);
-        }
-        const { data: perfilesLibres, error: perfErr } = await query;
         if (perfErr) throw perfErr;
-        const disponibles = (perfilesLibres || []).filter((p) => p?.cuentas?.inactiva === false);
+        const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
         const faltantes = Math.max(0, cantidad - disponibles.length);
         disponibles.slice(0, cantidad).forEach((p) => {
           asignaciones.push({
@@ -1255,6 +1218,32 @@ app.post("/api/checkout", async (req, res) => {
             .status(400)
             .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
         }
+      }
+    }
+
+    // Validación final: jamás usar cuentas inactivas
+    const assignedCuentaIds = Array.from(new Set(asignaciones.map((a) => a.id_cuenta).filter(Boolean)));
+    const assignedPerfilIds = Array.from(new Set(asignaciones.map((a) => a.id_perfil).filter(Boolean)));
+    if (assignedCuentaIds.length) {
+      const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
+        .from("cuentas")
+        .select("id_cuenta, inactiva")
+        .in("id_cuenta", assignedCuentaIds);
+      if (ctaValErr) throw ctaValErr;
+      const bad = (cuentasAsignadas || []).find((c) => isInactive(c.inactiva));
+      if (bad) {
+        return res.status(400).json({ error: "Se intentó asignar una cuenta inactiva." });
+      }
+    }
+    if (assignedPerfilIds.length) {
+      const { data: perfilesAsignados, error: perfValErr } = await supabaseAdmin
+        .from("perfiles")
+        .select("id_perfil, cuentas:cuentas(inactiva)")
+        .in("id_perfil", assignedPerfilIds);
+      if (perfValErr) throw perfValErr;
+      const bad = (perfilesAsignados || []).find((p) => isInactive(p?.cuentas?.inactiva));
+      if (bad) {
+        return res.status(400).json({ error: "Se intentó asignar una cuenta inactiva." });
       }
     }
 
