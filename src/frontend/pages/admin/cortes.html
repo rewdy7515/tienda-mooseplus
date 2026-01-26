@@ -63,7 +63,7 @@
         transition: background-color 0.15s ease;
       }
       .cortes-row.selected {
-        background: #e3f2ff !important;
+        background: #bfdbfe !important;
       }
       .cortes-hidden {
         display: none;
@@ -522,8 +522,6 @@
         }
         const cortarBtn = e.target.closest(".cortar-btn");
         if (cortarBtn) {
-          cortarBtn.classList.add("pressed");
-          cortarBtn.disabled = true;
           const markCortado = () => {
             cortarBtn.style.display = "none";
             const label = document.createElement("span");
@@ -572,6 +570,9 @@
             alert("Debes modificar la contraseña para poder cortar");
             return;
           }
+
+          cortarBtn.classList.add("pressed");
+          cortarBtn.disabled = true;
 
           const updateVenta = async () => {
             const updates = [];

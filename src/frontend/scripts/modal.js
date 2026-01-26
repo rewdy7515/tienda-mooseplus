@@ -128,8 +128,16 @@ const renderPrecios = (plataformaId, flags) => {
       const isPlan2 = hasSubCuenta || planLower.includes("hogar") || planLower.includes("extra");
       stockPlan = stockByPlatform[isPlan2 ? "1_plan2" : "1_plan1"] ?? stockPlan;
     }
-    const stockText = `Perfiles disponibles: ${stockPlan}`;
-    const planTitle = plan ? `${plan} · ${stockText}` : stockText;
+    const completasKey = `${plataformaId}_completas`;
+    const completasCount = stockByPlatform[completasKey] ?? 0;
+    const stockLines = [
+      "Stock:",
+      `- Perfiles: ${stockPlan}`,
+      `- Cuenta Completas: ${completasCount}`,
+    ];
+    const planTitle = plan
+      ? `${plan}<br>${stockLines.join("<br>")}`
+      : stockLines.join("<br>");
     const planLabel = `<p class="plan-titulo">${planTitle}</p>`;
     wrapper.innerHTML = planLabel;
 
@@ -331,7 +339,6 @@ export const openModal = (platform) => {
     modalImg,
     modalName,
     modalCategory,
-    modalStock,
     modalBadge,
   } = modalEls;
   const {
@@ -351,10 +358,6 @@ export const openModal = (platform) => {
   modalImg.alt = nombre;
   modalName.textContent = nombre;
   modalCategory.textContent = categoria || "";
-  if (modalStock) {
-    const stock = stockByPlatform[id_plataforma] ?? 0;
-    modalStock.textContent = `Perfiles disponibles: ${stock}`;
-  }
   if (modalBadge) {
     const stock = stockByPlatform[id_plataforma] ?? 0;
     if (

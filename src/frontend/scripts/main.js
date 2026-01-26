@@ -45,7 +45,6 @@ const modalEls = {
   modalName: document.querySelector("#modal-name"),
   modalCategory: document.querySelector("#modal-category"),
   modalBadge: document.querySelector("#modal-badge"),
-  modalStock: document.querySelector("#modal-stock"),
   modalPrecios: document.querySelector("#modal-precios"),
   modalQtyMonths: document.querySelectorAll(".modal-qty")[0],
   modalQtyItems: document.querySelectorAll(".modal-qty")[1],
@@ -149,21 +148,39 @@ const attachPlatformClicks = (onClick) => {
   });
 };
 
-const loadStockSummary = async (hasSession = false) => {
-  const [{ data, error }, { data: cuentasMiembro, error: ctaErr }] = await Promise.all([
+const loadStockSummary = async (_hasSession = false) => {
+  const [
+    { data: perfiles, error: perfErr },
+    { data: cuentasMiembro, error: ctaErr },
+    { data: cuentasCompletas, error: compErr },
+  ] = await Promise.all([
     supabase
       .from("perfiles")
       .select(
-        "id_perfil, n_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, venta_miembro, correo, plataformas(nombre))"
+        "id_perfil, n_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, correo, plataformas(nombre))"
       )
+      .eq("ocupado", false)
+      .eq("cuentas.venta_perfil", true)
+      .eq("cuentas.inactiva", false)
       .not("id_cuenta", "is", null),
     supabase
       .from("cuentas")
-      .select("id_cuenta, id_plataforma, venta_miembro, ocupado, inactiva, correo")
-      .eq("id_plataforma", 1),
+      .select("id_cuenta, id_plataforma, venta_miembro, venta_perfil, ocupado, inactiva, correo")
+      .eq("id_plataforma", 1)
+      .eq("venta_perfil", false)
+      .eq("venta_miembro", true)
+      .eq("ocupado", false)
+      .eq("inactiva", false),
+    supabase
+      .from("cuentas")
+      .select("id_cuenta, id_plataforma, venta_miembro, venta_perfil, ocupado, inactiva")
+      .eq("venta_perfil", false)
+      .eq("venta_miembro", false)
+      .eq("ocupado", false)
+      .eq("inactiva", false),
   ]);
-  if (error || ctaErr) {
-    console.error("stock summary error", error || ctaErr);
+  if (perfErr || ctaErr || compErr) {
+    console.error("stock summary error", perfErr || ctaErr || compErr);
     return {};
   }
   let stockObj = {};
@@ -174,58 +191,61 @@ const loadStockSummary = async (hasSession = false) => {
   const libresPlan1Perf = [];
   const libresPlan2Perf = [];
   const libresPorPlataforma = {};
-  (data || []).forEach((p) => {
+  (perfiles || []).forEach((p) => {
     const platId = p.cuentas?.id_plataforma;
-    const inactiva = p.cuentas?.inactiva;
-    const ventaPerfil = p.cuentas?.venta_perfil;
-    const ventaMiembro = p.cuentas?.venta_miembro;
     const correoCuenta = p.cuentas?.correo || "";
-    const platNombre = p.cuentas?.plataformas?.nombre || `Plataforma ${platId || "-"}`;
+    const platNombre =
+      p.cuentas?.plataformas?.nombre || `Plataforma ${platId || "-"}`;
     const perfilLabel = p.n_perfil != null ? `M${p.n_perfil}` : "";
     if (!platId) return;
-    // No contar cuentas marcadas inactivas
-    if (inactiva === true) return;
-    // Sin sesión, solo confiar en ocupado === false (no null); con sesión se permiten null como libre.
-    const libre = hasSession ? (p.ocupado === false || p.ocupado === null) : p.ocupado === false;
-    if (platId === 1 && libre) {
-      const hogar = p.perfil_hogar === true;
-      // Plan 2: hogar true (libre) en plataforma 1
-      if (hogar && libre) {
+
+    if (platId === 1) {
+      if (p.perfil_hogar === true) {
         netflixPlan2 += 1;
         if (correoCuenta) libresPlan2Correos.push(correoCuenta);
-        if (correoCuenta || perfilLabel) libresPlan2Perf.push({ correo: correoCuenta, perfil: perfilLabel });
-      }
-      // Plan 1: hogar false + venta_perfil true (libre)
-      if (!hogar && ventaPerfil === true) {
+        if (correoCuenta || perfilLabel)
+          libresPlan2Perf.push({ correo: correoCuenta, perfil: perfilLabel });
+      } else if (p.perfil_hogar === false) {
         netflixPlan1 += 1;
         if (correoCuenta) libresPlan1Correos.push(correoCuenta);
-        if (correoCuenta || perfilLabel) libresPlan1Perf.push({ correo: correoCuenta, perfil: perfilLabel });
+        if (correoCuenta || perfilLabel)
+          libresPlan1Perf.push({ correo: correoCuenta, perfil: perfilLabel });
       }
     }
+
     if (!stockObj[platId]) stockObj[platId] = 0;
-    if (libre && ventaPerfil === true) {
+    if (p.perfil_hogar === false) {
       stockObj[platId] += 1;
     }
-    if (libre) {
-      if (!libresPorPlataforma[platId]) {
-        libresPorPlataforma[platId] = { nombre: platNombre, items: [] };
-      }
-      libresPorPlataforma[platId].items.push({ correo: correoCuenta, perfil: perfilLabel });
+
+    if (!libresPorPlataforma[platId]) {
+      libresPorPlataforma[platId] = { nombre: platNombre, items: [] };
+    }
+    if (p.perfil_hogar === false) {
+      libresPorPlataforma[platId].items.push({
+        correo: correoCuenta,
+        perfil: perfilLabel,
+      });
     }
   });
-  const libresMiembro = (cuentasMiembro || []).filter((c) => {
-    if (c.id_plataforma !== 1) return false;
-    if (c.venta_miembro !== true) return false;
-    if (c.inactiva === true) return false;
-    return hasSession ? c.ocupado === false || c.ocupado === null : c.ocupado === false;
-  });
-  if (libresMiembro.length) {
-    netflixPlan2 += libresMiembro.length;
-    stockObj[1] = (stockObj[1] || 0) + libresMiembro.length;
-    libresMiembro.forEach((c) => {
+
+  if (cuentasMiembro?.length) {
+    netflixPlan2 += cuentasMiembro.length;
+    stockObj[1] = (stockObj[1] || 0) + cuentasMiembro.length;
+    cuentasMiembro.forEach((c) => {
       if (c.correo) libresPlan2Correos.push(c.correo);
     });
   }
+
+  const completasCount = {};
+  (cuentasCompletas || []).forEach((c) => {
+    const platId = c.id_plataforma || "unknown";
+    completasCount[platId] = (completasCount[platId] || 0) + 1;
+  });
+  Object.keys(completasCount).forEach((platId) => {
+    stockObj[`${platId}_completas`] = completasCount[platId];
+  });
+
   stockObj["1_plan1"] = netflixPlan1;
   stockObj["1_plan2"] = netflixPlan2;
   stockObj[1] = netflixPlan1 + netflixPlan2;
