@@ -3850,7 +3850,9 @@
         } else {
           query = query.or("perfil_hogar.is.null,perfil_hogar.eq.false");
         }
-        query = query.or("cuentas.inactiva.is.null,cuentas.inactiva.eq.false");
+        query = query.or("inactiva.is.null,inactiva.eq.false", {
+          foreignTable: "cuentas",
+        });
         if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
         const { data, error } = await query;
         if (error) return { error };
