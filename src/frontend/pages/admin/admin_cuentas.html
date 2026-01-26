@@ -75,6 +75,20 @@
       .sugerencias-cuentas button:hover {
         background: #f7f7f7;
       }
+      .cliente-alert {
+        margin-left: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #111;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
 
       .cuenta-detalle {
         margin: 16px auto 0;
@@ -208,6 +222,39 @@
         border-radius: 8px;
         background: #dc2626;
         color: #fff;
+        cursor: pointer;
+      }
+      .estado-cell {
+        font-weight: 700;
+        text-align: center;
+      }
+      .estado-cell.suspendido {
+        background: #fecaca;
+        color: #991b1b;
+      }
+      .estado-cell.vencido {
+        background: #fed7aa;
+        color: #9a3412;
+      }
+      .btn-delete-venta {
+        padding: 6px 10px;
+        border: none;
+        border-radius: 8px;
+        background: #dc2626;
+        color: #fff;
+        cursor: pointer;
+      }
+      .codigo-input-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .codigo-save-btn {
+        border: none;
+        background: #111;
+        color: #fff;
+        border-radius: 8px;
+        padding: 6px 8px;
         cursor: pointer;
       }
       .copy-toast {
@@ -846,6 +893,20 @@
         }
       };
 
+      const applyCorreoPrefill = () => {
+        const params = new URLSearchParams(window.location.search);
+        const correo = (params.get("correo") || "").trim();
+        if (!correo || !inputCuenta) return;
+        inputCuenta.value = correo;
+        resetClienteBusqueda();
+        if (selectPlataforma) selectPlataforma.value = "";
+        clearPlataformaResultados();
+        toggleBusquedaViews(true);
+        buscarCuentas(correo, true);
+        loadCuentaDetalleByCorreo(correo);
+        renderSugerencias([], true);
+      };
+
       inputCuenta?.addEventListener("input", (e) => {
         buscarCuentas(e.target.value || "");
       });
@@ -889,13 +950,15 @@
           return;
         }
         sugsClientes.innerHTML = items
-          .map(
-            (c) => `
-            <button type="button" data-id="${c.id_usuario}" data-correo="${c.correo || ""}">
-              ${[c.nombre, c.apellido].filter(Boolean).join(" ").trim()} (${c.correo || ""})
+          .map((c) => {
+            const nombre = [c.nombre, c.apellido].filter(Boolean).join(" ").trim();
+            const correo = c.correo || "";
+            return `
+            <button type="button" data-id="${c.id_usuario}" data-correo="${correo}">
+              ${nombre} (${correo})
             </button>
-          `,
-          )
+          `;
+          })
           .join("");
         sugsClientes.classList.remove("hidden");
       };
@@ -1507,7 +1570,10 @@
               (r) => `
               <tr>
                 <td>${r.id_venta ?? ""}</td>
-                <td>${r.correo || ""}</td>
+                <td>
+                  ${r.correo || ""}
+                  <span class="cliente-alert" data-correo="${r.correo || ""}" title="Ver cuenta">!</span>
+                </td>
                 <td>${r.clave || ""}</td>
                 <td>${r.n_perfil ?? ""}</td>
                 <td>${r.fecha_corte || ""}</td>
@@ -1680,6 +1746,14 @@
       };
 
       clienteVentasEl?.addEventListener("click", (e) => {
+        const alertBtn = e.target.closest(".cliente-alert");
+        if (alertBtn) {
+          const correo = alertBtn.dataset.correo || "";
+          if (correo) {
+            window.open(`admin_cuentas.html?correo=${encodeURIComponent(correo)}`, "_blank");
+          }
+          return;
+        }
         const btn = e.target.closest(".btn-copy");
         const delBtn = e.target.closest(".btn-delete");
         if (btn) {
@@ -1724,6 +1798,9 @@
           if (error) throw error;
           if (inputCliente?.dataset.selectedId) {
             loadVentasByCliente(inputCliente.dataset.selectedId);
+          }
+          if (currentCuentaDetalle?.id_cuenta) {
+            loadCuentaDetalle(currentCuentaDetalle.id_cuenta);
           }
         } catch (err) {
           console.error("delete venta error", err);
@@ -1777,6 +1854,7 @@
             ${showHogar ? "<th>Perfil hogar</th>" : ""}
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
+            <th>Estado</th>
             <th>Acción</th>
           </tr>`;
         } else if (colMode === "miembro") {
@@ -1785,6 +1863,7 @@
             <th>PIN</th>
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
+            <th>Estado</th>
             <th>Acción</th>
           </tr>`;
         } else {
@@ -1792,6 +1871,7 @@
             <th>ID Venta</th>
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
+            <th>Estado</th>
             <th>Acción</th>
           </tr>`;
         }
@@ -1816,13 +1896,26 @@
               id_venta: v.id_venta,
               fecha_corte: v.fecha_corte || "",
               fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
+              suspendido: v.suspendido === true,
             });
           });
         }
 
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const getEstado = (row) => {
+          if (row.suspendido === true) {
+            return { label: "Suspendido", className: "suspendido" };
+          }
+          if (row.fecha_corte && row.fecha_corte <= todayStr) {
+            return { label: "Vencido", className: "vencido" };
+          }
+          return { label: "-", className: "" };
+        };
+
         const tbodyRows = rows
           .map((p) => {
             const ocupado = p.ocupadoPor || "Vacío";
+            const estado = getEstado(p);
             if (colMode === "perfil") {
               const toggleHtml = showHogar
                 ? `<label class="toggle-label toggle-small">
@@ -1873,6 +1966,7 @@
                       : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
                   }
                 </td>
+                <td class="estado-cell ${estado.className}">${estado.label}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                   <button type="button" class="btn-primary btn-reemplazar-row"
                   data-perfil="${p.id_perfil || ""}"
@@ -1888,6 +1982,11 @@
                   <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
                   >Registrar servicio</button>
+                  ${
+                    isSuperadmin && p.id_venta
+                      ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
+                      : ""
+                  }
                 </td>
               </tr>`;
             }
@@ -1932,6 +2031,7 @@
                       : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
                   }
                 </td>
+                <td class="estado-cell ${estado.className}">${estado.label}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                   <button type="button" class="btn-primary btn-reemplazar-row"
                   data-perfil="${p.id_perfil || ""}"
@@ -1947,6 +2047,11 @@
                   <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
                   >Registrar servicio</button>
+                  ${
+                    isSuperadmin && p.id_venta
+                      ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
+                      : ""
+                  }
                 </td>
               </tr>`;
             }
@@ -1986,6 +2091,7 @@
                     : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
                 }
               </td>
+              <td class="estado-cell ${estado.className}">${estado.label}</td>
               <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                 <button type="button" class="btn-primary btn-reemplazar-row"
                 data-perfil="${p.id_perfil || ""}"
@@ -2001,13 +2107,18 @@
                 <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                   data-perfil="${p.id_perfil || ""}"
                 >Registrar servicio</button>
+                ${
+                  isSuperadmin && p.id_venta
+                    ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
+                    : ""
+                }
               </td>
             </tr>`;
           })
           .join("");
 
         let addPerfilRow = "";
-        const colCountPerfil = showHogar ? 7 : 6;
+        const colCountPerfil = showHogar ? 8 : 7;
         if (colMode === "perfil" && info.mas_perfiles) {
           const maxPerfiles =
             Number(info.num_max_dispositivos) || rows.length || 1;
@@ -2079,6 +2190,30 @@
 
         detalleEl.innerHTML = `
           <h3 class="cuenta-title">Detalle de cuenta</h3>
+          ${
+            (() => {
+              const linkVal = info.link_codigo || "";
+              const correoVal = info.correo_codigo || "";
+              const claveVal = info.pin_codigo || "";
+              const linkHtml = linkVal
+                ? `<a href="${linkVal}" target="_blank" rel="noopener noreferrer">${linkVal}</a>`
+                : `<span class="codigo-input-wrap">
+                    <input type="text" class="input-inline" value="" placeholder="-" data-field="link_codigo" />
+                    <button type="button" class="codigo-save-btn" data-field="link_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar link">💾</button>
+                  </span>`;
+              const correoHtml = correoVal
+                ? correoVal
+                : `<span class="codigo-input-wrap">
+                    <input type="text" class="input-inline" value="" placeholder="-" data-field="correo_codigo" />
+                    <button type="button" class="codigo-save-btn" data-field="correo_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar correo">💾</button>
+                  </span>`;
+              const claveHtml = claveVal
+                ? claveVal
+                : `<span class="codigo-input-wrap">
+                    <input type="text" class="input-inline" value="" placeholder="-" data-field="pin_codigo" />
+                    <button type="button" class="codigo-save-btn" data-field="pin_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar clave">💾</button>
+                  </span>`;
+              return `
           <div class="cuenta-meta two-cols">
             <div>
               <p><strong>Plataforma:</strong> ${info.plataformaNombre || "-"}</p>
@@ -2094,11 +2229,14 @@
             <div>
               <p><strong>Acceso a códigos</strong></p>
               <p>Instaddr: ${info.instaddr ? "Disponible" : "No disponible"}</p>
-              <p>Link: ${info.link_codigo || "-"}</p>
-              <p>Correo: ${info.correo_codigo || "-"}</p>
-              <p>Clave: ${info.pin_codigo || "-"}</p>
+              <p>Link: ${linkHtml}</p>
+              <p>Correo: ${correoHtml}</p>
+              <p>Clave: ${claveHtml}</p>
             </div>
           </div>
+              `;
+            })()
+          }
           <div class="cuenta-toggle">
             <label class="toggle-label">
               <input type="checkbox" id="toggle-activa" data-id="${info.id_cuenta}" ${info.inactiva ? "checked" : ""} />
@@ -2110,6 +2248,17 @@
             <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}" data-plat="${info.id_plataforma || ""}">${recargarLabel}</button>
             <div class="cuenta-tipo-label">${tipoServicio}</div>
           </div>
+          ${
+            info.venta_perfil === true
+              ? `
+          <div class="cuenta-toggle">
+            <button type="button" class="btn-outline btn-cambiar-completa ${info.hasVentasCuenta ? "btn-disabled" : ""}" ${info.hasVentasCuenta ? "disabled" : ""} data-cuenta="${info.id_cuenta}">
+              Cambiar a cuenta completa
+            </button>
+          </div>
+          `
+              : ""
+          }
           ${
             info.venta_perfil === false && info.venta_miembro === false
               ? `
@@ -2176,6 +2325,11 @@
                             <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${m.id_cuenta || ""}">Reemplazar</button>
                             <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
                             <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>
+                            ${
+                              isSuperadmin && hasVenta
+                                ? `<button type="button" class="btn-delete-venta" data-id-venta="${m.id_venta || ""}">Eliminar</button>`
+                                : ""
+                            }
                           </td>
                         </tr>
                       `;
@@ -2293,8 +2447,8 @@
           const perfilIds = perfiles.map((p) => p.id_perfil).filter(Boolean);
           if (perfilIds.length) {
             const { data: ventas, error: ventErr } = await supabase
-              .from("ventas")
-              .select("id_perfil, id_usuario, id_venta, fecha_corte")
+            .from("ventas")
+            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido")
               .in("id_perfil", perfilIds);
             if (ventErr) throw ventErr;
             ventasMap = (ventas || []).reduce((acc, v) => {
@@ -2302,6 +2456,7 @@
                 id_usuario: v.id_usuario,
                 id_venta: v.id_venta,
                 fecha_corte: v.fecha_corte,
+                suspendido: v.suspendido,
               };
               return acc;
             }, {});
@@ -2324,11 +2479,19 @@
             }
           }
 
+          const { data: ventasCuentaCheck, error: ventasCuentaErr } = await supabase
+            .from("ventas")
+            .select("id_venta")
+            .eq("id_cuenta", idCuenta)
+            .limit(1);
+          if (ventasCuentaErr) throw ventasCuentaErr;
+          const hasVentasCuenta = !!ventasCuentaCheck?.length;
+
           // Ventas de cuenta completa (sin perfiles)
           if (colMode === "ocupado" || colMode === "miembro") {
             const { data: ventasCta, error: ventasCtaErr } = await supabase
-              .from("ventas")
-              .select("id_venta, id_usuario, fecha_corte")
+            .from("ventas")
+            .select("id_venta, id_usuario, fecha_corte, suspendido")
               .eq("id_cuenta", idCuenta);
             if (ventasCtaErr) throw ventasCtaErr;
             ventasCuenta = ventasCta || [];
@@ -2364,30 +2527,31 @@
             replSet = new Set((repls || []).map((r) => r.id_perfil));
           }
 
-          const perfilesRows = perfiles.map((p) => {
-            const enReemplazos = replSet.has(p.id_perfil);
-            const ocupador =
-              p.id_perfil && ventasMap[p.id_perfil]?.id_usuario
-                ? usersMap[ventasMap[p.id_perfil].id_usuario] || "Vacío"
-                : "Vacío";
-            const ocupadoCell =
-              isSuperadmin && ocupador === "Vacío"
-                ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
+            const perfilesRows = perfiles.map((p) => {
+              const enReemplazos = replSet.has(p.id_perfil);
+              const ocupador =
+                p.id_perfil && ventasMap[p.id_perfil]?.id_usuario
+                  ? usersMap[ventasMap[p.id_perfil].id_usuario] || "Vacío"
+                  : "Vacío";
+              const ocupadoCell =
+                isSuperadmin && ocupador === "Vacío"
+                  ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
                 : ocupador;
-            return {
-              perfil: `M${p.n_perfil ?? ""}`,
-              pin: p.pin,
-              hogar: p.perfil_hogar === true,
-              id_perfil: p.id_perfil,
-              n_raw: p.n_perfil,
-              ocupadoPor: enReemplazos ? "Reemplazado" : ocupadoCell,
-              id_venta: ventasMap[p.id_perfil]?.id_venta || null,
-              fecha_corte: ventasMap[p.id_perfil]?.fecha_corte || "",
-              fecha_corte_fmt:
-                formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
-              reemplazado: enReemplazos,
-            };
-          });
+              return {
+                perfil: `M${p.n_perfil ?? ""}`,
+                pin: p.pin,
+                hogar: p.perfil_hogar === true,
+                id_perfil: p.id_perfil,
+                n_raw: p.n_perfil,
+                ocupadoPor: enReemplazos ? "Reemplazado" : ocupadoCell,
+                id_venta: ventasMap[p.id_perfil]?.id_venta || null,
+                fecha_corte: ventasMap[p.id_perfil]?.fecha_corte || "",
+                fecha_corte_fmt:
+                  formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
+                suspendido: ventasMap[p.id_perfil]?.suspendido === true,
+                reemplazado: enReemplazos,
+              };
+            });
 
           let plat9Rows = null;
           let isPlat9 = platId === 9;
@@ -2522,7 +2686,8 @@
             isPlat9,
             venta_perfil: cuenta.venta_perfil,
             venta_miembro: cuenta.venta_miembro,
-            ultimosCorreosPlat1,
+            hasVentasCuenta,
+        ultimosCorreosPlat1,
             por_acceso: plat?.por_acceso || false,
             usa_pines: plat?.usa_pines || false,
             mas_perfiles: isTrue(plat?.mas_perfiles),
@@ -2570,6 +2735,8 @@
           console.error("buscar por correo error", err);
         }
       };
+
+      applyCorreoPrefill();
 
       const fetchPinRecarga = async () => {
         try {
@@ -2627,8 +2794,35 @@
         }
       });
 
+      // Guardar datos de acceso a códigos
+      detalleEl?.addEventListener("click", async (e) => {
+        const saveBtn = e.target.closest(".codigo-save-btn");
+        if (!saveBtn) return;
+        const field = saveBtn.dataset.field;
+        const cuentaId = saveBtn.dataset.cuenta || currentCuentaDetalle?.id_cuenta;
+        const wrap = saveBtn.closest(".codigo-input-wrap");
+        const input = wrap?.querySelector("input");
+        const value = (input?.value || "").trim();
+        if (!field || !cuentaId) return;
+        try {
+          const payload = { [field]: value || null };
+          const { error } = await supabase.from("cuentas").update(payload).eq("id_cuenta", cuentaId);
+          if (error) throw error;
+          loadCuentaDetalle(cuentaId);
+        } catch (err) {
+          console.error("guardar acceso codigos error", err);
+          alert("No se pudo guardar el dato.");
+        }
+      });
+
       // Recargar cuenta modal
       detalleEl?.addEventListener("click", async (e) => {
+        const deleteBtn = e.target.closest(".btn-delete-venta");
+        if (deleteBtn) {
+          deleteTargetId = deleteBtn.dataset.idVenta || null;
+          if (modalDelete) modalDelete.classList.remove("hidden");
+          return;
+        }
         const copyRowBtn = e.target.closest(".btn-copy-row");
         if (copyRowBtn) {
           const text = decodeURIComponent(copyRowBtn.dataset.copy || "");
@@ -3258,6 +3452,26 @@
 
       // Acciones de detalle: PIN y Reemplazo
       detalleEl?.addEventListener("click", async (e) => {
+        const btnCambiar = e.target.closest(".btn-cambiar-completa");
+        if (btnCambiar) {
+          if (btnCambiar.disabled) return;
+          const cuentaId = btnCambiar.dataset.cuenta || currentCuentaDetalle?.id_cuenta;
+          if (!cuentaId) return;
+          try {
+            const { error: delErr } = await supabase.from("perfiles").delete().eq("id_cuenta", cuentaId);
+            if (delErr) throw delErr;
+            const { error: updErr } = await supabase
+              .from("cuentas")
+              .update({ venta_perfil: false, venta_miembro: true })
+              .eq("id_cuenta", cuentaId);
+            if (updErr) throw updErr;
+            loadCuentaDetalle(cuentaId);
+          } catch (err) {
+            console.error("cambiar a cuenta completa error", err);
+            alert("No se pudo cambiar a cuenta completa.");
+          }
+          return;
+        }
         const btnPin = e.target.closest(".btn-pin");
         if (btnPin) {
           const idPerfil = btnPin.dataset.perfil || null;
@@ -3299,7 +3513,9 @@
                 String(p.id_perfil) === String(btnRepl.dataset.perfil || ""),
             );
             const ventaId =
-              rowPerfil?.id_venta || obtenerVentaPerfil(btnRepl.dataset.perfil);
+              rowPerfil?.id_venta ||
+              btnRepl.dataset.idventa ||
+              obtenerVentaPerfil(btnRepl.dataset.perfil);
             if (!ventaId) {
               alert("No se encontró la venta asociada.");
               return;
@@ -3326,29 +3542,47 @@
               ventaPerfil,
               ventaMiembro,
             });
-            const { data: perfilDestino, error: perfilErr } =
-              await findPerfilLibre(plataformaId, cuentaId, {
-                perfilHogar,
-                ventaPerfil,
-                ventaMiembro,
-              });
-            if (perfilErr) {
-              console.error("[reemplazo] findPerfilLibre error", perfilErr);
-              throw perfilErr;
-            }
-            console.log("[reemplazo] perfilDestino", perfilDestino);
-            if (!perfilDestino) {
+            if (rowPerfil?.id_perfil) {
+              const { data: perfilDestino, error: perfilErr } =
+                await findPerfilLibre(plataformaId, perfilHogar, cuentaId);
+              if (perfilErr) {
+                console.error("[reemplazo] findPerfilLibre error", perfilErr);
+                throw perfilErr;
+              }
+              console.log("[reemplazo] perfilDestino", perfilDestino);
+              if (!perfilDestino) {
+                alert("Sin stock");
+                return;
+              }
+              nuevoPerfil = perfilDestino.id_perfil;
+              nuevoCuenta = perfilDestino.id_cuenta;
+              dataDestino = {
+                correo: perfilDestino.cuentas?.correo,
+                clave: perfilDestino.cuentas?.clave,
+                pin: perfilDestino.pin,
+                n_perfil: perfilDestino.n_perfil,
+              };
+            } else if (ventaMiembro && !ventaPerfil) {
+              const { data: cuentaDestino, error: cuentaErr } =
+                await findCuentaMiembroLibre(plataformaId, cuentaId);
+              if (cuentaErr) {
+                console.error("[reemplazo] findCuentaMiembroLibre error", cuentaErr);
+                throw cuentaErr;
+              }
+              if (!cuentaDestino) {
+                alert("Sin stock");
+                return;
+              }
+              nuevoPerfil = null;
+              nuevoCuenta = cuentaDestino.id_cuenta;
+              dataDestino = {
+                correo: cuentaDestino.correo,
+                clave: cuentaDestino.clave,
+              };
+            } else {
               alert("Sin stock");
               return;
             }
-            nuevoPerfil = perfilDestino.id_perfil;
-            nuevoCuenta = perfilDestino.id_cuenta;
-            dataDestino = {
-              correo: perfilDestino.cuentas?.correo,
-              clave: perfilDestino.cuentas?.clave,
-              pin: perfilDestino.pin,
-              n_perfil: perfilDestino.n_perfil,
-            };
 
             const updates = {
               id_cuenta: nuevoCuenta || null,
@@ -3526,55 +3760,39 @@
       };
 
       // Helpers de reemplazo (versión simplificada, sin reporte)
-      const findPerfilLibre = async (
-        plataformaId,
-        _excludeCuenta,
-        opts = {},
-      ) => {
-        const {
-          perfilHogar = null,
-          ventaPerfil = null,
-          ventaMiembro = null,
-        } = opts;
-        let excluidos = [];
-        try {
-          const { data: repData } = await supabase
-            .from("reemplazos")
-            .select("id_perfil")
-            .not("id_perfil", "is", null);
-          excluidos = (repData || []).map((r) => r.id_perfil);
-        } catch (err) {
-          console.error("reemplazos lookup error", err);
-        }
-        const { data, error } = await supabase
+      const findPerfilLibre = async (plataformaId, perfilHogar, excludeCuenta) => {
+        let query = supabase
           .from("perfiles")
           .select(
-            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!inner(id_plataforma, venta_perfil, venta_miembro, inactiva, ocupado, correo, clave)",
+            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!inner(id_plataforma, inactiva, correo, clave)",
           )
           .eq("cuentas.id_plataforma", plataformaId)
+          .eq("perfil_hogar", perfilHogar === true)
+          .eq("ocupado", false)
+          .eq("cuentas.inactiva", false)
           .order("id_perfil", { ascending: true })
-          .limit(1000);
+          .limit(1);
+        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+        const { data, error } = await query;
         if (error) return { error };
-        let rows = data || [];
-        if (perfilHogar !== null)
-          rows = rows.filter((r) => r.perfil_hogar === perfilHogar);
-        if (ventaPerfil !== null)
-          rows = rows.filter((r) => r.cuentas?.venta_perfil === ventaPerfil);
-        if (ventaMiembro !== null)
-          rows = rows.filter((r) => r.cuentas?.venta_miembro === ventaMiembro);
-        if (excluidos.length) {
-          rows = rows.filter((r) => !excluidos.includes(r.id_perfil));
-        }
-        rows = rows.filter(
-          (r) =>
-            (r.ocupado === false ||
-              r.ocupado === null ||
-              typeof r.ocupado === "undefined") &&
-            (r.cuentas?.inactiva === false ||
-              r.cuentas?.inactiva === null ||
-              typeof r.cuentas?.inactiva === "undefined"),
-        );
-        return { data: rows[0] || null };
+        return { data: data?.[0] || null };
+      };
+
+      const findCuentaMiembroLibre = async (plataformaId, excludeCuenta) => {
+        let query = supabase
+          .from("cuentas")
+          .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
+          .eq("id_plataforma", plataformaId)
+          .eq("venta_perfil", false)
+          .eq("venta_miembro", true)
+          .eq("ocupado", false)
+          .eq("inactiva", false)
+          .order("id_cuenta", { ascending: true })
+          .limit(1);
+        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+        const { data, error } = await query;
+        if (error) return { error };
+        return { data: data?.[0] || null };
       };
 
       const findSubCuentaLibre = async (plataformaId, excludeCuenta) => {
