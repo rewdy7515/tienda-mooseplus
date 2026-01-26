@@ -3975,16 +3975,28 @@
               .eq("id_cuenta", modalState.targetId);
             if (error) throw error;
 
-            // Notificar cambio de clave a usuarios con fecha_corte anterior a hoy
+            // Notificar cambio de clave a usuarios con fecha_corte >= mañana y no suspendidos
             const { data: ventasUsuarios, error: ventErr } = await supabase
               .from("ventas")
-              .select("id_usuario, fecha_corte")
+              .select("id_usuario, fecha_corte, suspendido")
               .eq("id_cuenta", modalState.targetId);
             if (ventErr) throw ventErr;
 
-            const userIds = pickNotificationUserIds("clave_actualizada", {
-              cuentaVentas: ventasUsuarios || [],
-            });
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+            const userIds = Array.from(
+              new Set(
+                (ventasUsuarios || [])
+                  .filter((v) => {
+                    if (v?.suspendido === true) return false;
+                    if (!v?.fecha_corte) return false;
+                    return v.fecha_corte >= tomorrowStr;
+                  })
+                  .map((v) => v.id_usuario)
+                  .filter(Boolean),
+              ),
+            );
             if (userIds.length) {
               const notif = buildNotificationPayload(
                 "clave_actualizada",

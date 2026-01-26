@@ -1487,4 +1487,40 @@ input[type="number"].input-inline {
   .modal-body {
     grid-template-columns: 1fr;
   }
+
+  #platform-modal .modal-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #platform-modal .modal-media {
+    min-height: unset;
+  }
+
+  #platform-modal .modal-media img {
+    height: auto;
+    max-height: 220px;
+  }
+
+  #platform-modal .modal-info {
+    display: flex;
+    flex-direction: column;
+    max-height: 70vh;
+  }
+
+  #platform-modal .modal-actions-fixed {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    padding: 10px 0 6px;
+    border-top: 1px solid #eee;
+  }
+
+  #platform-modal .modal-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
 }

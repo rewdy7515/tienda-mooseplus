@@ -26,13 +26,22 @@ const getDiscountPercent = (platform, months) => {
 };
 
 const buildButtonLabel = (opcion, flags, months, platform) => {
+  const isNetflixPlan2 =
+    Number(platform?.id_plataforma) === 1 &&
+    [4, 5].includes(Number(opcion.id_precio));
   const basePrice = Number(opcion.precio_usd_detal) || 0;
   const discount = getDiscountPercent(platform, months);
   const mesesFactor = months || 1;
   const precioMeses = basePrice * mesesFactor;
   const finalPrecio = discount > 0 ? precioMeses * (1 - discount / 100) : precioMeses;
 
-  if (opcion.completa === true || opcion.completa === "true" || opcion.completa === 1 || opcion.completa === "1") {
+  if (
+    !isNetflixPlan2 &&
+    (opcion.completa === true ||
+      opcion.completa === "true" ||
+      opcion.completa === 1 ||
+      opcion.completa === "1")
+  ) {
     return { text: `cuenta completa $${finalPrecio.toFixed(2)}` };
   }
   if (flags.tarjeta_de_regalo) {
@@ -122,19 +131,24 @@ const renderPrecios = (plataformaId, flags) => {
     const wrapper = document.createElement("div");
     wrapper.className = "plan-bloque";
     let stockPlan = stockByPlatform[plataformaId] ?? 0;
+    let isPlan2 = false;
     if (Number(plataformaId) === 1) {
-      const hasSubCuenta = items.some((op) => op.sub_cuenta === true || op.sub_cuenta === "true" || op.sub_cuenta === 1);
+      const hasSubCuenta = items.some(
+        (op) =>
+          op.sub_cuenta === true ||
+          op.sub_cuenta === "true" ||
+          op.sub_cuenta === 1,
+      );
       const planLower = (plan || "").toLowerCase();
-      const isPlan2 = hasSubCuenta || planLower.includes("hogar") || planLower.includes("extra");
+      isPlan2 = hasSubCuenta || planLower.includes("hogar") || planLower.includes("extra");
       stockPlan = stockByPlatform[isPlan2 ? "1_plan2" : "1_plan1"] ?? stockPlan;
     }
     const completasKey = `${plataformaId}_completas`;
     const completasCount = stockByPlatform[completasKey] ?? 0;
-    const stockLines = [
-      "Stock:",
-      `- Perfiles: ${stockPlan}`,
-      `- Cuenta Completas: ${completasCount}`,
-    ];
+    const stockLines = ["Stock:", `- Perfiles: ${stockPlan}`];
+    if (!(Number(plataformaId) === 1 && isPlan2)) {
+      stockLines.push(`- Cuentas completas: ${completasCount}`);
+    }
     const planTitle = plan
       ? `${plan}<br>${stockLines.join("<br>")}`
       : stockLines.join("<br>");
@@ -160,7 +174,7 @@ const renderPrecios = (plataformaId, flags) => {
       btn.dataset.idPrecio = opcion.id_precio;
       btn.addEventListener("click", () => {
         const isSelected = btn.classList.contains("selected");
-        list
+        modalPrecios
           .querySelectorAll(".precio-opcion")
           .forEach((b) => b.classList.remove("selected"));
         if (isSelected) {

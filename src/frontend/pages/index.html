@@ -39,46 +39,50 @@
             <img id="modal-image" src="" alt="Plataforma" />
           </div>
           <div class="modal-info">
-            <div class="modal-header">
-              <div class="modal-title">
-                <h3 id="modal-name"></h3>
-                <p id="modal-category" class="modal-category"></p>
+            <div class="modal-scroll">
+              <div class="modal-header">
+                <div class="modal-title">
+                  <h3 id="modal-name"></h3>
+                  <p id="modal-category" class="modal-category"></p>
+                </div>
+                <p id="modal-badge" class="modal-badge"></p>
               </div>
-              <p id="modal-badge" class="modal-badge"></p>
+              <div id="modal-precios" class="modal-precios"></div>
             </div>
-            <div id="modal-precios" class="modal-precios"></div>
-            <div class="modal-qty modal-qty-disabled">
-              <span class="modal-duration-label">Duración:</span>
-              <button
-                type="button"
-                id="qty-months-minus"
-                aria-label="Disminuir meses"
-              >
-                -
-              </button>
-              <span id="qty-months-value">1</span>
-              <button
-                type="button"
-                id="qty-months-plus"
-                aria-label="Aumentar meses"
-              >
-                +
-              </button>
-              <span class="modal-duration-suffix">meses</span>
-              <span id="months-discount" class="discount-badge hidden"></span>
+            <div class="modal-actions-fixed">
+              <div class="modal-qty modal-qty-disabled">
+                <span class="modal-duration-label">Duración:</span>
+                <button
+                  type="button"
+                  id="qty-months-minus"
+                  aria-label="Disminuir meses"
+                >
+                  -
+                </button>
+                <span id="qty-months-value">1</span>
+                <button
+                  type="button"
+                  id="qty-months-plus"
+                  aria-label="Aumentar meses"
+                >
+                  +
+                </button>
+                <span class="modal-duration-suffix">meses</span>
+                <span id="months-discount" class="discount-badge hidden"></span>
+              </div>
+              <div class="modal-qty modal-qty-disabled">
+                <span class="modal-duration-label">Cantidad:</span>
+                <button type="button" id="qty-minus" aria-label="Disminuir">
+                  -
+                </button>
+                <span id="qty-value">1</span>
+                <button type="button" id="qty-plus" aria-label="Aumentar">
+                  +
+                </button>
+                <span class="modal-duration-suffix">items</span>
+              </div>
+              <button id="add-cart" class="btn-add">Añadir al carrito</button>
             </div>
-            <div class="modal-qty modal-qty-disabled">
-              <span class="modal-duration-label">Cantidad:</span>
-              <button type="button" id="qty-minus" aria-label="Disminuir">
-                -
-              </button>
-              <span id="qty-value">1</span>
-              <button type="button" id="qty-plus" aria-label="Aumentar">
-                +
-              </button>
-              <span class="modal-duration-suffix">items</span>
-            </div>
-            <button id="add-cart" class="btn-add">Añadir al carrito</button>
           </div>
         </div>
       </div>
