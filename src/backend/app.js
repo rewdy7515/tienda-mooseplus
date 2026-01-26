@@ -1105,7 +1105,7 @@ app.post("/api/checkout", async (req, res) => {
           .eq("venta_perfil", false)
           .eq("venta_miembro", false)
           .eq("ocupado", false)
-          .or("inactiva.is.null,inactiva.eq.false")
+          .eq("inactiva", false)
           .limit(cantidad);
         if (ctaErr) throw ctaErr;
         const disponibles = (cuentasLibres || []).filter((c) => !isInactive(c.inactiva));
@@ -1135,11 +1135,11 @@ app.post("/api/checkout", async (req, res) => {
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", true)
           .eq("ocupado", false)
-          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .eq("cuentas.inactiva", false)
           .limit(cantidad);
         if (perfErr) throw perfErr;
         const libresHogar = (perfilesHogar || []).filter(
-          (p) => !isInactive(p?.cuentas?.inactiva) && p.ocupado === false
+          (p) => p?.cuentas?.inactiva === false && p.ocupado === false
         );
         const takeHogar = libresHogar.slice(0, cantidad);
         takeHogar.forEach((p) => {
@@ -1164,11 +1164,11 @@ app.post("/api/checkout", async (req, res) => {
             .eq("venta_perfil", false)
             .eq("venta_miembro", true)
             .eq("ocupado", false)
-            .or("inactiva.is.null,inactiva.eq.false")
+            .eq("inactiva", false)
             .limit(faltantesPerf);
           if (ctaMiembroErr) throw ctaMiembroErr;
           const cuentasLibres = (cuentasMiembro || []).filter(
-            (c) => !isInactive(c.inactiva) && c.ocupado === false
+            (c) => c.inactiva === false && c.ocupado === false
           );
           const takeCtas = cuentasLibres.slice(0, faltantesPerf);
           takeCtas.forEach((cta) => {
@@ -1197,10 +1197,10 @@ app.post("/api/checkout", async (req, res) => {
           .eq("cuentas.venta_perfil", true)
           .eq("perfil_hogar", false)
           .eq("ocupado", false)
-          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+          .eq("cuentas.inactiva", false)
           .limit(cantidad);
         if (perfErr) throw perfErr;
-        const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
+        const disponibles = (perfilesLibres || []).filter((p) => p?.cuentas?.inactiva === false);
         const faltantes = Math.max(0, cantidad - disponibles.length);
         disponibles.slice(0, cantidad).forEach((p) => {
           asignaciones.push({

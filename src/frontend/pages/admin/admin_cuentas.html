@@ -224,6 +224,9 @@
         color: #fff;
         cursor: pointer;
       }
+      .page-bottom-spacer {
+        height: 140px;
+      }
       .estado-cell {
         font-weight: 700;
         text-align: center;
@@ -1900,6 +1903,21 @@
             });
           });
         }
+        if (colMode === "miembro" && rows.length === 0) {
+          rows.push({
+            perfil: "",
+            pin: "",
+            hogar: false,
+            id_perfil: null,
+            n_raw: null,
+            reemplazado: false,
+            ocupadoPor: "",
+            id_venta: null,
+            fecha_corte: "",
+            fecha_corte_fmt: "",
+            suspendido: false,
+          });
+        }
 
         const todayStr = new Date().toISOString().slice(0, 10);
         const getEstado = (row) => {
@@ -1914,7 +1932,12 @@
 
         const tbodyRows = rows
           .map((p) => {
-            const ocupado = p.ocupadoPor || "Vacío";
+            const ocupadoRaw = p.ocupadoPor || "";
+            const ocupadoEmpty =
+              !ocupadoRaw || ocupadoRaw === "Vacío" || ocupadoRaw === "-";
+            const ocupadoCell = ocupadoEmpty
+              ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
+              : ocupadoRaw;
             const estado = getEstado(p);
             if (colMode === "perfil") {
               const toggleHtml = showHogar
@@ -1948,7 +1971,7 @@
                   <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
                 </td>
                 ${showHogar ? `<td>${toggleHtml}</td>` : ""}
-                <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
+                <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupadoCell}</td>
                 <td>
                   ${
                     p.id_venta
@@ -2013,7 +2036,7 @@
                   <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
                   <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
                 </td>
-                <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
+                <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupadoCell}</td>
                 <td>
                   ${
                     p.id_venta
@@ -2073,7 +2096,7 @@
             });
             return `<tr>
               <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-              <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupado}</td>
+              <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupadoCell}</td>
               <td>
                 ${
                   p.id_venta
@@ -2130,13 +2153,14 @@
           </tr>`;
         }
 
-        const table =
+        const emptyRow =
           rows.length === 0
-            ? '<p class="status">Sin perfiles asociados.</p>'
-            : `<div class="cuenta-table-wrap">
+            ? `<tr><td colspan="${colCountPerfil}" style="text-align:center;">Sin registros.</td></tr>`
+            : "";
+        const table = `<div class="cuenta-table-wrap">
                 <table class="proximas-table">
                   <thead>${thead}</thead>
-                  <tbody>${tbodyRows}${addPerfilRow}</tbody>
+                  <tbody>${tbodyRows}${emptyRow}${addPerfilRow}</tbody>
                 </table>
               </div>`;
 
@@ -2533,10 +2557,11 @@
                 p.id_perfil && ventasMap[p.id_perfil]?.id_usuario
                   ? usersMap[ventasMap[p.id_perfil].id_usuario] || "Vacío"
                   : "Vacío";
-              const ocupadoCell =
-                isSuperadmin && ocupador === "Vacío"
-                  ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
-                : ocupador;
+            const isOcupadoEmpty =
+              !ocupador || ocupador === "Vacío" || ocupador === "-";
+            const ocupadoCell = isOcupadoEmpty
+              ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
+              : ocupador;
               return {
                 perfil: `M${p.n_perfil ?? ""}`,
                 pin: p.pin,
@@ -4008,5 +4033,6 @@
         </div>
       </div>
     </div>
+    <div class="page-bottom-spacer"></div>
   </body>
 </html>
