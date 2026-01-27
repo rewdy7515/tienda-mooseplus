@@ -425,7 +425,7 @@
           const { data, error } = await supabase
             .from("plataformas")
             .select(
-              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo, cuenta_familiar"
+              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo"
             )
             .order("nombre");
           if (error) throw error;
@@ -444,7 +444,6 @@
                 num_max_dispositivos: p.num_max_dispositivos,
                 usa_pines: p.usa_pines,
                 max_dig_pin: p.max_dig_pin,
-                cuenta_familiar: p.cuenta_familiar,
               });
             });
           if (tipoCuentaSelect) {
@@ -459,7 +458,7 @@
         }
       };
 
-      const buildTipoCuentaOptions = (miembros, cuentaFamiliar = false) => {
+      const buildTipoCuentaOptions = (miembros) => {
         if (!tipoCuentaSelect) return;
         tipoCuentaSelect.innerHTML = '<option value="">Seleccione</option>';
         const opts = [
@@ -469,9 +468,6 @@
           opts.push({ val: "perfil_independiente", label: "Perfil independiente" });
         }
         opts.push({ val: "cuenta_completa", label: "Cuenta completa" });
-        if (cuentaFamiliar) {
-          opts.push({ val: "cuenta_familiar", label: "Cuenta familiar" });
-        }
         opts.forEach((o) => {
           const opt = document.createElement("option");
           opt.value = o.val;
@@ -564,8 +560,7 @@
         const sel = platSelect.selectedOptions?.[0];
         const meta = plataformaInfo.get(String(platSelect.value)) || {};
         const miembros = sel ? sel.dataset.miembros === "true" || sel.dataset.miembros === "1" || meta.miembros === true || meta.miembros === "1" : false;
-        const cuentaFamiliar = meta.cuenta_familiar === true || meta.cuenta_familiar === "1";
-        buildTipoCuentaOptions(miembros, cuentaFamiliar);
+        buildTipoCuentaOptions(miembros);
         if (tipoCuentaSelect) {
           tipoCuentaSelect.disabled = !platSelect.value;
           tipoCuentaSelect.classList.toggle("input-disabled", !platSelect.value);
@@ -653,7 +648,6 @@
 
           let venta_perfil = false;
           let venta_miembro = false;
-          let cuenta_madre = false;
           let ocupado = false;
           if (tipo === "perfil_independiente") {
             venta_perfil = false;
@@ -664,11 +658,6 @@
           } else if (tipo === "cuenta_completa") {
             venta_perfil = false;
             venta_miembro = false;
-          } else if (tipo === "cuenta_familiar") {
-            venta_perfil = false;
-            venta_miembro = false;
-            cuenta_madre = true;
-            ocupado = true;
           }
 
           const payload = {
@@ -686,7 +675,6 @@
             fecha_corte: fechaCorte,
             venta_perfil,
             venta_miembro,
-            cuenta_madre,
             ocupado,
             inactiva: false,
           };

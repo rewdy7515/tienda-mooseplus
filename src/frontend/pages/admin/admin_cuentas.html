@@ -1912,7 +1912,7 @@
 
           const { data: ventas, error: vErr } = await supabase
             .from("ventas")
-            .select("id_usuario, fecha_corte, suspendido, correo_miembro")
+            .select("id_venta, id_usuario, fecha_corte, suspendido, correo_miembro")
             .eq("id_cuenta", cuenta.id_cuenta);
           if (vErr) throw vErr;
 
@@ -1946,6 +1946,7 @@
             }
             return `
               <tr>
+                <td>${v.id_venta ? `#${v.id_venta}` : ""}</td>
                 <td>${usersMap[v.id_usuario] || "-"}</td>
                 <td>${v.correo_miembro || "-"}</td>
                 <td>${formatDDMMYYYY(v.fecha_corte) || ""}</td>
@@ -1961,6 +1962,7 @@
           if (!rows.length) {
             body += `
               <tr class="canva-input-row">
+                <td></td>
                 <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" /></td>
                 <td><input type="text" class="correo-input" placeholder="Correo" /></td>
                 <td><input type="date" class="fecha-input" /></td>
@@ -1990,6 +1992,7 @@
               <table class="proximas-table">
                 <thead>
                   <tr>
+                    <th>ID Venta</th>
                     <th>Cliente</th>
                     <th>Correo</th>
                     <th>Fecha de corte</th>

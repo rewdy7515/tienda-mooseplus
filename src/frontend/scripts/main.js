@@ -273,6 +273,16 @@ const loadStockSummary = async (_hasSession = false) => {
   } else {
     console.log("[stock] Plataforma 2 libres: 0");
   }
+  if (typeof stockObj[13] !== "undefined") {
+    const plat13 = libresPorPlataforma[13];
+    const nombre13 = plat13?.nombre || "Plataforma 13";
+    console.log("[stock] Plataforma 13 libres:", stockObj[13]);
+    if (plat13?.items?.length) {
+      console.log("[stock] Plataforma 13 libres (detalle):", nombre13, plat13.items);
+    }
+  } else {
+    console.log("[stock] Plataforma 13 libres: 0");
+  }
   return stockObj;
 };
 

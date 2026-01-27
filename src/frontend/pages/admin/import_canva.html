@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Importar Canva</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Importar Canva</h2>
+      <div class="reporte-form">
+        <label class="form-label" for="input-csv">Subir archivo CSV</label>
+        <input id="input-csv" class="form-input" type="file" accept=".csv,text/csv" />
+        <p class="status">Columnas requeridas: fecha_pago, fecha_corte, correo, cliente, monto_usd</p>
+        <button id="btn-importar" class="btn-primary" type="button">Importar</button>
+        <p id="import-status" class="status"></p>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const inputCsv = document.querySelector("#input-csv");
+      const btnImportar = document.querySelector("#btn-importar");
+      const statusEl = document.querySelector("#import-status");
+
+      const parseCsv = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
+        const splitLine = (line) =>
+          line
+            .split(new RegExp(`${sep}(?=(?:[^"]*"[^"]*")*[^"]*$)`))
+            .map((c) => c.replace(/^"(.*)"$/, "$1").trim());
+        const headers = splitLine(lines[0]).map((h) => h.replace(/^\uFEFF/, "").toLowerCase());
+        return lines.slice(1).map((line) => {
+          const cols = splitLine(line);
+          const row = {};
+          headers.forEach((h, i) => {
+            row[h] = cols[i];
+          });
+          return row;
+        });
+      };
+
+      const normalizeDate = (val) => {
+        const raw = (val || "").trim();
+        if (!raw) return null;
+        if (raw.includes("/")) {
+          const parts = raw.split("/");
+          if (parts.length === 3) {
+            const d = parts[0].padStart(2, "0");
+            const m = parts[1].padStart(2, "0");
+            const y = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+            return `${y}-${m}-${d}`;
+          }
+        }
+        return raw;
+      };
+
+      const getOrCreateUsuario = async (clienteRaw) => {
+        const clean = (clienteRaw || "").trim();
+        if (!clean) return null;
+        const parts = clean.split(/\s+/);
+        const nombre = parts.shift() || "";
+        const apellido = parts.join(" ").trim();
+        const { data: found, error: findErr } = await supabase
+          .from("usuarios")
+          .select("id_usuario")
+          .eq("nombre", nombre)
+          .eq("apellido", apellido)
+          .limit(1)
+          .maybeSingle();
+        if (findErr) throw findErr;
+        if (found?.id_usuario) return found.id_usuario;
+        const { data: created, error: createErr } = await supabase
+          .from("usuarios")
+          .insert({ nombre, apellido, acceso_cliente: true })
+          .select("id_usuario")
+          .single();
+        if (createErr) throw createErr;
+        return created?.id_usuario || null;
+      };
+
+      const getCuentaCanva = async () => {
+        const { data, error } = await supabase
+          .from("cuentas")
+          .select("id_cuenta")
+          .eq("id_plataforma", 12)
+          .order("id_cuenta", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        return data?.id_cuenta || null;
+      };
+
+      async function importar() {
+        if (statusEl) statusEl.textContent = "";
+        const file = inputCsv?.files?.[0];
+        if (!file) {
+          statusEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        const parsed = parseCsv(text);
+        if (!parsed.length) {
+          statusEl.textContent = "No se encontraron filas válidas.";
+          return;
+        }
+        statusEl.textContent = "Importando...";
+        try {
+          const idCuenta = await getCuentaCanva();
+          if (!idCuenta) {
+            statusEl.textContent = "No existe cuenta Canva (plataforma 12).";
+            return;
+          }
+          let inserted = 0;
+          for (const row of parsed) {
+            const fechaPago = normalizeDate(row.fecha_pago);
+            const fechaCorte = normalizeDate(row.fecha_corte);
+            const correo = (row.correo || "").trim();
+            const cliente = (row.cliente || "").trim();
+            const montoUsd = Number(row.monto_usd || 0) || 0;
+            if (!fechaCorte || !correo || !cliente) continue;
+            const idUsuario = await getOrCreateUsuario(cliente);
+            if (!idUsuario) continue;
+            const { error: insErr } = await supabase.from("ventas").insert({
+              id_usuario: idUsuario,
+              id_cuenta: idCuenta,
+              id_perfil: null,
+              fecha_pago: fechaPago || null,
+              fecha_corte: fechaCorte,
+              monto: montoUsd,
+              pendiente: false,
+              meses_contratados: 1,
+              correo_miembro: correo,
+            });
+            if (insErr) throw insErr;
+            inserted += 1;
+          }
+          statusEl.textContent = `Importación completada. Ventas insertadas: ${inserted}.`;
+        } catch (err) {
+          console.error("importar canva error", err);
+          statusEl.textContent = "No se pudo importar.";
+        }
+      }
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            const mainStatus = document.querySelector("main .status");
+            if (mainStatus) {
+              mainStatus.textContent = "No tienes permisos para administrar servicios.";
+            }
+          }
+        } catch (err) {
+          console.error("importar canva init error", err);
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+
+      btnImportar?.addEventListener("click", importar);
+    </script>
+  </body>
+</html>

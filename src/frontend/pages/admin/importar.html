@@ -16,6 +16,7 @@
         <button class="btn-primary admin-action" id="btn-importar-pines">Pines de perfiles</button>
         <button class="btn-primary admin-action" id="btn-importar-clientes">Clientes</button>
         <button class="btn-primary admin-action" id="btn-importar-cuentas">Cuentas</button>
+        <button class="btn-primary admin-action" id="btn-importar-canva">Importar Canva</button>
       </div>
       <p class="status">Selecciona qué deseas importar.</p>
     </main>
@@ -63,6 +64,9 @@
       });
       document.querySelector("#btn-importar-cuentas")?.addEventListener("click", () => {
         window.location.href = "importar_cuentas.html";
+      });
+      document.querySelector("#btn-importar-canva")?.addEventListener("click", () => {
+        window.location.href = "import_canva.html";
       });
     </script>
   </body>
