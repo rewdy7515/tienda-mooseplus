@@ -49,7 +49,6 @@ CREATE TABLE public.cuentas (
   venta_perfil boolean,
   venta_miembro boolean,
   id_cuenta_miembro bigint,
-  cuenta_madre boolean,
   direccion text,
   CONSTRAINT cuentas_pkey PRIMARY KEY (id_cuenta),
   CONSTRAINT cuentas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
@@ -90,11 +89,11 @@ CREATE TABLE public.historial_ventas (
   registrado_por bigint,
   id_metodo_de_pago bigint,
   referencia bigint,
+  comprobante text,
   CONSTRAINT historial_ventas_pkey PRIMARY KEY (id_historial_ventas),
-  CONSTRAINT historial_ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT historial_ventas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
-  CONSTRAINT historial_ventas_id_usuario_cliente_fkey FOREIGN KEY (id_usuario_cliente) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT historial_ventas_id_usuario_cliente_fkey FOREIGN KEY (id_usuario_cliente) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago)
 );
 CREATE TABLE public.metodos_de_pago (
@@ -119,7 +118,6 @@ CREATE TABLE public.notificaciones (
   id_cuenta bigint,
   id_orden bigint,
   CONSTRAINT notificaciones_pkey PRIMARY KEY (id_notificacion),
-  CONSTRAINT notificaciones_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT notificaciones_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
   CONSTRAINT notificaciones_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
@@ -163,7 +161,7 @@ CREATE TABLE public.plataformas (
   tarjeta_de_regalo boolean,
   max_dig_pin smallint,
   descuento_meses boolean,
-  cuenta_familiar boolean,
+  cuenta_madre boolean,
   corte_por_clave boolean,
   corte_de_usuario boolean,
   correo_cliente boolean,
@@ -173,6 +171,7 @@ CREATE TABLE public.plataformas (
   color_1 text,
   color_2 text,
   corte_directo boolean,
+  max_miembros smallint,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
   CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );
@@ -208,8 +207,7 @@ CREATE TABLE public.reemplazos (
   id_sub_cuenta bigint,
   CONSTRAINT reemplazos_pkey PRIMARY KEY (id_reemplazo),
   CONSTRAINT reemplazos_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
-  CONSTRAINT reemplazos_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),
-  CONSTRAINT reemplazos_id_sub_cuenta_fkey FOREIGN KEY (id_sub_cuenta) REFERENCES public.sub_cuentas(id_sub_cuenta)
+  CONSTRAINT reemplazos_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil)
 );
 CREATE TABLE public.reportes (
   id_reporte bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -233,17 +231,6 @@ CREATE TABLE public.reportes (
   CONSTRAINT reportes_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),
   CONSTRAINT reportes_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT reportes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
-);
-CREATE TABLE public.sub_cuentas (
-  id_sub_cuenta bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
-  correo text,
-  clave text,
-  pin smallint,
-  id_cuenta bigint,
-  ocupado boolean,
-  inactiva boolean,
-  CONSTRAINT sub_cuentas_pkey PRIMARY KEY (id_sub_cuenta),
-  CONSTRAINT sub_cuentas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta)
 );
 CREATE TABLE public.tarjetas_de_regalo (
   id_tarjeta_de_regalo bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -317,6 +304,5 @@ CREATE TABLE public.ventas (
   CONSTRAINT ventas_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT ventas_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
   CONSTRAINT ventas_id_precio_fkey FOREIGN KEY (id_precio) REFERENCES public.precios(id_precio),
-  CONSTRAINT ventas_id_sub_cuenta_fkey FOREIGN KEY (id_sub_cuenta) REFERENCES public.sub_cuentas(id_sub_cuenta),
   CONSTRAINT ventas_id_admin_venta_fkey FOREIGN KEY (id_admin_venta) REFERENCES public.usuarios(id_usuario)
 );

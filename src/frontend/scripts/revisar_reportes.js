@@ -580,20 +580,8 @@ async function reemplazarServicio(reporteDatos = {}) {
     return { data: rows[0] || null, disponibles };
   };
 
-  const findSubCuentaLibre = async (excludeCuenta) => {
-    let query = supabase
-      .from("sub_cuentas")
-      .select("id_sub_cuenta, id_cuenta, ocupado, cuentas!inner(id_plataforma, inactiva)")
-      .eq("cuentas.id_plataforma", plataformaId)
-      .or("ocupado.is.null,ocupado.eq.false")
-      .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-      .order("id_sub_cuenta", { ascending: true })
-      .limit(1);
-    if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
-    const { data, error } = await query;
-    console.log("findSubCuentaLibre", { excludeCuenta, data, error });
-    if (error) return { error };
-    return { data: data?.[0] || null };
+  const findSubCuentaLibre = async (_excludeCuenta) => {
+    return { data: null, error: null };
   };
 
   const findCuentaCompleta = async (excludeCuenta) => {
@@ -809,11 +797,6 @@ async function confirmarReemplazo() {
     if (nuevoPerfil) {
       updatesPromises.push(
         supabase.from("perfiles").update({ ocupado: true }).eq("id_perfil", nuevoPerfil)
-      );
-    }
-    if (nuevaSubCuenta) {
-      updatesPromises.push(
-        supabase.from("sub_cuentas").update({ ocupado: true }).eq("id_sub_cuenta", nuevaSubCuenta)
       );
     }
     if (esCuentaCompleta && nuevoCuenta) {

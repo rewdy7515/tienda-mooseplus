@@ -38,6 +38,14 @@
         background: #111;
         color: #fff;
       }
+      .cuentas-busqueda .btn-outline {
+        background: #f7f7f7;
+        color: #111;
+        border: 1px solid #ddd;
+      }
+      .cuentas-busqueda .btn-outline:hover {
+        background: #eee;
+      }
       .cuentas-acciones {
         display: flex;
         gap: 10px;
@@ -98,6 +106,7 @@
         background: #f9fafb;
         width: 100%;
         box-sizing: border-box;
+        display: none;
       }
 
       .cuenta-meta {
@@ -348,6 +357,9 @@
             <button type="button" class="btn-add" id="btn-ir-agregar">
               Agregar servicio
             </button>
+            <button type="button" id="btn-canva" class="btn-outline">
+              Cuenta Canva
+            </button>
           </div>
         </div>
         <div id="plataforma-resultados"></div>
@@ -560,6 +572,7 @@
       const btnBuscarVenta = document.querySelector("#btn-buscar-venta");
       const inputVentaId = document.querySelector("#input-venta-id");
       const btnIrAgregar = document.querySelector("#btn-ir-agregar");
+      const btnCanva = document.querySelector("#btn-canva");
       const detalleEl = document.querySelector("#cuenta-detalle");
       const clienteVentasEl = document.querySelector("#cliente-ventas");
       const modalPin = document.querySelector("#modal-pin");
@@ -850,9 +863,15 @@
         }
       };
 
+      const hideDetalle = () => {
+        if (!detalleEl) return;
+        detalleEl.innerHTML = "";
+        detalleEl.style.display = "none";
+      };
+
       const toggleBusquedaViews = (showBusqueda) => {
         const displayVal = showBusqueda ? "" : "none";
-        if (detalleEl) detalleEl.style.display = displayVal;
+        if (detalleEl) detalleEl.style.display = showBusqueda ? "block" : "none";
         if (clienteVentasEl) clienteVentasEl.style.display = displayVal;
       };
 
@@ -882,6 +901,7 @@
         if (!term) {
           renderSugerencias([], true);
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
+          hideDetalle();
           return;
         }
         const current = ++fetchCounter;
@@ -1259,7 +1279,6 @@
           const [
             { data: cuentas, error: cErr },
             { data: platInfo, error: pErr },
-            { data: subCtas, error: subErr },
           ] = await Promise.all([
             supabase
               .from("cuentas")
@@ -1274,18 +1293,10 @@
               )
               .eq("id_plataforma", platIdNum)
               .maybeSingle(),
-            platIdNum === 1
-              ? supabase
-                  .from("sub_cuentas")
-                  .select(
-                    "id_sub_cuenta, id_cuenta, correo, clave, pin, inactiva",
-                  )
-                  .order("id_sub_cuenta")
-              : Promise.resolve({ data: [], error: null }),
           ]);
           if (cErr) throw cErr;
           if (pErr) throw pErr;
-          if (subErr) throw subErr;
+          const subCtas = [];
           const cuentasActivas = (cuentas || []).filter(
             (c) => c.inactiva !== true,
           );
@@ -1872,9 +1883,139 @@
         if (cuentaId) loadCuentaDetalle(cuentaId);
       });
 
+      const loadCuentaCanva = async () => {
+        if (!detalleEl) return;
+        detalleEl.style.display = "block";
+        detalleEl.innerHTML = '<p class="status">Cargando cuenta Canva...</p>';
+        try {
+          const { data: cuenta, error: cErr } = await supabase
+            .from("cuentas")
+            .select(
+              "id_cuenta, correo, clave, fecha_corte, inactiva",
+            )
+            .eq("id_plataforma", 12)
+            .order("id_cuenta", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (cErr) throw cErr;
+          if (!cuenta?.id_cuenta) {
+            detalleEl.innerHTML =
+              '<p class="status">No hay cuenta registrada para Canva.</p>';
+            return;
+          }
+          const { data: platInfo, error: platErr } = await supabase
+            .from("plataformas")
+            .select("cuenta_madre")
+            .eq("id_plataforma", 12)
+            .maybeSingle();
+          if (platErr) throw platErr;
+
+          const { data: ventas, error: vErr } = await supabase
+            .from("ventas")
+            .select("id_usuario, fecha_corte, suspendido, correo_miembro")
+            .eq("id_cuenta", cuenta.id_cuenta);
+          if (vErr) throw vErr;
+
+          const userIds = Array.from(
+            new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)),
+          );
+          let usersMap = {};
+          if (userIds.length) {
+            const { data: users, error: uErr } = await supabase
+              .from("usuarios")
+              .select("id_usuario, nombre, apellido")
+              .in("id_usuario", userIds);
+            if (uErr) throw uErr;
+            usersMap = (users || []).reduce((acc, u) => {
+              acc[u.id_usuario] =
+                [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
+                `Usuario ${u.id_usuario}`;
+              return acc;
+            }, {});
+          }
+
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const rows = (ventas || []).map((v) => {
+            let estado = "Activo";
+            if (cuenta.inactiva === true) {
+              estado = "Inactiva";
+            } else if (v.suspendido === true) {
+              estado = "Suspendido";
+            } else if (v.fecha_corte && v.fecha_corte <= todayStr) {
+              estado = "Vencido";
+            }
+            return `
+              <tr>
+                <td>${usersMap[v.id_usuario] || "-"}</td>
+                <td>${v.correo_miembro || "-"}</td>
+                <td>${formatDDMMYYYY(v.fecha_corte) || ""}</td>
+                <td>${estado}</td>
+                <td>
+                  <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${cuenta.id_cuenta}">Ver cuenta</button>
+                </td>
+              </tr>
+            `;
+          });
+
+          let body = rows.length > 0 ? rows.join("") : "";
+          if (!rows.length) {
+            body += `
+              <tr class="canva-input-row">
+                <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" /></td>
+                <td><input type="text" class="correo-input" placeholder="Correo" /></td>
+                <td><input type="date" class="fecha-input" /></td>
+                <td>-</td>
+                <td>
+                  <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${cuenta.id_cuenta}">
+                    Registrar servicio
+                  </button>
+                </td>
+              </tr>
+            `;
+          }
+          body += `
+            <tr class="row-add-canva" data-cuenta="${cuenta.id_cuenta}">
+              <td colspan="5" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
+            </tr>
+          `;
+
+          detalleEl.innerHTML = `
+            <h3 class="cuenta-title">Cuenta Canva</h3>
+            <div class="cuenta-meta">
+              <p><strong>Correo:</strong> ${cuenta.correo || "-"}</p>
+              <p><strong>Clave:</strong> ${cuenta.clave || "-"}</p>
+              <p><strong>Fecha de corte:</strong> ${formatDDMMYYYY(cuenta.fecha_corte) || "-"}</p>
+            </div>
+            <div class="cuenta-table-wrap">
+              <table class="proximas-table">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Correo</th>
+                    <th>Fecha de corte</th>
+                    <th>Estado</th>
+                    <th>Acción</th>
+                  </tr>
+                </thead>
+                <tbody>${body}</tbody>
+              </table>
+            </div>
+          `;
+        } catch (err) {
+          console.error("load cuenta canva error", err);
+          detalleEl.innerHTML =
+            '<p class="status">No se pudo cargar la cuenta Canva.</p>';
+        }
+      };
+
+      btnCanva?.addEventListener("click", () => {
+        loadCuentaCanva();
+      });
+
       const renderDetalle = (info) => {
         currentCuentaId = info.id_cuenta || null;
         if (!detalleEl) return;
+        detalleEl.style.display = "block";
         if (!info) {
           detalleEl.innerHTML = '<p class="status">Sin datos.</p>';
           return;
@@ -2396,9 +2537,18 @@
                     })
                     .join("") || ""
                 }
-                <tr class="row-add-miembro">
-                  <td colspan="5" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
-                </tr>
+                ${
+                  (() => {
+                    const maxMiembros = Number(info.max_miembros);
+                    const actuales = (info.miembrosExtras || []).length;
+                    if (Number.isFinite(maxMiembros) && maxMiembros > 0 && actuales >= maxMiembros) {
+                      return "";
+                    }
+                    return `<tr class="row-add-miembro">
+                      <td colspan="5" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
+                    </tr>`;
+                  })()
+                }
               </tbody>
             </table>
           </div>
@@ -2440,12 +2590,13 @@
       const loadCuentaDetalle = async (idCuenta) => {
         if (!detalleEl) return;
         if (clienteVentasEl) clienteVentasEl.innerHTML = "";
+        detalleEl.style.display = "block";
         detalleEl.innerHTML = '<p class="status">Cargando cuenta...</p>';
         try {
           const { data: cuenta, error } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado",
+              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, id_cuenta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado",
             )
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
@@ -2480,7 +2631,7 @@
               ? supabase
                   .from("plataformas")
                   .select(
-                    "nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos",
+                    "nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos, max_miembros",
                   )
                   .eq("id_plataforma", platId)
                   .maybeSingle()
@@ -2772,6 +2923,7 @@
             usa_pines: plat?.usa_pines || false,
             mas_perfiles: isTrue(plat?.mas_perfiles),
             num_max_dispositivos: plat?.num_max_dispositivos || null,
+            max_miembros: plat?.max_miembros ?? null,
             ventasCuenta,
             usuariosCuenta,
             correo_madre: correoMadre,
@@ -2923,16 +3075,9 @@
           if (!row) return;
           const nameInput = row.querySelector(".ocupado-input");
           const fechaInput = row.querySelector(".fecha-input");
+          const correoInput = row.querySelector(".correo-input");
           const userId = nameInput?.dataset.userId;
           const fechaVal = fechaInput?.value;
-          if (!userId) {
-            alert("Selecciona un cliente válido.");
-            return;
-          }
-          if (!fechaVal) {
-            alert("Ingresa una fecha de corte.");
-            return;
-          }
           const perfilId = btnRegistrar.dataset.perfil || null;
           const cuentaId = btnRegistrar.dataset.cuenta || currentCuentaId;
           if (!cuentaId) {
@@ -2940,16 +3085,75 @@
             return;
           }
           try {
-            const { error } = await supabase.from("ventas").insert({
-              id_usuario: Number(userId),
-              id_cuenta: Number(cuentaId),
-              id_perfil: perfilId ? Number(perfilId) : null,
-              fecha_corte: fechaVal,
-              fecha_pago: new Date().toISOString().slice(0, 10),
-              pendiente: false,
-              meses_contratados: 1,
-            });
-            if (error) throw error;
+            let finalUserId = userId ? Number(userId) : null;
+            if (correoInput) {
+              const nombreVal = (nameInput?.value || "").trim();
+              const correoVal = (correoInput?.value || "").trim();
+              if (!nombreVal || !/\s+/.test(nombreVal)) {
+                alert("Ingresa nombre y apellido.");
+                return;
+              }
+              if (!correoVal) {
+                alert("Ingresa un correo.");
+                return;
+              }
+              if (!fechaVal) {
+                alert("Ingresa una fecha de corte.");
+                return;
+              }
+              if (!finalUserId) {
+                const { data: userFound, error: uErr } = await supabase
+                  .from("usuarios")
+                  .select("id_usuario")
+                  .eq("correo", correoVal)
+                  .maybeSingle();
+                if (uErr) throw uErr;
+                if (userFound?.id_usuario) {
+                  finalUserId = userFound.id_usuario;
+                } else {
+                  const parts = nombreVal.split(/\s+/);
+                  const nombre = parts.shift() || "";
+                  const apellido = parts.join(" ").trim();
+                  const { data: userNew, error: uNewErr } = await supabase
+                    .from("usuarios")
+                    .insert({ nombre, apellido, correo: correoVal })
+                    .select("id_usuario")
+                    .single();
+                  if (uNewErr) throw uNewErr;
+                  finalUserId = userNew?.id_usuario || null;
+                }
+              }
+              const { error } = await supabase.from("ventas").insert({
+                id_usuario: finalUserId,
+                id_cuenta: Number(cuentaId),
+                id_perfil: perfilId ? Number(perfilId) : null,
+                fecha_corte: fechaVal,
+                fecha_pago: new Date().toISOString().slice(0, 10),
+                pendiente: false,
+                meses_contratados: 1,
+                correo_miembro: correoVal,
+              });
+              if (error) throw error;
+            } else {
+              if (!finalUserId) {
+                alert("Selecciona un cliente válido.");
+                return;
+              }
+              if (!fechaVal) {
+                alert("Ingresa una fecha de corte.");
+                return;
+              }
+              const { error } = await supabase.from("ventas").insert({
+                id_usuario: Number(finalUserId),
+                id_cuenta: Number(cuentaId),
+                id_perfil: perfilId ? Number(perfilId) : null,
+                fecha_corte: fechaVal,
+                fecha_pago: new Date().toISOString().slice(0, 10),
+                pendiente: false,
+                meses_contratados: 1,
+              });
+              if (error) throw error;
+            }
             alert("Servicio registrado.");
           } catch (err) {
             console.error("registrar servicio error", err);
@@ -3027,6 +3231,7 @@
         if (!row) return;
         const nameInput = row.querySelector(".ocupado-input");
         const fechaInput = row.querySelector(".fecha-input");
+        const correoInput = row.querySelector(".correo-input");
         const btn = row.querySelector(".btn-registrar-servicio");
         if (!btn) return;
         const hasName =
@@ -3034,11 +3239,14 @@
           nameInput.value.trim().length > 0 &&
           /\s+/.test(nameInput.value.trim());
         const hasUser = nameInput && nameInput.dataset.userId;
+        const hasCorreo = correoInput && correoInput.value.trim().length > 0;
         const hasDate =
           fechaInput &&
           fechaInput.value &&
           !Number.isNaN(new Date(fechaInput.value).valueOf());
-        const enabled = !!(hasName && hasUser && hasDate);
+        const enabled = correoInput
+          ? !!(hasName && hasCorreo && hasDate)
+          : !!(hasName && hasUser && hasDate);
         btn.disabled = !enabled;
         btn.classList.toggle("btn-disabled", !enabled);
       };
@@ -3046,7 +3254,8 @@
       detalleEl?.addEventListener("input", (e) => {
         if (
           e.target.matches(".ocupado-input") ||
-          e.target.matches(".fecha-input")
+          e.target.matches(".fecha-input") ||
+          e.target.matches(".correo-input")
         ) {
           const row = e.target.closest("tr");
           if (!row) return;
@@ -3291,6 +3500,12 @@
         const addRow = e.target.closest(".row-add-miembro");
         if (!addRow) return;
         if (addRow.classList.contains("plat9-plus-row")) return; // no inputs for plataforma 9
+        const maxMiembros = Number(currentCuentaDetalle?.max_miembros);
+        const actuales = (currentCuentaDetalle?.miembrosExtras || []).length;
+        if (Number.isFinite(maxMiembros) && maxMiembros > 0 && actuales >= maxMiembros) {
+          alert("Ya alcanzaste el máximo de miembros extras.");
+          return;
+        }
         const tbody = addRow.closest("tbody");
         if (!tbody) return;
         if (tbody.querySelector(".miembro-input-row")) return;
@@ -3373,6 +3588,32 @@
           { once: true },
         );
         inp?.focus();
+      });
+
+      // Cuenta Canva: fila +
+      detalleEl?.addEventListener("click", (e) => {
+        const addRow = e.target.closest(".row-add-canva");
+        if (!addRow) return;
+        const tbody = addRow.closest("tbody");
+        if (!tbody) return;
+        const cuentaId = addRow.dataset.cuenta || currentCuentaId;
+        if (!cuentaId) return;
+        const newRow = document.createElement("tr");
+        newRow.className = "canva-input-row";
+        newRow.innerHTML = `
+          <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" /></td>
+          <td><input type="text" class="correo-input" placeholder="Correo" /></td>
+          <td><input type="date" class="fecha-input" /></td>
+          <td>-</td>
+          <td>
+            <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${cuentaId}">
+              Registrar servicio
+            </button>
+          </td>
+        `;
+        tbody.insertBefore(newRow, addRow);
+        const nameInput = newRow.querySelector(".ocupado-input");
+        if (nameInput) nameInput.focus();
       });
 
       // Guardar miembro extra
@@ -3479,14 +3720,6 @@
             .select("id_cuenta")
             .single();
           if (error) throw error;
-          // crear sub_cuenta básica asociada
-          if (data?.id_cuenta) {
-            await supabase.from("sub_cuentas").insert({
-              id_cuenta: data.id_cuenta,
-              ocupado: false,
-              inactiva: false,
-            });
-          }
           const tbody = detalleEl?.querySelector(".miembros-table tbody");
           const addRow = tbody?.querySelector(".row-add-miembro");
           if (tbody && addRow) {
@@ -3735,6 +3968,14 @@
 
       // Acciones de detalle: PIN y Reemplazo
       detalleEl?.addEventListener("click", async (e) => {
+        const alertBtn = e.target.closest(".cliente-alert");
+        if (alertBtn) {
+          const correo = alertBtn.dataset.correo || "";
+          if (correo) {
+            window.open(`admin_cuentas.html?correo=${encodeURIComponent(correo)}`, "_blank");
+          }
+          return;
+        }
         const btnCambiar = e.target.closest(".btn-cambiar-completa");
         if (btnCambiar) {
           if (btnCambiar.disabled) return;
@@ -3810,6 +4051,13 @@
         modalPin?.classList.remove("hidden");
       });
 
+      detalleEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-ver-cuenta");
+        if (!btn) return;
+        const cuentaId = btn.dataset.cuenta;
+        if (cuentaId) loadCuentaDetalle(cuentaId);
+      });
+
       modalPinClose?.addEventListener("click", closePinModal);
       modalPin?.addEventListener("click", (e) => {
         if (e.target.classList.contains("modal-backdrop")) closePinModal();
@@ -3877,20 +4125,7 @@
       };
 
       const findSubCuentaLibre = async (plataformaId, excludeCuenta) => {
-        let query = supabase
-          .from("sub_cuentas")
-          .select(
-            "id_sub_cuenta, id_cuenta, ocupado, correo, clave, pin, cuentas!inner(id_plataforma, inactiva)",
-          )
-          .eq("cuentas.id_plataforma", plataformaId)
-          .eq("cuentas.inactiva", false)
-          .or("ocupado.is.null,ocupado.eq.false")
-          .order("id_sub_cuenta", { ascending: true })
-          .limit(1);
-        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
-        const { data, error } = await query;
-        if (error) return { error };
-        return { data: data?.[0] || null };
+        return { data: null, error: null };
       };
 
       const findCuentaCompleta = async (plataformaId, excludeCuenta) => {

@@ -400,7 +400,7 @@
           const { data: reemplazos, error: replErr } = await supabase
             .from("reemplazos")
             .select(
-              "id_reemplazo, id_cuenta, id_perfil, id_sub_cuenta, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), sub_cuentas:sub_cuentas(id_sub_cuenta, correo, clave, pin)"
+              "id_reemplazo, id_cuenta, id_perfil, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
             )
             .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
           if (replErr) throw replErr;
@@ -413,12 +413,12 @@
               tipo: "reemplazo",
               id_cuenta: r.id_cuenta,
               id_perfil: r.id_perfil,
-              id_sub_cuenta: r.id_sub_cuenta,
-              correo: r.cuentas?.correo || r.sub_cuentas?.correo || "-",
-              clave: r.cuentas?.clave || r.sub_cuentas?.clave || "",
+              id_sub_cuenta: null,
+              correo: r.cuentas?.correo || "-",
+              clave: r.cuentas?.clave || "",
               perfil: r.perfiles?.n_perfil || null,
               perfil_hogar: r.perfiles?.perfil_hogar === true,
-              pin: r.perfiles?.pin ?? r.sub_cuentas?.pin ?? "",
+              pin: r.perfiles?.pin ?? "",
             });
           });
 
@@ -633,27 +633,17 @@
             const updates = [];
             if (claveInput && claveInput.dataset.original !== claveInput.value) {
               const cuentaId = claveInput.dataset.cuenta;
-              const subId = claveInput.dataset.subcuenta;
               if (cuentaId) {
                 updates.push(
                   supabase.from("cuentas").update({ clave: claveInput.value }).eq("id_cuenta", cuentaId)
-                );
-              } else if (subId) {
-                updates.push(
-                  supabase.from("sub_cuentas").update({ clave: claveInput.value }).eq("id_sub_cuenta", subId)
                 );
               }
             }
             if (pinInput && pinInput.dataset.original !== pinInput.value) {
               const perfilId = pinInput.dataset.perfil;
-              const subId = pinInput.dataset.subcuenta;
               if (perfilId) {
                 updates.push(
                   supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
-                );
-              } else if (subId) {
-                updates.push(
-                  supabase.from("sub_cuentas").update({ pin: pinInput.value }).eq("id_sub_cuenta", subId)
                 );
               }
             }
