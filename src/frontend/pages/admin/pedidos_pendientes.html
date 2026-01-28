@@ -5,6 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pedidos pendientes</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .copyable {
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 86px;
+        right: 24px;
+        background: #111;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        z-index: 2000;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
@@ -15,10 +39,12 @@
       <p id="pp-status" class="status">Cargando pedidos...</p>
       <div id="pp-tablas"></div>
     </main>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
 
     <script type="module">
       import { supabase, loadCurrentUser, clearServerSession } from "../../scripts/api.js";
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { buildNotificationPayload } from "../../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
@@ -26,6 +52,8 @@
 
       const statusEl = document.querySelector("#pp-status");
       const tablasEl = document.querySelector("#pp-tablas");
+      const copyToast = document.querySelector("#copy-toast");
+      let copyToastTimer = null;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -41,32 +69,50 @@
         }
         setStatus("");
         tablasEl.innerHTML = entries
-          .map(([plat, rows]) => {
+          .map(([_, payload]) => {
+            const rows = payload.rows || [];
+            const isEntregaInmediata = payload.entrega_inmediata === true;
+            const showClave = payload.clave_cliente === true;
             const body = rows
               .map(
                 (r) => `
               <tr>
                 <td>#${String(r.id_venta).padStart(4, "0")}</td>
                 <td>${r.cliente || "-"}</td>
-                <td>${r.fecha_pago || "-"}</td>
-                <td>${r.servicio || "-"}</td>
-                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}">Entregar servicio</button></td>
+                ${
+                  isEntregaInmediata
+                    ? `<td>${r.fecha_pago || "-"}</td>`
+                    : `<td>${r.servicio || "-"}</td>
+                       <td class="copyable" data-clipboard="${r.correo || ""}">${r.correo || "-"}</td>
+                       ${showClave ? `<td>${r.clave || "-"}</td>` : ""}`
+                }
+                ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
+                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-correo="${r.correo || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}">Entregar servicio</button></td>
               </tr>
             `
               )
               .join("");
             return `
               <div class="proximas-bloque">
-                <h3 class="proximas-title">${plat}</h3>
+                <h3 class="proximas-title">${payload.nombre}</h3>
                 <div class="cuenta-table-wrap">
-                  <table class="proximas-table">
+                  <table class="table-base">
                     <thead>
                       <tr>
-                        <th>ID Venta</th>
-                        <th>Cliente</th>
-                        <th>Fecha de pago</th>
-                        <th>Servicio solicitado</th>
-                        <th>Acción</th>
+                        ${
+                          isEntregaInmediata
+                            ? `<th>Venta</th>
+                               <th>Cliente</th>
+                               <th>Fecha de pago</th>
+                               <th>Servicio solicitado</th>
+                               <th>Acción</th>`
+                            : `<th>ID venta</th>
+                               <th>Cliente</th>
+                               <th>Servicio solicitado</th>
+                               <th>Correo</th>
+                               ${showClave ? "<th>Clave</th>" : ""}
+                               <th>Acción</th>`
+                        }
                       </tr>
                     </thead>
                     <tbody>${body}</tbody>
@@ -88,7 +134,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_usuario, id_precio, fecha_pago, pendiente, precios:precios(id_plataforma, plan), cuentas:cuentas(id_plataforma, correo, clave)"
+              "id_venta, id_usuario, id_precio, fecha_pago, fecha_corte, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas(id_plataforma, correo, clave), perfiles:perfiles(n_perfil)"
             )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -140,11 +186,11 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre")
+              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente")
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
-              acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
+              acc[p.id_plataforma] = p;
               return acc;
             }, {});
           }
@@ -153,15 +199,39 @@
           (ventas || []).forEach((v) => {
             const precio = precioMap[v.id_precio] || v.precios || {};
             const platId = precio.id_plataforma || v.cuentas?.id_plataforma;
-            const platName = platMap[platId] || `Plataforma ${platId || "-"}`;
+            const platInfo = platMap[platId] || {};
+            const platName =
+              platInfo.nombre || `Plataforma ${platId || "-"}`;
             const cliente = userMap[v.id_usuario] || "-";
             const servicio = precio.plan ? `${platName} - ${precio.plan}` : platName;
-            if (!grouped[platName]) grouped[platName] = [];
-            grouped[platName].push({
+            if (!grouped[platId])
+              grouped[platId] = {
+                nombre: platName,
+                entrega_inmediata:
+                  platInfo.entrega_inmediata === true ||
+                  platInfo.entrega_inmediata === "true" ||
+                  platInfo.entrega_inmediata === "1",
+                correo_cliente:
+                  platInfo.correo_cliente === true ||
+                  platInfo.correo_cliente === "true" ||
+                  platInfo.correo_cliente === "1",
+                clave_cliente:
+                  platInfo.clave_cliente === true ||
+                  platInfo.clave_cliente === "true" ||
+                  platInfo.clave_cliente === "1",
+                rows: [],
+              };
+            grouped[platId].rows.push({
               id_venta: v.id_venta,
               cliente,
+              id_usuario: v.id_usuario,
               fecha_pago: v.fecha_pago || "-",
               servicio,
+              correo: v.correo_miembro || "-",
+              clave: v.clave_miembro || "-",
+              plataforma: platName,
+              fecha_corte: v.fecha_corte || "",
+              perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
             });
           });
 
@@ -172,11 +242,65 @@
         }
       };
 
-      tablasEl?.addEventListener("click", (e) => {
+      tablasEl?.addEventListener("click", async (e) => {
         const btn = e.target.closest(".btn-entregar");
         if (!btn) return;
         const idVenta = btn.dataset.venta;
-        alert(`Entregar servicio para venta ${idVenta}`);
+        const idUsuario = btn.dataset.usuario;
+        const plataforma = btn.dataset.plataforma || "";
+        const correoCuenta = btn.dataset.correo || "";
+        const fechaCorte = btn.dataset.fecha || "Pendiente";
+        const perfil = btn.dataset.perfil || "";
+        if (!idVenta) return;
+        try {
+          const { error: updErr } = await supabase
+            .from("ventas")
+            .update({ pendiente: false })
+            .eq("id_venta", idVenta);
+          if (updErr) throw updErr;
+          if (idUsuario) {
+            const notif = buildNotificationPayload("nuevo_servicio", {
+              plataforma,
+              correoCuenta,
+              perfil,
+              fechaCorte,
+            });
+            const { error: nErr } = await supabase
+              .from("notificaciones")
+              .insert({ ...notif, id_usuario: Number(idUsuario) });
+            if (nErr) throw nErr;
+          }
+          btn.textContent = "Entregado";
+          btn.disabled = true;
+        } catch (err) {
+          console.error("entregar servicio error", err);
+          alert("No se pudo entregar el servicio.");
+        }
+      });
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (copyToastTimer) clearTimeout(copyToastTimer);
+        copyToastTimer = setTimeout(() => {
+          copyToast.classList.remove("show");
+        }, 2000);
+      };
+      tablasEl?.addEventListener("click", async (e) => {
+        const cell = e.target.closest(".copyable");
+        if (!cell) return;
+        const text = cell.dataset.clipboard || cell.textContent || "";
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (_err) {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        showCopyToast();
       });
 
       loadPendientes();

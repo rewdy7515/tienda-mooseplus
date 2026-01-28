@@ -24,7 +24,9 @@ export const notificationTemplates = {
 
   nuevo_servicio: ({ plataforma, correoCuenta, perfil, fechaCorte, idOrden }) => ({
     titulo: "Nuevo servicio",
-    mensaje: `Tienes ${plataforma} en ${correoCuenta} (${perfil}). Corte: ${fechaCorte}.${idOrden ? ` Orden #${idOrden}.` : ""}`,
+    mensaje: `Se asignó el servicio de ${plataforma} a <a href="inventario.html?correo=${encodeURIComponent(
+      correoCuenta || ""
+    )}">${correoCuenta || "-"}</a>.`,
   }),
 
   recordatorio_corte: ({ plataforma, correoCuenta, fechaCorte }) => ({

@@ -556,6 +556,8 @@
                       Number(v.id_plataforma) === 12
                         ? v.correo_cliente || ""
                         : v.correo || ""
+                    }" data-correo-cliente="${
+                      v.correo_cliente || ""
                     }" data-nperfil="${
                       v.n_perfil ?? ""
                     }" style="background-color:#22c55e;color:white;">🔄</button>
@@ -635,6 +637,11 @@
 
       async function init() {
         try {
+          const params = new URLSearchParams(window.location.search);
+          const correoParam = params.get("correo");
+          if (correoParam && searchInput) {
+            searchInput.value = correoParam;
+          }
           const user = await loadCurrentUser();
           if (user && usernameEl) {
             const fullName = [user.nombre, user.apellido]
@@ -757,11 +764,13 @@
       let selectedRenovarPerfil = null;
       let selectedRenovarCorreo = "";
       let selectedRenovarNPerfil = "";
+      let selectedRenovarCorreoCliente = "";
 
       const closeRenovarModal = () => {
         modalRenovar?.classList.add("hidden");
         selectedRenovarVenta = null;
         if (renovarSpan) renovarSpan.textContent = "1";
+        selectedRenovarCorreoCliente = "";
       };
 
       listEl?.addEventListener("click", (e) => {
@@ -779,6 +788,7 @@
         selectedRenovarPerfil = btn.dataset.perfil || null;
         selectedRenovarCorreo = btn.dataset.correo || "";
         selectedRenovarNPerfil = btn.dataset.nperfil || "";
+        selectedRenovarCorreoCliente = btn.dataset.correoCliente || "";
         modalRenovar?.classList.remove("hidden");
       });
 
@@ -832,12 +842,15 @@
             alert("No se pudo identificar el precio de la venta.");
             return;
           }
+          const platNum = Number(selectedRenovarPlat) || null;
           return sendCartDelta(precioId, 1, meses, {
             renovacion: true,
             id_venta: selectedRenovarVenta,
-            id_cuenta: selectedRenovarCuenta || null,
+            id_cuenta: platNum === 12 ? null : selectedRenovarCuenta || null,
             id_perfil: selectedRenovarPerfil || null,
             correo: selectedRenovarCorreo || null,
+            correo_cliente:
+              platNum === 12 ? selectedRenovarCorreoCliente || null : null,
             n_perfil: selectedRenovarNPerfil || null,
           });
         };

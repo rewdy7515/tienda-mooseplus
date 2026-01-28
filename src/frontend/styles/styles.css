@@ -223,6 +223,15 @@ body {
   background: #22c55e;
   vertical-align: middle;
 }
+.notify-dot {
+  display: inline-block;
+  margin-left: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  vertical-align: middle;
+}
 
 .dropdown-item {
   display: block;

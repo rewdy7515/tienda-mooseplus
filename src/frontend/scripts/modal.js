@@ -143,15 +143,25 @@ const renderPrecios = (plataformaId, flags) => {
       isPlan2 = hasSubCuenta || planLower.includes("hogar") || planLower.includes("extra");
       stockPlan = stockByPlatform[isPlan2 ? "1_plan2" : "1_plan1"] ?? stockPlan;
     }
+    const ms = currentPlatform?.mostrar_stock;
+    const showStock = !(
+      ms === false ||
+      ms === 0 ||
+      ms === "0" ||
+      ms === "false"
+    );
     const completasKey = `${plataformaId}_completas`;
     const completasCount = stockByPlatform[completasKey] ?? 0;
-    const stockLines = ["Stock:", `- Perfiles: ${stockPlan}`];
-    if (!(Number(plataformaId) === 1 && isPlan2)) {
-      stockLines.push(`- Cuentas completas: ${completasCount}`);
+    let planTitle = plan || "";
+    if (showStock) {
+      const stockLines = ["Stock:", `- Perfiles: ${stockPlan}`];
+      if (!(Number(plataformaId) === 1 && isPlan2)) {
+        stockLines.push(`- Cuentas completas: ${completasCount}`);
+      }
+      planTitle = plan
+        ? `${plan}<br>${stockLines.join("<br>")}`
+        : stockLines.join("<br>");
     }
-    const planTitle = plan
-      ? `${plan}<br>${stockLines.join("<br>")}`
-      : stockLines.join("<br>");
     const planLabel = `<p class="plan-titulo">${planTitle}</p>`;
     wrapper.innerHTML = planLabel;
 
@@ -366,6 +376,7 @@ export const openModal = (platform) => {
     entrega_inmediata,
     descuento_meses,
     id_descuento,
+    mostrar_stock,
   } = platform;
 
   modalImg.src = imagen || "";
@@ -373,20 +384,20 @@ export const openModal = (platform) => {
   modalName.textContent = nombre;
   modalCategory.textContent = categoria || "";
   if (modalBadge) {
-    const stock = stockByPlatform[id_plataforma] ?? 0;
-    if (
-      (entrega_inmediata === true ||
-        entrega_inmediata === "true" ||
-        entrega_inmediata === "1") &&
-      stock === 0
-    ) {
-      modalBadge.textContent = "Pronto mas stock";
-      modalBadge.className = "modal-badge badge-warning";
-    } else if (
+    const showStock = !(
+      mostrar_stock === false ||
+      mostrar_stock === 0 ||
+      mostrar_stock === "0" ||
+      mostrar_stock === "false"
+    );
+    const entrega =
       entrega_inmediata === true ||
       entrega_inmediata === "true" ||
-      entrega_inmediata === "1"
-    ) {
+      entrega_inmediata === "1";
+    if (showStock && entrega && (stockByPlatform[id_plataforma] ?? 0) === 0) {
+      modalBadge.textContent = "Pronto mas stock";
+      modalBadge.className = "modal-badge badge-warning";
+    } else if (entrega) {
       modalBadge.textContent = "Entrega inmediata";
       modalBadge.className = "modal-badge badge-green";
     } else {
@@ -417,6 +428,7 @@ export const openModal = (platform) => {
       descuento_meses === "true" ||
       descuento_meses === "1",
     id_descuento: null,
+    mostrar_stock,
   };
   if (descuento_meses !== undefined) {
     currentPlatform.descuento_meses = descuento_meses;

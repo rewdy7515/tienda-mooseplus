@@ -16,6 +16,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria)
                 entrega_inmediata,
                 descuento_meses,
                 id_descuento,
+                mostrar_stock,
               }) => {
                 const platId = id_plataforma || id;
                 return `
@@ -29,6 +30,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria)
                   data-tarjeta-de-regalo="${tarjeta_de_regalo}"
                   data-entrega-inmediata="${entrega_inmediata}"
                   data-descuento-meses="${descuento_meses}"
+                  data-mostrar-stock="${mostrar_stock}"
                 data-id-descuento="">
                   <div class="plataforma-thumb">
                     <img src="${imagen || ""}" alt="${nomPlat}" loading="lazy" />

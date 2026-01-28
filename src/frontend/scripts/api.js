@@ -35,7 +35,7 @@ export async function loadCatalog() {
     supabase
       .from("plataformas")
       .select(
-        "id_plataforma, id_categoria, nombre, imagen, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses"
+        "id_plataforma, id_categoria, nombre, imagen, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock"
       )
       .order("nombre"),
     supabase

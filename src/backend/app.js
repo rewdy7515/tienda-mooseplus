@@ -1020,13 +1020,18 @@ app.post("/api/checkout", async (req, res) => {
     const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
     const { data: plataformas, error: platErr } = await supabaseAdmin
       .from("plataformas")
-      .select("id_plataforma, nombre")
+      .select("id_plataforma, nombre, entrega_inmediata")
       .in("id_plataforma", plataformaIds);
     if (platErr) throw platErr;
+    const platInfoById = (plataformas || []).reduce((acc, p) => {
+      acc[p.id_plataforma] = p;
+      return acc;
+    }, {});
     const platNameById = (plataformas || []).reduce((acc, p) => {
       acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
       return acc;
     }, {});
+    const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true";
 
     const totalCalc = items.reduce((sum, it) => {
       const unit = pickPrecio(priceMap[it.id_precio]);
@@ -1091,6 +1096,8 @@ app.post("/api/checkout", async (req, res) => {
       const cantidad = it.cantidad || 0;
       if (cantidad <= 0) continue;
       const platId = Number(price.id_plataforma) || null;
+      const entregaInmediata = isTrue(platInfoById[platId]?.entrega_inmediata);
+      const pendienteVenta = !entregaInmediata;
       const mesesItemRaw = it.meses || 1;
       const mesesItem = Number.isFinite(Number(mesesItemRaw))
         ? Math.max(1, Math.round(Number(mesesItemRaw)))
@@ -1121,7 +1128,7 @@ app.post("/api/checkout", async (req, res) => {
             id_perfil: null,
             id_sub_cuenta: null,
             meses: mesesItem,
-            pendiente: false,
+            pendiente: pendienteVenta,
           });
         });
         if (faltantes > 0) {
@@ -1155,7 +1162,7 @@ app.post("/api/checkout", async (req, res) => {
             id_perfil: p.id_perfil,
             id_sub_cuenta: null,
             meses: mesesItem,
-            pendiente: false,
+            pendiente: pendienteVenta,
           });
           usedPerfiles.push(p.id_perfil);
         });
@@ -1184,7 +1191,7 @@ app.post("/api/checkout", async (req, res) => {
               id_perfil: null,
               id_sub_cuenta: null,
               meses: mesesItem,
-              pendiente: false,
+              pendiente: pendienteVenta,
             });
           });
           const faltantesPerf2 = Math.max(0, faltantesPerf - takeCtas.length);
@@ -1215,7 +1222,7 @@ app.post("/api/checkout", async (req, res) => {
             id_perfil: p.id_perfil,
             id_sub_cuenta: null,
             meses: mesesItem,
-            pendiente: false,
+            pendiente: pendienteVenta,
           });
         });
         if (faltantes > 0) {

@@ -142,6 +142,7 @@ const attachPlatformClicks = (onClick) => {
         tarjeta_de_regalo: card.dataset.tarjetaDeRegalo,
         entrega_inmediata: card.dataset.entregaInmediata,
         descuento_meses: isTrue(card.dataset.descuentoMeses),
+        mostrar_stock: card.dataset.mostrarStock,
         id_descuento: null,
       })
     );

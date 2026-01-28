@@ -151,38 +151,13 @@ if (!window.__headerActionsInit) {
         adminHeaderBtn.classList.toggle("hidden", !isAdmin);
         adminHeaderBtn.style.display = isAdmin ? "inline-flex" : "none";
       }
-      // Dot de inventario según notificacion_inventario
-      if (user?.notificacion_inventario) {
-        const inventarioLink = Array.from(document.querySelectorAll("a")).find(
-          (a) => a.textContent?.trim().toLowerCase().startsWith("inventario")
-        );
-        if (inventarioLink) {
-          let dot = inventarioLink.querySelector(".delivery-dot");
-          if (!dot) {
-            dot = document.createElement("span");
-            dot.className = "delivery-dot";
-            inventarioLink.appendChild(dot);
-          }
-          dot.classList.remove("hidden");
-          // al hacer click, limpiar flag
-          inventarioLink.addEventListener(
-            "click",
-            async () => {
-              try {
-                await supabase.from("usuarios").update({ notificacion_inventario: false }).eq("id_usuario", userId);
-              } catch (err) {
-                console.error("clear notificacion_inventario error", err);
-              }
-            },
-            { once: true }
-          );
-        }
-      } else {
-        const inventarioLink = Array.from(document.querySelectorAll("a")).find(
-          (a) => a.textContent?.trim().toLowerCase().startsWith("inventario")
-        );
-        const dot = inventarioLink?.querySelector(".delivery-dot");
-        if (dot) dot.classList.add("hidden");
+      // Punto verde en Notificaciones según notificacion_inventario
+      const notifLink = Array.from(document.querySelectorAll("a")).find(
+        (a) => a.textContent?.trim().toLowerCase().startsWith("notificaciones")
+      );
+      const notifDot = notifLink?.querySelector(".notify-dot");
+      if (notifDot) {
+        notifDot.classList.remove("hidden");
       }
     } catch (err) {
       console.error("header user init error", err);
