@@ -88,6 +88,7 @@
         const sectionHtml = plataformas
           .map((platObj) => {
             const rows = platObj.rows || [];
+            const hasPendiente = rows.some((r) => r.pendiente);
             const showClientInputs =
               FORCE_CLIENT_INPUTS ||
               (platObj.entrega_inmediata === false && platObj.correo_cliente === true);
@@ -165,7 +166,7 @@
             return `
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${platObj.nombre}</h3>
-                ${showClientInputs ? `<p class="status">Ingrese sus datos</p>` : ""}
+                ${showClientInputs && hasPendiente ? `<p class="status">Ingrese sus datos</p>` : ""}
                 <div class="cuenta-table-wrap">
                   <table class="table-base" style="${platObj.color_1 ? `--table-header-bg:${platObj.color_1};` : ""}">
                     <thead>
