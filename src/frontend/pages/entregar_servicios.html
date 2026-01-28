@@ -125,7 +125,7 @@
                     <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
                     <td>
                       ${
-                        showClientInputs
+                        showClientInputs && isPendiente
                           ? `<div class="fecha-wrap">
                               <div class="input-inline">
                                 <input type="text" class="form-input input-correo" placeholder="Correo" value="" />
@@ -136,7 +136,7 @@
                       }
                     </td>
                     ${isRenovacion ? "" : `<td>${
-                      showClaveInput
+                      showClaveInput && isPendiente
                         ? `<div class="fecha-wrap">
                             <div class="input-inline">
                               <input type="text" class="form-input input-clave" placeholder="Clave" value="" />
@@ -151,7 +151,7 @@
                       ${
                         isRenovacion
                           ? `<button type="button" class="btn-outline btn-copy-renew" data-copy="${encodeURIComponent(copyText)}">Copiar mensaje de renovación</button>`
-                          : showClientInputs
+                          : showClientInputs && isPendiente
                             ? `<button type="button" class="btn-outline btn-send-datos" data-venta="${r.id_venta}">Enviar datos</button>`
                             : isPendiente
                               ? '<span class="badge badge-warning">Pendiente</span>'

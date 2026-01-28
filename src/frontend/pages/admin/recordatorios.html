@@ -142,7 +142,7 @@
         try {
           const { data: ventas, error: ventErr } = await supabase
             .from("ventas")
-            .select("id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte")
+            .select("id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro")
             .eq("fecha_corte", fecha);
           if (ventErr) throw ventErr;
 
@@ -182,7 +182,10 @@
             ])
           );
           const { data: plats, error: platErr } = platIds.length
-            ? await supabase.from("plataformas").select("id_plataforma, nombre").in("id_plataforma", platIds)
+            ? await supabase
+                .from("plataformas")
+                .select("id_plataforma, nombre, correo_cliente")
+                .in("id_plataforma", platIds)
             : { data: [], error: null };
           if (platErr) throw platErr;
 
@@ -195,7 +198,7 @@
             return acc;
           }, {});
           const mapPlat = (plats || []).reduce((acc, p) => {
-            acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
+            acc[p.id_plataforma] = p;
             return acc;
           }, {});
           const mapUser = (users || []).reduce((acc, u) => {
@@ -212,9 +215,14 @@
             const cuenta = mapCuenta[v.id_cuenta] || {};
             const precio = mapPrecio[v.id_precio] || {};
             const platId = cuenta.id_plataforma || precio.id_plataforma || null;
-            const platNombre = platId ? mapPlat[platId] || `Plataforma ${platId}` : "-";
+            const platInfo = platId ? mapPlat[platId] || {} : {};
+            const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
             const cliente = mapUser[v.id_usuario] || "Cliente";
-            const correo = cuenta.correo || "-";
+            const useCorreoCliente =
+              platInfo.correo_cliente === true ||
+              platInfo.correo_cliente === "true" ||
+              platInfo.correo_cliente === "1";
+            const correo = useCorreoCliente ? v.correo_miembro || "-" : cuenta.correo || "-";
             const perfInfo = v.id_perfil ? mapPerf[v.id_perfil] : null;
             const perfilTxt = perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
             const hogarTxt = perfInfo?.hogar ? " (HOGAR ACTUALIZADO)" : "";
