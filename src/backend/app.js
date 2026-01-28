@@ -437,6 +437,7 @@ app.get("/api/inventario", async (req, res) => {
       .select(
         `
         id_venta,
+        correo_miembro,
         fecha_corte,
         id_precio,
         id_cuenta,
@@ -477,6 +478,7 @@ app.get("/api/inventario", async (req, res) => {
         id_cuenta: row.id_cuenta || row.cuentas?.id_cuenta || null,
         id_perfil: row.id_perfil || row.perfiles?.id_perfil || null,
         correo: row.cuentas?.correo || "",
+        correo_cliente: row.correo_miembro || "",
         clave: row.cuentas?.clave || "",
         n_perfil: row.perfiles?.n_perfil ?? null,
         pin: row.perfiles?.pin ?? null,
@@ -1088,14 +1090,15 @@ app.post("/api/checkout", async (req, res) => {
       }
       const cantidad = it.cantidad || 0;
       if (cantidad <= 0) continue;
-      const platId = price.id_plataforma;
+      const platId = Number(price.id_plataforma) || null;
       const mesesItemRaw = it.meses || 1;
       const mesesItem = Number.isFinite(Number(mesesItemRaw))
         ? Math.max(1, Math.round(Number(mesesItemRaw)))
         : 1;
       console.log("[checkout] item", it, "mesesRaw", mesesItemRaw, "meses", mesesItem);
 
-      const isNetflixPlan2 = platId === 1 && [4, 5].includes(Number(price.id_precio));
+      const priceId = Number(price.id_precio) || Number(it.id_precio) || null;
+      const isNetflixPlan2 = platId === 1 && [4, 5].includes(priceId);
 
       if (price.completa) {
         const { data: cuentasLibres, error: ctaErr } = await supabaseAdmin
@@ -1130,12 +1133,14 @@ app.post("/api/checkout", async (req, res) => {
         const usedPerfiles = [];
         const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
           .from("perfiles")
-          .select("id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil)")
+          .select(
+            "id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas!inner(id_plataforma, inactiva, venta_perfil)",
+          )
           .eq("perfil_hogar", true)
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", true)
           .eq("ocupado", false)
-          .eq("cuentas.inactiva", false)
+          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
           .limit(cantidad);
         if (perfErr) throw perfErr;
         const libresHogar = (perfilesHogar || []).filter(

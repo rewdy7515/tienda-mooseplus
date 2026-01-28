@@ -219,9 +219,11 @@
           (p.planes || []).forEach((planObj) => {
             const planNombre = planObj.plan || "";
             (planObj.ventas || []).forEach((v) => {
+              const rowCorreo =
+                Number(platId) === 12 ? v.correo_cliente || "" : v.correo || "";
               rows.push({
                 id_venta: v.id_venta ?? "",
-                correo: v.correo || "",
+                correo: rowCorreo,
                 clave: v.clave || "",
                 n_perfil: v.n_perfil ?? "",
                 pin: v.pin ?? "",
@@ -414,7 +416,10 @@
               items.push({
                 id_venta: v.id_venta,
                 id_precio: v.id_precio,
-                correo: v.correo || "",
+                correo:
+                  Number(p.id_plataforma) === 12
+                    ? v.correo_cliente || ""
+                    : v.correo || "",
                 perfil: v.n_perfil ?? "",
                 dias,
               });
@@ -527,7 +532,9 @@
                     <tr>
                       <td>${v.id_venta ?? ""}</td>
                       <td class="copyable" data-label="Correo">${
-                        v.correo || ""
+                        Number(v.id_plataforma) === 12
+                          ? v.correo_cliente || ""
+                          : v.correo || ""
                       }</td>
                       <td class="copyable" data-label="Clave">${
                         v.clave || ""
@@ -546,7 +553,9 @@
                     }" data-vmiem="${v.venta_miembro ?? ""}" data-cuenta="${
                       v.id_cuenta ?? ""
                     }" data-perfil="${v.id_perfil ?? ""}" data-correo="${
-                      v.correo || ""
+                      Number(v.id_plataforma) === 12
+                        ? v.correo_cliente || ""
+                        : v.correo || ""
                     }" data-nperfil="${
                       v.n_perfil ?? ""
                     }" style="background-color:#22c55e;color:white;">🔄</button>
@@ -556,7 +565,9 @@
                       v.id_perfil ?? ""
                     }" style="background-color:#ef4444;color:white;">❕</button>
                           <button class="btn-small btn-copy-row" data-copy="Correo: ${
-                            v.correo || ""
+                            Number(v.id_plataforma) === 12
+                              ? v.correo_cliente || ""
+                              : v.correo || ""
                           }\nClave: ${v.clave || ""}\nPIN: ${
                       v.pin || ""
                     }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">

@@ -128,11 +128,28 @@
         overflow-x: auto;
       }
       .fecha-wrap {
-        display: inline-flex;
+        display: flex;
         align-items: center;
         gap: 6px;
+        width: 100%;
+      }
+      .fecha-wrap .fecha-text,
+      .fecha-wrap .cliente-text,
+      .fecha-wrap .correo-copy,
+      .fecha-wrap .fecha-input,
+      .fecha-wrap .cliente-edit-input,
+      .fecha-wrap .correo-edit-input {
+        flex: 1;
       }
       .btn-edit-fecha {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .btn-edit-cliente,
+      .btn-save-edit,
+      .btn-cancel-edit {
         background: transparent;
         border: none;
         cursor: pointer;
@@ -259,6 +276,9 @@
         font-weight: 600;
         font-size: 12px;
         color: #111;
+      }
+      .correo-copy {
+        cursor: pointer;
       }
       .btn-delete-venta {
         padding: 6px 10px;
@@ -665,6 +685,90 @@
         modalOverlay && (modalOverlay.style.display = "flex");
       const hideModal = () =>
         modalOverlay && (modalOverlay.style.display = "none");
+      const buildCanvaRowHtml = ({
+        idVenta,
+        clienteNombre,
+        correo,
+        fechaCorte,
+        userId,
+        cuentaId,
+      }) => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        let estado = "Activo";
+        if (currentCanvaCuenta?.inactiva === true) {
+          estado = "Inactiva";
+        } else if (fechaCorte && fechaCorte <= todayStr) {
+          estado = "Vencido";
+        }
+        const correoCell = isSuperadmin
+          ? `<div class="fecha-wrap">
+              <span class="correo-copy" data-clipboard="${correo || ""}">${correo || "-"}</span>
+              <button type="button" class="btn-edit-correo" data-venta="${idVenta}">✏️</button>
+              <input type="text" class="correo-edit-input hidden" data-venta="${idVenta}" value="${correo || ""}" />
+            </div>`
+          : `<span class="correo-copy" data-clipboard="${correo || ""}">${correo || "-"}</span>`;
+        const clienteCell = isSuperadmin
+          ? `<div class="fecha-wrap">
+              <span class="cliente-text">${clienteNombre || "-"}</span>
+              <button type="button" class="btn-edit-cliente" data-venta="${idVenta}">✏️</button>
+              <input type="text" class="cliente-edit-input hidden" data-venta="${idVenta}" value="${clienteNombre || ""}" list="sugs-ocupado" />
+              <button type="button" class="btn-save-edit hidden" data-venta="${idVenta}" data-type="cliente">💾</button>
+              <button type="button" class="btn-cancel-edit hidden" data-type="cliente">✖</button>
+            </div>`
+          : `${clienteNombre || "-"}`;
+        const fechaCell = isSuperadmin
+          ? `<div class="fecha-wrap">
+              <span class="fecha-text">${formatDDMMYYYY(fechaCorte) || ""}</span>
+              <button type="button" class="btn-edit-fecha" data-venta="${idVenta}">✏️</button>
+              <input type="date" class="fecha-input hidden" data-venta="${idVenta}" value="${fechaCorte || ""}" />
+              <button type="button" class="btn-save-edit hidden" data-venta="${idVenta}" data-type="fecha">💾</button>
+              <button type="button" class="btn-cancel-edit hidden" data-type="fecha">✖</button>
+            </div>`
+          : `${formatDDMMYYYY(fechaCorte) || ""}`;
+        const deleteBtn =
+          isSuperadmin && idVenta
+            ? `<button type="button" class="btn-delete-venta" data-id-venta="${idVenta}">Eliminar</button>`
+            : "";
+        return `
+          <tr data-id-venta="${idVenta || ""}">
+            <td>${idVenta ? `#${idVenta}` : ""}</td>
+            <td>${clienteCell}</td>
+            <td>${correoCell}</td>
+            <td>${fechaCell}</td>
+            <td>${estado}</td>
+            <td>
+              <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${cuentaId || ""}">Ver cuenta</button>
+              ${deleteBtn}
+            </td>
+          </tr>
+        `;
+      };
+
+      const insertCanvaRowSorted = (tbody, newRow, addRow) => {
+        if (!tbody || !newRow) return;
+        const rows = Array.from(tbody.querySelectorAll("tr")).filter(
+          (tr) => tr !== addRow && tr !== newRow,
+        );
+        rows.push(newRow);
+        rows.sort((a, b) => {
+          const aId = Number(
+            a.dataset.idVenta ||
+              a.querySelector("td")?.textContent?.replace("#", "") ||
+              0,
+          );
+          const bId = Number(
+            b.dataset.idVenta ||
+              b.querySelector("td")?.textContent?.replace("#", "") ||
+              0,
+          );
+          if (!aId && !bId) return 0;
+          if (!aId) return 1;
+          if (!bId) return -1;
+          return aId - bId;
+        });
+        rows.forEach((row) => tbody.appendChild(row));
+        if (addRow) tbody.appendChild(addRow);
+      };
       const goStep1 = () => {
         if (modalStep1) modalStep1.style.display = "block";
         if (modalStep2) modalStep2.style.display = "none";
@@ -814,7 +918,9 @@
       const btnCancelDelete = document.querySelector("#btn-cancel-delete");
       const btnCloseDelete = document.querySelector(".modal-delete-close");
       let deleteTargetId = null;
+      let deleteTargetRow = null;
       const modalReemplazoMsg = document.querySelector("#modal-reemplazo-msg");
+      let currentCanvaCuenta = null;
 
       (async () => {
         try {
@@ -1822,12 +1928,14 @@
         }
         if (delBtn) {
           deleteTargetId = delBtn.dataset.idVenta || null;
+          deleteTargetRow = delBtn.closest("tr");
           if (modalDelete) modalDelete.classList.remove("hidden");
         }
       });
 
       const closeDeleteModal = () => {
         deleteTargetId = null;
+        deleteTargetRow = null;
         modalDelete?.classList.add("hidden");
       };
 
@@ -1845,11 +1953,15 @@
             .delete()
             .eq("id_venta", deleteTargetId);
           if (error) throw error;
-          if (inputCliente?.dataset.selectedId) {
-            loadVentasByCliente(inputCliente.dataset.selectedId);
-          }
-          if (currentCuentaDetalle?.id_cuenta) {
-            loadCuentaDetalle(currentCuentaDetalle.id_cuenta);
+          if (deleteTargetRow) {
+            deleteTargetRow.remove();
+          } else {
+            document
+              .querySelectorAll(`[data-id-venta="${deleteTargetId}"]`)
+              .forEach((el) => {
+                const row = el.closest("tr");
+                if (row) row.remove();
+              });
           }
         } catch (err) {
           console.error("delete venta error", err);
@@ -1903,6 +2015,7 @@
               '<p class="status">No hay cuenta registrada para Canva.</p>';
             return;
           }
+          currentCanvaCuenta = cuenta;
           const { data: platInfo, error: platErr } = await supabase
             .from("plataformas")
             .select("cuenta_madre")
@@ -1913,7 +2026,8 @@
           const { data: ventas, error: vErr } = await supabase
             .from("ventas")
             .select("id_venta, id_usuario, fecha_corte, suspendido, correo_miembro")
-            .eq("id_cuenta", cuenta.id_cuenta);
+            .eq("id_cuenta", cuenta.id_cuenta)
+            .order("id_venta", { ascending: true });
           if (vErr) throw vErr;
 
           const userIds = Array.from(
@@ -1944,15 +2058,45 @@
             } else if (v.fecha_corte && v.fecha_corte <= todayStr) {
               estado = "Vencido";
             }
+            const correoCell = isSuperadmin
+              ? `<div class="fecha-wrap">
+                  <span class="correo-copy" data-clipboard="${v.correo_miembro || ""}">${v.correo_miembro || "-"}</span>
+                  <button type="button" class="btn-edit-correo" data-venta="${v.id_venta}">✏️</button>
+                  <input type="text" class="correo-edit-input hidden" data-venta="${v.id_venta}" value="${v.correo_miembro || ""}" />
+                </div>`
+              : `<span class="correo-copy" data-clipboard="${v.correo_miembro || ""}">${v.correo_miembro || "-"}</span>`;
+            const clienteCell = isSuperadmin
+              ? `<div class="fecha-wrap">
+                  <span class="cliente-text">${usersMap[v.id_usuario] || "-"}</span>
+                  <button type="button" class="btn-edit-cliente" data-venta="${v.id_venta}">✏️</button>
+                  <input type="text" class="cliente-edit-input hidden" data-venta="${v.id_venta}" value="${usersMap[v.id_usuario] || ""}" list="sugs-ocupado" />
+                  <button type="button" class="btn-save-edit hidden" data-venta="${v.id_venta}" data-type="cliente">💾</button>
+                  <button type="button" class="btn-cancel-edit hidden" data-type="cliente">✖</button>
+                </div>`
+              : `${usersMap[v.id_usuario] || "-"}`;
+            const fechaCell = isSuperadmin
+              ? `<div class="fecha-wrap">
+                  <span class="fecha-text">${formatDDMMYYYY(v.fecha_corte) || ""}</span>
+                  <button type="button" class="btn-edit-fecha" data-venta="${v.id_venta}">✏️</button>
+                  <input type="date" class="fecha-input hidden" data-venta="${v.id_venta}" value="${v.fecha_corte || ""}" />
+                  <button type="button" class="btn-save-edit hidden" data-venta="${v.id_venta}" data-type="fecha">💾</button>
+                  <button type="button" class="btn-cancel-edit hidden" data-type="fecha">✖</button>
+                </div>`
+              : `${formatDDMMYYYY(v.fecha_corte) || ""}`;
             return `
-              <tr>
+              <tr data-id-venta="${v.id_venta || ""}">
                 <td>${v.id_venta ? `#${v.id_venta}` : ""}</td>
-                <td>${usersMap[v.id_usuario] || "-"}</td>
-                <td>${v.correo_miembro || "-"}</td>
-                <td>${formatDDMMYYYY(v.fecha_corte) || ""}</td>
+                <td>${clienteCell}</td>
+                <td>${correoCell}</td>
+                <td>${fechaCell}</td>
                 <td>${estado}</td>
                 <td>
                   <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${cuenta.id_cuenta}">Ver cuenta</button>
+                  ${
+                    isSuperadmin && v.id_venta
+                      ? `<button type="button" class="btn-delete-venta" data-id-venta="${v.id_venta}">Eliminar</button>`
+                      : ""
+                  }
                 </td>
               </tr>
             `;
@@ -1977,7 +2121,7 @@
           }
           body += `
             <tr class="row-add-canva" data-cuenta="${cuenta.id_cuenta}">
-              <td colspan="5" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
+              <td colspan="6" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
             </tr>
           `;
 
@@ -3017,6 +3161,13 @@
           copyTextNotify(text);
           return;
         }
+        const correoCopy = e.target.closest(".correo-copy");
+        if (correoCopy) {
+          const text = correoCopy.dataset.clipboard || correoCopy.textContent || "";
+          if (!text) return;
+          copyTextNotify(text);
+          return;
+        }
         const pinEl = e.target.closest(".pin-copy");
         if (pinEl) {
           const text = pinEl.dataset.clipboard || pinEl.textContent || "";
@@ -3051,6 +3202,7 @@
         const deleteBtn = e.target.closest(".btn-delete-venta");
         if (deleteBtn) {
           deleteTargetId = deleteBtn.dataset.idVenta || null;
+          deleteTargetRow = deleteBtn.closest("tr");
           if (modalDelete) modalDelete.classList.remove("hidden");
           return;
         }
@@ -3065,10 +3217,177 @@
         if (editBtn) {
           const row = editBtn.closest("tr");
           const input = row?.querySelector(".fecha-input");
+          const span = row?.querySelector(".fecha-text");
+          const saveBtn = row?.querySelector('.btn-save-edit[data-type="fecha"]');
+          const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="fecha"]');
           if (input) {
+            input.classList.remove("hidden");
             input.classList.add("show");
+            input.dataset.original = input.value || "";
             input.focus();
           }
+          if (span) span.classList.add("hidden");
+          if (saveBtn) saveBtn.classList.remove("hidden");
+          if (cancelBtn) cancelBtn.classList.remove("hidden");
+          if (saveBtn || cancelBtn) editBtn.classList.add("hidden");
+          return;
+        }
+        const editClienteBtn = e.target.closest(".btn-edit-cliente");
+        if (editClienteBtn) {
+          const row = editClienteBtn.closest("tr");
+          const input = row?.querySelector(".cliente-edit-input");
+          const span = row?.querySelector(".cliente-text");
+          const saveBtn = row?.querySelector('.btn-save-edit[data-type="cliente"]');
+          const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="cliente"]');
+          if (input) {
+            input.classList.remove("hidden");
+            input.classList.add("show");
+            input.dataset.original = input.value || "";
+            input.focus();
+            input.select();
+          }
+          if (span) span.classList.add("hidden");
+          if (saveBtn) saveBtn.classList.remove("hidden");
+          if (cancelBtn) cancelBtn.classList.remove("hidden");
+          if (saveBtn || cancelBtn) editClienteBtn.classList.add("hidden");
+          return;
+        }
+        const cancelEditBtn = e.target.closest(".btn-cancel-edit");
+        if (cancelEditBtn) {
+          const row = cancelEditBtn.closest("tr");
+          const type = cancelEditBtn.dataset.type;
+          if (type === "fecha") {
+            const input = row?.querySelector(".fecha-input");
+            const span = row?.querySelector(".fecha-text");
+            const editBtn = row?.querySelector(".btn-edit-fecha");
+            const saveBtn = row?.querySelector('.btn-save-edit[data-type="fecha"]');
+            if (input) {
+              input.value = input.dataset.original || input.value;
+              input.classList.add("hidden");
+              input.classList.remove("show");
+            }
+            if (span) span.classList.remove("hidden");
+            if (editBtn) editBtn.classList.remove("hidden");
+            if (saveBtn) saveBtn.classList.add("hidden");
+            cancelEditBtn.classList.add("hidden");
+          } else if (type === "cliente") {
+            const input = row?.querySelector(".cliente-edit-input");
+            const span = row?.querySelector(".cliente-text");
+            const editBtn = row?.querySelector(".btn-edit-cliente");
+            const saveBtn = row?.querySelector('.btn-save-edit[data-type="cliente"]');
+            if (input) {
+              input.value = input.dataset.original || input.value;
+              input.classList.add("hidden");
+              input.classList.remove("show");
+            }
+            if (span) span.classList.remove("hidden");
+            if (editBtn) editBtn.classList.remove("hidden");
+            if (saveBtn) saveBtn.classList.add("hidden");
+            cancelEditBtn.classList.add("hidden");
+          }
+          return;
+        }
+        const saveEditBtn = e.target.closest(".btn-save-edit");
+        if (saveEditBtn) {
+          const row = saveEditBtn.closest("tr");
+          const type = saveEditBtn.dataset.type;
+          if (type === "fecha") {
+            const input = row?.querySelector(".fecha-input");
+            const span = row?.querySelector(".fecha-text");
+            const editBtn = row?.querySelector(".btn-edit-fecha");
+            const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="fecha"]');
+            const ventaId = saveEditBtn.dataset.venta || input?.dataset.venta;
+            const newDate = input?.value || "";
+            if (!ventaId || !newDate) return;
+            try {
+              const { error } = await supabase
+                .from("ventas")
+                .update({ fecha_corte: newDate })
+                .eq("id_venta", ventaId);
+              if (error) throw error;
+              if (span) {
+                span.textContent = formatDDMMYYYY(newDate) || newDate;
+                span.classList.remove("hidden");
+              }
+              if (input) {
+                input.classList.add("hidden");
+                input.classList.remove("show");
+              }
+              if (editBtn) editBtn.classList.remove("hidden");
+              if (cancelBtn) cancelBtn.classList.add("hidden");
+              saveEditBtn.classList.add("hidden");
+            } catch (err) {
+              console.error("update fecha corte error", err);
+              alert("No se pudo actualizar la fecha.");
+            }
+            return;
+          }
+          if (type === "cliente") {
+            const input = row?.querySelector(".cliente-edit-input");
+            const span = row?.querySelector(".cliente-text");
+            const editBtn = row?.querySelector(".btn-edit-cliente");
+            const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="cliente"]');
+            const value = (input?.value || "").trim();
+            if (!value || !value.includes(" ")) {
+              alert("Ingresa nombre y apellido.");
+              return;
+            }
+            const parts = value.split(/\s+/);
+            const nombre = parts.shift() || "";
+            const apellido = parts.join(" ").trim();
+            try {
+              const ventaId = saveEditBtn.dataset.venta || input?.dataset.venta;
+              if (!ventaId) {
+                alert("No se pudo identificar la venta.");
+                return;
+              }
+              const { data: userFound, error: uErr } = await supabase
+                .from("usuarios")
+                .select("id_usuario")
+                .ilike("nombre", nombre)
+                .ilike("apellido", apellido)
+                .limit(1)
+                .maybeSingle();
+              if (uErr) throw uErr;
+              if (!userFound?.id_usuario) {
+                alert("Cliente no encontrado.");
+                return;
+              }
+              const { error } = await supabase
+                .from("ventas")
+                .update({ id_usuario: userFound.id_usuario })
+                .eq("id_venta", ventaId);
+              if (error) throw error;
+              if (span) {
+                span.textContent = value;
+                span.classList.remove("hidden");
+              }
+              if (input) {
+                input.classList.add("hidden");
+                input.classList.remove("show");
+              }
+              if (editBtn) editBtn.classList.remove("hidden");
+              if (cancelBtn) cancelBtn.classList.add("hidden");
+              saveEditBtn.classList.add("hidden");
+            } catch (err) {
+              console.error("update cliente error", err);
+              alert("No se pudo actualizar el cliente.");
+            }
+            return;
+          }
+        }
+        const editCorreoBtn = e.target.closest(".btn-edit-correo");
+        if (editCorreoBtn) {
+          const row = editCorreoBtn.closest("tr");
+          const input = row?.querySelector(".correo-edit-input");
+          const span = row?.querySelector(".correo-copy");
+          if (input) {
+            input.classList.remove("hidden");
+            input.classList.add("show");
+            input.focus();
+            input.select();
+          }
+          if (span) span.classList.add("hidden");
           return;
         }
 
@@ -3076,6 +3395,7 @@
         if (btnRegistrar) {
           const row = btnRegistrar.closest("tr");
           if (!row) return;
+          const isCanvaRow = !!row.querySelector(".correo-input");
           const nameInput = row.querySelector(".ocupado-input");
           const fechaInput = row.querySelector(".fecha-input");
           const correoInput = row.querySelector(".correo-input");
@@ -3083,6 +3403,7 @@
           const fechaVal = fechaInput?.value;
           const perfilId = btnRegistrar.dataset.perfil || null;
           const cuentaId = btnRegistrar.dataset.cuenta || currentCuentaId;
+          let newVentaId = null;
           if (!cuentaId) {
             alert("No se pudo identificar la cuenta.");
             return;
@@ -3105,38 +3426,39 @@
                 return;
               }
               if (!finalUserId) {
-                const { data: userFound, error: uErr } = await supabase
-                  .from("usuarios")
-                  .select("id_usuario")
-                  .eq("correo", correoVal)
-                  .maybeSingle();
-                if (uErr) throw uErr;
-                if (userFound?.id_usuario) {
-                  finalUserId = userFound.id_usuario;
-                } else {
-                  const parts = nombreVal.split(/\s+/);
-                  const nombre = parts.shift() || "";
-                  const apellido = parts.join(" ").trim();
-                  const { data: userNew, error: uNewErr } = await supabase
+                const parts = nombreVal.split(/\s+/);
+                const nombre = parts.shift() || "";
+                const apellido = parts.join(" ").trim();
+                if (nombre && apellido) {
+                  const { data: userFound, error: uErr } = await supabase
                     .from("usuarios")
-                    .insert({ nombre, apellido, correo: correoVal })
                     .select("id_usuario")
-                    .single();
-                  if (uNewErr) throw uNewErr;
-                  finalUserId = userNew?.id_usuario || null;
+                    .ilike("nombre", nombre)
+                    .ilike("apellido", apellido)
+                    .limit(1)
+                    .maybeSingle();
+                  if (uErr) throw uErr;
+                  if (userFound?.id_usuario) {
+                    finalUserId = userFound.id_usuario;
+                  }
                 }
               }
-              const { error } = await supabase.from("ventas").insert({
-                id_usuario: finalUserId,
-                id_cuenta: Number(cuentaId),
-                id_perfil: perfilId ? Number(perfilId) : null,
-                fecha_corte: fechaVal,
-                fecha_pago: new Date().toISOString().slice(0, 10),
-                pendiente: false,
-                meses_contratados: 1,
-                correo_miembro: correoVal,
-              });
+              const { data: ventaRow, error } = await supabase
+                .from("ventas")
+                .insert({
+                  id_usuario: finalUserId,
+                  id_cuenta: Number(cuentaId),
+                  id_perfil: perfilId ? Number(perfilId) : null,
+                  fecha_corte: fechaVal,
+                  fecha_pago: new Date().toISOString().slice(0, 10),
+                  pendiente: false,
+                  meses_contratados: 1,
+                  correo_miembro: correoVal,
+                })
+                .select("id_venta")
+                .single();
               if (error) throw error;
+              newVentaId = ventaRow?.id_venta || null;
             } else {
               if (!finalUserId) {
                 alert("Selecciona un cliente válido.");
@@ -3146,16 +3468,42 @@
                 alert("Ingresa una fecha de corte.");
                 return;
               }
-              const { error } = await supabase.from("ventas").insert({
-                id_usuario: Number(finalUserId),
-                id_cuenta: Number(cuentaId),
-                id_perfil: perfilId ? Number(perfilId) : null,
-                fecha_corte: fechaVal,
-                fecha_pago: new Date().toISOString().slice(0, 10),
-                pendiente: false,
-                meses_contratados: 1,
-              });
+              const { data: ventaRow, error } = await supabase
+                .from("ventas")
+                .insert({
+                  id_usuario: Number(finalUserId),
+                  id_cuenta: Number(cuentaId),
+                  id_perfil: perfilId ? Number(perfilId) : null,
+                  fecha_corte: fechaVal,
+                  fecha_pago: new Date().toISOString().slice(0, 10),
+                  pendiente: false,
+                  meses_contratados: 1,
+                })
+                .select("id_venta")
+                .single();
               if (error) throw error;
+              newVentaId = ventaRow?.id_venta || null;
+            }
+            if (isCanvaRow) {
+              const tbody = row.closest("tbody");
+              const addRow = tbody?.querySelector(".row-add-canva");
+              const nombreVal = (nameInput?.value || "").trim();
+              const correoVal = (correoInput?.value || "").trim();
+              const html = buildCanvaRowHtml({
+                idVenta: newVentaId,
+                clienteNombre: nombreVal,
+                correo: correoVal,
+                fechaCorte: fechaVal,
+                userId: finalUserId,
+                cuentaId,
+              });
+              const temp = document.createElement("tbody");
+              temp.innerHTML = html.trim();
+              const newRow = temp.querySelector("tr");
+              if (newRow && tbody) {
+                row.remove();
+                insertCanvaRowSorted(tbody, newRow, addRow);
+              }
             }
             alert("Servicio registrado.");
           } catch (err) {
@@ -3257,13 +3605,46 @@
       detalleEl?.addEventListener("input", (e) => {
         if (
           e.target.matches(".ocupado-input") ||
+          e.target.matches(".cliente-edit-input") ||
           e.target.matches(".fecha-input") ||
           e.target.matches(".correo-input")
         ) {
           const row = e.target.closest("tr");
           if (!row) return;
+          if (e.target.matches(".cliente-edit-input")) {
+            fetchOcupadoSuggestions(e.target.value).then((list) => {
+              ocupadoSuggestions = list;
+              const dl = document.querySelector("#sugs-ocupado");
+              if (dl) {
+                dl.innerHTML = list
+                  .map(
+                    (u) =>
+                      `<option data-id="${u.id_usuario}" value="${[u.nombre, u.apellido].filter(Boolean).join(" ").trim()}"></option>`,
+                  )
+                  .join("");
+              }
+            });
+            return;
+          }
           if (e.target.matches(".ocupado-input")) {
             const input = e.target;
+            const isCanvaRow = !!row?.querySelector(".correo-input");
+            if (isCanvaRow) {
+              fetchOcupadoSuggestions(input.value).then((list) => {
+                ocupadoSuggestions = list;
+                const dl = document.querySelector("#sugs-ocupado");
+                if (dl) {
+                  dl.innerHTML = list
+                    .map(
+                      (u) =>
+                        `<option data-id="${u.id_usuario}" value="${[u.nombre, u.apellido].filter(Boolean).join(" ").trim()}"></option>`,
+                    )
+                    .join("");
+                }
+              });
+              validateRegistrarBtn(row);
+              return;
+            }
             fetchOcupadoSuggestions(input.value).then((list) => {
               ocupadoSuggestions = list;
               const dl = document.querySelector("#sugs-ocupado");
@@ -3299,6 +3680,21 @@
         if (e.target.matches(".ocupado-input")) {
           const input = e.target;
           const row = input.closest("tr");
+          const isCanvaRow = !!row?.querySelector(".correo-input");
+          if (isCanvaRow) {
+            const match = (ocupadoSuggestions || []).find(
+              (u) =>
+                [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ===
+                input.value.trim(),
+            );
+            if (match) {
+              input.dataset.userId = match.id_usuario;
+            } else {
+              delete input.dataset.userId;
+            }
+            validateRegistrarBtn(row);
+            return;
+          }
           const match = (ocupadoSuggestions || []).find(
             (u) =>
               [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ===
@@ -3308,7 +3704,7 @@
             input.dataset.userId = match.id_usuario;
           } else {
             delete input.dataset.userId;
-            if (input.value.trim().includes(" ")) {
+            if (isCanvaRow && input.value.trim().includes(" ")) {
               pendingOcupadoInput = input;
               goStep1();
               showModal();
@@ -3319,26 +3715,60 @@
       });
 
       detalleEl?.addEventListener("change", async (e) => {
-        if (!e.target.matches(".fecha-input")) return;
-        const input = e.target;
-        const row = input.closest("tr");
-        const ventaBtn = row?.querySelector(".btn-edit-fecha");
-        const ventaId = input.dataset.venta || ventaBtn?.dataset.venta;
-        if (!ventaId) return;
-        const newDate = input.value;
-        if (!newDate) return;
-        try {
-          const { error } = await supabase
-            .from("ventas")
-            .update({ fecha_corte: newDate })
-            .eq("id_venta", ventaId);
-          if (error) throw error;
-          const span = row.querySelector(".fecha-text");
-          if (span) span.textContent = formatDDMMYYYY(newDate) || newDate;
-          input.classList.remove("show");
-        } catch (err) {
-          console.error("update fecha corte error", err);
-          alert("No se pudo actualizar la fecha.");
+        if (e.target.matches(".fecha-input")) {
+          const input = e.target;
+          const row = input.closest("tr");
+          if (row?.querySelector('.btn-save-edit[data-type="fecha"]')) return;
+          const ventaBtn = row?.querySelector(".btn-edit-fecha");
+          const ventaId = input.dataset.venta || ventaBtn?.dataset.venta;
+          if (!ventaId) return;
+          const newDate = input.value;
+          if (!newDate) return;
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ fecha_corte: newDate })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            const span = row.querySelector(".fecha-text");
+            if (span) {
+              span.textContent = formatDDMMYYYY(newDate) || newDate;
+              span.classList.remove("hidden");
+            }
+            input.classList.remove("show");
+            input.classList.add("hidden");
+          } catch (err) {
+            console.error("update fecha corte error", err);
+            alert("No se pudo actualizar la fecha.");
+          }
+          return;
+        }
+        if (e.target.matches(".correo-edit-input")) {
+          const input = e.target;
+          const row = input.closest("tr");
+          const ventaId = input.dataset.venta;
+          if (!ventaId) return;
+          const newCorreo = input.value.trim();
+          if (!newCorreo) return;
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ correo_miembro: newCorreo })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            const span = row.querySelector(".correo-copy");
+            if (span) {
+              span.textContent = newCorreo;
+              span.dataset.clipboard = newCorreo;
+              span.classList.remove("hidden");
+            }
+            input.classList.remove("show");
+            input.classList.add("hidden");
+          } catch (err) {
+            console.error("update correo miembro error", err);
+            alert("No se pudo actualizar el correo.");
+          }
+          return;
         }
       });
 
@@ -3604,6 +4034,7 @@
         const newRow = document.createElement("tr");
         newRow.className = "canva-input-row";
         newRow.innerHTML = `
+          <td></td>
           <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" /></td>
           <td><input type="text" class="correo-input" placeholder="Correo" /></td>
           <td><input type="date" class="fecha-input" /></td>
