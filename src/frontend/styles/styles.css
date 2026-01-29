@@ -1128,6 +1128,7 @@ input[type="number"].input-inline {
   font-weight: 500;
   height: 30px;
   white-space: nowrap;
+  overflow: hidden;
 }
 .table-base th {
   background: var(--table-header-bg, #2c2f36);
@@ -1135,6 +1136,26 @@ input[type="number"].input-inline {
   padding: 5px 10px;
   font-size: 17px;
   font-weight: 800;
+}
+.table-base tbody tr:nth-child(odd) {
+  background: #eef1f5;
+}
+.table-base tbody tr:nth-child(even) {
+  background: #ffffff;
+}
+
+.table-base td[style*="display:flex"] {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-base td .btn-outline,
+.table-base td .btn-primary,
+.table-base td .btn-delete,
+.table-base td .btn-copy,
+.table-base td .btn-delete-venta {
+  max-width: 100%;
 }
 
 /* Contenedor de tablas (datos de cuentas) */

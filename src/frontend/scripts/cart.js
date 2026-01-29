@@ -80,11 +80,10 @@ const toggleCart = (open) => {
 };
 
 const toggleActions = (hasItems) => {
-  // Mantén visible el contenedor para botones extra; solo ocultamos checkout/view.
-  if (actionsEl) actionsEl.classList.remove("hidden");
-  if (btnAssign) btnAssign.classList.remove("hidden");
+  if (actionsEl) actionsEl.classList.toggle("hidden", !hasItems);
   btnCheckout?.classList.toggle("hidden", !hasItems);
   btnViewCart?.classList.toggle("hidden", !hasItems);
+  btnAssign?.classList.toggle("hidden", !hasItems);
 };
 
 const renderCart = () => {

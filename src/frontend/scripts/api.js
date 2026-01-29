@@ -299,7 +299,9 @@ export async function loadCurrentUser() {
   const idUsuario = requireSession();
   const { data, error } = await supabase
     .from("usuarios")
-    .select("id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin, acceso_cliente")
+    .select(
+      "id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario"
+    )
     .eq("id_usuario", idUsuario)
     .maybeSingle();
   if (error) {

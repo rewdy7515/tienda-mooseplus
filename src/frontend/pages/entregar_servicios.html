@@ -368,6 +368,11 @@
             .update(payload)
             .eq("id_venta", ventaId);
           if (error) throw error;
+          btn.classList.add("hidden");
+          const status = document.createElement("span");
+          status.className = "badge badge-green";
+          status.textContent = "Datos enviados ✅";
+          btn.parentElement?.appendChild(status);
           alert("Datos enviados.");
         } catch (err) {
           console.error("enviar datos error", err);

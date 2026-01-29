@@ -44,6 +44,7 @@
     <script type="module">
       import { supabase, loadCurrentUser, clearServerSession } from "../../scripts/api.js";
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
       import { buildNotificationPayload } from "../../scripts/notification-templates.js";
 
       requireSession();
@@ -57,6 +58,14 @@
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
+      };
+      const addMonthsKeepDay = (baseDate, months) => {
+        const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+        const day = baseDate.getDate();
+        d.setMonth(d.getMonth() + months);
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        d.setDate(Math.min(day, lastDay));
+        return d;
       };
 
       const render = (grouped) => {
@@ -87,7 +96,8 @@
                        ${showClave ? `<td>${r.clave || "-"}</td>` : ""}`
                 }
                 ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
-                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-correo="${r.correo || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}">Entregar servicio</button></td>
+                <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
+                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}">Entregar servicio</button></td>
               </tr>
             `
               )
@@ -105,12 +115,14 @@
                                <th>Cliente</th>
                                <th>Fecha de pago</th>
                                <th>Servicio solicitado</th>
+                               <th>Fecha de pedido</th>
                                <th>Acción</th>`
                             : `<th>ID venta</th>
                                <th>Cliente</th>
                                <th>Servicio solicitado</th>
                                <th>Correo</th>
                                ${showClave ? "<th>Clave</th>" : ""}
+                               <th>Fecha de pedido</th>
                                <th>Acción</th>`
                         }
                       </tr>
@@ -134,7 +146,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_usuario, id_precio, fecha_pago, fecha_corte, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas(id_plataforma, correo, clave), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave), perfiles:perfiles(n_perfil)"
             )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -186,7 +198,7 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente")
+              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre")
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
@@ -219,6 +231,10 @@
                   platInfo.clave_cliente === true ||
                   platInfo.clave_cliente === "true" ||
                   platInfo.clave_cliente === "1",
+                cuenta_madre:
+                  platInfo.cuenta_madre === true ||
+                  platInfo.cuenta_madre === "true" ||
+                  platInfo.cuenta_madre === "1",
                 rows: [],
               };
             grouped[platId].rows.push({
@@ -232,6 +248,9 @@
               plataforma: platName,
               fecha_corte: v.fecha_corte || "",
               perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
+              id_plataforma: platId,
+              cuenta_madre: grouped[platId].cuenta_madre,
+              meses_contratados: v.meses_contratados || 1,
             });
           });
 
@@ -248,14 +267,86 @@
         const idVenta = btn.dataset.venta;
         const idUsuario = btn.dataset.usuario;
         const plataforma = btn.dataset.plataforma || "";
+        const idPlataforma = btn.dataset.idPlataforma || "";
         const correoCuenta = btn.dataset.correo || "";
+        const claveCuenta = btn.dataset.clave || "";
         const fechaCorte = btn.dataset.fecha || "Pendiente";
         const perfil = btn.dataset.perfil || "";
+        const cuentaMadreFlag = btn.dataset.cuentaMadre === "true";
+        const mesesContratados = Number(btn.dataset.meses || 1);
         if (!idVenta) return;
         try {
+          if (!correoCuenta) {
+            alert("Falta el correo del cliente.");
+            return;
+          }
+          const { data: cuentaNueva, error: cuentaErr } = await supabase
+            .from("cuentas")
+            .insert({
+              correo: correoCuenta,
+              clave: claveCuenta || null,
+              inactiva: false,
+              ocupado: false,
+              venta_dominio: true,
+              dominio_de: idUsuario ? Number(idUsuario) : null,
+              id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            })
+            .select("id_cuenta")
+            .single();
+          if (cuentaErr) throw cuentaErr;
+          const nuevaCuentaId = cuentaNueva?.id_cuenta;
+          if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
+
+          let cuentaMadreId = null;
+          let perfilId = null;
+          if (cuentaMadreFlag && idPlataforma) {
+            const { data: madre, error: madreErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta")
+              .eq("id_plataforma", Number(idPlataforma))
+              .eq("cuenta_madre", true)
+              .limit(1)
+              .maybeSingle();
+            if (madreErr) throw madreErr;
+            cuentaMadreId = madre?.id_cuenta || null;
+            if (cuentaMadreId) {
+              const { data: perf, error: perfErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil")
+                .eq("id_cuenta", cuentaMadreId)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (perfErr) throw perfErr;
+              perfilId = perf?.id_perfil || null;
+              if (perfilId) {
+                const { error: occErr } = await supabase
+                  .from("perfiles")
+                  .update({ ocupado: true })
+                  .eq("id_perfil", perfilId);
+                if (occErr) throw occErr;
+              }
+              const { error: linkErr } = await supabase
+                .from("cuentas")
+                .update({ id_cuenta_miembro: cuentaMadreId })
+                .eq("id_cuenta", nuevaCuentaId);
+              if (linkErr) throw linkErr;
+            }
+          }
+
+          const base = new Date();
+          const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
+          const nextIso = next.toISOString().slice(0, 10);
           const { error: updErr } = await supabase
             .from("ventas")
-            .update({ pendiente: false })
+            .update({
+              pendiente: false,
+              id_cuenta: nuevaCuentaId,
+              id_cuenta_miembro: cuentaMadreId,
+              id_perfil: perfilId,
+              fecha_corte: nextIso,
+            })
             .eq("id_venta", idVenta);
           if (updErr) throw updErr;
           if (idUsuario) {
@@ -270,8 +361,11 @@
               .insert({ ...notif, id_usuario: Number(idUsuario) });
             if (nErr) throw nErr;
           }
-          btn.textContent = "Entregado";
-          btn.disabled = true;
+          const status = document.createElement("span");
+          status.className = "badge badge-green";
+          status.textContent = "Servicio entregado";
+          btn.parentElement?.appendChild(status);
+          btn.remove();
         } catch (err) {
           console.error("entregar servicio error", err);
           alert("No se pudo entregar el servicio.");

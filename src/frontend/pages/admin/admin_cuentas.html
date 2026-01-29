@@ -155,6 +155,13 @@
         cursor: pointer;
         font-size: 14px;
       }
+      .miembros-table .correo-copy,
+      .miembros-table .clave-copy {
+        cursor: pointer;
+      }
+      .copyable-text {
+        cursor: pointer;
+      }
       .fecha-input {
         display: inline-block;
       }
@@ -577,6 +584,39 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) =>
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const decorateCopyColumns = (root) => {
+        if (!root) return;
+        root.querySelectorAll("table").forEach((table) => {
+          const headers = Array.from(table.querySelectorAll("thead th"));
+          if (!headers.length) return;
+          const correoIdx = headers.findIndex((h) =>
+            (h.textContent || "").trim().toLowerCase().startsWith("correo")
+          );
+          const claveIdx = headers.findIndex((h) =>
+            (h.textContent || "").trim().toLowerCase().startsWith("clave")
+          );
+          if (correoIdx === -1 && claveIdx === -1) return;
+          table.querySelectorAll("tbody tr").forEach((tr) => {
+            const cells = Array.from(tr.children);
+            const markCell = (idx) => {
+              if (idx < 0 || idx >= cells.length) return;
+              const cell = cells[idx];
+              if (!cell || cell.querySelector("input, button, textarea, select")) return;
+              if (cell.querySelector("[data-clipboard]")) return;
+              const text = (cell.textContent || "").trim();
+              if (!text || text === "-") return;
+              cell.textContent = "";
+              const span = document.createElement("span");
+              span.className = "copyable-text";
+              span.dataset.clipboard = text;
+              span.textContent = text;
+              cell.appendChild(span);
+            };
+            markCell(correoIdx);
+            markCell(claveIdx);
+          });
+        });
+      };
       let currentUserId = null;
 
       const inputCuenta = document.querySelector("#input-cuenta");
@@ -702,9 +742,11 @@
         }
         const correoCell = isSuperadmin
           ? `<div class="fecha-wrap">
-              <span class="correo-copy" data-clipboard="${correo || ""}">${correo || "-"}</span>
-              <button type="button" class="btn-edit-correo" data-venta="${idVenta}">✏️</button>
-              <input type="text" class="correo-edit-input hidden" data-venta="${idVenta}" value="${correo || ""}" />
+              <span class="correo-copy correo-text" data-clipboard="${correo || ""}">${correo || "-"}</span>
+              <button type="button" class="btn-edit-correo" data-venta="${idVenta}" data-cuenta="${cuentaId || ""}">✏️</button>
+              <input type="text" class="correo-edit-input hidden" data-venta="${idVenta}" data-cuenta="${cuentaId || ""}" value="${correo || ""}" />
+              <button type="button" class="btn-save-edit hidden" data-venta="${idVenta}" data-cuenta="${cuentaId || ""}" data-type="correo">💾</button>
+              <button type="button" class="btn-cancel-edit hidden" data-type="correo">✖</button>
             </div>`
           : `<span class="correo-copy" data-clipboard="${correo || ""}">${correo || "-"}</span>`;
         const clienteCell = isSuperadmin
@@ -1172,6 +1214,7 @@
             </table>
           </div>
         `;
+        decorateCopyColumns(ventaResultadoEl);
       };
 
       const buscarVentaPorId = async (id) => {
@@ -1370,6 +1413,7 @@
           <h3 style="margin-bottom:8px;">${plataformaNombre || "Plataforma"}</h3>
           ${html}
         `;
+        decorateCopyColumns(plataformaResultadosEl);
         plataformaResultadosEl.classList.remove("hidden");
         plataformaResultadosEl.style.display = "block";
         plataformaResultadosEl.style.visibility = "visible";
@@ -1664,6 +1708,11 @@
       });
 
       plataformaResultadosEl?.addEventListener("click", async (e) => {
+        const copyEl = e.target.closest(".copyable-text");
+        if (copyEl) {
+          copyWithToast(copyEl);
+          return;
+        }
         const addBtn = e.target.closest(".btn-add-perfil");
         if (!addBtn) return;
         const cuentaId = addBtn.dataset.cuenta;
@@ -1761,6 +1810,7 @@
           `;
         });
         clienteVentasEl.innerHTML = blocks.join("");
+        decorateCopyColumns(clienteVentasEl);
       };
 
       const loadVentasByCliente = async (idUsuario) => {
@@ -1885,6 +1935,11 @@
       };
 
       clienteVentasEl?.addEventListener("click", (e) => {
+        const copyEl = e.target.closest(".copyable-text");
+        if (copyEl) {
+          copyWithToast(copyEl);
+          return;
+        }
         const alertBtn = e.target.closest(".cliente-alert");
         if (alertBtn) {
           const correo = alertBtn.dataset.correo || "";
@@ -2005,9 +2060,7 @@
             .select(
               "id_cuenta, correo, clave, fecha_corte, inactiva",
             )
-            .eq("id_plataforma", 12)
-            .order("id_cuenta", { ascending: false })
-            .limit(1)
+            .eq("id_cuenta", 688)
             .maybeSingle();
           if (cErr) throw cErr;
           if (!cuenta?.id_cuenta) {
@@ -2016,22 +2069,32 @@
             return;
           }
           currentCanvaCuenta = cuenta;
-          const { data: platInfo, error: platErr } = await supabase
-            .from("plataformas")
-            .select("cuenta_madre")
-            .eq("id_plataforma", 12)
-            .maybeSingle();
-          if (platErr) throw platErr;
-
           const { data: ventas, error: vErr } = await supabase
             .from("ventas")
-            .select("id_venta, id_usuario, fecha_corte, suspendido, correo_miembro")
+            .select("id_venta, id_usuario, id_perfil, fecha_corte, suspendido, correo_miembro")
             .eq("id_cuenta", cuenta.id_cuenta)
+            .not("id_perfil", "is", null)
             .order("id_venta", { ascending: true });
           if (vErr) throw vErr;
 
+          const perfilIds = Array.from(
+            new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean))
+          );
+          let perfilesMap = {};
+          if (perfilIds.length) {
+            const { data: perfiles, error: pErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil, n_perfil")
+              .in("id_perfil", perfilIds);
+            if (pErr) throw pErr;
+            perfilesMap = (perfiles || []).reduce((acc, p) => {
+              acc[p.id_perfil] = p;
+              return acc;
+            }, {});
+          }
+
           const userIds = Array.from(
-            new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)),
+            new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean))
           );
           let usersMap = {};
           if (userIds.length) {
@@ -2058,40 +2121,19 @@
             } else if (v.fecha_corte && v.fecha_corte <= todayStr) {
               estado = "Vencido";
             }
-            const correoCell = isSuperadmin
-              ? `<div class="fecha-wrap">
-                  <span class="correo-copy" data-clipboard="${v.correo_miembro || ""}">${v.correo_miembro || "-"}</span>
-                  <button type="button" class="btn-edit-correo" data-venta="${v.id_venta}">✏️</button>
-                  <input type="text" class="correo-edit-input hidden" data-venta="${v.id_venta}" value="${v.correo_miembro || ""}" />
-                </div>`
-              : `<span class="correo-copy" data-clipboard="${v.correo_miembro || ""}">${v.correo_miembro || "-"}</span>`;
-            const clienteCell = isSuperadmin
-              ? `<div class="fecha-wrap">
-                  <span class="cliente-text">${usersMap[v.id_usuario] || "-"}</span>
-                  <button type="button" class="btn-edit-cliente" data-venta="${v.id_venta}">✏️</button>
-                  <input type="text" class="cliente-edit-input hidden" data-venta="${v.id_venta}" value="${usersMap[v.id_usuario] || ""}" list="sugs-ocupado" />
-                  <button type="button" class="btn-save-edit hidden" data-venta="${v.id_venta}" data-type="cliente">💾</button>
-                  <button type="button" class="btn-cancel-edit hidden" data-type="cliente">✖</button>
-                </div>`
-              : `${usersMap[v.id_usuario] || "-"}`;
-            const fechaCell = isSuperadmin
-              ? `<div class="fecha-wrap">
-                  <span class="fecha-text">${formatDDMMYYYY(v.fecha_corte) || ""}</span>
-                  <button type="button" class="btn-edit-fecha" data-venta="${v.id_venta}">✏️</button>
-                  <input type="date" class="fecha-input hidden" data-venta="${v.id_venta}" value="${v.fecha_corte || ""}" />
-                  <button type="button" class="btn-save-edit hidden" data-venta="${v.id_venta}" data-type="fecha">💾</button>
-                  <button type="button" class="btn-cancel-edit hidden" data-type="fecha">✖</button>
-                </div>`
-              : `${formatDDMMYYYY(v.fecha_corte) || ""}`;
+            const perfilInfo = perfilesMap[v.id_perfil] || {};
+            const cliente = usersMap[v.id_usuario] || "-";
+            const copyText = `Correo: ${v.correo_miembro || ""}`;
             return `
               <tr data-id-venta="${v.id_venta || ""}">
-                <td>${v.id_venta ? `#${v.id_venta}` : ""}</td>
-                <td>${clienteCell}</td>
-                <td>${correoCell}</td>
-                <td>${fechaCell}</td>
+                <td>${v.id_perfil || ""}</td>
+                <td>${perfilInfo.n_perfil || ""}</td>
+                <td>${cliente}</td>
+                <td>${v.correo_miembro || "-"}</td>
+                <td>${formatDDMMYYYY(v.fecha_corte) || "-"}</td>
                 <td>${estado}</td>
-                <td>
-                  <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${cuenta.id_cuenta}">Ver cuenta</button>
+                <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                  <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
                     isSuperadmin && v.id_venta
                       ? `<button type="button" class="btn-delete-venta" data-id-venta="${v.id_venta}">Eliminar</button>`
@@ -2101,29 +2143,9 @@
               </tr>
             `;
           });
-
-          let body = rows.length > 0 ? rows.join("") : "";
-          if (!rows.length) {
-            body += `
-              <tr class="canva-input-row">
-                <td></td>
-                <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" /></td>
-                <td><input type="text" class="correo-input" placeholder="Correo" /></td>
-                <td><input type="date" class="fecha-input" /></td>
-                <td>-</td>
-                <td>
-                  <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${cuenta.id_cuenta}">
-                    Registrar servicio
-                  </button>
-                </td>
-              </tr>
-            `;
-          }
-          body += `
-            <tr class="row-add-canva" data-cuenta="${cuenta.id_cuenta}">
-              <td colspan="6" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
-            </tr>
-          `;
+          const body = rows.length
+            ? rows.join("")
+            : `<tr><td colspan="7" class="status">Sin perfiles registrados.</td></tr>`;
 
           detalleEl.innerHTML = `
             <h3 class="cuenta-title">Cuenta Canva</h3>
@@ -2133,10 +2155,11 @@
               <p><strong>Fecha de corte:</strong> ${formatDDMMYYYY(cuenta.fecha_corte) || "-"}</p>
             </div>
             <div class="cuenta-table-wrap">
-              <table class="proximas-table">
+              <table class="table-base">
                 <thead>
                   <tr>
-                    <th>ID Venta</th>
+                    <th>ID Perfil</th>
+                    <th>Perfil</th>
                     <th>Cliente</th>
                     <th>Correo</th>
                     <th>Fecha de corte</th>
@@ -2148,6 +2171,7 @@
               </table>
             </div>
           `;
+          decorateCopyColumns(detalleEl);
         } catch (err) {
           console.error("load cuenta canva error", err);
           detalleEl.innerHTML =
@@ -2655,8 +2679,8 @@
                         : "";
                       return `
                         <tr>
-                          <td>${m.correo || "-"}</td>
-                          <td>${m.clave || "-"}</td>
+                          <td><span class="correo-copy" data-clipboard="${m.correo || ""}">${m.correo || "-"}</span></td>
+                          <td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>
                           <td>${hasVenta ? m.ocupado || "-" : `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />`}</td>
                           <td>
                             ${
@@ -2709,6 +2733,7 @@
               : ""
           }
         `;
+        decorateCopyColumns(detalleEl);
 
         const toggle = detalleEl.querySelector("#toggle-activa");
         if (toggle) {
@@ -3161,9 +3186,21 @@
           copyTextNotify(text);
           return;
         }
+        const copyEl = e.target.closest(".copyable-text");
+        if (copyEl) {
+          copyWithToast(copyEl);
+          return;
+        }
         const correoCopy = e.target.closest(".correo-copy");
         if (correoCopy) {
           const text = correoCopy.dataset.clipboard || correoCopy.textContent || "";
+          if (!text) return;
+          copyTextNotify(text);
+          return;
+        }
+        const claveCopy = e.target.closest(".clave-copy");
+        if (claveCopy) {
+          const text = claveCopy.dataset.clipboard || claveCopy.textContent || "";
           if (!text) return;
           copyTextNotify(text);
           return;
@@ -3270,6 +3307,20 @@
             if (editBtn) editBtn.classList.remove("hidden");
             if (saveBtn) saveBtn.classList.add("hidden");
             cancelEditBtn.classList.add("hidden");
+          } else if (type === "correo") {
+            const input = row?.querySelector(".correo-edit-input");
+            const span = row?.querySelector(".correo-text");
+            const editBtn = row?.querySelector(".btn-edit-correo");
+            const saveBtn = row?.querySelector('.btn-save-edit[data-type="correo"]');
+            if (input) {
+              input.value = input.dataset.original || input.value;
+              input.classList.add("hidden");
+              input.classList.remove("show");
+            }
+            if (span) span.classList.remove("hidden");
+            if (editBtn) editBtn.classList.remove("hidden");
+            if (saveBtn) saveBtn.classList.add("hidden");
+            cancelEditBtn.classList.add("hidden");
           } else if (type === "cliente") {
             const input = row?.querySelector(".cliente-edit-input");
             const span = row?.querySelector(".cliente-text");
@@ -3319,6 +3370,50 @@
             } catch (err) {
               console.error("update fecha corte error", err);
               alert("No se pudo actualizar la fecha.");
+            }
+            return;
+          }
+          if (type === "correo") {
+            const input = row?.querySelector(".correo-edit-input");
+            const span = row?.querySelector(".correo-text");
+            const editBtn = row?.querySelector(".btn-edit-correo");
+            const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="correo"]');
+            const ventaId = saveEditBtn.dataset.venta || input?.dataset.venta;
+            const cuentaId =
+              saveEditBtn.dataset.cuenta ||
+              input?.dataset.cuenta ||
+              currentCanvaCuenta?.id_cuenta;
+            const newCorreo = (input?.value || "").trim();
+            if (!ventaId || !newCorreo) return;
+            try {
+              const { error: vErr } = await supabase
+                .from("ventas")
+                .update({ correo_miembro: newCorreo })
+                .eq("id_venta", ventaId);
+              if (vErr) throw vErr;
+              if (cuentaId) {
+                const { error: cErr } = await supabase
+                  .from("cuentas")
+                  .update({ correo: newCorreo })
+                  .eq("id_cuenta", cuentaId);
+                if (cErr) throw cErr;
+              }
+              const copySpan = row?.querySelector(".correo-copy");
+              if (copySpan) {
+                copySpan.textContent = newCorreo;
+                copySpan.dataset.clipboard = newCorreo;
+              }
+              if (span) span.classList.remove("hidden");
+              if (input) {
+                input.classList.add("hidden");
+                input.classList.remove("show");
+              }
+              if (editBtn) editBtn.classList.remove("hidden");
+              if (cancelBtn) cancelBtn.classList.add("hidden");
+              saveEditBtn.classList.add("hidden");
+            } catch (err) {
+              console.error("update correo miembro error", err);
+              alert("No se pudo actualizar el correo.");
             }
             return;
           }
@@ -3380,14 +3475,20 @@
         if (editCorreoBtn) {
           const row = editCorreoBtn.closest("tr");
           const input = row?.querySelector(".correo-edit-input");
-          const span = row?.querySelector(".correo-copy");
+          const span = row?.querySelector(".correo-text");
+          const saveBtn = row?.querySelector('.btn-save-edit[data-type="correo"]');
+          const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="correo"]');
           if (input) {
             input.classList.remove("hidden");
             input.classList.add("show");
+            input.dataset.original = input.value || "";
             input.focus();
             input.select();
           }
           if (span) span.classList.add("hidden");
+          if (saveBtn) saveBtn.classList.remove("hidden");
+          if (cancelBtn) cancelBtn.classList.remove("hidden");
+          if (saveBtn || cancelBtn) editCorreoBtn.classList.add("hidden");
           return;
         }
 
@@ -3746,6 +3847,7 @@
         if (e.target.matches(".correo-edit-input")) {
           const input = e.target;
           const row = input.closest("tr");
+          if (row?.querySelector('.btn-save-edit[data-type="correo"]')) return;
           const ventaId = input.dataset.venta;
           if (!ventaId) return;
           const newCorreo = input.value.trim();

@@ -158,7 +158,7 @@ const loadStockSummary = async (_hasSession = false) => {
     supabase
       .from("perfiles")
       .select(
-        "id_perfil, n_perfil, ocupado, perfil_hogar, cuentas:cuentas(id_plataforma, inactiva, venta_perfil, correo, plataformas(nombre))"
+        "id_perfil, n_perfil, ocupado, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey(id_plataforma, inactiva, venta_perfil, correo, plataformas(nombre))"
       )
       .eq("ocupado", false)
       .eq("cuentas.venta_perfil", true)

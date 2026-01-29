@@ -22,9 +22,9 @@ if (!window.__headerActionsInit) {
     }
   })();
 
-  const toAbs = (path) => {
+  const toAbs = (path, baseOverride = null) => {
     try {
-      return new URL(path, basePagesUrl).href;
+      return new URL(path, baseOverride || basePagesUrl).href;
     } catch (_) {
       return path;
     }
@@ -38,7 +38,9 @@ if (!window.__headerActionsInit) {
       if (!href || href === "#" || href.startsWith("http") || href.startsWith("mailto:") || href.startsWith("tel:")) {
         return;
       }
-      a.setAttribute("href", toAbs(href));
+      const usePageBase = !(href.startsWith("./") || href.startsWith("../"));
+      const base = usePageBase ? basePagesUrl : window.location.href;
+      a.setAttribute("href", toAbs(href, base));
     });
   };
 
@@ -156,9 +158,27 @@ if (!window.__headerActionsInit) {
         (a) => a.textContent?.trim().toLowerCase().startsWith("notificaciones")
       );
       const notifDot = notifLink?.querySelector(".notify-dot");
-      if (notifDot) {
-        notifDot.classList.remove("hidden");
+      if (isTrue(user?.notificacion_inventario)) {
+        if (notifDot) {
+          notifDot.classList.remove("hidden");
+        }
+      } else if (notifDot) {
+        notifDot.classList.add("hidden");
       }
+      notifLink?.addEventListener("click", async (e) => {
+        const href = notifLink.getAttribute("href");
+        if (href) e.preventDefault();
+        try {
+          await supabase
+            .from("usuarios")
+            .update({ notificacion_inventario: false })
+            .eq("id_usuario", userId);
+        } catch (err) {
+          console.error("clear notificacion_inventario error", err);
+        } finally {
+          if (href) window.location.href = href;
+        }
+      });
     } catch (err) {
       console.error("header user init error", err);
     }
@@ -171,17 +191,17 @@ if (!window.__headerActionsInit) {
   // Botones de carrito / checkout / stock
   const btnViewCart = document.querySelector("#btn-view-cart");
   btnViewCart?.addEventListener("click", () => {
-    window.location.href = toAbs("cart.html");
+    window.location.href = toAbs("cart.html", basePagesUrl);
   });
 
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
   adminHeaderBtn?.addEventListener("click", () => {
-    window.location.href = toAbs("admin/admin_cuentas.html");
+    window.location.href = toAbs("admin/admin_cuentas.html", basePagesUrl);
   });
 
   const btnCheckout = document.querySelector("#btn-checkout");
   btnCheckout?.addEventListener("click", () => {
-    window.location.href = toAbs("checkout.html");
+    window.location.href = toAbs("checkout.html", basePagesUrl);
   });
 
   // Búsqueda en el header (usa catálogo para autocompletar)
