@@ -1266,7 +1266,7 @@ app.post("/api/checkout", async (req, res) => {
           .select("id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil)")
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", isSpotify ? false : true)
-          .eq("cuentas.cuenta_madre", isSpotify ? true : false)
+          .or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" })
           .eq("perfil_hogar", false)
           .eq("ocupado", false)
           .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
@@ -1277,12 +1277,42 @@ app.post("/api/checkout", async (req, res) => {
           count: perfilesLibres?.length || 0,
           first: perfilesLibres?.[0] || null,
         });
+        if (platId === 1) {
+          console.log("[checkout][netflix] filtros", {
+            platId,
+            venta_perfil: isSpotify ? false : true,
+            cuenta_madre: isSpotify ? true : false,
+            perfil_hogar: false,
+            ocupado: false,
+            inactiva: "null|false",
+          });
+          const rawSample = (perfilesLibres || []).slice(0, 5).map((p) => ({
+            id_perfil: p.id_perfil,
+            id_cuenta: p.id_cuenta,
+            perfil_hogar: p.perfil_hogar,
+            ocupado: p.ocupado,
+            cuenta_plat: p.cuentas?.id_plataforma,
+            cuenta_inactiva: p.cuentas?.inactiva,
+            cuenta_venta_perfil: p.cuentas?.venta_perfil,
+          }));
+          console.log("[checkout][netflix] raw sample", rawSample);
+        }
         const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
         console.log("[checkout] perfiles libres disponibles", {
           platId,
           count: disponibles.length,
           first: disponibles[0] || null,
         });
+        if (platId === 1) {
+          const dispSample = disponibles.slice(0, 5).map((p) => ({
+            id_perfil: p.id_perfil,
+            id_cuenta: p.id_cuenta,
+            perfil_hogar: p.perfil_hogar,
+            ocupado: p.ocupado,
+            cuenta_inactiva: p.cuentas?.inactiva,
+          }));
+          console.log("[checkout][netflix] disponibles sample", dispSample);
+        }
         const faltantes = Math.max(0, cantidad - disponibles.length);
         disponibles.slice(0, cantidad).forEach((p) => {
           asignaciones.push({

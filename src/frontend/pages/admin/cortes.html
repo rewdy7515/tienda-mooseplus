@@ -113,6 +113,10 @@
         border-radius: 8px;
         box-sizing: border-box;
       }
+      .copy-cell,
+      .copy-input {
+        cursor: pointer;
+      }
 
       .cortes-block {
         width: 100%;
@@ -143,6 +147,10 @@
       .madre-bar p {
         margin: 4px 0;
       }
+      .madre-bar .copyable {
+        cursor: pointer;
+        font-weight: 600;
+      }
       .madre-bar a {
         color: #1d4ed8;
         text-decoration: underline;
@@ -168,6 +176,25 @@
         margin: 14px 0 6px;
         font-weight: 700;
       }
+      .copy-toast {
+        position: fixed;
+        top: 86px;
+        right: 24px;
+        background: #111;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        z-index: 2000;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
     </style>
   </head>
   <body>
@@ -184,6 +211,7 @@
         <div id="cortes-tablas"></div>
       </div>
     </main>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
@@ -261,6 +289,18 @@
       let platCorteClaveMap = {};
       let platCorteDirectoMap = {};
 
+      const copyToast = document.querySelector("#copy-toast");
+      let copyToastTimer = null;
+
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (copyToastTimer) clearTimeout(copyToastTimer);
+        copyToastTimer = setTimeout(() => {
+          copyToast.classList.remove("show");
+        }, 2000);
+      };
+
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
@@ -312,7 +352,7 @@
               </div>
             </td>
             <td>${perfilCell}</td>
-            <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
+            <td><input type="text" class="input-inline copy-input" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
             <td>${formatDDMMYYYY(v.fecha_corte)}</td>
             <td style="display:flex; gap:6px; flex-wrap:wrap;">
               ${
@@ -366,7 +406,7 @@
             </td>
             <td>${perfilCell}</td>
             <td>
-              <input type="text" class="input-inline" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
+              <input type="text" class="input-inline copy-input" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
             </td>
             <td></td>
             <td style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -434,8 +474,8 @@
                 const madre = rows[0]?.cuentas || {};
                 const bar = `
                   <div class="madre-bar">
-                    <p><strong>Cuenta madre:</strong> ${madre.correo || "-"}</p>
-                    <p><strong>Clave:</strong> ${madre.clave || "-"}</p>
+                    <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
+                    <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
                     <div class="madre-link">
                       <strong>Link:</strong>
                       <input
@@ -607,6 +647,7 @@
         if (!text) return;
         try {
           await navigator.clipboard.writeText(text);
+          showCopyToast();
         } catch (err) {
           try {
             const temp = document.createElement("textarea");
@@ -615,6 +656,7 @@
             temp.select();
             document.execCommand("copy");
             temp.remove();
+            showCopyToast();
           } catch (_) {
             console.error("No se pudo copiar al portapapeles");
           }
@@ -641,6 +683,11 @@
         const copyInput = e.target.closest(".copy-input");
         if (copyInput) {
           copyToClipboard(copyInput.value, copyInput);
+          return;
+        }
+        const madreCopy = e.target.closest(".copyable");
+        if (madreCopy) {
+          copyToClipboard(madreCopy.dataset.clipboard || madreCopy.textContent.trim(), madreCopy);
           return;
         }
         const madreSaveBtn = e.target.closest(".madre-save-btn");
