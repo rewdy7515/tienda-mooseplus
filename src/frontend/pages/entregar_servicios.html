@@ -40,6 +40,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
       import { buildServiceCopyText } from "../scripts/copy-format.js";
+      import { formatDDMMYYYY } from "../scripts/date-format.js";
       import { buildNotification } from "../scripts/notification-templates.js";
 
       requireSession();
@@ -147,7 +148,7 @@
                         : r.clave || ""
                     }</td>`}
                     ${isRenovacion ? "" : `<td>${perfilTxt}</td>`}
-                    <td>${r.fecha_corte || (isPendiente ? "Pendiente" : "")}</td>
+                    <td>${r.fecha_corte ? formatDDMMYYYY(r.fecha_corte) : isPendiente ? "Pendiente" : ""}</td>
                     <td>
                       ${
                         isRenovacion
