@@ -28,6 +28,24 @@
         opacity: 1;
         transform: translateY(0);
       }
+      .madre-bar {
+        background: #f3f4f6;
+        border: 2px solid #cbd5e1;
+        border-bottom: none;
+        border-radius: 10px 10px 0 0;
+        padding: 12px 16px;
+        margin: 8px 0 -6px;
+        position: relative;
+      }
+      .madre-bar .copyable {
+        font-weight: 600;
+      }
+      .madre-region {
+        margin: 0 0 6px;
+        font-size: 18px;
+        font-weight: 800;
+        color: #111827;
+      }
     </style>
   </head>
   <body>
@@ -46,6 +64,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
       import { buildNotificationPayload } from "../../scripts/notification-templates.js";
+      import { buildServiceCopyText } from "../../scripts/copy-format.js";
 
       requireSession();
       attachLogoHome();
@@ -82,6 +101,22 @@
             const rows = payload.rows || [];
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
+            const madre = payload.cuenta_info || {};
+            const madreBlock = payload.cuenta_madre
+              ? `
+                <div class="madre-bar">
+                  ${madre.region ? `<p class="madre-region">${madre.region}</p>` : ""}
+                  <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
+                  <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
+                  <p><strong>Link:</strong> ${
+                    madre.link
+                      ? `<a href="${madre.link}" target="_blank" rel="noopener noreferrer">${madre.link}</a>`
+                      : "-"
+                  }</p>
+                  <p><strong>Dirección:</strong> <span class="copyable" data-clipboard="${madre.direccion || ""}">${madre.direccion || "-"}</span></p>
+                </div>
+              `
+              : "";
             const body = rows
               .map(
                 (r) => `
@@ -93,11 +128,11 @@
                     ? `<td>${r.fecha_pago || "-"}</td>`
                     : `<td>${r.servicio || "-"}</td>
                        <td class="copyable" data-clipboard="${r.correo || ""}">${r.correo || "-"}</td>
-                       ${showClave ? `<td>${r.clave || "-"}</td>` : ""}`
+                       ${showClave ? `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>` : ""}`
                 }
                 ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
                 <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
-                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}">Entregar servicio</button></td>
+                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}">Entregar servicio</button></td>
               </tr>
             `
               )
@@ -105,6 +140,12 @@
             return `
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${payload.nombre}</h3>
+                ${madreBlock}
+                ${
+                  payload.cuenta_madre
+                    ? `<p class="status madre-stock-msg hidden" data-plat="${payload.id_plataforma || ""}">Sin stock de cuentas madres</p>`
+                    : ""
+                }
                 <div class="cuenta-table-wrap">
                   <table class="table-base">
                     <thead>
@@ -146,7 +187,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_usuario, id_precio, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
             )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -198,7 +239,7 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre")
+              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines")
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
@@ -235,8 +276,26 @@
                   platInfo.cuenta_madre === true ||
                   platInfo.cuenta_madre === "true" ||
                   platInfo.cuenta_madre === "1",
+                por_acceso:
+                  platInfo.por_acceso === true ||
+                  platInfo.por_acceso === "true" ||
+                  platInfo.por_acceso === "1",
+                usa_pines:
+                  platInfo.usa_pines === true ||
+                  platInfo.usa_pines === "true" ||
+                  platInfo.usa_pines === "1",
+                cuenta_info: null,
                 rows: [],
               };
+            if (!grouped[platId].cuenta_info && v.cuentas) {
+              grouped[platId].cuenta_info = {
+                correo: v.cuentas?.correo || "",
+                clave: v.cuentas?.clave || "",
+                link: v.cuentas?.link_codigo || "",
+                direccion: v.cuentas?.direccion || "",
+                region: v.cuentas?.region || "",
+              };
+            }
             grouped[platId].rows.push({
               id_venta: v.id_venta,
               cliente,
@@ -248,9 +307,14 @@
               plataforma: platName,
               fecha_corte: v.fecha_corte || "",
               perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
+              n_perfil: v.perfiles?.n_perfil || null,
               id_plataforma: platId,
               cuenta_madre: grouped[platId].cuenta_madre,
+              por_acceso: grouped[platId].por_acceso,
+              usa_pines: grouped[platId].usa_pines,
               meses_contratados: v.meses_contratados || 1,
+              id_cuenta: v.id_cuenta || null,
+              id_perfil: v.id_perfil || null,
             });
           });
 
@@ -272,6 +336,11 @@
         const claveCuenta = btn.dataset.clave || "";
         const fechaCorte = btn.dataset.fecha || "Pendiente";
         const perfil = btn.dataset.perfil || "";
+        const nPerfil = btn.dataset.nperfil || "";
+        const porAcceso = btn.dataset.poracceso === "true";
+        const usaPines = btn.dataset.usapines === "true";
+        const existingMadreId = btn.dataset.idCuenta || "";
+        const existingPerfilId = btn.dataset.idPerfil || "";
         const cuentaMadreFlag = btn.dataset.cuentaMadre === "true";
         const mesesContratados = Number(btn.dataset.meses || 1);
         if (!idVenta) return;
@@ -300,6 +369,10 @@
           let cuentaMadreId = null;
           let perfilId = null;
           if (cuentaMadreFlag && idPlataforma) {
+            if (existingMadreId && existingPerfilId) {
+              cuentaMadreId = Number(existingMadreId);
+              perfilId = Number(existingPerfilId);
+            } else {
             const { data: madre, error: madreErr } = await supabase
               .from("cuentas")
               .select("id_cuenta")
@@ -320,18 +393,27 @@
                 .maybeSingle();
               if (perfErr) throw perfErr;
               perfilId = perf?.id_perfil || null;
+              if (!perfilId) {
+                const msg = document.querySelector(
+                  `.madre-stock-msg[data-plat="${idPlataforma}"]`
+                );
+                if (msg) msg.classList.remove("hidden");
+              }
               if (perfilId) {
                 const { error: occErr } = await supabase
                   .from("perfiles")
-                  .update({ ocupado: true })
+                  .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
                   .eq("id_perfil", perfilId);
                 if (occErr) throw occErr;
               }
-              const { error: linkErr } = await supabase
-                .from("cuentas")
-                .update({ id_cuenta_miembro: cuentaMadreId })
-                .eq("id_cuenta", nuevaCuentaId);
-              if (linkErr) throw linkErr;
+              if (cuentaMadreId) {
+                const { error: linkErr } = await supabase
+                  .from("cuentas")
+                  .update({ id_cuenta_miembro: cuentaMadreId })
+                  .eq("id_cuenta", nuevaCuentaId);
+                if (linkErr) throw linkErr;
+              }
+            }
             }
           }
 
@@ -342,9 +424,9 @@
             .from("ventas")
             .update({
               pendiente: false,
-              id_cuenta: nuevaCuentaId,
-              id_cuenta_miembro: cuentaMadreId,
-              id_perfil: perfilId,
+              id_cuenta: cuentaMadreId || null,
+              id_cuenta_miembro: nuevaCuentaId,
+              id_perfil: perfilId || null,
               fecha_corte: nextIso,
             })
             .eq("id_venta", idVenta);
@@ -364,7 +446,30 @@
           const status = document.createElement("span");
           status.className = "badge badge-green";
           status.textContent = "Servicio entregado";
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.className = "btn-outline btn-copy-row";
+          copyBtn.textContent = "Copiar";
+          const perfilNum = nPerfil ? Number(nPerfil) : null;
+          const copyText = buildServiceCopyText({
+            plataforma,
+            idVenta: idVenta || null,
+            correo: correoCuenta,
+            clave: claveCuenta,
+            nPerfil: Number.isFinite(perfilNum) ? perfilNum : null,
+            pin: "",
+            fechaCorte,
+            porAcceso,
+            usaPines,
+            ventaPerfil: false,
+            ventaMiembro: false,
+            idPlataforma: idPlataforma ? Number(idPlataforma) : null,
+            perfilHogar: false,
+            isSubCuenta: false,
+          });
+          copyBtn.dataset.copy = encodeURIComponent(copyText);
           btn.parentElement?.appendChild(status);
+          btn.parentElement?.appendChild(copyBtn);
           btn.remove();
         } catch (err) {
           console.error("entregar servicio error", err);
@@ -380,6 +485,23 @@
         }, 2000);
       };
       tablasEl?.addEventListener("click", async (e) => {
+        const copyBtn = e.target.closest(".btn-copy-row");
+        if (copyBtn) {
+          const text = decodeURIComponent(copyBtn.dataset.copy || "");
+          if (!text) return;
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch (_err) {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          showCopyToast();
+          return;
+        }
         const cell = e.target.closest(".copyable");
         if (!cell) return;
         const text = cell.dataset.clipboard || cell.textContent || "";

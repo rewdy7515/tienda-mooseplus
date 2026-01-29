@@ -131,7 +131,6 @@
                           ? `<div class="fecha-wrap">
                               <div class="input-inline">
                                 <input type="text" class="form-input input-correo" placeholder="Correo" value="" />
-                                <button type="button" class="btn-outline btn-check" aria-label="Confirmar correo">✓</button>
                               </div>
                             </div>`
                           : r.correo || ""
@@ -142,7 +141,6 @@
                         ? `<div class="fecha-wrap">
                             <div class="input-inline">
                               <input type="text" class="form-input input-clave" placeholder="Clave" value="" />
-                              <button type="button" class="btn-outline btn-check" aria-label="Confirmar clave">✓</button>
                             </div>
                           </div>`
                         : r.clave || ""
@@ -198,7 +196,7 @@
           const user = await loadCurrentUser();
           const userId = user?.id_usuario;
           const baseSelect =
-            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, correo_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
+            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
           let query = supabase.from("ventas").select(baseSelect).order("id_venta", { ascending: false });
           if (idOrdenParam) {
             query = query.eq("id_orden", idOrdenParam);
@@ -230,8 +228,29 @@
             }, {});
           }
 
+          const onlyFaltantes = params.get("faltantes") === "1";
+          const filteredVentas = (ventas || []).filter((v) => {
+            if (!onlyFaltantes) return true;
+            if (!v.pendiente) return false;
+            const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
+            if (!platId) return false;
+            const plat = platMap[platId] || {};
+            const needsCorreo =
+              plat.correo_cliente === true ||
+              plat.correo_cliente === "true" ||
+              plat.correo_cliente === "1";
+            if (!needsCorreo) return false;
+            const missingCorreo = !v.correo_miembro;
+            const needsClave =
+              plat.clave_cliente === true ||
+              plat.clave_cliente === "true" ||
+              plat.clave_cliente === "1";
+            const missingClave = needsClave ? !v.clave_miembro : false;
+            return missingCorreo || missingClave;
+          });
+
           const grouped = {};
-          (ventas || []).forEach((v) => {
+          (filteredVentas || []).forEach((v) => {
             const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
             if (!platId) return;
             const plat = platMap[platId] || {};
@@ -274,12 +293,12 @@
             });
           });
 
-          const ventasMap = (ventas || []).reduce((acc, v) => {
+          const ventasMap = (filteredVentas || []).reduce((acc, v) => {
             if (v?.id_venta) acc[v.id_venta] = v;
             return acc;
           }, {});
           let renovacionesRows = [];
-          if ((ventas || []).length) {
+          if (!onlyFaltantes && (ventas || []).length) {
             const idsVentas = (ventas || []).map((v) => v.id_venta).filter(Boolean);
             if (idsVentas.length) {
               const { data: hist, error: hErr } = await supabase

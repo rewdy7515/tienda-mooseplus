@@ -2194,9 +2194,22 @@
 
         const colMode = info.colMode || "ocupado";
         const showHogar = info.showHogar;
+        const isCuentaMadre = info.cuenta_madre === true;
+        const showClaveCliente = info.clave_cliente === true;
 
         let thead = "";
-        if (colMode === "perfil") {
+        if (isCuentaMadre) {
+          thead = `<tr>
+            <th>ID Venta</th>
+            <th>Acceso</th>
+            <th>Cliente</th>
+            <th>Correo</th>
+            ${showClaveCliente ? "<th>Clave</th>" : ""}
+            <th>Fecha de corte</th>
+            <th>Estado</th>
+            <th>Acción</th>
+          </tr>`;
+        } else if (colMode === "perfil") {
           thead = `<tr>
             <th>ID Venta</th>
             <th>Perfil</th>
@@ -2227,6 +2240,9 @@
         }
 
         let rows = [...(info.perfiles || [])];
+        if (isCuentaMadre) {
+          rows = [...(info.madreRows || [])];
+        }
         // Si no hay perfiles y hay ventas de cuenta completa, crear filas sintéticas
         if (
           !rows.length &&
@@ -2286,6 +2302,52 @@
               ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
               : ocupadoRaw;
             const estado = getEstado(p);
+            if (isCuentaMadre) {
+              const cliente = p.cliente || "-";
+              const correo = p.correo || "";
+              const clave = p.clave || "";
+              const fecha = p.fecha_corte || "";
+              const estadoRow = getEstado({
+                suspendido: p.suspendido === true,
+                fecha_corte: fecha,
+              });
+              const copyText = buildServiceCopyText({
+                plataforma: info.plataformaNombre,
+                idVenta: p.id_venta,
+                correo,
+                clave,
+                nPerfil: p.n_raw,
+                pin: p.pin,
+                fechaCorte: fecha,
+                porAcceso: info.por_acceso,
+                usaPines: info.usa_pines,
+                ventaPerfil: info.venta_perfil,
+                ventaMiembro: info.venta_miembro,
+                idPlataforma: info.plataformaId,
+                perfilHogar: p.hogar,
+                isSubCuenta: false,
+              });
+              return `<tr>
+                <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
+                <td>${p.n_raw ?? ""}</td>
+                <td>${cliente || "-"}</td>
+                <td>${correo || "-"}</td>
+                ${showClaveCliente ? `<td>${clave || "-"}</td>` : ""}
+                <td>${formatDDMMYYYY(fecha) || ""}</td>
+                <td class="estado-cell ${estadoRow.className}">${estadoRow.label}</td>
+                <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                  <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
+                  <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
+                    data-perfil="${p.id_perfil || ""}"
+                  >Registrar servicio</button>
+                  ${
+                    isSuperadmin && p.id_venta
+                      ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
+                      : ""
+                  }
+                </td>
+              </tr>`;
+            }
             if (colMode === "perfil") {
               const toggleHtml = showHogar
                 ? `<label class="toggle-label toggle-small">
@@ -2500,14 +2562,15 @@
           </tr>`;
         }
 
+        const colCountMadre = 7 + (showClaveCliente ? 1 : 0);
         const emptyRow =
           rows.length === 0
-            ? `<tr><td colspan="${colCountPerfil}" style="text-align:center;">Sin registros.</td></tr>`
+            ? `<tr><td colspan="${isCuentaMadre ? colCountMadre : colCountPerfil}" style="text-align:center;">Sin registros.</td></tr>`
             : "";
         const table = `<div class="cuenta-table-wrap">
                 <table class="proximas-table">
                   <thead>${thead}</thead>
-                  <tbody>${tbodyRows}${emptyRow}${addPerfilRow}</tbody>
+                  <tbody>${tbodyRows}${emptyRow}${isCuentaMadre ? "" : addPerfilRow}</tbody>
                 </table>
               </div>`;
 
@@ -2640,8 +2703,12 @@
           `
               : ""
           }
-          ${plat9Table}
-          <h4>Perfiles</h4>
+          ${
+            info.venta_dominio
+              ? ""
+              : `
+          ${info.cuenta_madre ? "" : plat9Table}
+          <h4>${isCuentaMadre ? "Perfiles ocupados" : "Perfiles"}</h4>
           ${table}
           ${
             info.showMiembros && info.venta_miembro !== true
@@ -2727,9 +2794,11 @@
         `
               : ""
           }
+          `
+          }
           ${
-            info.venta_miembro
-              ? `<p class="cuenta-miembro-label">Miembro de: ${info.correo_madre || "No ha sido registrado aún"}${info.correo_madre ? ` <span class="cliente-alert" data-correo="${info.correo_madre}" title="Ver cuenta">!</span>` : ""}</p>`
+            info.venta_miembro || info.venta_dominio
+              ? `<p class="cuenta-miembro-label">Miembro de: ${info.correo_madre || ""}${info.correo_madre ? ` <span class="cliente-alert" data-correo="${info.correo_madre}" title="Ver cuenta">!</span>` : ""}</p>`
               : ""
           }
         `;
@@ -2768,7 +2837,7 @@
           const { data: cuenta, error } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, id_cuenta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado",
+              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre",
             )
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
@@ -2803,7 +2872,7 @@
               ? supabase
                   .from("plataformas")
                   .select(
-                    "nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos, max_miembros",
+                    "nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos, max_miembros, clave_cliente",
                   )
                   .eq("id_plataforma", platId)
                   .maybeSingle()
@@ -2844,12 +2913,21 @@
             if (madreErr) throw madreErr;
             correoMadre = madre?.correo || "";
           }
+          if (cuenta.venta_dominio === true && cuenta.id_cuenta_miembro) {
+            const { data: madreDom, error: madreDomErr } = await supabase
+              .from("cuentas")
+              .select("correo")
+              .eq("id_cuenta", cuenta.id_cuenta_miembro)
+              .maybeSingle();
+            if (madreDomErr) throw madreDomErr;
+            correoMadre = madreDom?.correo || correoMadre;
+          }
 
           const perfilIds = perfiles.map((p) => p.id_perfil).filter(Boolean);
           if (perfilIds.length) {
             const { data: ventas, error: ventErr } = await supabase
             .from("ventas")
-            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido")
+            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido, correo_miembro, clave_miembro")
               .in("id_perfil", perfilIds);
             if (ventErr) throw ventErr;
             ventasMap = (ventas || []).reduce((acc, v) => {
@@ -2858,6 +2936,8 @@
                 id_venta: v.id_venta,
                 fecha_corte: v.fecha_corte,
                 suspendido: v.suspendido,
+                correo_miembro: v.correo_miembro,
+                clave_miembro: v.clave_miembro,
               };
               return acc;
             }, {});
@@ -2928,11 +3008,11 @@
             replSet = new Set((repls || []).map((r) => r.id_perfil));
           }
 
-            const perfilesRows = perfiles.map((p) => {
-              const enReemplazos = replSet.has(p.id_perfil);
-              const ocupador =
-                p.id_perfil && ventasMap[p.id_perfil]?.id_usuario
-                  ? usersMap[ventasMap[p.id_perfil].id_usuario] || "Vacío"
+          const perfilesRows = perfiles.map((p) => {
+            const enReemplazos = replSet.has(p.id_perfil);
+            const ocupador =
+              p.id_perfil && ventasMap[p.id_perfil]?.id_usuario
+                ? usersMap[ventasMap[p.id_perfil].id_usuario] || "Vacío"
                   : "Vacío";
             const isOcupadoEmpty =
               !ocupador || ocupador === "Vacío" || ocupador === "-";
@@ -2954,6 +3034,29 @@
                 reemplazado: enReemplazos,
               };
             });
+
+          const madreRows = cuenta.cuenta_madre
+            ? perfiles.map((p) => {
+                const ventaInfo = ventasMap[p.id_perfil] || {};
+                const cliente =
+                  ventaInfo.id_usuario
+                    ? usersMap[ventaInfo.id_usuario] ||
+                      `Usuario ${ventaInfo.id_usuario || "-"}`
+                    : "";
+                return {
+                  id_venta: ventaInfo.id_venta || null,
+                  id_perfil: p.id_perfil,
+                  n_raw: p.n_perfil,
+                  pin: p.pin,
+                  hogar: p.perfil_hogar === true,
+                  cliente,
+                  correo: ventaInfo.correo_miembro || "",
+                  clave: ventaInfo.clave_miembro || "",
+                  fecha_corte: ventaInfo.fecha_corte || "",
+                  suspendido: ventaInfo.suspendido === true,
+                };
+              })
+            : [];
 
           let plat9Rows = null;
           let isPlat9 = platId === 9;
@@ -3073,6 +3176,7 @@
             fecha_corte_fmt: formatDDMMYYYY(cuenta.fecha_corte) || "",
             estadoCuenta,
             perfiles: perfilesRows,
+            madreRows,
             colMode,
             showHogar,
             inactiva: cuenta.inactiva,
@@ -3089,6 +3193,7 @@
             isPlat9,
             venta_perfil: cuenta.venta_perfil,
             venta_miembro: cuenta.venta_miembro,
+            cuenta_madre: cuenta.cuenta_madre === true,
             hasVentasCuenta,
         ultimosCorreosPlat1,
             por_acceso: plat?.por_acceso || false,
@@ -3096,9 +3201,11 @@
             mas_perfiles: isTrue(plat?.mas_perfiles),
             num_max_dispositivos: plat?.num_max_dispositivos || null,
             max_miembros: plat?.max_miembros ?? null,
+            clave_cliente: plat?.clave_cliente === true,
             ventasCuenta,
             usuariosCuenta,
             correo_madre: correoMadre,
+            venta_dominio: cuenta.venta_dominio === true,
           };
 
           renderDetalle(currentCuentaDetalle);

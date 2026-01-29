@@ -38,6 +38,8 @@ const cartIcon = document.querySelector(".carrito");
 const cartItemsEl = document.querySelector("#cart-items");
 const logo = document.querySelector(".logo");
 const testingBtn = document.querySelector("#btn-testing-toggle");
+const missingDataWrap = document.querySelector("#missing-data-wrap");
+const missingDataBtn = document.querySelector("#missing-data-btn");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -287,6 +289,41 @@ const loadStockSummary = async (_hasSession = false) => {
   return stockObj;
 };
 
+const checkMissingDataNotice = async (currentUser) => {
+  if (!missingDataWrap || !missingDataBtn) return;
+  if (!currentUser?.id_usuario) {
+    missingDataWrap.classList.add("hidden");
+    return;
+  }
+  try {
+    const { data: ventas, error } = await supabase
+      .from("ventas")
+      .select("id_venta, pendiente, correo_miembro, clave_miembro, id_precio, precios:precios(id_plataforma, plataformas:plataformas(correo_cliente, clave_cliente))")
+      .eq("id_usuario", currentUser.id_usuario)
+      .eq("pendiente", true);
+    if (error) throw error;
+    const hasMissing = (ventas || []).some((v) => {
+      const plat = v.precios?.plataformas || {};
+      const needsCorreo = plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1";
+      if (!needsCorreo) return false;
+      const missingCorreo = !v.correo_miembro;
+      const needsClave = plat.clave_cliente === true || plat.clave_cliente === "true" || plat.clave_cliente === "1";
+      const missingClave = needsClave ? !v.clave_miembro : false;
+      return missingCorreo || missingClave;
+    });
+    missingDataWrap.classList.toggle("hidden", !hasMissing);
+    if (hasMissing && !missingDataBtn.dataset.bound) {
+      missingDataBtn.addEventListener("click", () => {
+        window.location.href = "entregar_servicios.html?faltantes=1";
+      });
+      missingDataBtn.dataset.bound = "1";
+    }
+  } catch (err) {
+    console.error("missing data notice error", err);
+    missingDataWrap.classList.add("hidden");
+  }
+};
+
 async function init() {
   setEstado("Cargando categorias y plataformas...");
   initModal(modalEls);
@@ -337,6 +374,7 @@ async function init() {
       testingBtn.classList.toggle("hidden", !isSuper);
       testingBtn.style.display = isSuper ? "inline-flex" : "none";
     }
+    await checkMissingDataNotice(currentUser);
 
     const cachedCart = getCachedCart();
     const cartData = await fetchCart();

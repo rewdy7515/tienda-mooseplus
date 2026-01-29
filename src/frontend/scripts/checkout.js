@@ -431,7 +431,7 @@ btnSendPayment?.addEventListener("click", async () => {
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
-            "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuentas:cuentas!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+            "id_usuario, fecha_corte, id_cuenta_miembro, id_perfil, id_orden, cuentas:cuentas!ventas_id_cuenta_miembro_fkey!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
           )
           .eq("id_orden", resp.id_orden);
         if (ventasOrdErr) throw ventasOrdErr;
@@ -450,7 +450,7 @@ btnSendPayment?.addEventListener("click", async () => {
               fechaCorte: v.fecha_corte || "",
               idOrden: resp.id_orden,
             },
-            { idCuenta: v.id_cuenta }
+            { idCuenta: v.id_cuenta_miembro }
           );
           userIds.forEach((uid) => rowsNotif.push({ ...notif, id_usuario: uid }));
         });

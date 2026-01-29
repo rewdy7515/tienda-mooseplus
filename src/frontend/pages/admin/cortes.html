@@ -94,6 +94,18 @@
         box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
         transform: translateY(1px);
       }
+      .aviso-btn {
+        background: #facc15;
+        color: #1f2937;
+        border: none;
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .aviso-btn:hover {
+        background: #eab308;
+      }
       .input-inline {
         width: 100%;
         padding: 6px 8px;
@@ -119,6 +131,42 @@
         font-weight: 700;
         margin-left: 12px;
         line-height: 1;
+      }
+      .madre-bar {
+        background: #f3f4f6;
+        border: 2px solid #b5c1d3;
+        border-bottom: none;
+        border-radius: 10px 10px 0 0;
+        padding: 12px 16px;
+        margin: 10px 0 -6px;
+      }
+      .madre-bar p {
+        margin: 4px 0;
+      }
+      .madre-bar a {
+        color: #1d4ed8;
+        text-decoration: underline;
+      }
+      .madre-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .madre-link .input-inline {
+        max-width: 420px;
+      }
+      .madre-save-btn {
+        background: #111827;
+        color: #fff;
+        border: none;
+        padding: 6px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .cortes-subtitle {
+        margin: 14px 0 6px;
+        font-weight: 700;
       }
     </style>
   </head>
@@ -217,6 +265,139 @@
         if (statusEl) statusEl.textContent = msg || "";
       };
 
+      const renderVentaRow = (v, plataforma) => {
+        const maxPin = plataforma.max_dig_pin || "";
+        const usaPines = !!plataforma.usa_pines;
+        const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
+        const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
+        const cliente = v.usuarios
+          ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
+          : "-";
+        const accountSource = v.id_cuenta_miembro ? v.cuentas_miembro : v.cuentas;
+        const correo = accountSource?.correo || "-";
+        const clave = accountSource?.clave || "";
+        const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
+        const showDot =
+          plataforma.id_plataforma === 1 &&
+          ((v.cuentas?.venta_perfil === true && v.perfiles?.perfil_hogar === true) ||
+            v.cuentas?.venta_miembro === true);
+        const perfilCell = `${perfil}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
+        const pin = v.perfiles?.pin ?? "";
+        const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
+        const cuentaId = accountSource?.id_cuenta || "";
+        const perfilId = v.perfiles?.id_perfil || "";
+        buildServiceCopyText({
+          plataforma: plataforma.nombre,
+          idVenta: v.id_venta,
+          correo,
+          clave,
+          nPerfil: v.perfiles?.n_perfil,
+          pin,
+          fechaCorte: v.fecha_corte,
+          porAcceso: plataforma.por_acceso,
+          usaPines: plataforma.usa_pines,
+          ventaPerfil: v.cuentas?.venta_perfil,
+          ventaMiembro: v.cuentas?.venta_miembro,
+          idPlataforma: plataforma.id_plataforma,
+          isSubCuenta: false,
+        });
+        return `
+          <tr class="cortes-row" data-row-type="venta">
+            <td>${ventaId ? `#${ventaId}` : ""}</td>
+            <td>${cliente}</td>
+            <td class="copy-cell" data-copy="${correo}">${correo}</td>
+            <td>
+              <div class="copy-wrap" data-copy="${clave}">
+                <input type="text" class="input-inline copy-input" value="${clave}" data-venta="${v.id_venta}" data-cuenta="${cuentaId}" data-field="clave" data-original="${clave}">
+              </div>
+            </td>
+            <td>${perfilCell}</td>
+            <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
+            <td>${formatDDMMYYYY(v.fecha_corte)}</td>
+            <td style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${
+                plataforma.id_plataforma === 12 && v.aviso_corte !== true
+                  ? `<button class="aviso-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Aviso</button>`
+                  : `<button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>`
+              }
+            </td>
+          </tr>
+        `;
+      };
+
+      const renderReemplazoRow = (v, plataforma) => {
+        const maxPin = plataforma.max_dig_pin || "";
+        const usaPines = !!plataforma.usa_pines;
+        const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
+        const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
+        const perfilLabel = v.perfil ? `M${v.perfil}` : "-";
+        const showDot =
+          plataforma.id_plataforma === 1 &&
+          ((v.cuentas?.venta_perfil === true && v.perfil_hogar === true) ||
+            v.cuentas?.venta_miembro === true);
+        const perfilCell = `${perfilLabel}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
+        const cuentaId = v.id_cuenta || "";
+        const perfilId = v.id_perfil || "";
+        const subId = v.id_sub_cuenta || "";
+        buildServiceCopyText({
+          plataforma: plataforma.nombre,
+          idVenta: null,
+          correo: v.correo,
+          clave: v.clave,
+          nPerfil: v.perfil,
+          pin: v.pin,
+          fechaCorte: "",
+          porAcceso: plataforma.por_acceso,
+          usaPines: plataforma.usa_pines,
+          ventaPerfil: v.cuentas?.venta_perfil,
+          ventaMiembro: v.cuentas?.venta_miembro,
+          idPlataforma: plataforma.id_plataforma,
+          isSubCuenta: !!subId,
+        });
+        return `
+          <tr class="cortes-row" data-row-type="reemplazo">
+            <td>-</td>
+            <td>Reemplazado</td>
+            <td class="copy-cell" data-copy="${v.correo || ""}">${v.correo || "-"}</td>
+            <td>
+              <div class="copy-wrap" data-copy="${v.clave || ""}">
+                <input type="text" class="input-inline copy-input" value="${v.clave || ""}" data-reemplazo="${v.id_reemplazo || ""}" data-cuenta="${cuentaId}" data-subcuenta="${subId}" data-field="clave" data-original="${v.clave || ""}">
+              </div>
+            </td>
+            <td>${perfilCell}</td>
+            <td>
+              <input type="text" class="input-inline" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
+            </td>
+            <td></td>
+            <td style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
+            </td>
+          </tr>
+        `;
+      };
+
+      const renderTable = (rowsHtml) => {
+        return `
+          <table class="cortes-table">
+            <thead>
+              <tr>
+                <th>ID Venta</th>
+                <th>Cliente</th>
+                <th>Correo</th>
+                <th>Clave</th>
+                <th>Perfil</th>
+                <th>PIN</th>
+                <th>Fecha de corte</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        `;
+      };
+
       const renderBloques = (plataformasConItems) => {
         if (!tablasEl) return;
         if (!plataformasConItems.length) {
@@ -233,108 +414,60 @@
               if (ca === cb) return 0;
               return ca > cb ? 1 : -1;
             });
-            const usaPines = !!plataforma.usa_pines;
-            const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
-            const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
-            const rows = sortedItems
-              .map((v) => {
-                const maxPin = plataforma.max_dig_pin || "";
-                if (v.tipo === "reemplazo") {
-                  const perfilLabel = v.perfil ? `M${v.perfil}` : "-";
-                  const showDot =
-                    plataforma.id_plataforma === 1 &&
-                    ((v.cuentas?.venta_perfil === true && v.perfil_hogar === true) ||
-                      v.cuentas?.venta_miembro === true);
-                  const perfilCell = `${perfilLabel}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
-                  const cuentaId = v.id_cuenta || "";
-                  const perfilId = v.id_perfil || "";
-                  const subId = v.id_sub_cuenta || "";
-                  const copyText = buildServiceCopyText({
-                    plataforma: plataforma.nombre,
-                    idVenta: null,
-                    correo: v.correo,
-                    clave: v.clave,
-                    nPerfil: v.perfil,
-                    pin: v.pin,
-                    fechaCorte: "",
-                    porAcceso: plataforma.por_acceso,
-                    usaPines: plataforma.usa_pines,
-                    ventaPerfil: v.cuentas?.venta_perfil,
-                    ventaMiembro: v.cuentas?.venta_miembro,
-                    idPlataforma: plataforma.id_plataforma,
-                    isSubCuenta: !!subId,
-                  });
-                  return `
-                    <tr class="cortes-row" data-row-type="reemplazo">
-                      <td>-</td>
-                      <td>Reemplazado</td>
-                      <td class="copy-cell" data-copy="${v.correo || ""}">${v.correo || "-"}</td>
-                      <td>
-                        <div class="copy-wrap" data-copy="${v.clave || ""}">
-                          <input type="text" class="input-inline copy-input" value="${v.clave || ""}" data-reemplazo="${v.id_reemplazo || ""}" data-cuenta="${cuentaId}" data-subcuenta="${subId}" data-field="clave" data-original="${v.clave || ""}">
-                        </div>
-                      </td>
-                      <td>${perfilCell}</td>
-                      <td>
-                        <input type="text" class="input-inline" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
-                      </td>
-                      <td></td>
-                      <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                      <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
-                    </td>
-                  </tr>
+            const ventasItems = sortedItems.filter((v) => v.tipo === "venta");
+            const reemplazosItems = sortedItems.filter((v) => v.tipo === "reemplazo");
+            const motherEnabled = plataforma.cuenta_madre === true;
+            let contentHtml = "";
+            if (motherEnabled && ventasItems.length) {
+              const motherMap = new Map();
+              const sinMadre = [];
+              ventasItems.forEach((v) => {
+                const motherId = v.cuentas?.id_cuenta;
+                if (!motherId) {
+                  sinMadre.push(v);
+                  return;
+                }
+                if (!motherMap.has(motherId)) motherMap.set(motherId, []);
+                motherMap.get(motherId).push(v);
+              });
+              const motherBlocks = Array.from(motherMap.values()).map((rows) => {
+                const madre = rows[0]?.cuentas || {};
+                const bar = `
+                  <div class="madre-bar">
+                    <p><strong>Cuenta madre:</strong> ${madre.correo || "-"}</p>
+                    <p><strong>Clave:</strong> ${madre.clave || "-"}</p>
+                    <div class="madre-link">
+                      <strong>Link:</strong>
+                      <input
+                        type="text"
+                        class="input-inline"
+                        value="${madre.link_codigo || ""}"
+                        data-madre="${madre.id_cuenta || ""}"
+                        data-field="link_codigo"
+                        data-original="${madre.link_codigo || ""}"
+                      />
+                      <button class="madre-save-btn" data-madre="${madre.id_cuenta || ""}" aria-label="Guardar link">
+                        💾
+                      </button>
+                    </div>
+                  </div>
                 `;
+                const rowsHtml = rows.map((v) => renderVentaRow(v, plataforma)).join("");
+                return `${bar}${renderTable(rowsHtml)}`;
+              });
+              contentHtml += motherBlocks.join("");
+              if (sinMadre.length) {
+                const rowsHtml = sinMadre.map((v) => renderVentaRow(v, plataforma)).join("");
+                contentHtml += `<div class="cortes-subtitle">Sin cuenta madre</div>${renderTable(rowsHtml)}`;
               }
-                const cliente = v.usuarios
-                  ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
-                  : "-";
-                const correo = v.cuentas?.correo || "-";
-                const clave = v.cuentas?.clave || "";
-                const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
-                const showDot =
-                  plataforma.id_plataforma === 1 &&
-                  ((v.cuentas?.venta_perfil === true && v.perfiles?.perfil_hogar === true) ||
-                    v.cuentas?.venta_miembro === true);
-                const perfilCell = `${perfil}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
-                const pin = v.perfiles?.pin ?? "";
-                const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
-                const cuentaId = v.cuentas?.id_cuenta || "";
-                const perfilId = v.perfiles?.id_perfil || "";
-                const copyText = buildServiceCopyText({
-                  plataforma: plataforma.nombre,
-                  idVenta: v.id_venta,
-                  correo,
-                  clave,
-                  nPerfil: v.perfiles?.n_perfil,
-                  pin,
-                  fechaCorte: v.fecha_corte,
-                  porAcceso: plataforma.por_acceso,
-                  usaPines: plataforma.usa_pines,
-                  ventaPerfil: v.cuentas?.venta_perfil,
-                  ventaMiembro: v.cuentas?.venta_miembro,
-                  idPlataforma: plataforma.id_plataforma,
-                  isSubCuenta: false,
-                });
-                return `
-                  <tr class="cortes-row" data-row-type="venta">
-                    <td>${ventaId ? `#${ventaId}` : ""}</td>
-                    <td>${cliente}</td>
-                    <td class="copy-cell" data-copy="${correo}">${correo}</td>
-                    <td>
-                      <div class="copy-wrap" data-copy="${clave}">
-                        <input type="text" class="input-inline copy-input" value="${clave}" data-venta="${v.id_venta}" data-cuenta="${cuentaId}" data-field="clave" data-original="${clave}">
-                      </div>
-                    </td>
-                    <td>${perfilCell}</td>
-                    <td><input type="text" class="input-inline" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
-                    <td>${formatDDMMYYYY(v.fecha_corte)}</td>
-                    <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                      <button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
-                    </td>
-                  </tr>
-                `;
-              })
-              .join("");
+            } else if (ventasItems.length) {
+              const rowsHtml = ventasItems.map((v) => renderVentaRow(v, plataforma)).join("");
+              contentHtml += renderTable(rowsHtml);
+            }
+            if (reemplazosItems.length) {
+              const rowsHtml = reemplazosItems.map((v) => renderReemplazoRow(v, plataforma)).join("");
+              contentHtml += `<div class="cortes-subtitle">Reemplazos</div>${renderTable(rowsHtml)}`;
+            }
             return `
               <div class="cortes-block">
                 <button type="button" data-plat="${plataforma.id_plataforma}" class="btn-outline inventario-btn cortes-btn">
@@ -342,23 +475,7 @@
                   <span class="cortes-badge" aria-label="Total de registros">${items.length}</span>
                 </button>
                 <div class="cortes-tabla cortes-hidden" id="tabla-plat-${plataforma.id_plataforma}">
-                  <table class="cortes-table">
-                    <thead>
-                      <tr>
-                        <th>ID Venta</th>
-                        <th>Cliente</th>
-                        <th>Correo</th>
-                        <th>Clave</th>
-                        <th>Perfil</th>
-                        <th>PIN</th>
-                        <th>Fecha de corte</th>
-                        <th>Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${rows}
-                    </tbody>
-                  </table>
+                  ${contentHtml}
                 </div>
               </div>
             `;
@@ -375,7 +492,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, fecha_corte, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
+              "id_venta, fecha_corte, aviso_corte, id_cuenta_miembro, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, correo, clave, link_codigo, id_plataforma, inactiva, venta_perfil, venta_miembro, cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, link_codigo), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
             )
             .lte("fecha_corte", today)
             .or("suspendido.is.null,suspendido.eq.false")
@@ -430,7 +547,9 @@
 
           const { data: plataformasInfo, error: platErr } = await supabase
             .from("plataformas")
-            .select("id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso")
+            .select(
+              "id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso, cuenta_madre"
+            )
             .in("id_plataforma", platIds);
           if (platErr) throw platErr;
           const platNameMap = (plataformasInfo || []).reduce((acc, p) => {
@@ -465,6 +584,10 @@
               max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
               usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
               por_acceso: platAccessMap[entry.plataforma.id_plataforma] || false,
+              cuenta_madre:
+                (plataformasInfo || []).find(
+                  (p) => p.id_plataforma === entry.plataforma.id_plataforma
+                )?.cuenta_madre === true,
             },
             items: entry.items,
           }));
@@ -508,7 +631,7 @@
         row.classList.add("selected");
       };
 
-      tablasEl?.addEventListener("click", (e) => {
+      tablasEl?.addEventListener("click", async (e) => {
         selectRow(e.target);
         const copyCell = e.target.closest(".copy-cell");
         if (copyCell) {
@@ -518,6 +641,57 @@
         const copyInput = e.target.closest(".copy-input");
         if (copyInput) {
           copyToClipboard(copyInput.value, copyInput);
+          return;
+        }
+        const madreSaveBtn = e.target.closest(".madre-save-btn");
+        if (madreSaveBtn) {
+          const madreId = madreSaveBtn.dataset.madre;
+          if (!madreId) return;
+          const wrapper = madreSaveBtn.closest(".madre-link");
+          const input = wrapper?.querySelector('input[data-field="link_codigo"]');
+          if (!input) return;
+          madreSaveBtn.disabled = true;
+          try {
+            const { error } = await supabase
+              .from("cuentas")
+              .update({ link_codigo: input.value || null })
+              .eq("id_cuenta", madreId);
+            if (error) throw error;
+            input.dataset.original = input.value || "";
+          } catch (err) {
+            console.error("madre link save error", err);
+            alert("No se pudo guardar el link.");
+          } finally {
+            madreSaveBtn.disabled = false;
+          }
+          return;
+        }
+        const avisoBtn = e.target.closest(".aviso-btn");
+        if (avisoBtn) {
+          const ventaId = avisoBtn.dataset.venta;
+          if (!ventaId) return;
+          avisoBtn.disabled = true;
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ aviso_corte: true })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            const cortarBtn = document.createElement("button");
+            cortarBtn.className = "cortar-btn";
+            cortarBtn.textContent = "Cortar";
+            cortarBtn.dataset.venta = ventaId;
+            cortarBtn.dataset.usapines = avisoBtn.dataset.usapines || "false";
+            cortarBtn.dataset.corteclave = avisoBtn.dataset.corteclave || "false";
+            cortarBtn.dataset.cortedirecto = avisoBtn.dataset.cortedirecto || "false";
+            cortarBtn.dataset.vperf = avisoBtn.dataset.vperf || "false";
+            cortarBtn.dataset.vmiem = avisoBtn.dataset.vmiem || "false";
+            avisoBtn.replaceWith(cortarBtn);
+          } catch (err) {
+            console.error("aviso corte error", err);
+            alert("No se pudo enviar el aviso.");
+            avisoBtn.disabled = false;
+          }
           return;
         }
         const cortarBtn = e.target.closest(".cortar-btn");

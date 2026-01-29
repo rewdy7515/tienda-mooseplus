@@ -17,6 +17,7 @@
         <button class="btn-primary admin-action" id="btn-importar-clientes">Clientes</button>
         <button class="btn-primary admin-action" id="btn-importar-cuentas">Cuentas</button>
         <button class="btn-primary admin-action" id="btn-importar-canva">Importar Canva</button>
+        <button class="btn-primary admin-action" id="btn-importar-spotify">Importar Spotify</button>
       </div>
       <p class="status">Selecciona qué deseas importar.</p>
     </main>
@@ -67,6 +68,9 @@
       });
       document.querySelector("#btn-importar-canva")?.addEventListener("click", () => {
         window.location.href = "import_canva.html";
+      });
+      document.querySelector("#btn-importar-spotify")?.addEventListener("click", () => {
+        window.location.href = "importar_spotify.html";
       });
     </script>
   </body>

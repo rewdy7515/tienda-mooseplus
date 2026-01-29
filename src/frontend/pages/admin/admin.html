@@ -82,10 +82,10 @@
               .eq("solucionado", false),
             supabase
               .from("ventas")
-              .select("id_venta, cuentas!inner(inactiva)", { count: "exact", head: true })
+              .select("id_venta, cuentas!ventas_id_cuenta_fkey!inner(inactiva)", { count: "exact", head: true })
               .lte("fecha_corte", today)
               .or("suspendido.is.null,suspendido.eq.false")
-              .eq("cuentas.inactiva", false),
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
             supabase
               .from("ventas")
               .select("id_venta", { count: "exact", head: true })
