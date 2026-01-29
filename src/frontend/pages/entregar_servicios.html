@@ -198,7 +198,7 @@
           const user = await loadCurrentUser();
           const userId = user?.id_usuario;
           const baseSelect =
-            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, correo_miembro, cuentas:cuentas(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
+            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, correo_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
           let query = supabase.from("ventas").select(baseSelect).order("id_venta", { ascending: false });
           if (idOrdenParam) {
             query = query.eq("id_orden", idOrdenParam);

@@ -105,6 +105,7 @@
             </div>
             <button type="button" id="prov-buscar-btn" class="btn-primary">🔍</button>
             <button type="button" id="btn-netflix" class="btn-outline" title="Autocompletar Netflix">Netflix</button>
+            <button type="button" id="btn-spotify" class="btn-outline" title="Autocompletar Spotify">Spotify</button>
           </div>
         </div>
 
@@ -232,6 +233,7 @@
       }
       let pinRecargaSeleccionado = null;
       const btnNetflix = document.querySelector("#btn-netflix");
+      const btnSpotify = document.querySelector("#btn-spotify");
       const btnAdd = document.querySelector("#btn-add-cuenta");
       const statusEl = document.querySelector("#add-status");
       const tipoCuentaSelect = document.querySelector("#tipo-cuenta");
@@ -425,7 +427,7 @@
           const { data, error } = await supabase
             .from("plataformas")
             .select(
-              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo"
+              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo, cuenta_madre, max_miembros"
             )
             .order("nombre");
           if (error) throw error;
@@ -444,6 +446,8 @@
                 num_max_dispositivos: p.num_max_dispositivos,
                 usa_pines: p.usa_pines,
                 max_dig_pin: p.max_dig_pin,
+                max_miembros: p.max_miembros,
+                cuenta_madre: p.cuenta_madre,
               });
             });
           if (tipoCuentaSelect) {
@@ -458,12 +462,15 @@
         }
       };
 
-      const buildTipoCuentaOptions = (miembros) => {
+      const buildTipoCuentaOptions = (miembros, cuentaMadre) => {
         if (!tipoCuentaSelect) return;
         tipoCuentaSelect.innerHTML = '<option value="">Seleccione</option>';
         const opts = [
           { val: "perfiles", label: "Perfiles" },
         ];
+        if (cuentaMadre) {
+          opts.push({ val: "cuenta_madre", label: "Cuenta madre" });
+        }
         if (miembros) {
           opts.push({ val: "perfil_independiente", label: "Perfil independiente" });
         }
@@ -474,7 +481,7 @@
           opt.textContent = o.label;
           tipoCuentaSelect.appendChild(opt);
         });
-        tipoCuentaSelect.value = "perfiles";
+        tipoCuentaSelect.value = cuentaMadre ? "cuenta_madre" : "perfiles";
       };
 
       const adjustDuracion = (delta) => {
@@ -537,9 +544,13 @@
         buscarProveedores(provInput?.value || "", false);
       });
 
+      const setProveedor = (id, nombre) => {
+        selectedProveedor = String(id);
+        if (provInput) provInput.value = nombre || "";
+      };
+
       btnNetflix?.addEventListener("click", () => {
-        selectedProveedor = "2";
-        if (provInput) provInput.value = "Netflix";
+        setProveedor(2, "Netflix");
         if (platSelect) {
           platSelect.value = "1";
           const changeEvt = new Event("change");
@@ -556,11 +567,33 @@
         }
       });
 
+      btnSpotify?.addEventListener("click", () => {
+        setProveedor(2, "moose+");
+        if (platSelect) {
+          platSelect.value = "9";
+          const changeEvt = new Event("change");
+          platSelect.dispatchEvent(changeEvt);
+        }
+        if (regionEl) regionEl.value = "Egipto";
+        if (direccionEl) {
+          direccionEl.value =
+            "109 Ahmed Saeed, Ganayen Al Waileyah, El Weili, Cairo Governorate 4390114, Egypt";
+        }
+        if (precioInput) {
+          precioInput.value = "0";
+        }
+      });
+
       platSelect?.addEventListener("change", async () => {
         const sel = platSelect.selectedOptions?.[0];
         const meta = plataformaInfo.get(String(platSelect.value)) || {};
         const miembros = sel ? sel.dataset.miembros === "true" || sel.dataset.miembros === "1" || meta.miembros === true || meta.miembros === "1" : false;
-        buildTipoCuentaOptions(miembros);
+        const cuentaMadre =
+          meta.cuenta_madre === true ||
+          meta.cuenta_madre === "true" ||
+          meta.cuenta_madre === 1 ||
+          meta.cuenta_madre === "1";
+        buildTipoCuentaOptions(miembros, cuentaMadre);
         if (tipoCuentaSelect) {
           tipoCuentaSelect.disabled = !platSelect.value;
           tipoCuentaSelect.classList.toggle("input-disabled", !platSelect.value);
@@ -606,6 +639,7 @@
         const direccion = direccionEl?.value.trim() || "";
         const platMeta = plataformaInfo.get(String(plataforma)) || {};
         const numDispositivos = Number(platMeta.num_max_dispositivos) > 0 ? Number(platMeta.num_max_dispositivos) : 1;
+        const maxMiembros = Number(platMeta.max_miembros) > 0 ? Number(platMeta.max_miembros) : 0;
         const usaPines = platMeta.usa_pines === true || platMeta.usa_pines === "true" || platMeta.usa_pines === 1 || platMeta.usa_pines === "1";
         const maxDigPin = Number(platMeta.max_dig_pin) > 0 ? Number(platMeta.max_dig_pin) : 4;
         const requierePinRecarga = String(plataforma) === "1" && String(selectedProveedor) === "2";
@@ -648,6 +682,7 @@
 
           let venta_perfil = false;
           let venta_miembro = false;
+          let cuenta_madre = false;
           let ocupado = false;
           if (tipo === "perfil_independiente") {
             venta_perfil = false;
@@ -655,6 +690,10 @@
           } else if (tipo === "perfiles") {
             venta_perfil = true;
             venta_miembro = false;
+          } else if (tipo === "cuenta_madre") {
+            venta_perfil = false;
+            venta_miembro = false;
+            cuenta_madre = true;
           } else if (tipo === "cuenta_completa") {
             venta_perfil = false;
             venta_miembro = false;
@@ -677,6 +716,7 @@
             venta_miembro,
             ocupado,
             inactiva: false,
+            cuenta_madre,
           };
 
           let cuentaInserted = null;
@@ -706,9 +746,13 @@
           }
           if (insertError) throw insertError;
 
-          // Si es tipo "perfiles", crear perfiles asociados
-          if (tipo === "perfiles" && cuentaInserted?.id_cuenta) {
-            const perfiles = Array.from({ length: Math.max(1, numDispositivos) }).map((_, idx) => {
+          const shouldCreatePerfiles =
+            (tipo === "perfiles" && cuentaInserted?.id_cuenta) ||
+            (tipo === "cuenta_madre" && cuentaInserted?.id_cuenta);
+          if (shouldCreatePerfiles) {
+            const totalPerfiles =
+              tipo === "cuenta_madre" ? Math.max(1, maxMiembros) : Math.max(1, numDispositivos);
+            const perfiles = Array.from({ length: totalPerfiles }).map((_, idx) => {
               let pinVal = null;
               if (usaPines) {
                 const digits = Math.max(1, maxDigPin);

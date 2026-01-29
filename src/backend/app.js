@@ -1141,7 +1141,7 @@ app.post("/api/checkout", async (req, res) => {
         const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
           .from("perfiles")
           .select(
-            "id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas!inner(id_plataforma, inactiva, venta_perfil)",
+            "id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas!perfiles_id_cuenta_fkey(id_plataforma, inactiva, venta_perfil)",
           )
           .eq("perfil_hogar", true)
           .eq("cuentas.id_plataforma", platId)
@@ -1204,7 +1204,7 @@ app.post("/api/checkout", async (req, res) => {
       } else {
         const { data: perfilesLibres, error: perfErr } = await supabaseAdmin
           .from("perfiles")
-          .select("id_perfil, id_cuenta, perfil_hogar, cuentas!inner(id_plataforma, inactiva, venta_perfil)")
+          .select("id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey(id_plataforma, inactiva, venta_perfil)")
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", true)
           .eq("perfil_hogar", false)
@@ -1250,7 +1250,7 @@ app.post("/api/checkout", async (req, res) => {
     if (assignedPerfilIds.length) {
       const { data: perfilesAsignados, error: perfValErr } = await supabaseAdmin
         .from("perfiles")
-        .select("id_perfil, cuentas:cuentas(inactiva)")
+        .select("id_perfil, cuentas:cuentas!perfiles_id_cuenta_fkey(inactiva)")
         .in("id_perfil", assignedPerfilIds);
       if (perfValErr) throw perfValErr;
       const bad = (perfilesAsignados || []).find((p) => isInactive(p?.cuentas?.inactiva));
