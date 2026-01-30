@@ -1043,7 +1043,7 @@ app.post("/api/checkout", async (req, res) => {
     const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
     const { data: plataformas, error: platErr } = await supabaseAdmin
       .from("plataformas")
-      .select("id_plataforma, nombre, entrega_inmediata")
+      .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre")
       .in("id_plataforma", plataformaIds);
     if (platErr) throw platErr;
     const platInfoById = (plataformas || []).reduce((acc, p) => {
@@ -1120,7 +1120,8 @@ app.post("/api/checkout", async (req, res) => {
       if (cantidad <= 0) continue;
       const platId = Number(price.id_plataforma) || null;
       const entregaInmediata = isTrue(platInfoById[platId]?.entrega_inmediata);
-      const pendienteVenta = !entregaInmediata;
+      const cuentaMadrePlat = isTrue(platInfoById[platId]?.cuenta_madre);
+      const pendienteVenta = !entregaInmediata || cuentaMadrePlat;
       const mesesItemRaw = it.meses || 1;
       const mesesItem = Number.isFinite(Number(mesesItemRaw))
         ? Math.max(1, Math.round(Number(mesesItemRaw)))
@@ -1261,23 +1262,26 @@ app.post("/api/checkout", async (req, res) => {
         }
       } else {
         const isSpotify = platId === 9;
-        const { data: perfilesLibres, error: perfErr } = await supabaseAdmin
+        let perfilesQuery = supabaseAdmin
           .from("perfiles")
-          .select("id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil)")
+          .select("id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil, cuenta_madre)")
           .eq("cuentas.id_plataforma", platId)
           .eq("cuentas.venta_perfil", isSpotify ? false : true)
-          .or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" })
           .eq("perfil_hogar", false)
           .eq("ocupado", false)
           .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
           .limit(cantidad);
+        perfilesQuery = isSpotify
+          ? perfilesQuery.eq("cuentas.cuenta_madre", true)
+          : perfilesQuery.or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" });
+        const { data: perfilesLibres, error: perfErr } = await perfilesQuery;
         if (perfErr) throw perfErr;
         console.log("[checkout] perfiles libres raw", {
           platId,
           count: perfilesLibres?.length || 0,
           first: perfilesLibres?.[0] || null,
         });
-        if (platId === 1) {
+        if (platId === 1 || platId === 9) {
           console.log("[checkout][netflix] filtros", {
             platId,
             venta_perfil: isSpotify ? false : true,
@@ -1294,8 +1298,9 @@ app.post("/api/checkout", async (req, res) => {
             cuenta_plat: p.cuentas?.id_plataforma,
             cuenta_inactiva: p.cuentas?.inactiva,
             cuenta_venta_perfil: p.cuentas?.venta_perfil,
+            cuenta_madre: p.cuentas?.cuenta_madre,
           }));
-          console.log("[checkout][netflix] raw sample", rawSample);
+          console.log("[checkout][stock] raw sample", rawSample);
         }
         const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
         console.log("[checkout] perfiles libres disponibles", {
@@ -1303,7 +1308,7 @@ app.post("/api/checkout", async (req, res) => {
           count: disponibles.length,
           first: disponibles[0] || null,
         });
-        if (platId === 1) {
+        if (platId === 1 || platId === 9) {
           const dispSample = disponibles.slice(0, 5).map((p) => ({
             id_perfil: p.id_perfil,
             id_cuenta: p.id_cuenta,
@@ -1311,7 +1316,7 @@ app.post("/api/checkout", async (req, res) => {
             ocupado: p.ocupado,
             cuenta_inactiva: p.cuentas?.inactiva,
           }));
-          console.log("[checkout][netflix] disponibles sample", dispSample);
+          console.log("[checkout][stock] disponibles sample", dispSample);
         }
         const faltantes = Math.max(0, cantidad - disponibles.length);
         disponibles.slice(0, cantidad).forEach((p) => {

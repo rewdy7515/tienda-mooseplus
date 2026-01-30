@@ -53,6 +53,8 @@
 
       const params = new URLSearchParams(window.location.search);
       const idOrdenParam = params.get("id_orden");
+      let ventasById = {};
+      let platById = {};
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -219,7 +221,9 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, por_acceso, usa_pines, color_1, entrega_inmediata, correo_cliente, clave_cliente")
+              .select(
+                "id_plataforma, nombre, por_acceso, usa_pines, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
+              )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
@@ -227,6 +231,7 @@
               return acc;
             }, {});
           }
+          platById = platMap;
 
           const onlyFaltantes = params.get("faltantes") === "1";
           const filteredVentas = (ventas || []).filter((v) => {
@@ -263,6 +268,7 @@
                 entrega_inmediata: plat.entrega_inmediata === true || plat.entrega_inmediata === "true" || plat.entrega_inmediata === "1",
                 correo_cliente: plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1",
                 clave_cliente: plat.clave_cliente === true || plat.clave_cliente === "true" || plat.clave_cliente === "1",
+                cuenta_madre: plat.cuenta_madre === true || plat.cuenta_madre === "true" || plat.cuenta_madre === "1",
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -297,6 +303,7 @@
             if (v?.id_venta) acc[v.id_venta] = v;
             return acc;
           }, {});
+          ventasById = ventasMap;
           let renovacionesRows = [];
           if (!onlyFaltantes && (ventas || []).length) {
             const idsVentas = (ventas || []).map((v) => v.id_venta).filter(Boolean);
@@ -380,8 +387,79 @@
           return;
         }
         try {
+          const venta = ventasById[ventaId] || {};
+          const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
+          const platInfo = platById[platId] || {};
+          const needsMadre = platInfo.cuenta_madre === true;
+          let assignCuenta = null;
+          let assignPerfil = null;
+          let clientCuentaId = null;
+
+          if (needsMadre) {
+            const { data: cuentaCliente, error: cErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, id_cuenta_miembro")
+              .eq("correo", correoVal)
+              .maybeSingle();
+            if (cErr) throw cErr;
+            clientCuentaId = cuentaCliente?.id_cuenta || null;
+            const motherFromClient = cuentaCliente?.id_cuenta_miembro || null;
+
+            if (motherFromClient) {
+              const { data: perfPref, error: pErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil, id_cuenta, n_perfil")
+                .eq("id_cuenta", motherFromClient)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (pErr) throw pErr;
+              if (perfPref?.id_perfil) {
+                assignPerfil = perfPref.id_perfil;
+                assignCuenta = perfPref.id_cuenta;
+              }
+            }
+
+            if (!assignPerfil && platId) {
+              const { data: perfAlt, error: pAltErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil, id_cuenta, n_perfil, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, cuenta_madre)")
+                .eq("cuentas.id_plataforma", Number(platId))
+                .eq("cuentas.cuenta_madre", true)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (pAltErr) throw pAltErr;
+              if (perfAlt?.id_perfil) {
+                assignPerfil = perfAlt.id_perfil;
+                assignCuenta = perfAlt.id_cuenta;
+              }
+            }
+          }
+
+          if (assignPerfil && clientCuentaId) {
+            const { error: occErr } = await supabase
+              .from("perfiles")
+              .update({ ocupado: true, id_cuenta_miembro: clientCuentaId })
+              .eq("id_perfil", assignPerfil);
+            if (occErr) throw occErr;
+          }
+
+          if (assignCuenta && clientCuentaId) {
+            const { error: linkErr } = await supabase
+              .from("cuentas")
+              .update({ id_cuenta_miembro: assignCuenta })
+              .eq("id_cuenta", clientCuentaId);
+            if (linkErr) throw linkErr;
+          }
+
           const payload = { correo_miembro: correoVal };
           if (claveVal) payload.clave_miembro = claveVal;
+          if (assignCuenta) payload.id_cuenta = assignCuenta;
+          if (assignPerfil) payload.id_perfil = assignPerfil;
+
           const { error } = await supabase
             .from("ventas")
             .update(payload)

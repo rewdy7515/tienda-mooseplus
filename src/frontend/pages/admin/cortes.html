@@ -812,7 +812,11 @@
                 return d.toISOString().slice(0, 10);
               })();
               const isHoyOAyer = fechaCorte === todayVe || fechaCorte === ayerVe;
-              if (isHoyOAyer) {
+              if (corteDirecto) {
+                updates.push(
+                  supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
+                );
+              } else if (isHoyOAyer) {
                 updates.push(
                   supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
                 );

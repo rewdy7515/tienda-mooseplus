@@ -98,79 +98,87 @@
         setStatus("");
         tablasEl.innerHTML = entries
           .map(([_, payload]) => {
-            const rows = payload.rows || [];
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
-            const madre = payload.cuenta_info || {};
-            const madreBlock = payload.cuenta_madre
-              ? `
-                <div class="madre-bar">
-                  ${madre.region ? `<p class="madre-region">${madre.region}</p>` : ""}
-                  <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
-                  <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
-                  <p><strong>Link:</strong> ${
-                    madre.link
-                      ? `<a href="${madre.link}" target="_blank" rel="noopener noreferrer">${madre.link}</a>`
-                      : "-"
-                  }</p>
-                  <p><strong>Dirección:</strong> <span class="copyable" data-clipboard="${madre.direccion || ""}">${madre.direccion || "-"}</span></p>
-                </div>
-              `
-              : "";
-            const body = rows
-              .map(
-                (r) => `
-              <tr>
-                <td>#${String(r.id_venta).padStart(4, "0")}</td>
-                <td>${r.cliente || "-"}</td>
-                ${
-                  isEntregaInmediata
-                    ? `<td>${r.fecha_pago || "-"}</td>`
-                    : `<td>${r.servicio || "-"}</td>
-                       <td class="copyable" data-clipboard="${r.correo || ""}">${r.correo || "-"}</td>
-                       ${showClave ? `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>` : ""}`
-                }
-                ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
-                <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
-                <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}">Entregar servicio</button></td>
-              </tr>
-            `
-              )
+            const groups = Object.values(payload.groups || {});
+            const tablesHtml = groups
+              .map((group) => {
+                const rows = group.rows || [];
+                const madre = group.cuenta_info || {};
+                const madreBlock = payload.cuenta_madre
+                  ? `
+                    <div class="madre-bar">
+                      ${madre.region ? `<p class="madre-region">${madre.region}</p>` : ""}
+                      <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
+                      <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
+                      <p><strong>Link:</strong> ${
+                        madre.link
+                          ? `<a href="${madre.link}" target="_blank" rel="noopener noreferrer">${madre.link}</a>`
+                          : "-"
+                      }</p>
+                      <p><strong>Dirección:</strong> <span class="copyable" data-clipboard="${madre.direccion || ""}">${madre.direccion || "-"}</span></p>
+                    </div>
+                  `
+                  : "";
+                const body = rows
+                  .map(
+                    (r) => `
+                  <tr>
+                    <td>#${String(r.id_venta).padStart(4, "0")}</td>
+                    <td>${r.cliente || "-"}</td>
+                    ${
+                      isEntregaInmediata
+                        ? `<td>${r.fecha_pago || "-"}</td>`
+                        : `<td>${r.servicio || "-"}</td>
+                           <td class="copyable" data-clipboard="${r.correo || ""}">${r.correo || "-"}</td>
+                           ${showClave ? `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>` : ""}`
+                    }
+                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
+                    <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
+                    <td><button class="btn-primary btn-entregar" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}">Entregar servicio</button></td>
+                  </tr>
+                `
+                  )
+                  .join("");
+                return `
+                  ${madreBlock}
+                  ${
+                    payload.cuenta_madre
+                      ? `<p class="status madre-stock-msg hidden" data-plat="${payload.id_plataforma || ""}">Sin stock de cuentas madres</p>`
+                      : ""
+                  }
+                  <div class="cuenta-table-wrap">
+                    <table class="table-base">
+                      <thead>
+                        <tr>
+                          ${
+                            isEntregaInmediata
+                              ? `<th>Venta</th>
+                                 <th>Cliente</th>
+                                 <th>Fecha de pago</th>
+                                 <th>Servicio solicitado</th>
+                                 <th>Fecha de pedido</th>
+                                 <th>Acción</th>`
+                              : `<th>ID venta</th>
+                                 <th>Cliente</th>
+                                 <th>Servicio solicitado</th>
+                                 <th>Correo</th>
+                                 ${showClave ? "<th>Clave</th>" : ""}
+                                 <th>Fecha de pedido</th>
+                                 <th>Acción</th>`
+                          }
+                        </tr>
+                      </thead>
+                      <tbody>${body}</tbody>
+                    </table>
+                  </div>
+                `;
+              })
               .join("");
             return `
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${payload.nombre}</h3>
-                ${madreBlock}
-                ${
-                  payload.cuenta_madre
-                    ? `<p class="status madre-stock-msg hidden" data-plat="${payload.id_plataforma || ""}">Sin stock de cuentas madres</p>`
-                    : ""
-                }
-                <div class="cuenta-table-wrap">
-                  <table class="table-base">
-                    <thead>
-                      <tr>
-                        ${
-                          isEntregaInmediata
-                            ? `<th>Venta</th>
-                               <th>Cliente</th>
-                               <th>Fecha de pago</th>
-                               <th>Servicio solicitado</th>
-                               <th>Fecha de pedido</th>
-                               <th>Acción</th>`
-                            : `<th>ID venta</th>
-                               <th>Cliente</th>
-                               <th>Servicio solicitado</th>
-                               <th>Correo</th>
-                               ${showClave ? "<th>Clave</th>" : ""}
-                               <th>Fecha de pedido</th>
-                               <th>Acción</th>`
-                        }
-                      </tr>
-                    </thead>
-                    <tbody>${body}</tbody>
-                  </table>
-                </div>
+                ${tablesHtml}
               </div>
             `;
           })
@@ -284,19 +292,24 @@
                   platInfo.usa_pines === true ||
                   platInfo.usa_pines === "true" ||
                   platInfo.usa_pines === "1",
-                cuenta_info: null,
+                groups: {},
+              };
+            const motherId = v.id_cuenta || "sin-madre";
+            if (!grouped[platId].groups[motherId]) {
+              grouped[platId].groups[motherId] = {
+                cuenta_info: v.cuentas
+                  ? {
+                      correo: v.cuentas?.correo || "",
+                      clave: v.cuentas?.clave || "",
+                      link: v.cuentas?.link_codigo || "",
+                      direccion: v.cuentas?.direccion || "",
+                      region: v.cuentas?.region || "",
+                    }
+                  : null,
                 rows: [],
               };
-            if (!grouped[platId].cuenta_info && v.cuentas) {
-              grouped[platId].cuenta_info = {
-                correo: v.cuentas?.correo || "",
-                clave: v.cuentas?.clave || "",
-                link: v.cuentas?.link_codigo || "",
-                direccion: v.cuentas?.direccion || "",
-                region: v.cuentas?.region || "",
-              };
             }
-            grouped[platId].rows.push({
+            grouped[platId].groups[motherId].rows.push({
               id_venta: v.id_venta,
               cliente,
               id_usuario: v.id_usuario,
@@ -406,15 +419,15 @@
                   .eq("id_perfil", perfilId);
                 if (occErr) throw occErr;
               }
-              if (cuentaMadreId) {
-                const { error: linkErr } = await supabase
-                  .from("cuentas")
-                  .update({ id_cuenta_miembro: cuentaMadreId })
-                  .eq("id_cuenta", nuevaCuentaId);
-                if (linkErr) throw linkErr;
-              }
             }
             }
+          }
+          if (cuentaMadreId) {
+            const { error: linkErr } = await supabase
+              .from("cuentas")
+              .update({ id_cuenta_miembro: cuentaMadreId })
+              .eq("id_cuenta", nuevaCuentaId);
+            if (linkErr) throw linkErr;
           }
 
           const base = new Date();
