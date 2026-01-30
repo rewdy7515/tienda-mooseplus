@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 const { supabaseAdmin } = require("../database/db");
 const { port } = require("../../config/config");
 
@@ -11,6 +12,62 @@ app.use(
   })
 );
 app.use(express.json({ limit: "10mb" }));
+
+const clearCorsHeaders = (res) => {
+  res.removeHeader("Access-Control-Allow-Origin");
+  res.removeHeader("Access-Control-Allow-Credentials");
+  res.removeHeader("Access-Control-Allow-Headers");
+  res.removeHeader("Access-Control-Allow-Methods");
+};
+
+app.post("/api/bdv/notify", async (req, res) => {
+  clearCorsHeaders(res);
+  try {
+    const auth = req.headers.authorization || "";
+    const token = process.env.BDV_WEBHOOK_TOKEN || "";
+    const expected = `Bearer ${token}`;
+    if (!token || auth !== expected) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { app: appName, titulo, texto, fecha, dispositivo } = req.body || {};
+    const fields = { app: appName, titulo, texto, fecha, dispositivo };
+    const allStrings = Object.values(fields).every((v) => typeof v === "string" && v.trim() !== "");
+    if (!allStrings) {
+      return res.status(400).json({ error: "Invalid payload" });
+    }
+
+    const hash = crypto
+      .createHash("sha256")
+      .update([appName, titulo, texto, fecha, dispositivo].join("|"))
+      .digest("hex");
+
+    const { data: exists, error: existsErr } = await supabaseAdmin
+      .from("pagomoviles")
+      .select("hash")
+      .eq("hash", hash)
+      .maybeSingle();
+    if (existsErr) throw existsErr;
+    if (exists?.hash) {
+      return res.json({ ok: true, duplicado: true });
+    }
+
+    const { error: insErr } = await supabaseAdmin.from("pagomoviles").insert({
+      app: appName,
+      titulo,
+      texto,
+      fecha,
+      dispositivo,
+      hash,
+    });
+    if (insErr) throw insErr;
+
+    return res.json({ ok: true, duplicado: false });
+  } catch (err) {
+    console.error("bdv notify error", err);
+    return res.status(500).json({ error: "Internal error" });
+  }
+});
 
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";

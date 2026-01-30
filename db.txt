@@ -56,7 +56,8 @@ CREATE TABLE public.cuentas (
   CONSTRAINT cuentas_pkey PRIMARY KEY (id_cuenta),
   CONSTRAINT cuentas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT cuentas_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
-  CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario)
+  CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT cuentas_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta)
 );
 CREATE TABLE public.descuentos_meses (
   id_descuento bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -139,6 +140,15 @@ CREATE TABLE public.ordenes (
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito)
 );
+CREATE TABLE public.pagomoviles (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  titulo text NOT NULL,
+  texto text,
+  fecha time without time zone,
+  dispositivo text,
+  app text,
+  CONSTRAINT pagomoviles_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.perfiles (
   id_perfil bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   pin integer,
@@ -147,9 +157,10 @@ CREATE TABLE public.perfiles (
   n_perfil smallint,
   perfil_hogar boolean,
   correo text,
-  id_cuenta_miembro boolean,
+  id_cuenta_miembro bigint,
   CONSTRAINT perfiles_pkey PRIMARY KEY (id_perfil),
-  CONSTRAINT perfiles_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta)
+  CONSTRAINT perfiles_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT perfiles_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta)
 );
 CREATE TABLE public.plataformas (
   id_plataforma bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -316,4 +327,40 @@ CREATE TABLE public.ventas (
   CONSTRAINT ventas_id_precio_fkey FOREIGN KEY (id_precio) REFERENCES public.precios(id_precio),
   CONSTRAINT ventas_id_admin_venta_fkey FOREIGN KEY (id_admin_venta) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT ventas_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta)
+);
+CREATE TABLE public.ventas_duplicate (
+  id_venta bigint GENERATED ALWAYS AS IDENTITY NOT NULL UNIQUE,
+  id_usuario bigint,
+  id_cuenta bigint,
+  id_perfil bigint,
+  fecha_pago date,
+  fecha_corte date,
+  monto real,
+  id_tarjeta_de_regalo bigint,
+  id_orden bigint,
+  reportado boolean,
+  vencido boolean,
+  suspendido boolean,
+  infinito boolean,
+  corte_reemplazo boolean,
+  meses_contratados smallint,
+  pendiente boolean,
+  pago_verificado boolean,
+  pago_rechazado boolean,
+  id_precio bigint,
+  id_sub_cuenta bigint,
+  id_admin_venta bigint,
+  correo_miembro text,
+  clave_miembro text,
+  aviso_corte boolean,
+  id_cuenta_miembro bigint,
+  CONSTRAINT ventas_duplicate_pkey PRIMARY KEY (id_venta),
+  CONSTRAINT ventas_duplicate_id_admin_venta_fkey FOREIGN KEY (id_admin_venta) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT ventas_duplicate_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT ventas_duplicate_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT ventas_duplicate_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
+  CONSTRAINT ventas_duplicate_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),
+  CONSTRAINT ventas_duplicate_id_precio_fkey FOREIGN KEY (id_precio) REFERENCES public.precios(id_precio),
+  CONSTRAINT ventas_duplicate_id_tarjeta_de_regalo_fkey FOREIGN KEY (id_tarjeta_de_regalo) REFERENCES public.tarjetas_de_regalo(id_tarjeta_de_regalo),
+  CONSTRAINT ventas_duplicate_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
