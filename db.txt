@@ -22,6 +22,10 @@ CREATE TABLE public.carritos (
   id_carrito bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   fecha_creacion date DEFAULT now(),
   id_usuario bigint,
+  monto_usd double precision,
+  monto_bs double precision,
+  hora time without time zone,
+  fecha time without time zone,
   CONSTRAINT carritos_pkey PRIMARY KEY (id_carrito),
   CONSTRAINT carritos_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
@@ -136,6 +140,8 @@ CREATE TABLE public.ordenes (
   comprobante text,
   referencia text,
   tasa_bs double precision,
+  num_telefono text,
+  monto_bs double precision,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito)
@@ -144,10 +150,18 @@ CREATE TABLE public.pagomoviles (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   titulo text NOT NULL,
   texto text,
-  fecha time without time zone,
+  fecha text,
   dispositivo text,
   app text,
-  CONSTRAINT pagomoviles_pkey PRIMARY KEY (id)
+  hash text,
+  referencia bigint,
+  fecha_pago time without time zone,
+  monto_bs double precision,
+  num_telefono text,
+  saldo_acreditado_a bigint,
+  saldo_acreditado boolean,
+  CONSTRAINT pagomoviles_pkey PRIMARY KEY (id),
+  CONSTRAINT pagomoviles_saldo_acreditado_a_fkey FOREIGN KEY (saldo_acreditado_a) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.perfiles (
   id_perfil bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -290,6 +304,7 @@ CREATE TABLE public.usuarios (
   claim_token text UNIQUE,
   claim_expires timestamp with time zone,
   notificacion_inventario boolean,
+  saldo double precision,
   CONSTRAINT usuarios_pkey PRIMARY KEY (id_usuario)
 );
 CREATE TABLE public.ventas (

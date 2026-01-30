@@ -286,6 +286,15 @@ const loadStockSummary = async (_hasSession = false) => {
   } else {
     console.log("[stock] Plataforma 13 libres: 0");
   }
+  Object.entries(libresPorPlataforma).forEach(([platId, info]) => {
+    const nombre = info?.nombre || `Plataforma ${platId}`;
+    const items = info?.items || [];
+    if (!items.length) {
+      console.log(`[stock] Plataforma ${platId} libres (detalle):`, nombre, []);
+      return;
+    }
+    console.log(`[stock] Plataforma ${platId} libres (detalle):`, nombre, items);
+  });
   return stockObj;
 };
 

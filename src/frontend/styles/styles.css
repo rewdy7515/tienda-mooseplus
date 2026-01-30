@@ -307,6 +307,12 @@ body {
   max-width: 350px;
 }
 
+#phone-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .hidden {
   display: none !important;
 }
@@ -391,6 +397,31 @@ body {
 .checkout-total {
   margin-top: 10px;
   font-weight: 700;
+}
+
+.checkout-countdown {
+  margin-top: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.pago-movil-note {
+  margin-top: 6px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #b45309;
+}
+
+.saldo-display {
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.saldo-subtitle {
+  font-size: 1rem;
+  color: #555;
 }
 
 .dropzone.dragover {

@@ -465,6 +465,13 @@
         try {
           const user = await loadCurrentUser();
           adminId = user?.id_usuario || null;
+          const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+          const isSuper = isTrue(user?.permiso_superadmin);
+          if (!isSuper) {
+            alert("Acceso denegado.");
+            window.location.href = "index.html";
+            return;
+          }
         } catch (err) {
           console.error("load current user error", err);
         }

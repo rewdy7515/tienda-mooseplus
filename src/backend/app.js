@@ -336,6 +336,51 @@ app.post("/api/cart/item", async (req, res) => {
     if (remaining === 0) {
       await supabaseAdmin.from("carritos").delete().eq("id_carrito", idCarrito);
       console.log("[cart:item] carrito vacío, eliminado", idCarrito);
+    } else {
+      try {
+        const { data: userRow, error: userErr } = await supabaseAdmin
+          .from("usuarios")
+          .select("acceso_cliente")
+          .eq("id_usuario", idUsuario)
+          .maybeSingle();
+        if (userErr) throw userErr;
+        const useMayor = userRow?.acceso_cliente === false;
+
+        const { data: items, error: itemsErr } = await supabaseAdmin
+          .from("carrito_items")
+          .select("id_precio, cantidad, meses")
+          .eq("id_carrito", idCarrito);
+        if (itemsErr) throw itemsErr;
+        const priceIds = (items || []).map((i) => i.id_precio).filter(Boolean);
+        let totalUsd = 0;
+        if (priceIds.length) {
+          const { data: prices, error: pricesErr } = await supabaseAdmin
+            .from("precios")
+            .select("id_precio, precio_usd_detal, precio_usd_mayor")
+            .in("id_precio", priceIds);
+          if (pricesErr) throw pricesErr;
+          const priceMap = (prices || []).reduce((acc, p) => {
+            acc[p.id_precio] = p;
+            return acc;
+          }, {});
+          totalUsd = (items || []).reduce((sum, it) => {
+            const price = priceMap[it.id_precio] || {};
+            const unit = useMayor
+              ? Number(price.precio_usd_mayor) || Number(price.precio_usd_detal) || 0
+              : Number(price.precio_usd_detal) || 0;
+            const qty = Number(it.cantidad) || 0;
+            const meses = Number(it.meses) || 1;
+            return sum + unit * qty * meses;
+          }, 0);
+        }
+        const { error: updMontoErr } = await supabaseAdmin
+          .from("carritos")
+          .update({ monto_usd: totalUsd })
+          .eq("id_carrito", idCarrito);
+        if (updMontoErr) throw updMontoErr;
+      } catch (mErr) {
+        console.error("[cart:item] update monto_usd error", mErr);
+      }
     }
 
     console.log("[cart:item] usuario", idUsuario, "carrito", idCarrito, "delta", parsedDelta, "id_precio", id_precio, "remaining", remaining);
@@ -371,6 +416,13 @@ app.get("/api/cart", async (_req, res) => {
     const carritoId = await getCurrentCarrito(idUsuario);
     if (!carritoId) return res.json({ items: [] });
 
+    const { data: carritoInfo, error: carritoErr } = await supabaseAdmin
+      .from("carritos")
+      .select("monto_usd, monto_bs, tasa_bs, hora, fecha")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (carritoErr) throw carritoErr;
+
     const { data: items, error: itemErr } = await supabaseAdmin
       .from("carrito_items")
       .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
@@ -401,13 +453,66 @@ app.get("/api/cart", async (_req, res) => {
       };
     });
 
-    res.json({ id_carrito: carritoId, items: enriched });
+    res.json({
+      id_carrito: carritoId,
+      items: enriched,
+      monto_usd: carritoInfo?.monto_usd ?? null,
+      monto_bs: carritoInfo?.monto_bs ?? null,
+      tasa_bs: carritoInfo?.tasa_bs ?? null,
+      hora: carritoInfo?.hora ?? null,
+      fecha: carritoInfo?.fecha ?? null,
+    });
   } catch (err) {
     console.error("[cart:get] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Actualizar montos fijos del carrito (USD y BS)
+app.post("/api/cart/montos", async (req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    const carritoId = await getCurrentCarrito(idUsuario);
+    if (!carritoId) {
+      return res.status(400).json({ error: "Carrito no encontrado" });
+    }
+    const monto_usd = Number(req.body?.monto_usd);
+    const monto_bs = req.body?.monto_bs === null ? null : Number(req.body?.monto_bs);
+    const tasa_bs = req.body?.tasa_bs === null ? null : Number(req.body?.tasa_bs);
+    if (!Number.isFinite(monto_usd)) {
+      return res.status(400).json({ error: "monto_usd inválido" });
+    }
+    const caracasNow = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
+    );
+    const pad2 = (val) => String(val).padStart(2, "0");
+    const fecha = `${caracasNow.getFullYear()}-${pad2(caracasNow.getMonth() + 1)}-${pad2(
+      caracasNow.getDate()
+    )}`;
+    const hora = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
+      caracasNow.getSeconds()
+    )}`;
+    const { error: updErr } = await supabaseAdmin
+      .from("carritos")
+      .update({
+        monto_usd,
+        monto_bs: Number.isFinite(monto_bs) ? monto_bs : null,
+        tasa_bs: Number.isFinite(tasa_bs) ? tasa_bs : null,
+        hora,
+        fecha,
+      })
+      .eq("id_carrito", carritoId);
+    if (updErr) throw updErr;
+    return res.json({ ok: true, id_carrito: carritoId });
+  } catch (err) {
+    console.error("[cart:montos] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res.status(500).json({ error: err.message });
   }
 });
 

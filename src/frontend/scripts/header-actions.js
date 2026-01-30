@@ -1,4 +1,10 @@
-import { loadCatalog, ensureServerSession, fetchEntregadas } from "./api.js";
+import {
+  loadCatalog,
+  ensureServerSession,
+  fetchEntregadas,
+  fetchCart,
+  submitCheckout,
+} from "./api.js";
 import { initSearch } from "./search.js";
 import {
   attachLogoHome,
@@ -129,6 +135,12 @@ if (!window.__headerActionsInit) {
         const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
         usernameEl.textContent = fullName || user.correo || "Usuario";
       }
+      const saldoEl = document.querySelector(".saldo-item");
+      if (saldoEl) {
+        const saldoVal = Number(user?.saldo);
+        const saldoNum = Number.isFinite(saldoVal) ? saldoVal : 0;
+        saldoEl.textContent = `Saldo: $${saldoNum.toFixed(2)}`;
+      }
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const isSuper =
@@ -201,7 +213,47 @@ if (!window.__headerActionsInit) {
 
   const btnCheckout = document.querySelector("#btn-checkout");
   btnCheckout?.addEventListener("click", () => {
-    window.location.href = toAbs("checkout.html", basePagesUrl);
+    (async () => {
+      try {
+        await ensureServerSession();
+        const user = await loadCurrentUser();
+        if (!user?.id_usuario) {
+          window.location.href = toAbs("checkout.html", basePagesUrl);
+          return;
+        }
+        const cartData = await fetchCart();
+        const montoUsd = Number(cartData?.monto_usd);
+        const saldo = Number(user?.saldo) || 0;
+        if (!Number.isFinite(montoUsd) || saldo < montoUsd) {
+          window.location.href = toAbs("checkout.html", basePagesUrl);
+          return;
+        }
+        const payload = {
+          id_metodo_de_pago: 1,
+          referencia: "SALDO",
+          comprobantes: [],
+          total: montoUsd,
+          tasa_bs: null,
+        };
+        const resp = await submitCheckout(payload);
+        if (resp?.error) {
+          alert(`Error al procesar: ${resp.error}`);
+          return;
+        }
+        const nuevoSaldo = Math.max(0, Math.round((saldo - montoUsd) * 100) / 100);
+        await supabase
+          .from("usuarios")
+          .update({ saldo: nuevoSaldo })
+          .eq("id_usuario", user.id_usuario);
+        const dest = resp?.id_orden
+          ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+          : "entregar_servicios.html";
+        window.location.href = toAbs(dest, basePagesUrl);
+      } catch (err) {
+        console.error("saldo checkout header error", err);
+        window.location.href = toAbs("checkout.html", basePagesUrl);
+      }
+    })();
   });
 
   // Búsqueda en el header (usa catálogo para autocompletar)

@@ -1,13 +1,16 @@
 import {
   fetchCart,
   loadCatalog,
+  fetchP2PRate,
   sendCartDelta,
   clearServerSession,
   loadCurrentUser,
   ensureServerSession,
   startSession,
+  submitCheckout,
   supabase,
 } from "./api.js";
+import { TASA_MARKUP } from "./rate-config.js";
 import {
   requireSession,
   attachLogout,
@@ -26,13 +29,18 @@ const statusEl = document.querySelector("#cart-status");
 const itemsEl = document.querySelector("#cart-page-items");
 const btnContinue = document.querySelector("#btn-page-continue");
 const btnPay = document.querySelector("#btn-page-pay");
+const cartSaldoEl = document.querySelector("#cart-saldo");
 let cartItems = [];
 let precios = [];
 let plataformas = [];
 let descuentos = [];
+let tasaBs = null;
+let currentUser = null;
+let cartMontoUsd = null;
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
-const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const isTrue = (v) =>
+  v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
 async function syncAuthSession() {
   try {
@@ -45,7 +53,9 @@ async function syncAuthSession() {
     if (!email) return null;
     const { data: user, error: userErr } = await supabase
       .from("usuarios")
-      .select("id_usuario, nombre, apellido, acceso_cliente, permiso_admin, permiso_superadmin")
+      .select(
+        "id_usuario, nombre, apellido, acceso_cliente, permiso_admin, permiso_superadmin, saldo",
+      )
       .ilike("correo", email)
       .maybeSingle();
     if (userErr) {
@@ -81,8 +91,8 @@ const buildPrecioDetalle = (item, price, platform) => {
   const baseUnit = flags.por_pantalla
     ? "pantalla"
     : flags.por_acceso
-    ? "dispositivo"
-    : "mes";
+      ? "dispositivo"
+      : "mes";
   const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
   return `${qty} ${baseUnit}${plural} $${price.precio_usd_detal || ""}`;
 };
@@ -115,7 +125,9 @@ const renderCart = () => {
       const baseSubtotal = +(unit * qtyVal * mesesVal).toFixed(2);
       let descuentoVal = 0;
       if (platform?.descuento_meses) {
-        const descRow = descuentos.find((d) => Number(d.meses) === Number(mesesVal));
+        const descRow = descuentos.find(
+          (d) => Number(d.meses) === Number(mesesVal),
+        );
         const rawRate = Number(descRow?.descuento) || 0;
         const rate = rawRate > 1 ? rawRate / 100 : rawRate;
         descuentoVal = +(baseSubtotal * rate).toFixed(2);
@@ -196,11 +208,6 @@ const renderCart = () => {
           <td class="cart-cell-center">Total</td>
           <td class="cart-cell-center">$${(subtotalBruto - totalDescuento).toFixed(2)}</td>
         </tr>
-        <tr class="cart-total-row cart-total-bs">
-          <td colspan="4"></td>
-          <td class="cart-cell-center">Total (Bs)</td>
-          <td class="cart-cell-center">Bs. ${((subtotalBruto - totalDescuento) * 400).toFixed(2)}</td>
-        </tr>
       </tfoot>
     </table>
   `;
@@ -213,7 +220,8 @@ const handleCartClick = (e) => {
   const btnMesesMinus = e.target.closest(".meses-minus");
   const btnMesesPlus = e.target.closest(".meses-plus");
 
-  if (!btnRemove && !btnMinus && !btnPlus && !btnMesesMinus && !btnMesesPlus) return;
+  if (!btnRemove && !btnMinus && !btnPlus && !btnMesesMinus && !btnMesesPlus)
+    return;
 
   const wrapper = e.target.closest("[data-index]");
   const idx = Number(wrapper?.dataset.index);
@@ -259,13 +267,18 @@ async function init() {
   try {
     await syncAuthSession();
     await ensureServerSession();
-    const currentUser = await loadCurrentUser();
+    currentUser = await loadCurrentUser();
     if (usernameEl && currentUser) {
       const fullName = [currentUser.nombre, currentUser.apellido]
         .filter(Boolean)
         .join(" ")
         .trim();
       usernameEl.textContent = fullName || currentUser.correo || "Usuario";
+    }
+    if (cartSaldoEl && currentUser) {
+      const saldoVal = Number(currentUser?.saldo);
+      const saldoNum = Number.isFinite(saldoVal) ? saldoVal : 0;
+      cartSaldoEl.textContent = `Saldo: $${saldoNum.toFixed(2)}`;
     }
     setSessionRoles(currentUser || {});
     const sessionRoles = getSessionRoles();
@@ -280,7 +293,15 @@ async function init() {
     }
 
     const cachedCart = getCachedCart();
-    const [cartData, catalog] = await Promise.all([fetchCart(), loadCatalog()]);
+    const [cartData, catalog, tasaResp] = await Promise.all([
+      fetchCart(),
+      loadCatalog(),
+      fetchP2PRate(),
+    ]);
+    cartMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
+      ? Number(cartData.monto_usd)
+      : null;
+    tasaBs = tasaResp ? Math.round(tasaResp * TASA_MARKUP * 100) / 100 : null;
     setCachedCart(cartData);
     const esCliente =
       isTrue(sessionRoles?.acceso_cliente) ||
@@ -314,5 +335,46 @@ btnContinue?.addEventListener("click", () => {
 });
 
 btnPay?.addEventListener("click", () => {
-  window.location.href = "checkout.html";
+  (async () => {
+    try {
+      if (!currentUser) {
+        window.location.href = "checkout.html";
+        return;
+      }
+      const saldo = Number(currentUser?.saldo) || 0;
+      if (!Number.isFinite(cartMontoUsd)) {
+        window.location.href = "checkout.html";
+        return;
+      }
+      if (saldo < cartMontoUsd) {
+        window.location.href = "checkout.html";
+        return;
+      }
+
+      const payload = {
+        id_metodo_de_pago: 1,
+        referencia: "SALDO",
+        comprobantes: [],
+        total: cartMontoUsd,
+        tasa_bs: null,
+      };
+      const resp = await submitCheckout(payload);
+      if (resp?.error) {
+        alert(`Error al procesar: ${resp.error}`);
+        return;
+      }
+      const nuevoSaldo = Math.max(0, Math.round((saldo - cartMontoUsd) * 100) / 100);
+      await supabase
+        .from("usuarios")
+        .update({ saldo: nuevoSaldo })
+        .eq("id_usuario", currentUser.id_usuario);
+      const dest = resp?.id_orden
+        ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+        : "entregar_servicios.html";
+      window.location.href = dest;
+    } catch (err) {
+      console.error("saldo checkout error", err);
+      window.location.href = "checkout.html";
+    }
+  })();
 });

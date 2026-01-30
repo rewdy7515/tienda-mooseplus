@@ -138,6 +138,27 @@ export async function submitCheckout(payload) {
   }
 }
 
+export async function updateCartMontos(monto_usd, monto_bs, tasa_bs) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/cart/montos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ monto_usd, monto_bs, tasa_bs }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("cart montos response", res.status, text);
+      return { error: text || "Error al actualizar montos" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("No se pudo actualizar montos carrito:", err);
+    return { error: err.message };
+  }
+}
+
 export async function uploadComprobantes(files = []) {
   await ensureServerSession();
   try {
@@ -300,7 +321,7 @@ export async function loadCurrentUser() {
   const { data, error } = await supabase
     .from("usuarios")
     .select(
-      "id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario"
+      "id_usuario, nombre, apellido, correo, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo"
     )
     .eq("id_usuario", idUsuario)
     .maybeSingle();

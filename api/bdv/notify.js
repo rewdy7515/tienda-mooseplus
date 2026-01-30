@@ -56,7 +56,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, duplicado: true });
     }
 
-    console.log("BDV notify received", { app, titulo, fecha, dispositivo });
+    const ref = texto.match(/Ref:\s*([0-9]+)/i)?.[1] || null;
+    const fechaRaw = texto.match(/fecha\s*([0-9]{2}-[0-9]{2}-[0-9]{2})/i)?.[1] || null;
+    const monto = texto.match(/Bs\.?\s*([0-9]+,[0-9]+)/i)?.[1] || null;
+    const telefono = texto.match(/del\s*([0-9]{4}-[0-9]{7})/i)?.[1] || null;
+    const fechaPago = fechaRaw
+      ? (() => {
+          const [dd, mm, yy] = fechaRaw.split("-");
+          const yyyy = Number(yy) <= 69 ? `20${yy}` : `19${yy}`;
+          return `${yyyy}-${mm}-${dd}`;
+        })()
+      : null;
+
+    console.log("BDV notify received", { app, titulo, fecha, dispositivo, ref, fechaPago, monto, telefono });
     const { error: insErr } = await supabaseAdmin.from("pagomoviles").insert({
       app,
       titulo,
@@ -64,6 +76,10 @@ export default async function handler(req, res) {
       fecha,
       dispositivo,
       hash,
+      referencia: ref,
+      fecha_pago: fechaPago,
+      monto_bs: monto,
+      num_telefono: telefono,
     });
     if (insErr) {
       console.error("BDV notify insert error", insErr);

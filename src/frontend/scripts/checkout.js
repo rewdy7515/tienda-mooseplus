@@ -6,16 +6,18 @@ import {
   uploadComprobantes,
   fetchP2PRate,
   loadCurrentUser,
+  updateCartMontos,
 } from "./api.js";
 import { requireSession, attachLogoHome } from "./session.js";
 import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
+import { TASA_MARKUP } from "./rate-config.js";
 
 requireSession();
 attachLogoHome();
 
-const metodosContainer = document.querySelector("#metodos-container");
 const metodoDetalle = document.querySelector("#metodo-detalle");
 const metodoSelect = document.querySelector("#metodo-select");
+const pagoMovilNote = document.querySelector("#pago-movil-note");
 const btnAddImage = document.querySelector("#btn-add-image");
 const inputFiles = document.querySelector("#input-files");
 const filePreview = document.querySelector("#file-preview");
@@ -23,6 +25,9 @@ const dropzone = document.querySelector("#dropzone");
 const totalEl = document.querySelector("#checkout-total");
 const btnSendPayment = document.querySelector("#btn-send-payment");
 const refInput = document.querySelector("#input-ref");
+const phoneInput = document.querySelector("#input-phone");
+const phoneWrap = document.querySelector("#phone-wrap");
+const btnVerifyPayment = document.querySelector("#btn-verify-payment");
 
 let metodos = [];
 let seleccionado = null;
@@ -35,22 +40,144 @@ let cartId = null;
 let tasaBs = null;
 let precioTierLabel = "";
 let userAcceso = null;
-const TASA_MARKUP = 1.015; // +1.5%
+let currentUserId = null;
+let fixedMontoBs = null;
+let fixedMontoUsd = null;
+let fixedHora = null;
+let fixedFecha = null;
+let montoRefreshTimer = null;
+let countdownTimer = null;
 
-const renderMetodos = () => {
-  if (!metodosContainer) return;
-  if (!metodos.length) {
-    metodosContainer.innerHTML = '<p class="status">No hay métodos de pago.</p>';
+const getCaracasNow = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  return {
+    fecha: `${get("year")}-${get("month")}-${get("day")}`,
+    hora: `${get("hour")}:${get("minute")}:${get("second")}`,
+  };
+};
+
+const parseCaracasDate = (fechaStr, horaStr) => {
+  if (!fechaStr || !horaStr) return null;
+  const fecha = String(fechaStr).trim();
+  const hora = String(horaStr).trim();
+  if (!fecha || !hora) return null;
+  const iso = `${fecha}T${hora}-04:00`;
+  const dt = new Date(iso);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const shouldRefreshMonto = (fechaStr, horaStr) => {
+  const dt = parseCaracasDate(fechaStr, horaStr);
+  if (!dt) return true;
+  return Date.now() - dt.getTime() >= 10 * 60 * 1000;
+};
+
+const formatCountdown = (msLeft) => {
+  const totalSec = Math.max(0, Math.floor(msLeft / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  const mm = String(min).padStart(2, "0");
+  const ss = String(sec).padStart(2, "0");
+  return `${mm}min ${ss}seg`;
+};
+
+const getCountdownMs = (fechaStr, horaStr) => {
+  const dt = parseCaracasDate(fechaStr, horaStr);
+  if (!dt) return null;
+  const elapsed = Date.now() - dt.getTime();
+  const remaining = 10 * 60 * 1000 - elapsed;
+  return remaining > 0 ? remaining : 0;
+};
+
+const startCountdown = () => {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  countdownTimer = setInterval(() => {
+    renderTotal();
+  }, 1000);
+};
+
+const scheduleMontoRefresh = (fechaStr, horaStr, totalUsdVal, tasaVal) => {
+  if (montoRefreshTimer) {
+    clearTimeout(montoRefreshTimer);
+    montoRefreshTimer = null;
+  }
+  const dt = parseCaracasDate(fechaStr, horaStr);
+  if (!dt) return;
+  const elapsed = Date.now() - dt.getTime();
+  const waitMs = 10 * 60 * 1000 - elapsed;
+  if (waitMs <= 0) return;
+  montoRefreshTimer = setTimeout(async () => {
+    try {
+      const cartData = await fetchCart();
+      await syncCartMontosIfNeeded(cartData, totalUsdVal, tasaVal);
+      renderTotal();
+    } catch (err) {
+      console.warn("checkout monto refresh error", err);
+    }
+  }, waitMs + 1000);
+};
+
+const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
+  if (!cartId || !Number.isFinite(totalUsdVal)) return;
+  const storedUsd = Number(cartData?.monto_usd);
+  const storedBs = Number(cartData?.monto_bs);
+  const storedHora = cartData?.hora ?? null;
+  const storedFecha = cartData?.fecha ?? null;
+  const sameUsd = Number.isFinite(storedUsd) && Math.abs(storedUsd - totalUsdVal) < 0.01;
+  const montoBsCalc = Number.isFinite(tasaVal)
+    ? Math.round(totalUsdVal * tasaVal * 100) / 100
+    : null;
+
+  if (!sameUsd) {
+    fixedMontoUsd = totalUsdVal;
+    fixedMontoBs = Number.isFinite(montoBsCalc) ? montoBsCalc : null;
+    const nowVz = getCaracasNow();
+    fixedFecha = nowVz.fecha;
+    fixedHora = nowVz.hora;
+    try {
+      const resp = await updateCartMontos(totalUsdVal, fixedMontoBs, tasaVal);
+      if (resp?.error) console.warn("checkout cart monto update error", resp.error);
+    } catch (err) {
+      console.warn("checkout cart monto update error", err);
+    }
+    startCountdown();
     return;
   }
-  metodosContainer.innerHTML = metodos
-    .map(
-      (m, idx) => `
-      <button class="metodo-btn ${seleccionado === idx ? "selected" : ""}" data-index="${idx}">
-        ${m.nombre || "Método"}
-      </button>`
-    )
-    .join("");
+
+  fixedMontoUsd = storedUsd;
+  fixedMontoBs = Number.isFinite(storedBs) ? storedBs : montoBsCalc;
+  fixedHora = storedHora;
+  fixedFecha = storedFecha;
+
+  if (shouldRefreshMonto(fixedFecha, fixedHora) && Number.isFinite(montoBsCalc)) {
+    fixedMontoBs = montoBsCalc;
+    const nowVz = getCaracasNow();
+    fixedFecha = nowVz.fecha;
+    fixedHora = nowVz.hora;
+    try {
+      const resp = await updateCartMontos(totalUsdVal, montoBsCalc, tasaVal);
+      if (resp?.error) console.warn("checkout cart monto update error", resp.error);
+    } catch (err) {
+      console.warn("checkout cart monto update error", err);
+    }
+    startCountdown();
+  } else {
+    scheduleMontoRefresh(fixedFecha, fixedHora, totalUsdVal, tasaVal);
+    if (fixedHora) startCountdown();
+  }
 };
 
 const renderDetalle = () => {
@@ -79,6 +206,12 @@ const renderDetalle = () => {
     .join("");
 
   const isMetodoBs = Number(m.id_metodo_de_pago ?? m.id) === 1;
+  if (phoneWrap) {
+    phoneWrap.classList.toggle("hidden", !isMetodoBs);
+  }
+  if (pagoMovilNote) {
+    pagoMovilNote.classList.toggle("hidden", !isMetodoBs);
+  }
   metodoDetalle.innerHTML =
     detalleHtml +
     (isMetodoBs
@@ -159,21 +292,12 @@ const updateSelection = (idx) => {
   } else {
     seleccionado = idx;
   }
-  renderMetodos();
   renderDetalle();
   if (metodoSelect && seleccionado !== null) {
     metodoSelect.value = String(seleccionado);
   }
   renderTotal();
 };
-
-metodosContainer?.addEventListener("click", (e) => {
-  const btn = e.target.closest(".metodo-btn");
-  if (!btn) return;
-  const idx = Number(btn.dataset.index);
-  if (Number.isNaN(idx)) return;
-  updateSelection(seleccionado === idx ? null : idx);
-});
 
 metodoSelect?.addEventListener("change", (e) => {
   const idx = Number(e.target.value);
@@ -256,10 +380,186 @@ const renderTotal = () => {
   const isBs = metodo && Number(metodoId) === 1;
   const tasaVal = Number.isFinite(tasaBs) ? tasaBs : null;
   const lineUsd = `Total: $${totalUsd.toFixed(2)} ${precioTierLabel ? `(${precioTierLabel})` : ""}`;
-  const lineBs =
-    isBs && tasaVal ? `<div>Bs. ${(totalUsd * tasaVal).toFixed(2)}</div>` : "";
-  totalEl.innerHTML = `<div>${lineUsd}</div>${lineBs}`;
+  let montoBsView = null;
+  let countdownLine = "";
+  if (isBs) {
+    if (Number.isFinite(fixedMontoBs)) {
+      montoBsView = fixedMontoBs;
+    } else if (tasaVal) {
+      montoBsView = totalUsd * tasaVal;
+    }
+    if (fixedHora) {
+      const remaining = getCountdownMs(fixedFecha, fixedHora);
+      if (remaining !== null) {
+        countdownLine = `<div class="checkout-countdown">El monto en bolivares se actualizará en ${formatCountdown(remaining)}</div>`;
+      }
+    } else if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+  }
+  const lineBs = isBs && Number.isFinite(montoBsView)
+    ? `<div>Bs. ${montoBsView.toFixed(2)}</div>`
+    : "";
+  totalEl.innerHTML = `<div>${lineUsd}</div>${lineBs}${countdownLine}`;
 };
+
+const verifyPagoMovil = async () => {
+  const metodo = seleccionado !== null ? metodos[seleccionado] : null;
+  const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
+  const isMetodoBs = metodoId === 1;
+  if (!isMetodoBs) {
+    alert("Selecciona el método de pago 1 para verificar.");
+    return { ok: false };
+  }
+  if (!refInput?.value.trim()) {
+    alert("Ingresa la referencia.");
+    refInput.classList.add("input-error");
+    return { ok: false };
+  }
+  if (!phoneInput?.value.trim()) {
+    alert("Ingresa el número de teléfono.");
+    phoneInput?.classList.add("input-error");
+    return { ok: false };
+  }
+  if (!Number.isFinite(tasaBs)) {
+    alert("No se pudo obtener la tasa.");
+    return { ok: false };
+  }
+
+  const refDigits = refInput.value.trim();
+  const telefono = phoneInput.value.trim();
+  let montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
+  let cartMontoBs = null;
+  let cartTasaBs = null;
+  try {
+    const cartData = await fetchCart();
+    cartId = cartData.id_carrito || cartId;
+    await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
+    if (Number.isFinite(cartData?.monto_bs)) {
+      montoBs = Number(cartData.monto_bs);
+      cartMontoBs = montoBs;
+    } else if (Number.isFinite(fixedMontoBs)) {
+      montoBs = fixedMontoBs;
+      cartMontoBs = fixedMontoBs;
+    }
+    if (Number.isFinite(cartData?.tasa_bs)) {
+      cartTasaBs = Number(cartData.tasa_bs);
+    } else if (Number.isFinite(tasaBs)) {
+      cartTasaBs = tasaBs;
+    }
+  } catch (err) {
+    console.warn("[pago movil] cart monto fetch error", err);
+  }
+  if (!Number.isFinite(cartMontoBs) || !Number.isFinite(cartTasaBs)) {
+    alert("No se pudo obtener el monto o la tasa del carrito.");
+    return { ok: false };
+  }
+  console.log("[pago movil] input", { refDigits, telefono, montoBs, tasaBs, totalUsd, cartId });
+
+  const { data: pagos, error: pagoErr } = await supabase
+    .from("pagomoviles")
+    .select("id, referencia, num_telefono, monto_bs, saldo_acreditado")
+    .eq("num_telefono", telefono)
+    .order("id", { ascending: false });
+  if (pagoErr) throw pagoErr;
+  console.log("[pago movil] candidatos", pagos);
+
+  const montoNum = (val) => {
+    if (val == null) return null;
+    const raw = String(val).trim();
+    let clean = raw;
+    if (raw.includes(".") && raw.includes(",")) {
+      // Assume dot as thousands, comma as decimal
+      clean = raw.replace(/\./g, "").replace(",", ".");
+    } else if (raw.includes(",")) {
+      // Comma as decimal
+      clean = raw.replace(",", ".");
+    }
+    const num = Number(clean);
+    return Number.isFinite(num) ? num : null;
+  };
+  const match = (pagos || []).find((p) => {
+    const ref = p.referencia != null ? String(p.referencia) : "";
+    const pagoMonto = montoNum(p.monto_bs);
+    console.log("[pago movil] eval", {
+      id: p.id,
+      ref,
+      endsWith: ref.endsWith(refDigits),
+      pagoMonto,
+      montoBs,
+      diff: Number.isFinite(pagoMonto) ? Math.abs(pagoMonto - montoBs) : null,
+      saldo_acreditado: p.saldo_acreditado,
+    });
+    if (!ref.endsWith(refDigits)) return false;
+    return Number.isFinite(pagoMonto);
+  });
+  if (!match) {
+    alert("Pago no encontrado");
+    return { ok: false };
+  }
+  if (match.saldo_acreditado === true) {
+    alert("Operación fallida: pago anteriormente registrado");
+    return { ok: false };
+  }
+
+  const sessionUserId = currentUserId || requireSession();
+  const pagoMonto = montoNum(match.monto_bs);
+  if (!Number.isFinite(pagoMonto)) {
+    alert("Pago no encontrado");
+    return { ok: false };
+  }
+
+  if (sessionUserId) {
+    const updates = { saldo_acreditado_a: sessionUserId, saldo_acreditado: true };
+    await supabase.from("pagomoviles").update(updates).eq("id", match.id);
+  }
+
+  const diff = Number((pagoMonto - cartMontoBs).toFixed(2));
+  if (diff === 0) {
+    alert("Pago verificado. Procesando pedido...");
+    return { ok: true };
+  }
+
+  let saldoUsd = null;
+  if (Number.isFinite(cartTasaBs) && cartTasaBs) {
+    if (diff > 0) {
+      saldoUsd = Number(((pagoMonto - cartMontoBs) / cartTasaBs).toFixed(2));
+    } else {
+      saldoUsd = Number((pagoMonto / cartTasaBs).toFixed(2));
+    }
+  }
+  if (Number.isFinite(saldoUsd) && sessionUserId) {
+    const { data: userSaldo, error: saldoErr } = await supabase
+      .from("usuarios")
+      .select("saldo")
+      .eq("id_usuario", sessionUserId)
+      .maybeSingle();
+    if (!saldoErr) {
+      const saldoActual = Number(userSaldo?.saldo) || 0;
+      const nuevoSaldo = Math.round((saldoActual + saldoUsd) * 100) / 100;
+      await supabase.from("usuarios").update({ saldo: nuevoSaldo }).eq("id_usuario", sessionUserId);
+    }
+  }
+
+  if (diff > 0) {
+    alert("Pago verificado. Saldo restante acreditado al perfil");
+    return { ok: true };
+  }
+
+  alert("Pago verificado menor al del carrito. Saldo acreditado a su perfil");
+  return { ok: false };
+};
+
+const formatPhoneValue = (raw = "") => {
+  const digits = raw.replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 4) return digits;
+  return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+};
+
+phoneInput?.addEventListener("input", () => {
+  phoneInput.value = formatPhoneValue(phoneInput.value);
+});
 
 const calcularTotalRpc = async (id_carrito) => {
   if (!id_carrito) return null;
@@ -304,13 +604,14 @@ async function init() {
     ]);
     if (metodosResp.error) throw metodosResp.error;
     metodos = metodosResp.data || [];
-    tasaBs = tasaResp ? tasaResp * TASA_MARKUP : null;
+    tasaBs = tasaResp ? Math.round(tasaResp * TASA_MARKUP * 100) / 100 : null;
     cartItems = cartData.items || [];
     cartId = cartData.id_carrito || null;
     precios = catalog.precios;
     plataformas = catalog.plataformas;
     descuentos = catalog.descuentos || [];
     userAcceso = user?.acceso_cliente;
+    currentUserId = user?.id_usuario || null;
     const preciosMap = (precios || []).reduce((acc, p) => {
       acc[p.id_precio] = p;
       return acc;
@@ -319,6 +620,23 @@ async function init() {
     const rpcTotal = await calcularTotalRpc(cartId);
     totalUsd = tierTotal.total || rpcTotal || 0;
     precioTierLabel = tierTotal.label;
+    const saldoVal = Number(user?.saldo) || 0;
+    const baseCartUsd = Number.isFinite(Number(cartData?.monto_usd))
+      ? Number(cartData.monto_usd)
+      : totalUsd;
+    if (saldoVal > 0 && saldoVal < baseCartUsd) {
+      const nuevoMontoUsd = Math.max(0, Math.round((baseCartUsd - saldoVal) * 100) / 100);
+      totalUsd = nuevoMontoUsd;
+      const montoBsCalc = Number.isFinite(tasaBs)
+        ? Math.round(nuevoMontoUsd * tasaBs * 100) / 100
+        : null;
+      try {
+        await updateCartMontos(nuevoMontoUsd, montoBsCalc, tasaBs);
+      } catch (err) {
+        console.warn("checkout saldo adjust error", err);
+      }
+    }
+    await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
 
     // Selecciona por defecto el método con id 1 si existe
     // Prefill de pruebas: seleccionar índice 5 si existe, si no cae al método id 1
@@ -331,14 +649,16 @@ async function init() {
     }
 
     populateSelect(idxDefault >= 0 ? idxDefault : null);
-    renderMetodos();
     renderDetalle();
     renderTotal();
+    if (btnVerifyPayment) {
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const isSuper = isTrue(user?.permiso_superadmin);
+      btnVerifyPayment.classList.toggle("hidden", !isSuper);
+      if (!isSuper) btnVerifyPayment.style.display = "none";
+    }
   } catch (err) {
     console.error("checkout load error", err);
-    if (metodosContainer) {
-      metodosContainer.innerHTML = '<p class="status">No se pudieron cargar los métodos de pago.</p>';
-    }
     renderTotal();
   }
 }
@@ -367,6 +687,23 @@ btnSendPayment?.addEventListener("click", async () => {
     const rpcTotal = await calcularTotalRpc(cartId);
     totalUsd = tierTotal.total || rpcTotal || 0;
     precioTierLabel = tierTotal.label;
+    const saldoVal = Number(currentUserId ? (await loadCurrentUser())?.saldo : null) || 0;
+    const baseCartUsd = Number.isFinite(Number(cartData?.monto_usd))
+      ? Number(cartData.monto_usd)
+      : totalUsd;
+    if (saldoVal > 0 && saldoVal < baseCartUsd) {
+      const nuevoMontoUsd = Math.max(0, Math.round((baseCartUsd - saldoVal) * 100) / 100);
+      totalUsd = nuevoMontoUsd;
+      const montoBsCalc = Number.isFinite(tasaBs)
+        ? Math.round(nuevoMontoUsd * tasaBs * 100) / 100
+        : null;
+      try {
+        await updateCartMontos(nuevoMontoUsd, montoBsCalc, tasaBs);
+      } catch (err) {
+        console.warn("checkout saldo adjust error", err);
+      }
+    }
+    await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
     renderTotal();
   } catch (err) {
     console.error("recalc checkout error", err);
@@ -379,7 +716,6 @@ btnSendPayment?.addEventListener("click", async () => {
     if (idxDefault >= 0) {
       seleccionado = idxDefault;
       if (metodoSelect) metodoSelect.value = String(idxDefault);
-      renderMetodos();
       renderDetalle();
     }
   }
@@ -388,12 +724,25 @@ btnSendPayment?.addEventListener("click", async () => {
     metodoSelect?.classList.add("input-error");
     return;
   }
+  const metodo = metodos[seleccionado];
+  const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
+  const isMetodoBs = metodoId === 1;
   if (!refInput?.value.trim()) {
     alert("Ingresa la referencia.");
     refInput.classList.add("input-error");
     return;
   }
-  if (!inputFiles?.files?.length) {
+  if (isMetodoBs) {
+    if (!phoneInput?.value.trim()) {
+      alert("Ingresa el número de teléfono.");
+      phoneInput?.classList.add("input-error");
+      return;
+    }
+    if (!Number.isFinite(tasaBs)) {
+      alert("No se pudo obtener la tasa.");
+      return;
+    }
+  } else if (!inputFiles?.files?.length) {
     alert("Adjunta comprobantes de pago.");
     dropzone?.classList.add("input-error");
     return;
@@ -403,8 +752,12 @@ btnSendPayment?.addEventListener("click", async () => {
     return;
   }
   try {
-    const comprobantes = await uploadFiles();
-    const metodo = metodos[seleccionado];
+    if (isMetodoBs) {
+      const verified = await verifyPagoMovil();
+      if (!verified.ok) return;
+    }
+
+    const comprobantes = isMetodoBs ? [] : await uploadFiles();
     const payload = {
       id_metodo_de_pago: metodo.id_metodo_de_pago ?? metodo.id,
       referencia: refInput.value.trim(),
@@ -471,6 +824,15 @@ btnSendPayment?.addEventListener("click", async () => {
   } catch (err) {
     console.error("checkout submit error", err);
     alert("No se pudo enviar el pago. Intenta de nuevo.");
+  }
+});
+
+btnVerifyPayment?.addEventListener("click", async () => {
+  try {
+    await verifyPagoMovil();
+  } catch (err) {
+    console.error("verify pago movil error", err);
+    alert("No se pudo verificar el pago.");
   }
 });
 

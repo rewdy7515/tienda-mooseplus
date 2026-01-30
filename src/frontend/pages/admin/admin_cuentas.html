@@ -159,6 +159,15 @@
       .miembros-table .clave-copy {
         cursor: pointer;
       }
+      .perfil-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-left: 6px;
+        border-radius: 50%;
+        background: #f97316;
+        vertical-align: middle;
+      }
       .copyable-text {
         cursor: pointer;
       }
@@ -1333,7 +1342,7 @@
                   <td>${venta ? `#${venta.id_venta ?? ""}` : ""}</td>
                   <td>${userInfo.nombre || ""}</td>
                   <td>${userInfo.correo || ""}</td>
-                  <td>${p.n_perfil ? `M${p.n_perfil}` : ""}</td>
+                  <td>${p.n_perfil ? `M${p.n_perfil}` : ""}${p.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
                   <td>${p.pin || ""}</td>
                   <td>${formatDDMMYYYY(venta?.fecha_corte) || ""}</td>
                 </tr>
@@ -1372,7 +1381,7 @@
                 <h3 class="cuenta-title">${cta.correo || "Cuenta"}</h3>
                 <p><strong>Clave:</strong> ${cta.clave || "-"}</p>
                 <div class="cuenta-table-wrap">
-                  <table class="proximas-table">
+                  <table class="table-base">
                     <thead>
                       <tr>
                         <th>ID Venta</th>
@@ -1391,7 +1400,7 @@
                   subRows
                     ? `
                 <div class="cuenta-table-wrap" style="margin-top:8px;">
-                  <table class="proximas-table">
+                  <table class="table-base">
                     <thead>
                       <tr>
                         <th>Sub-cuenta</th>
@@ -1466,7 +1475,7 @@
             ventas = ventasData || [];
             const { data: perfAll, error: perfAllErr } = await supabase
               .from("perfiles")
-              .select("id_perfil, id_cuenta, n_perfil, pin, correo")
+              .select("id_perfil, id_cuenta, n_perfil, pin, correo, perfil_hogar")
               .in("id_cuenta", cuentaIds)
               .order("n_perfil", { ascending: true });
             if (perfAllErr) throw perfAllErr;
@@ -1756,7 +1765,7 @@
                   <span class="cliente-alert" data-correo="${r.correo || ""}" title="Ver cuenta">!</span>
                 </td>
                 <td>${r.clave || ""}</td>
-                <td>${r.n_perfil ?? ""}</td>
+                <td>${r.n_perfil ?? ""}${r.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
                 <td>${r.fecha_corte || ""}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap;">
                   <button class="btn-primary btn-reemplazar-row"
@@ -1792,7 +1801,7 @@
             <div class="ventas-bloque">
               <h3>${platName}</h3>
               <div class="ventas-table-wrap">
-                <table>
+                <table class="table-base">
                   <thead>
                     <tr>
                       <th>ID de Venta</th>
@@ -1848,11 +1857,15 @@
           if (perfilesIds.length) {
             const { data: perfiles } = await supabase
               .from("perfiles")
-              .select("id_perfil, n_perfil, pin")
+              .select("id_perfil, n_perfil, pin, perfil_hogar")
               .in("id_perfil", perfilesIds);
             perfilMap =
               (perfiles || []).reduce((acc, p) => {
-                acc[p.id_perfil] = { n_perfil: p.n_perfil, pin: p.pin };
+                acc[p.id_perfil] = {
+                  n_perfil: p.n_perfil,
+                  pin: p.pin,
+                  perfil_hogar: p.perfil_hogar === true,
+                };
                 return acc;
               }, {}) || {};
           }
@@ -2329,7 +2342,7 @@
               });
               return `<tr>
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-                <td>${p.n_raw ?? ""}</td>
+                <td>${p.n_raw ?? ""}${p.hogar ? '<span class="perfil-dot"></span>' : ""}</td>
                 <td>${cliente || "-"}</td>
                 <td>${correo || "-"}</td>
                 ${showClaveCliente ? `<td>${clave || "-"}</td>` : ""}
@@ -2374,7 +2387,7 @@
               });
               return `<tr>
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-                <td>${p.perfil}</td>
+                <td>${p.perfil}${p.hogar ? '<span class="perfil-dot"></span>' : ""}</td>
                 <td class="pin-cell">
                   <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
                   <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
@@ -2568,7 +2581,7 @@
             ? `<tr><td colspan="${isCuentaMadre ? colCountMadre : colCountPerfil}" style="text-align:center;">Sin registros.</td></tr>`
             : "";
         const table = `<div class="cuenta-table-wrap">
-                <table class="proximas-table">
+                <table class="table-base">
                   <thead>${thead}</thead>
                   <tbody>${tbodyRows}${emptyRow}${isCuentaMadre ? "" : addPerfilRow}</tbody>
                 </table>
@@ -2596,7 +2609,7 @@
           plat9Table = `
             <h4>Clientes</h4>
             <div class="cuenta-table-wrap">
-              <table class="proximas-table">
+              <table class="table-base">
                 <thead>
                   <tr>
                     <th>Cliente</th>
@@ -2715,7 +2728,7 @@
               ? `
           <h4>Miembros extras</h4>
           <div class="cuenta-table-wrap">
-            <table class="proximas-table miembros-table">
+            <table class="table-base miembros-table">
               <thead>
                 <tr>
                   <th>Correo</th>
@@ -4730,7 +4743,7 @@
         let query = supabase
           .from("perfiles")
           .select(
-            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!inner(id_plataforma, inactiva, correo, clave)",
+            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, correo, clave)",
           )
           .eq("cuentas.id_plataforma", plataformaId)
           .eq("ocupado", false)
