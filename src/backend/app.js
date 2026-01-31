@@ -604,7 +604,7 @@ app.get("/api/inventario", async (req, res) => {
         id_precio,
         id_cuenta,
         id_perfil,
-        cuentas:cuentas(
+        cuentas:cuentas!ventas_id_cuenta_fkey(
           id_cuenta,
           id_plataforma,
           correo,

@@ -683,22 +683,35 @@
       const copyToast = document.querySelector("#copy-toast");
       let copyToastTimer = null;
       let pendingOcupadoInput = null;
+      const normalizeText = (val) =>
+        (val || "")
+          .toString()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .trim();
       const findClienteByTerm = async (term) => {
         const txt = (term || "").trim();
         if (!txt) return null;
-        const parts = txt.split(/\s+/);
-        const nombreTerm = parts.shift() || "";
-        const apellidoTerm = parts.join(" ").trim();
+        const tokens = txt.split(/\s+/).filter(Boolean);
+        const firstToken = tokens[0] || "";
+        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
         try {
-          let query = supabase
+          const { data, error } = await supabase
             .from("usuarios")
             .select("id_usuario, nombre, apellido")
-            .ilike("nombre", `%${nombreTerm}%`);
-          if (apellidoTerm)
-            query = query.ilike("apellido", `%${apellidoTerm}%`);
-          const { data, error } = await query.limit(1);
+            .or(
+              lastToken && lastToken !== firstToken
+                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
+                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+            )
+            .limit(20);
           if (error) throw error;
-          return data?.[0] || null;
+          const norm = normalizeText(txt);
+          const match = (data || []).find((u) =>
+            normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm)
+          );
+          return match || data?.[0] || null;
         } catch (err) {
           console.error("buscar cliente inline error", err);
           return null;
@@ -707,19 +720,26 @@
       const fetchOcupadoSuggestions = async (term) => {
         const txt = (term || "").trim();
         if (txt.length < 2) return [];
-        const parts = txt.split(/\s+/);
-        const nombreTerm = parts.shift() || "";
-        const apellidoTerm = parts.join(" ").trim();
+        const tokens = txt.split(/\s+/).filter(Boolean);
+        const firstToken = tokens[0] || "";
+        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
         try {
-          let query = supabase
+          const { data, error } = await supabase
             .from("usuarios")
             .select("id_usuario, nombre, apellido")
-            .ilike("nombre", `%${nombreTerm}%`);
-          if (apellidoTerm)
-            query = query.ilike("apellido", `%${apellidoTerm}%`);
-          const { data, error } = await query.limit(5);
+            .or(
+              lastToken && lastToken !== firstToken
+                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
+                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+            )
+            .limit(20);
           if (error) throw error;
-          return data || [];
+          const norm = normalizeText(txt);
+          return (data || [])
+            .filter((u) =>
+              normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm)
+            )
+            .slice(0, 5);
         } catch (err) {
           console.error("sugs ocupado error", err);
           return [];
@@ -1161,27 +1181,34 @@
           renderSugerenciasClientes([], true);
           return;
         }
-        const parts = term.split(/\s+/);
-        const nombreTerm = parts.shift() || "";
-        const apellidoTerm = parts.join(" ").trim();
+        const tokens = term.split(/\s+/).filter(Boolean);
+        const firstToken = tokens[0] || "";
+        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
+        const norm = normalizeText(term);
         const current = ++fetchCounterClientes;
         try {
-          let query = supabase
+          const { data, error } = await supabase
             .from("usuarios")
             .select("id_usuario, nombre, apellido, correo")
-            .ilike("nombre", `%${nombreTerm}%`);
-          if (apellidoTerm) {
-            query = query.ilike("apellido", `%${apellidoTerm}%`);
-          }
-          const { data, error } = await query.limit(5);
+            .or(
+              lastToken && lastToken !== firstToken
+                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
+                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+            );
+          const dataLimited = (data || []).slice(0, 20);
           if (current !== fetchCounterClientes) return;
           if (error) throw error;
-          const parsed = (data || []).map((u) => ({
-            id_usuario: u.id_usuario,
-            nombre: u.nombre,
-            apellido: u.apellido,
-            correo: u.correo,
-          }));
+          const parsed = (dataLimited || [])
+            .filter((u) =>
+              normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm)
+            )
+            .map((u) => ({
+              id_usuario: u.id_usuario,
+              nombre: u.nombre,
+              apellido: u.apellido,
+              correo: u.correo,
+            }))
+            .slice(0, 5);
           renderSugerenciasClientes(parsed, false);
         } catch (err) {
           console.error("buscar clientes error", err);
@@ -3905,8 +3932,8 @@
           if (isCanvaRow) {
             const match = (ocupadoSuggestions || []).find(
               (u) =>
-                [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ===
-                input.value.trim(),
+                normalizeText([u.nombre, u.apellido].filter(Boolean).join(" ").trim()) ===
+                normalizeText(input.value.trim()),
             );
             if (match) {
               input.dataset.userId = match.id_usuario;
@@ -3918,8 +3945,8 @@
           }
           const match = (ocupadoSuggestions || []).find(
             (u) =>
-              [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ===
-              input.value.trim(),
+              normalizeText([u.nombre, u.apellido].filter(Boolean).join(" ").trim()) ===
+              normalizeText(input.value.trim()),
           );
           if (match) {
             input.dataset.userId = match.id_usuario;

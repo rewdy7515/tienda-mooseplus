@@ -79,7 +79,7 @@ const parseCaracasDate = (fechaStr, horaStr) => {
 const shouldRefreshMonto = (fechaStr, horaStr) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return true;
-  return Date.now() - dt.getTime() >= 10 * 60 * 1000;
+  return Date.now() - dt.getTime() >= 30 * 60 * 1000;
 };
 
 const formatCountdown = (msLeft) => {
@@ -95,7 +95,7 @@ const getCountdownMs = (fechaStr, horaStr) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return null;
   const elapsed = Date.now() - dt.getTime();
-  const remaining = 10 * 60 * 1000 - elapsed;
+  const remaining = 30 * 60 * 1000 - elapsed;
   return remaining > 0 ? remaining : 0;
 };
 
@@ -117,7 +117,7 @@ const scheduleMontoRefresh = (fechaStr, horaStr, totalUsdVal, tasaVal) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return;
   const elapsed = Date.now() - dt.getTime();
-  const waitMs = 10 * 60 * 1000 - elapsed;
+  const waitMs = 30 * 60 * 1000 - elapsed;
   if (waitMs <= 0) return;
   montoRefreshTimer = setTimeout(async () => {
     try {
@@ -420,18 +420,13 @@ const verifyPagoMovil = async () => {
     refInput.classList.add("input-error");
     return { ok: false };
   }
-  if (!phoneInput?.value.trim()) {
-    alert("Ingresa el número de teléfono.");
-    phoneInput?.classList.add("input-error");
-    return { ok: false };
-  }
   if (!Number.isFinite(tasaBs)) {
     alert("No se pudo obtener la tasa.");
     return { ok: false };
   }
 
   const refDigits = refInput.value.trim();
-  const telefono = phoneInput.value.trim();
+  const telefono = phoneInput?.value.trim() || "";
   let montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
   let cartMontoBs = null;
   let cartTasaBs = null;
@@ -460,11 +455,24 @@ const verifyPagoMovil = async () => {
   }
   console.log("[pago movil] input", { refDigits, telefono, montoBs, tasaBs, totalUsd, cartId });
 
-  const { data: pagos, error: pagoErr } = await supabase
-    .from("pagomoviles")
-    .select("id, referencia, num_telefono, monto_bs, saldo_acreditado")
-    .eq("num_telefono", telefono)
-    .order("id", { ascending: false });
+  let pagos = [];
+  let pagoErr = null;
+  if (telefono) {
+    const resp = await supabase
+      .from("pagomoviles")
+      .select("id, referencia, num_telefono, monto_bs, saldo_acreditado")
+      .eq("num_telefono", telefono)
+      .order("id", { ascending: false });
+    pagos = resp.data || [];
+    pagoErr = resp.error;
+  } else {
+    const resp = await supabase
+      .from("pagomoviles")
+      .select("id, referencia, num_telefono, monto_bs, saldo_acreditado")
+      .order("id", { ascending: false });
+    pagos = resp.data || [];
+    pagoErr = resp.error;
+  }
   if (pagoErr) throw pagoErr;
   console.log("[pago movil] candidatos", pagos);
 
