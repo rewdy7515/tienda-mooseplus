@@ -767,9 +767,19 @@
           const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
           const pinChanged = pinInput && pinInput.dataset.original !== pinInput.value;
           const claveChanged = claveInput && claveInput.dataset.original !== claveInput.value;
-          if (!corteDirecto && !esCuentaCompleta && usaPines && pinInput && !pinChanged) {
-            alert("Debes modificar el pin del perfil para poder cortar");
-            return; // si hay pin pero no cambió, no se actualiza nada
+          if (!corteDirecto) {
+            const cortePorClave = cortarBtn.dataset.corteclave === "true";
+            if (cortePorClave) {
+              if (!claveChanged) {
+                alert("Debes modificar la contraseña para poder cortar");
+                return;
+              }
+            } else {
+              if (!pinInput || !pinChanged) {
+                alert("Debes modificar el pin del perfil para poder cortar");
+                return;
+              }
+            }
           }
           if (usaPines && pinInput && pinChanged) {
             const max = Number(pinInput.dataset.maxpin);
@@ -782,15 +792,7 @@
               }
             }
           }
-          const needsClaveChange = !esCuentaCompleta && !claveChanged && (!usaPines || !pinInput || !pinChanged);
-          if (!corteDirecto && esCuentaCompleta && !claveChanged) {
-            alert("Debes modificar la contraseña para poder cortar");
-            return;
-          }
-          if (!corteDirecto && needsClaveChange) {
-            alert("Debes modificar la contraseña para poder cortar");
-            return;
-          }
+          // Si corte_directo = true no se exige cambio de clave/pin
 
           cortarBtn.classList.add("pressed");
           cortarBtn.disabled = true;
