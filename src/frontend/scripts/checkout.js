@@ -274,7 +274,10 @@ const renderDetalle = () => {
 const populateSelect = (defaultIdx = null) => {
   if (!metodoSelect) return;
   metodoSelect.innerHTML = '<option value="">Seleccione un método</option>';
-  metodos.forEach((m, idx) => {
+  metodos
+    .map((m, idx) => ({ m, idx }))
+    .filter(({ m }) => Number(m.id_metodo_de_pago ?? m.id) === 1)
+    .forEach(({ m, idx }) => {
     const opt = document.createElement("option");
     opt.value = String(idx);
     opt.textContent = m.nombre || `Método ${idx + 1}`;
