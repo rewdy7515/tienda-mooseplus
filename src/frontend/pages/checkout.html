@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Checkout</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img
+        src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png"
+        class="logo"
+        alt="Logo"
+      />
+    </header>
+
+    <main class="categorias-dinamicas">
+      <section class="checkout-form">
+        <h3>Confirmar pago</h3>
+        <label class="form-label" for="metodo-select">Método de pago <span class="required">*</span></label>
+        <select id="metodo-select" class="form-select">
+          <option value="">Seleccione un método</option>
+        </select>
+        <div id="pago-movil-note" class="pago-movil-note hidden">NUEVOS DATOS DE PAGOMOVIL</div>
+        <div id="metodo-detalle" class="metodo-detalle"></div>
+        <div id="checkout-total" class="checkout-total"></div>
+
+        <label class="form-label" for="input-ref">Referencia <span class="required">*</span></label>
+        <input id="input-ref" class="form-input" type="text" placeholder="Ingrese últimos 4 dígitos" />
+
+        <div id="phone-wrap" class="hidden">
+          <label class="form-label" for="input-phone">Num. de Teléfono del Banco Emisor <span class="required">*</span></label>
+          <input id="input-phone" class="form-input" type="text" placeholder="1234-5678910" />
+        </div>
+
+        <label class="form-label">Comprobante de pago</label>
+        <div id="dropzone" class="dropzone">
+          <p>Arrastra una imagen aquí o</p>
+          <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
+          <input id="input-files" type="file" accept="image/*" hidden />
+          <div id="file-preview" class="file-preview"></div>
+        </div>
+
+        <button id="btn-send-payment" class="btn-primary page-pay-btn">Enviar pago</button>
+        <button id="btn-verify-payment" class="btn-outline page-pay-btn" type="button">Verificar pago (solo prueba)</button>
+      </section>
+    </main>
+
+    <script type="module" src="../scripts/checkout.js"></script>
+  </body>
+</html>

@@ -1,0 +1,236 @@
+SELECT setval(pg_get_serial_sequence('ventas', 'id_venta'), 1000, true);
+^
+|
+ejecutar para restablecer el id_venta al actual
+
+==========================================================
+NOTAS IMPORTANTES:
+==========================================================
+
+
+TABLA PRECIOS:
+-Debe tener una fila por tipo de servicio
+    una fila por plan
+-Usar 1 precio base de servicio tambien para los de meses (canva, spotify, capcut)
+    se enlaza con tabla de descuentos para variar la cantidad de meses
+-Con esto se puede guardar un id_precio a cada venta y se puede acceder al momento de renovar
+
+RENOVACION: 
+-Se accede al id_precio relacionado a la venta
+-Si se necesita renovar mas de 1 mes se usa el precio base y se accede a la tabla de descuentos
+
+TABLA DE DESCUENTOS:
+-Tener mas de un conjunto de descuentos
+
+DISPLAY EN LA PAGINA:
+Debe mostrar una tabla para enseñarle al cliente los descuentos disponibles por:
+-cada item 
+-cada mes 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Transicion de pagina vieja a la nueva:
+Debe crearse un botón de cuenta nueva, renovación y reemplazo igual a la pagina vieja.
+Ese sistema se seguirá usando mientras se va migrando toda la información
+de los servicios a la pagina nueva y mientras se van registrando los clientes
+a la nueva pagina
+
+tambien una parte de buscar clientes donde se muestre la informacion que tiene cada cliente
+
+ADMINISTRAR CUENTAS:
+-Añadir columna de estado y fecha de pago
+
+
+REPORTES
+-boton opcional al final del formulario que indique "no me permite hacer screenshot"
+y que aparezca el box de Descripción
+-mostrar recomendaciones para la foto segun el motivo del reporte.
+    -para reportes de contraseña que se muestre diga "asegurate de que sea visible
+    como se está introduciendo el correo y la contraseña"
+
+-en inventario hacer que todos los datos se copien
+y se muestre una notificacion de copiado al portapapeles
+
+IMPORTANTE
+-Corregir en checkout la diferenciacion de venta de perfiles y de completas
+-las cuentas completas no deben existir en perfiles
+-se debe nada mas tomar en cuenta las cuentas con "por_perfil" y "por_venta"
+para ver el tipo de cuenta
+
+=========
+
+==========================================================
+PARA IMPORTAR DATOS
+==========================================================
+
+PERFILES 
+importar directamente el csv en supabase junto al correo y luego correr 
+el sql de sql editor
+
+CLIENTES
+usar el import de la pagina web
+
+CUENTAS:
+solo enviar el csv directamente a la base de datos
+
+
+
+==========================================================
+ESTRUCTURA DE LA PAGINA 
+==========================================================
+
+USUARIO:
+-inventario: se muestran todas las plataformas activas y detalles
+    detalles:
+        -datos de acceso al servicio
+        -fecha de corte 
+        -formateado para que el color cambie si está cerca la fecha de pago
+        -copiar info con mensaje formateado para compartir en whatsapp
+
+COMPRAR SERVICIOS
+    detalles:
+        -Descripción de cada servicio
+        -stickers de beneficio de la plataforma
+        -fondo de pelicula famosa de la plataforma
+
+-HISTORIAL: de todos los pagos que ha hecho
+    detalles:
+        -servicio comprado
+        -fecha
+        -monto
+        -metodo de pago usado 
+
+-REPORTES: el cliente sube reportes de sus cuentas
+    detalles:
+        -se selecciona:
+            -plataforma
+            -correo
+            -perfil 
+            -reporte:
+                -contraseña incorrecta
+                -pin incorrecto
+                -sin suscripción activa
+                -otro 
+                    -se despliega una caja de texto donde se describe el error
+                -foto del error
+            -Si en plataforma se selecciona Netflix debe mostrar tambien:
+                -"Tu TV no forma parte de hogar con Netflix"
+                Si se selecciona esta opción entonces:
+                    -¿Te aparece un botón de "Estoy de viaje" o "Ver temporalmente"?
+                        SI: Un administrador te contactará por whatsapp
+                        NO: Tu cuenta debe ser reemplazada, en unos momentos recibiras los nuevos datos
+ 
+            Si la cuenta está marcada como inactiva y se está reportando entonces solo debe enviarse
+            un reemplazo automatico junto a una explicación del porqué.
+
+REEMPLAZO
+-añadir a gemini para que detecte si una foto es de reemplazo por error hogar
+-hacer webscrapping de instaddr y que saque el link del codigo para entregarlo por la pagina web
+
+VERIFICAR PAGOS
+-que gemini compruebe que la foto del comprobante de pago tiene los datos del pago correctamente
+
+
+
+==========================================================
+FUNCIONES DE ADMIN
+==========================================================
+-CORTES:
+    -Dividido por plataforma
+    -Cada header de las secciones de plataforma debe tener un link de acceso a la pagina
+    de la plataforma con accesos directos de las partes importantes para CORTES
+    -toda la información necesaria se copia al hacer click
+    -input de pin y contraseña modificables
+    -solo deben aparecer los pines de las plataformas que tienen pines
+    -las cuentas reemplazadas se eliminan automaticamente de la base de datos
+    -las cuentas que se corten deben mantenerse en la base de datos, solo se le actualiza el estado a cortado
+    en la base de datos
+
+-CAMBIAR CLAVE
+
+-RECARGAR NETFLIX 
+
+-AGREGAR PINES PARA RECARGAR
+
+-AGREGAR SERVICIOS
+    -Agregar cuentas
+        -perfiles
+        -cuentas completas
+    -Agregar tarjetas de regalo 
+
+-REEMPLAZAR SERVICIOS
+    de garantias de servicio
+    -Se debe mantener las fechas de corte
+
+    
+
+==========================================================
+FUNCIONES DE SUPERADMINISTRADOR 
+==========================================================
+-PAGAR SERVICIOS
+
+
+
+
+=========================================================
+-CARRITO: se muestran todos los productos seleccionados
+    detalles:
+        -Resumen de todos los productos seleccionados 
+        -subtotal y total Y MONTO EN BS
+        -descuentos (si aplica)
+        -Comisión (si aplica)
+        -botones de metodos de pagos disponibles
+            -se despliegan los datos para pagar
+            -conectar api de binance pay 
+        -
+-CHECKOUT:
+    detalles:
+        -
+
+================================
+AUTOMATIZACIONES:
+-RECORDATORIOS
+    -mismos recordatorios que se enviaban
+    -el cliente puede seleccionar cuantos dias con anticipación
+    quiere recibir los mensajes o si quiere un día en especifico
+-CAMBIOS DE CLAVE:
+    -se envian automaticamente a los clientes segun la plataforma
+
+
+==================================================
+EXTRAS
+==================================================
+-Q&A: preguntas y respuestas comunes para solucionar errores
+    detalles
+        -se divide por plataformas
+        -titulo
+        -foto del error
+        -explicación
+        -solución
+
+
+-SECCIÓN DE STREAM WATCH
+    -explicar qué es y para qué funciona
+
+-REGALOS
+    -que una persona pueda regalar una cuenta facilmente

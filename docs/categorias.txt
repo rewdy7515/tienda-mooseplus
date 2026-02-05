@@ -1,0 +1,7 @@
+categorias
+
+1. Series & Películas
+2. Música & Podcasts
+3. Diseño
+4. Tarjetas de Regalo
+5. Otros

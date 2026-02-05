@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notificaciones</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .notif-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .notif-item {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: #f9fafb;
+      }
+      .notif-item h4 {
+        margin: 0 0 6px;
+      }
+      .notif-item p {
+        margin: 0;
+      }
+      .notif-item small {
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Notificaciones</h2>
+      <div id="notif-container">
+        <p class="status" id="notif-status">Cargando...</p>
+        <div class="notif-list" id="notif-body"></div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const statusEl = document.querySelector("#notif-status");
+      const tbody = document.querySelector("#notif-body");
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const renderTable = (items = []) => {
+        if (!tbody) return;
+        if (!items.length) {
+          setStatus("No hay notificaciones por ahora.");
+          tbody.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        tbody.innerHTML = items
+          .map(
+            (n) => `
+          <div class="notif-item">
+            <h4>${n.titulo || "-"}</h4>
+            <p>${n.mensaje || "-"}</p>
+            <small>${n.fecha || ""}</small>
+          </div>
+        `
+          )
+          .join("");
+      };
+
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          if (!user?.id_usuario) {
+            setStatus("No autenticado.");
+            return;
+          }
+          const { data, error } = await supabase
+            .from("notificaciones")
+            .select("titulo, mensaje, fecha")
+            .eq("id_usuario", user.id_usuario)
+            .order("fecha", { ascending: false });
+          if (error) throw error;
+          renderTable(data || []);
+        } catch (err) {
+          console.error("cargar notificaciones error", err);
+          setStatus("No se pudieron cargar las notificaciones.");
+        }
+      })();
+
+      attachLogout(clearServerSession);
+    </script>
+  </body>
+</html>

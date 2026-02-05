@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Importar pines de perfiles</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Importar pines de perfiles</h2>
+      <div class="reporte-form">
+        <label class="form-label" for="input-csv">Subir archivo CSV</label>
+        <input id="input-csv" class="form-input" type="file" accept=".csv,text/csv" />
+        <p class="status">Selecciona un archivo CSV para continuar.</p>
+        <button id="btn-importar" class="btn-primary" type="button">Importar</button>
+        <p id="import-status" class="status"></p>
+      </div>
+    </main>
+
+    <script type="module">
+      import {
+        requireSession,
+        attachLogout,
+        getSessionRoles,
+        setSessionRoles,
+        attachLogoHome,
+      } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, startSession } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const logo = document.querySelector(".logo");
+      const inputCsv = document.querySelector("#input-csv");
+      const btnImportar = document.querySelector("#btn-importar");
+      const statusEl = document.querySelector("#import-status");
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          setSessionRoles(user || {});
+          const sessionRoles = getSessionRoles();
+          const isAdmin =
+            isTrue(sessionRoles?.permiso_admin) ||
+            isTrue(sessionRoles?.permiso_superadmin) ||
+            isTrue(user?.permiso_admin) ||
+            isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            document.querySelector("main .status").textContent =
+              "No tienes permisos para administrar servicios.";
+          }
+        } catch (err) {
+          console.error("importar datos init error", err);
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+
+      const parseCsv = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
+        const splitLine = (line) =>
+          line
+            .split(new RegExp(`${sep}(?=(?:[^"]*"[^"]*")*[^"]*$)`))
+            .map((c) => c.replace(/^"(.*)"$/, "$1").trim());
+
+        const headers = splitLine(lines[0]).map((h) => h.replace(/^\uFEFF/, "").toLowerCase());
+        const idx = {
+          n_perfil: headers.indexOf("n_perfil"),
+          pin: headers.indexOf("pin"),
+          perfil_hogar: headers.indexOf("perfil_hogar"),
+          correo: headers.indexOf("correo"),
+        };
+        const requiredPresent = Object.values(idx).every((v) => v >= 0);
+        if (!requiredPresent) return [];
+
+        return lines.slice(1).map((line) => {
+          const cols = splitLine(line);
+          const rawPerfil = cols[idx.n_perfil];
+          return {
+            n_perfil: rawPerfil ? Number(rawPerfil) : null,
+            pin: cols[idx.pin],
+            perfil_hogar: cols[idx.perfil_hogar],
+            correo: cols[idx.correo],
+          };
+        });
+      };
+
+      async function importar() {
+        if (statusEl) statusEl.textContent = "";
+        const file = inputCsv?.files?.[0];
+        if (!file) {
+          statusEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        console.log("[importar] raw text first 200 chars:", text.slice(0, 200));
+        const parsed = parseCsv(text);
+        console.log("[importar] parsed rows count:", parsed.length, "sample:", parsed.slice(0, 3));
+        const rows = parsed.filter(
+          (r) => r?.correo && r.n_perfil !== null && !Number.isNaN(r.n_perfil)
+        );
+        if (!rows.length) {
+          statusEl.textContent =
+            "No se encontraron filas válidas (revisa encabezados n_perfil, pin, perfil_hogar, correo).";
+          return;
+        }
+        console.log("[importar] filtered rows count:", rows.length, "sample:", rows.slice(0, 3));
+        const id_usuario = requireSession();
+        await startSession(id_usuario);
+        const res = await fetch("http://localhost:3000/api/admin/import-pines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ rows, id_usuario }),
+        });
+        const body = await res.json().catch(() => ({}));
+        console.log("[importar] server response", res.status, body);
+        if (!res.ok || body?.error) {
+          statusEl.textContent = body?.error || "Error al importar.";
+          return;
+        }
+        statusEl.textContent = `Importación completada. Perfiles insertados: ${body.perfiles_insertados || 0}, sub_cuentas insertadas: ${body.sub_cuentas_insertadas || 0}.`;
+      }
+
+      btnImportar?.addEventListener("click", importar);
+    </script>
+  </body>
+</html>

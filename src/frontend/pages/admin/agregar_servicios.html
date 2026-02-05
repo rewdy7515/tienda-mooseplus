@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agregar servicios</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .form-admin {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 720px;
+        margin-top: 16px;
+      }
+      .form-admin .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .form-admin label {
+        font-weight: 700;
+      }
+      .form-admin input,
+      .form-admin select {
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .proveedor-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .proveedor-row .input-wrap {
+        position: relative;
+        flex: 1;
+      }
+      .proveedor-row button {
+        padding: 10px 12px;
+      }
+      .proveedor-sugerencias {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        z-index: 30;
+        margin-top: 6px;
+      }
+      .proveedor-sugerencias.hidden {
+        display: none;
+      }
+      .proveedor-sugerencias button {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+      }
+      .proveedor-sugerencias button:last-child {
+        border-bottom: none;
+      }
+      .proveedor-sugerencias button:hover {
+        background: #f7f7f7;
+      }
+      .field-inline {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px;
+      }
+      .field-inline-3 {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+      }
+      .modal-qty.inline {
+        margin: 0;
+      }
+      .status {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Agregar servicios</h2>
+      <div class="form-admin">
+        <div class="field">
+          <label>Proveedor</label>
+          <div class="proveedor-row">
+            <div class="input-wrap">
+              <input type="search" id="prov-buscar" placeholder="Buscar proveedor por nombre" autocomplete="off" />
+              <div id="prov-sugerencias" class="proveedor-sugerencias hidden"></div>
+            </div>
+            <button type="button" id="prov-buscar-btn" class="btn-primary">🔍</button>
+            <button type="button" id="btn-netflix" class="btn-outline" title="Autocompletar Netflix">Netflix</button>
+            <button type="button" id="btn-spotify" class="btn-outline" title="Autocompletar Spotify">Spotify</button>
+          </div>
+        </div>
+
+        <div class="field-inline">
+          <div class="field">
+            <label for="plat-select">Plataforma</label>
+            <select id="plat-select">
+              <option value="">Seleccione una plataforma</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="tipo-cuenta">Tipo de cuenta</label>
+            <select id="tipo-cuenta">
+              <option value="">Seleccione</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-inline">
+          <div class="field">
+            <label for="correo-cuenta">Correo</label>
+            <input type="text" id="correo-cuenta" placeholder="Correo" />
+            <p id="ultimo-correo" class="status" style="margin:4px 0 0; font-size:13px; color:#374151; display:none;"></p>
+          </div>
+          <div class="field">
+            <label for="clave-cuenta">Clave</label>
+            <input type="text" id="clave-cuenta" placeholder="Clave" />
+          </div>
+        </div>
+
+        <div class="field-inline">
+          <div class="field">
+            <label for="region-cuenta">Región</label>
+            <input type="text" id="region-cuenta" placeholder="Región" />
+          </div>
+          <div class="field" style="align-self: flex-end;">
+            <label class="proximas-check">
+              <input type="checkbox" id="instaddr-check" />
+              <span>Instaddr</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field-inline-3">
+          <div class="field">
+            <label for="link-codigo">Link</label>
+            <input type="text" id="link-codigo" placeholder="Link" />
+          </div>
+          <div class="field plat-extra plat-extra-default">
+            <label for="correo-acceso">Correo acceso</label>
+            <input type="text" id="correo-acceso" placeholder="Correo acceso" />
+          </div>
+          <div class="field plat-extra plat-extra-default">
+            <label for="pin-codigo">PIN</label>
+            <input type="text" id="pin-codigo" placeholder="PIN" />
+          </div>
+          <div class="field plat-extra plat-extra-9 hidden">
+            <label for="direccion-cuenta">Dirección</label>
+            <input type="text" id="direccion-cuenta" placeholder="Dirección" />
+          </div>
+        </div>
+
+        <div class="field-inline">
+          <div class="field">
+            <label>Duración</label>
+            <div class="modal-qty inline" id="duracion-qty">
+              <button type="button" id="duracion-menos">-</button>
+              <span id="duracion-meses">1</span>
+              <button type="button" id="duracion-mas">+</button>
+              <span class="modal-duration-suffix">meses</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="fecha-corte-input">Fecha de corte</label>
+            <input type="date" id="fecha-corte-input" />
+          </div>
+          <div class="field">
+            <label for="precio-cuenta">Precio</label>
+            <input type="number" step="0.01" min="0" id="precio-cuenta" placeholder="Precio" />
+          </div>
+        </div>
+
+        <button type="button" id="btn-add-cuenta" class="btn-primary">Añadir cuenta</button>
+        <p class="status" id="add-status"></p>
+      </div>
+    </main>
+
+    <script type="module">
+      import {
+        requireSession,
+        attachLogout,
+        getSessionRoles,
+        setSessionRoles,
+        attachLogoHome,
+      } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector("" + ".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const logo = document.querySelector(".logo");
+
+      const provInput = document.querySelector("#prov-buscar");
+      const provSugs = document.querySelector("#prov-sugerencias");
+      const provBtn = document.querySelector("#prov-buscar-btn");
+      const platSelect = document.querySelector("#plat-select");
+      const durMenos = document.querySelector("#duracion-menos");
+      const durMas = document.querySelector("#duracion-mas");
+      const durSpan = document.querySelector("#duracion-meses");
+      const fechaCorteInput = document.querySelector("#fecha-corte-input");
+      const ultimoCorreoEl = document.querySelector("#ultimo-correo");
+      const pinRecargaEl = document.createElement("p");
+      pinRecargaEl.className = "status";
+      pinRecargaEl.style.margin = "6px 0 0";
+      pinRecargaEl.style.fontSize = "15px";
+      pinRecargaEl.style.fontWeight = "700";
+      pinRecargaEl.style.color = "#111";
+      pinRecargaEl.style.cursor = "pointer";
+      pinRecargaEl.style.display = "none";
+      const claveField = document.querySelector("#clave-cuenta")?.parentElement;
+      if (claveField) {
+        claveField.appendChild(pinRecargaEl);
+      }
+      let pinRecargaSeleccionado = null;
+      const btnNetflix = document.querySelector("#btn-netflix");
+      const btnSpotify = document.querySelector("#btn-spotify");
+      const btnAdd = document.querySelector("#btn-add-cuenta");
+      const statusEl = document.querySelector("#add-status");
+      const tipoCuentaSelect = document.querySelector("#tipo-cuenta");
+      const regionEl = document.querySelector("#region-cuenta");
+      const instaddrEl = document.querySelector("#instaddr-check");
+      const linkEl = document.querySelector("#link-codigo");
+      const correoAccesoEl = document.querySelector("#correo-acceso");
+      const pinEl = document.querySelector("#pin-codigo");
+      const direccionEl = document.querySelector("#direccion-cuenta");
+      const precioInput = document.querySelector("#precio-cuenta");
+
+      let selectedProveedor = null;
+      let fetchProvCounter = 0;
+      const plataformaInfo = new Map(); // id -> {miembros, num_max_dispositivos, usa_pines, max_dig_pin}
+      let currentUser = null;
+      const toTitleCase = (str) =>
+        (str || "").replace(/(\S+)/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+      let dirTimeout = null;
+
+      const copyText = async (text) => {
+        if (!text) return false;
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (err) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            return true;
+          } catch (_err) {
+            return false;
+          }
+        }
+      };
+
+      const tryAutofillDireccion = async () => {
+        if (String(platSelect?.value) !== "9") return;
+        const regionVal = regionEl?.value.trim();
+        if (!regionVal || !direccionEl) return;
+        try {
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("region, direccion")
+            .eq("id_plataforma", 9)
+            .eq("region", regionVal)
+            .not("direccion", "is", null)
+            .limit(1);
+          if (error) throw error;
+          if (data?.length && data[0].direccion) {
+            direccionEl.value = data[0].direccion;
+          }
+        } catch (err) {
+          console.error("autocompletar direccion error", err);
+        }
+      };
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const setUltimoCorreoText = (text, show = false) => {
+        if (!ultimoCorreoEl) return;
+        if (!show) {
+          ultimoCorreoEl.style.display = "none";
+          ultimoCorreoEl.textContent = "";
+          return;
+        }
+        ultimoCorreoEl.textContent = text || "";
+        ultimoCorreoEl.style.display = "block";
+      };
+
+      const fetchUltimoCorreo = async (platId) => {
+        if (!platId || platId !== "1") {
+          setUltimoCorreoText("", false);
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.style.display = "none";
+          pinRecargaEl.textContent = "";
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("correo")
+            .eq("id_plataforma", 1)
+            .order("id_cuenta", { ascending: false })
+            .limit(3);
+          if (error) throw error;
+          const correos = (data || []).map((c) => c.correo).filter(Boolean);
+          const label = correos.length ? correos.join(", ") : "-";
+          setUltimoCorreoText(`Últimos correos: ${label}`, true);
+          // Si el proveedor es 2, intenta buscar pin
+          if (String(selectedProveedor) === "2") {
+            await fetchPinRecarga();
+          } else {
+            pinRecargaSeleccionado = null;
+            pinRecargaEl.style.display = "none";
+            pinRecargaEl.textContent = "";
+          }
+        } catch (err) {
+          console.error("fetch ultimo correo error", err);
+          setUltimoCorreoText("Últimos correos: -", true);
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.style.display = "none";
+          pinRecargaEl.textContent = "";
+        }
+      };
+
+      const fetchPinRecarga = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("tarjetas_de_regalo")
+            .select("id_tarjeta_de_regalo, pin")
+            .eq("id_plataforma", 21)
+            .eq("para_venta", false)
+            .eq("usado", false)
+            .order("id_tarjeta_de_regalo", { ascending: true })
+            .limit(1);
+          if (error) throw error;
+          const pinRow = data?.[0] || null;
+          pinRecargaSeleccionado = pinRow;
+          if (pinRecargaSeleccionado?.pin) {
+            pinRecargaEl.textContent = `Pin de recarga: ${pinRecargaSeleccionado.pin}`;
+            pinRecargaEl.style.display = "block";
+          } else {
+            pinRecargaEl.textContent = "Pin de recarga: -";
+            pinRecargaEl.style.display = "block";
+          }
+        } catch (err) {
+          console.error("fetch pin recarga error", err);
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.textContent = "Pin de recarga: -";
+          pinRecargaEl.style.display = "block";
+        }
+      };
+
+      pinRecargaEl?.addEventListener("click", () => {
+        if (pinRecargaSeleccionado?.pin) {
+          copyText(pinRecargaSeleccionado.pin);
+        }
+      });
+
+      const renderProveedorSugs = (items, forceHide = false) => {
+        if (!provSugs) return;
+        if (forceHide || !items.length) {
+          provSugs.innerHTML = "";
+          provSugs.classList.add("hidden");
+          return;
+        }
+        provSugs.innerHTML = items
+          .map(
+            (p) => `
+              <button type="button" data-id="${p.id_proveedor}" data-nombre="${p.nombre || ""}">
+                ${p.nombre || ""}
+              </button>
+            `
+          )
+          .join("");
+        provSugs.classList.remove("hidden");
+      };
+
+      const buscarProveedores = async (texto, hide = false) => {
+        const term = (texto || "").trim();
+        if (!term) {
+          renderProveedorSugs([], true);
+          return;
+        }
+        const current = ++fetchProvCounter;
+        try {
+          const { data, error } = await supabase
+            .from("proveedores")
+            .select("id_proveedor, nombre")
+            .ilike("nombre", `%${term}%`)
+            .limit(5);
+          if (current !== fetchProvCounter) return;
+          if (error) throw error;
+          renderProveedorSugs(data || [], hide);
+        } catch (err) {
+          console.error("buscar proveedores error", err);
+          renderProveedorSugs([], true);
+        }
+      };
+
+      const loadPlataformas = async () => {
+        if (!platSelect) return;
+        try {
+          setStatus("Cargando plataformas...");
+          const { data, error } = await supabase
+            .from("plataformas")
+            .select(
+              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo, cuenta_madre, max_miembros"
+            )
+            .order("nombre");
+          if (error) throw error;
+          platSelect.innerHTML = '<option value="">Seleccione una plataforma</option>';
+          plataformaInfo.clear();
+          (data || [])
+            .filter((p) => p.tarjeta_de_regalo !== true) // excluir gift cards
+            .forEach((p) => {
+              const opt = document.createElement("option");
+              opt.value = p.id_plataforma;
+              opt.textContent = p.nombre || `Plataforma ${p.id_plataforma}`;
+              opt.dataset.miembros = p.miembros;
+              platSelect.appendChild(opt);
+              plataformaInfo.set(String(p.id_plataforma), {
+                miembros: p.miembros,
+                num_max_dispositivos: p.num_max_dispositivos,
+                usa_pines: p.usa_pines,
+                max_dig_pin: p.max_dig_pin,
+                max_miembros: p.max_miembros,
+                cuenta_madre: p.cuenta_madre,
+              });
+            });
+          if (tipoCuentaSelect) {
+            tipoCuentaSelect.disabled = true;
+            tipoCuentaSelect.classList.add("input-disabled");
+          }
+          setStatus("");
+        } catch (err) {
+          console.error("load plataformas error", err);
+          platSelect.innerHTML = '<option value="">Sin plataformas</option>';
+          setStatus("No se pudieron cargar las plataformas.");
+        }
+      };
+
+      const buildTipoCuentaOptions = (miembros, cuentaMadre) => {
+        if (!tipoCuentaSelect) return;
+        tipoCuentaSelect.innerHTML = '<option value="">Seleccione</option>';
+        const opts = [
+          { val: "perfiles", label: "Perfiles" },
+        ];
+        if (cuentaMadre) {
+          opts.push({ val: "cuenta_madre", label: "Cuenta madre" });
+        }
+        if (miembros) {
+          opts.push({ val: "perfil_independiente", label: "Perfil independiente" });
+        }
+        opts.push({ val: "cuenta_completa", label: "Cuenta completa" });
+        opts.forEach((o) => {
+          const opt = document.createElement("option");
+          opt.value = o.val;
+          opt.textContent = o.label;
+          tipoCuentaSelect.appendChild(opt);
+        });
+        tipoCuentaSelect.value = cuentaMadre ? "cuenta_madre" : "perfiles";
+      };
+
+      const adjustDuracion = (delta) => {
+        const current = Number(durSpan?.textContent || 1);
+        const next = Math.max(1, current + delta);
+        if (durSpan) durSpan.textContent = String(next);
+      };
+
+      provInput?.addEventListener("input", (e) => {
+        selectedProveedor = null;
+        buscarProveedores(e.target.value);
+      });
+
+      provSugs?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn || !provInput) return;
+        provInput.value = btn.dataset.nombre || "";
+        selectedProveedor = btn.dataset.id || null;
+        renderProveedorSugs([], true);
+        if (String(platSelect?.value) === "1" && String(selectedProveedor) === "2") {
+          fetchPinRecarga();
+        } else {
+          pinRecargaSeleccionado = null;
+          pinRecargaEl.style.display = "none";
+          pinRecargaEl.textContent = "";
+        }
+      });
+
+      regionEl?.addEventListener("input", () => {
+        const el = regionEl;
+        const start = el.selectionStart;
+        el.value = toTitleCase(el.value);
+        if (start !== null) {
+          const pos = Math.min(start, el.value.length);
+          el.setSelectionRange(pos, pos);
+        }
+        if (String(platSelect?.value) === "9") {
+          if (dirTimeout) clearTimeout(dirTimeout);
+          dirTimeout = setTimeout(() => {
+            tryAutofillDireccion();
+          }, 300);
+        }
+      });
+
+      const setFechaCorteDefault = (meses) => {
+        const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
+        const base = new Date();
+        base.setHours(12, 0, 0, 0);
+        const target = new Date(base);
+        target.setMonth(target.getMonth() + monthsVal);
+        const pad = (n) => String(n).padStart(2, "0");
+        const iso = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
+        if (fechaCorteInput) fechaCorteInput.value = iso;
+      };
+
+      setFechaCorteDefault(Number(durSpan?.textContent || 1));
+
+      provBtn?.addEventListener("click", (e) => {
+        e.preventDefault();
+        buscarProveedores(provInput?.value || "", false);
+      });
+
+      const setProveedor = (id, nombre) => {
+        selectedProveedor = String(id);
+        if (provInput) provInput.value = nombre || "";
+      };
+
+      btnNetflix?.addEventListener("click", () => {
+        setProveedor(2, "Netflix");
+        if (platSelect) {
+          platSelect.value = "1";
+          const changeEvt = new Event("change");
+          platSelect.dispatchEvent(changeEvt);
+        }
+        // Forzar tipo de cuenta
+        if (tipoCuentaSelect) {
+          tipoCuentaSelect.disabled = false;
+          tipoCuentaSelect.classList.remove("input-disabled");
+          tipoCuentaSelect.value = "perfiles";
+        }
+        if (precioInput) {
+          precioInput.value = "0";
+        }
+      });
+
+      btnSpotify?.addEventListener("click", () => {
+        setProveedor(2, "moose+");
+        if (platSelect) {
+          platSelect.value = "9";
+          const changeEvt = new Event("change");
+          platSelect.dispatchEvent(changeEvt);
+        }
+        if (regionEl) regionEl.value = "Egipto";
+        if (direccionEl) {
+          direccionEl.value =
+            "109 Ahmed Saeed, Ganayen Al Waileyah, El Weili, Cairo Governorate 4390114, Egypt";
+        }
+        if (precioInput) {
+          precioInput.value = "0";
+        }
+      });
+
+      platSelect?.addEventListener("change", async () => {
+        const sel = platSelect.selectedOptions?.[0];
+        const meta = plataformaInfo.get(String(platSelect.value)) || {};
+        const miembros = sel ? sel.dataset.miembros === "true" || sel.dataset.miembros === "1" || meta.miembros === true || meta.miembros === "1" : false;
+        const cuentaMadre =
+          meta.cuenta_madre === true ||
+          meta.cuenta_madre === "true" ||
+          meta.cuenta_madre === 1 ||
+          meta.cuenta_madre === "1";
+        buildTipoCuentaOptions(miembros, cuentaMadre);
+        if (tipoCuentaSelect) {
+          tipoCuentaSelect.disabled = !platSelect.value;
+          tipoCuentaSelect.classList.toggle("input-disabled", !platSelect.value);
+        }
+        // Toggle campos según plataforma
+        const isPlat9 = String(platSelect.value) === "9";
+        document.querySelectorAll(".plat-extra-default").forEach((el) => {
+          el.classList.toggle("hidden", isPlat9);
+        });
+        document.querySelectorAll(".plat-extra-9").forEach((el) => {
+          el.classList.toggle("hidden", !isPlat9);
+        });
+        if (isPlat9 && regionEl && direccionEl) {
+          const regionVal = regionEl.value.trim();
+          if (regionVal) tryAutofillDireccion();
+        }
+        fetchUltimoCorreo(String(platSelect.value || ""));
+      });
+
+      durMas?.addEventListener("click", () => {
+        adjustDuracion(1);
+        const next = Math.max(1, Number(durSpan?.textContent || 1));
+        setFechaCorteDefault(next);
+      });
+      durMenos?.addEventListener("click", () => {
+        adjustDuracion(-1);
+        const next = Math.max(1, Number(durSpan?.textContent || 1));
+        setFechaCorteDefault(next);
+      });
+
+      btnAdd?.addEventListener("click", async () => {
+        const plataforma = platSelect?.value || "";
+        const tipo = document.querySelector("#tipo-cuenta")?.value.trim() || "";
+        const correo = document.querySelector("#correo-cuenta")?.value.trim() || "";
+        const clave = document.querySelector("#clave-cuenta")?.value.trim() || "";
+        const meses = Number(durSpan?.textContent || 1);
+        const precio = Number(document.querySelector("#precio-cuenta")?.value || 0);
+        const region = regionEl?.value.trim() || "";
+        const instaddr = instaddrEl?.checked || false;
+        const link = linkEl?.value.trim() || "";
+        const correoAcceso = correoAccesoEl?.value.trim() || "";
+        const pin = pinEl?.value.trim() || "";
+        const direccion = direccionEl?.value.trim() || "";
+        const platMeta = plataformaInfo.get(String(plataforma)) || {};
+        const numDispositivos = Number(platMeta.num_max_dispositivos) > 0 ? Number(platMeta.num_max_dispositivos) : 1;
+        const maxMiembros = Number(platMeta.max_miembros) > 0 ? Number(platMeta.max_miembros) : 0;
+        const usaPines = platMeta.usa_pines === true || platMeta.usa_pines === "true" || platMeta.usa_pines === 1 || platMeta.usa_pines === "1";
+        const maxDigPin = Number(platMeta.max_dig_pin) > 0 ? Number(platMeta.max_dig_pin) : 4;
+        const requierePinRecarga = String(selectedProveedor) === "2";
+
+        if (!selectedProveedor) {
+          alert("Selecciona un proveedor.");
+          return;
+        }
+        if (!plataforma) {
+          alert("Selecciona una plataforma.");
+          return;
+        }
+        if (!correo || !clave) {
+          alert("Ingresa correo y clave.");
+          return;
+        }
+        if (requierePinRecarga && !pinRecargaSeleccionado?.id_tarjeta_de_regalo) {
+          alert("No hay pin de recarga disponible.");
+          return;
+        }
+
+        const insertCuenta = async (body, forceId = null) => {
+          const payloadCuenta = { ...body };
+          if (forceId !== null) payloadCuenta.id_cuenta = forceId;
+          return supabase.from("cuentas").insert(payloadCuenta).select("id_cuenta").single();
+        };
+
+        setStatus("Agregando cuenta...");
+        try {
+        const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
+        const today = new Date();
+        const fechaPagada = today.toISOString().slice(0, 10);
+        const fechaCorte =
+          fechaCorteInput?.value?.trim() ||
+          (() => {
+            const fechaCorteDate = new Date(today);
+            fechaCorteDate.setMonth(fechaCorteDate.getMonth() + monthsVal);
+            return fechaCorteDate.toISOString().slice(0, 10);
+          })();
+
+          let venta_perfil = false;
+          let venta_miembro = false;
+          let cuenta_madre = false;
+          let ocupado = false;
+          if (tipo === "perfil_independiente") {
+            venta_perfil = false;
+            venta_miembro = true;
+          } else if (tipo === "perfiles") {
+            venta_perfil = true;
+            venta_miembro = false;
+          } else if (tipo === "cuenta_madre") {
+            venta_perfil = false;
+            venta_miembro = false;
+            cuenta_madre = true;
+          } else if (tipo === "cuenta_completa") {
+            venta_perfil = false;
+            venta_miembro = false;
+          }
+
+          const payload = {
+            id_proveedor: Number(selectedProveedor),
+            id_plataforma: Number(plataforma),
+            correo,
+            clave,
+            region: region || null,
+            instaddr,
+            link_codigo: link || null,
+            correo_codigo: String(plataforma) === "9" ? null : correoAcceso || null,
+            pin_codigo: String(plataforma) === "9" ? null : pin || null,
+            direccion: String(plataforma) === "9" ? direccion || null : null,
+            fecha_pagada: fechaPagada,
+            fecha_corte: fechaCorte,
+            venta_perfil,
+            venta_miembro,
+            ocupado,
+            inactiva: false,
+            cuenta_madre,
+          };
+
+          let cuentaInserted = null;
+          let insertError = null;
+          try {
+            const res = await insertCuenta(payload);
+            cuentaInserted = res.data;
+            insertError = res.error;
+          } catch (err) {
+            insertError = err;
+          }
+
+          // Si la secuencia está desfasada (23505 en cuentas_pkey), calculamos el siguiente ID y reintentamos
+          if (insertError?.code === "23505") {
+            const { data: lastRows, error: lastErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta")
+              .order("id_cuenta", { ascending: false })
+              .limit(1);
+            if (lastErr) throw insertError;
+            const lastId = lastRows?.[0]?.id_cuenta || 0;
+            const nextId = Number(lastId) + 1;
+            const retry = await insertCuenta(payload, nextId);
+            if (retry.error) throw retry.error;
+            cuentaInserted = retry.data;
+            insertError = null;
+          }
+          if (insertError) throw insertError;
+
+          const shouldCreatePerfiles =
+            (tipo === "perfiles" && cuentaInserted?.id_cuenta) ||
+            (tipo === "cuenta_madre" && cuentaInserted?.id_cuenta);
+          if (shouldCreatePerfiles) {
+            const totalPerfiles =
+              tipo === "cuenta_madre" ? Math.max(1, maxMiembros) : Math.max(1, numDispositivos);
+            const perfiles = Array.from({ length: totalPerfiles }).map((_, idx) => {
+              let pinVal = null;
+              if (usaPines) {
+                const digits = Math.max(1, maxDigPin);
+                const min = digits === 1 ? 0 : Math.pow(10, digits - 1);
+                const max = Math.pow(10, digits) - 1;
+                pinVal = Math.floor(Math.random() * (max - min + 1)) + min;
+              }
+              const isHogar = Number(plataforma) === 1 && idx === 0;
+              return {
+                id_cuenta: cuentaInserted.id_cuenta,
+                n_perfil: idx + 1,
+                ocupado: false,
+                pin: pinVal,
+                perfil_hogar: isHogar,
+                correo: null,
+              };
+            });
+            const { error: perfErr } = await supabase.from("perfiles").insert(perfiles);
+            if (perfErr) throw perfErr;
+          }
+
+          // Insertar historial_ventas
+          const monto = precio || 0;
+          const { error: histErr } = await supabase.from("historial_ventas").insert({
+            id_usuario_cliente: null,
+            id_proveedor: Number(selectedProveedor),
+            monto,
+            fecha_pago: fechaPagada,
+            venta_cliente: false,
+            renovacion: false,
+            id_venta: null,
+            id_plataforma: Number(plataforma),
+            id_cuenta: cuentaInserted.id_cuenta,
+            registrado_por: currentUser?.id_usuario || null,
+          });
+          if (histErr) throw histErr;
+
+          // Marcar pin de recarga como usado si aplica
+          if (requierePinRecarga && cuentaInserted?.id_cuenta && pinRecargaSeleccionado?.id_tarjeta_de_regalo) {
+            try {
+              const todayMark = new Date().toISOString().slice(0, 10);
+              const { error: updPinErr } = await supabase
+                .from("tarjetas_de_regalo")
+                .update({
+                  usado: true,
+                  fecha_uso: todayMark,
+                  id_cuenta: cuentaInserted.id_cuenta,
+                })
+                .eq("id_tarjeta_de_regalo", pinRecargaSeleccionado.id_tarjeta_de_regalo);
+              if (updPinErr) throw updPinErr;
+            } catch (err) {
+              console.error("marcar pin recarga error", err);
+            }
+          }
+
+          setStatus("Cuenta agregada correctamente.");
+        } catch (err) {
+          console.error("agregar cuenta error", err);
+          setStatus("No se pudo agregar la cuenta.");
+        }
+      });
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          currentUser = user || null;
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          setSessionRoles(user || {});
+          const sessionRoles = getSessionRoles();
+          const isAdmin =
+            isTrue(sessionRoles?.permiso_admin) ||
+            isTrue(sessionRoles?.permiso_superadmin) ||
+            isTrue(user?.permiso_admin) ||
+            isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            const mainStatus = document.querySelector("main .status");
+            if (mainStatus) {
+              mainStatus.textContent = "No tienes permisos para administrar servicios.";
+            }
+          }
+          await loadPlataformas();
+        } catch (err) {
+          console.error("agregar servicios init error", err);
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+    </script>
+  </body>
+</html>

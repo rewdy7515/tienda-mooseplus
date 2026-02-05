@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Importar clientes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Importar clientes</h2>
+      <div class="reporte-form">
+        <p class="status">
+          Formato esperado (encabezados): id_venta, n_perfil, nombre, fecha_corte, correo, suspendido, meses_contratados, corte_reemplazo.
+          En id_venta se acepta valor como #0751 (se elimina #). n_perfil es entero. nombre lleva nombre y apellidos en una celda. correo debe existir en cuentas.
+        </p>
+        <label class="form-label" for="input-csv">Subir archivo CSV</label>
+        <input id="input-csv" class="form-input" type="file" accept=".csv,text/csv" />
+        <p class="status">Selecciona un archivo CSV para continuar.</p>
+        <button id="btn-importar" class="btn-primary" type="button">Importar</button>
+        <p id="import-status" class="status"></p>
+
+        <hr />
+        <label class="form-label" for="input-csv-fechas">Subir CSV de fechas (id_venta, fecha_corte)</label>
+        <input id="input-csv-fechas" class="form-input" type="file" accept=".csv,text/csv" />
+        <p class="status">Solo se usa id_venta y fecha_corte. id_venta puede traer # y ceros a la izquierda.</p>
+        <button id="btn-importar-fechas" class="btn-primary" type="button">Importar fechas</button>
+        <p id="import-status-fechas" class="status"></p>
+      </div>
+    </main>
+
+    <script type="module">
+      import { attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser } from "../../scripts/api.js";
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const inputCsv = document.querySelector("#input-csv");
+      const btnImportar = document.querySelector("#btn-importar");
+      const statusEl = document.querySelector("#import-status");
+      const inputCsvFechas = document.querySelector("#input-csv-fechas");
+      const btnImportarFechas = document.querySelector("#btn-importar-fechas");
+      const statusFechasEl = document.querySelector("#import-status-fechas");
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+        } catch (err) {
+          console.error("importar clientes init error", err);
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+
+      const parseCsv = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
+        const splitLine = (line) =>
+          line
+            .split(new RegExp(`${sep}(?=(?:[^"]*"[^"]*")*[^"]*$)`))
+            .map((c) => c.replace(/^"(.*)"$/, "$1").trim());
+
+        const headers = splitLine(lines[0]).map((h) => h.replace(/^\uFEFF/, "").toLowerCase());
+        const idx = {
+          id_venta: headers.indexOf("id_venta"),
+          n_perfil: headers.indexOf("n_perfil"),
+          nombre: headers.indexOf("nombre"),
+          fecha_corte: headers.indexOf("fecha_corte"),
+          correo: headers.indexOf("correo"),
+          suspendido: headers.indexOf("suspendido"),
+          meses_contratados: headers.indexOf("meses_contratados"),
+          corte_reemplazo: headers.indexOf("corte_reemplazo"),
+        };
+        const required = ["id_venta", "n_perfil", "nombre", "fecha_corte", "correo"];
+        const hasAll = required.every((k) => idx[k] >= 0);
+        if (!hasAll) return [];
+
+        return lines.slice(1).map((line) => {
+          const cols = splitLine(line);
+          return {
+            id_venta: cols[idx.id_venta],
+            n_perfil: cols[idx.n_perfil],
+            nombre: cols[idx.nombre],
+            fecha_corte: cols[idx.fecha_corte],
+            correo: cols[idx.correo],
+            suspendido: cols[idx.suspendido],
+            meses_contratados: cols[idx.meses_contratados],
+            corte_reemplazo: cols[idx.corte_reemplazo],
+          };
+        });
+      };
+
+      const parseCsvFechas = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
+        const splitLine = (line) =>
+          line
+            .split(new RegExp(`${sep}(?=(?:[^"]*"[^"]*")*[^"]*$)`))
+            .map((c) => c.replace(/^"(.*)"$/, "$1").trim());
+
+        const headers = splitLine(lines[0]).map((h) => h.replace(/^\uFEFF/, "").toLowerCase());
+        const idx = {
+          id_venta: headers.indexOf("id_venta"),
+          fecha_corte: headers.indexOf("fecha_corte"),
+        };
+        const required = ["id_venta", "fecha_corte"];
+        const hasAll = required.every((k) => idx[k] >= 0);
+        if (!hasAll) return [];
+
+        const rows = lines.slice(1).map((line) => {
+          const cols = splitLine(line);
+          return {
+            id_venta: cols[idx.id_venta],
+            fecha_corte: cols[idx.fecha_corte],
+          };
+        });
+
+        const valid = rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test((r.fecha_corte || "").trim()));
+        const invalid = rows.length - valid.length;
+        console.log("[importar fechas] filtrados:", { total: rows.length, valid: valid.length, invalid });
+        return valid;
+      };
+
+      async function importar() {
+        if (statusEl) statusEl.textContent = "";
+        const file = inputCsv?.files?.[0];
+        if (!file) {
+          statusEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        console.log("[importar clientes] raw text first 200 chars:", text.slice(0, 200));
+        const parsed = parseCsv(text);
+        console.log("[importar clientes] parsed rows:", parsed.length, "sample:", parsed.slice(0, 3));
+        if (!parsed.length) {
+          statusEl.textContent =
+            "No se encontraron filas válidas (encabezados id_venta, n_perfil, nombre, fecha_corte, correo, suspendido, meses_contratados, corte_reemplazo).";
+          return;
+        }
+        const res = await fetch("http://localhost:3000/api/admin/import-clientes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ rows: parsed }),
+        });
+        const body = await res.json().catch(() => ({}));
+        console.log("[importar clientes] response", res.status, body);
+        if (!res.ok || body?.error) {
+          statusEl.textContent = body?.error || "Error al importar.";
+          return;
+        }
+        statusEl.textContent = `Importación completada. Ventas: ${body.ventas}, perfiles ocupados: ${body.perfiles_ocupados}, usuarios: ${body.usuarios}.`;
+      }
+
+      btnImportar?.addEventListener("click", importar);
+
+      btnImportarFechas?.addEventListener("click", async () => {
+        if (statusFechasEl) statusFechasEl.textContent = "";
+        const file = inputCsvFechas?.files?.[0];
+        if (!file) {
+          statusFechasEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        console.log("[importar fechas] raw text first 200 chars:", text.slice(0, 200));
+        const parsed = parseCsvFechas(text);
+        console.log("[importar fechas] parsed rows:", parsed.length, "sample:", parsed.slice(0, 3));
+        if (!parsed.length) {
+          statusFechasEl.textContent = "No se encontraron filas con id_venta y fecha_corte.";
+          return;
+        }
+        try {
+          const res = await fetch("http://localhost:3000/api/admin/import-fechas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: parsed }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || body?.error) {
+            statusFechasEl.textContent = body?.error || "Error al importar fechas.";
+            return;
+          }
+          statusFechasEl.textContent = `Fechas actualizadas: ${body.actualizadas || 0}`;
+        } catch (err) {
+          console.error("importar fechas error", err);
+          statusFechasEl.textContent = "No se pudo importar las fechas.";
+        }
+      });
+    </script>
+  </body>
+</html>

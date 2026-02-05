@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Renovar servicio cliente</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .buscador-wrapper {
+        margin-top: 16px;
+        max-width: 100%;
+        width: 100%;
+      }
+      .buscador-cliente {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .buscador-cliente input {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .buscador-cliente button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 14px;
+        background: #111;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .buscador-sugerencias {
+        margin-top: 6px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+        overflow: hidden;
+      }
+      .buscador-sugerencias.hidden {
+        display: none;
+      }
+      .buscador-sugerencias button {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+        text-align: left;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .buscador-sugerencias button:last-child {
+        border-bottom: none;
+      }
+      .buscador-sugerencias button:hover {
+        background: #f7f7f7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Renovar servicio cliente</h2>
+      <div class="buscador-wrapper">
+        <div class="buscador-cliente">
+          <input
+            type="search"
+            id="input-buscar-cliente"
+            placeholder="Ingrese el nombre de un cliente"
+            autocomplete="off"
+          />
+          <button type="button" id="btn-buscar-cliente" aria-label="Buscar cliente">🔍</button>
+        </div>
+        <div class="buscador-cliente" style="margin-top:10px;">
+          <input
+            type="search"
+            id="input-cuenta"
+            placeholder="Buscar cuenta (correo)"
+            autocomplete="off"
+          />
+        </div>
+        <div class="buscador-actions" style="margin-top:10px;">
+          <button type="button" id="btn-buscar-general" class="btn-primary">Buscar</button>
+        </div>
+        <div class="buscador-actions">
+          <button type="button" id="btn-renovar-seleccion" class="btn-primary btn-disabled hidden" disabled>Renovar</button>
+        </div>
+        <div id="buscador-sugerencias" class="buscador-sugerencias hidden"></div>
+        <div id="sugs-cuentas" class="buscador-sugerencias hidden"></div>
+        <div id="buscador-resultado" class="proximas-panel hidden"></div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const inputBuscar = document.querySelector("#input-buscar-cliente");
+      const inputCuenta = document.querySelector("#input-cuenta");
+      const sugerenciasEl = document.querySelector("#buscador-sugerencias");
+      const sugerenciasCuentasEl = document.querySelector("#sugs-cuentas");
+      const resultadoEl = document.querySelector("#buscador-resultado");
+      const btnBuscar = document.querySelector("#btn-buscar-cliente");
+      const btnBuscarGeneral = document.querySelector("#btn-buscar-general");
+      const btnRenovarSeleccion = document.querySelector("#btn-renovar-seleccion");
+      const modalRenovarSel = document.querySelector("#modal-renovar-sel");
+      const modalRenovarSelClose = document.querySelector(".modal-renovar-sel-close");
+      const modalRenovarSelBody = document.querySelector("#modal-renovar-sel-body");
+      const metodoRenovarSelect = document.querySelector("#metodo-renovar");
+      const refRenovarInput = document.querySelector("#ref-renovar");
+      const btnConfirmarRenovar = document.querySelector("#btn-confirmar-renovar");
+      let fetchCounter = 0;
+      let seleccionActual = [];
+      let metodosPago = [];
+
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          window.__RC_USER_ID__ = user?.id_usuario || null;
+        } catch (err) {
+          console.error("renovar cliente init error", err);
+        }
+      })();
+
+      const limpiarSugerencias = () => {
+        if (sugerenciasEl) {
+          sugerenciasEl.innerHTML = "";
+          sugerenciasEl.classList.add("hidden");
+        }
+        if (sugerenciasCuentasEl) {
+          sugerenciasCuentasEl.innerHTML = "";
+          sugerenciasCuentasEl.classList.add("hidden");
+        }
+      };
+
+      // Compat: limpiador específico para las sugerencias de cuentas
+      const limpiarSugsCuentas = () => {
+        if (sugerenciasCuentasEl) {
+          sugerenciasCuentasEl.innerHTML = "";
+          sugerenciasCuentasEl.classList.add("hidden");
+        }
+      };
+
+      const limpiarResultado = () => {
+        if (resultadoEl) {
+          resultadoEl.innerHTML = "";
+          resultadoEl.classList.add("hidden");
+        }
+      };
+
+      const mostrarCargando = (msg = "Cargando...") => {
+        if (resultadoEl) {
+          resultadoEl.innerHTML = `<p class="status">${msg}</p>`;
+          resultadoEl.classList.remove("hidden");
+        }
+      };
+
+      const renderResultado = (items) => {
+        if (!resultadoEl) return;
+        console.log("[renovar_cliente] renderResultado items:", items);
+        if (!items.length) {
+          resultadoEl.innerHTML = '<p class="status">Sin ventas para el criterio ingresado.</p>';
+          resultadoEl.classList.remove("hidden");
+          if (btnRenovarSeleccion) {
+            btnRenovarSeleccion.disabled = true;
+            btnRenovarSeleccion.classList.add("btn-disabled");
+            btnRenovarSeleccion.classList.add("hidden");
+          }
+          return;
+        }
+
+        // Agrupar por plataforma
+        const grouped = items.reduce((acc, it) => {
+          const key = it.plataforma || "Sin plataforma";
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(it);
+          return acc;
+        }, {});
+
+        const bloques = Object.entries(grouped)
+          .map(([plat, rows]) => {
+            const showPerfilCol = rows.some((r) => r.showPerfil);
+            const showHogarCol = rows.some((r) => r.showHogar);
+            const head = [
+              "<th>ID Venta</th>",
+              "<th>Correo</th>",
+              showPerfilCol ? "<th>Perfil</th>" : "",
+              showHogarCol ? "<th>Perfil hogar</th>" : "",
+              "<th>Fecha de corte</th>",
+              "<th>Seleccionar</th>",
+            ].join("");
+
+            const rowsHtml = rows
+              .map((it) => {
+                const perfilLabel = showPerfilCol ? it.perfil || "-" : "";
+                const hogarLabel = showHogarCol
+                  ? it.perfil_hogar === true
+                    ? "Activado"
+                    : it.perfil_hogar === false
+                    ? "Desactivado"
+                    : "-"
+                  : "";
+                return `
+                  <tr>
+                    <td>#${String(it.id_venta ?? "").padStart(4, "0")}</td>
+                    <td>${it.correo || ""}</td>
+                    ${showPerfilCol ? `<td>${perfilLabel}</td>` : ""}
+                    ${showHogarCol ? `<td>${hogarLabel}</td>` : ""}
+                    <td>${it.fecha_corte || "-"}</td>
+                    <td>
+                      <label class="proximas-check">
+                        <input
+                          type="checkbox"
+                          data-venta="${it.id_venta ?? ""}"
+                          data-correo="${it.correo || ""}"
+                          data-clave="${it.clave || ""}"
+                          data-nperfil="${it.n_perfil || ""}"
+                          data-pin="${it.pin || ""}"
+                          data-plataforma="${plat}"
+                          data-id-plataforma="${it.id_plataforma || ""}"
+                          data-id-cuenta="${it.id_cuenta || ""}"
+                          data-id-usuario="${it.id_usuario_cliente || ""}"
+                          data-fechacorte="${it.fecha_corte_raw || ""}"
+                        />
+                      </label>
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${plat}</h3>
+                <div class="proximas-table-wrap">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>${head}</tr>
+                    </thead>
+                    <tbody>
+                      ${rowsHtml}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+
+        resultadoEl.innerHTML = bloques;
+        resultadoEl.classList.remove("hidden");
+        if (btnRenovarSeleccion) {
+          btnRenovarSeleccion.classList.remove("hidden");
+        }
+        actualizarBotonRenovar();
+      };
+
+      const renderResultadoCuentas = (rows) => {
+        if (!resultadoEl) return;
+        if (!rows.length) {
+          resultadoEl.innerHTML = '<p class="status">Sin ventas para el criterio ingresado.</p>';
+          resultadoEl.classList.remove("hidden");
+          return;
+        }
+        const showPerfil = rows.some((r) => r.perfil);
+        const showHogar = rows.some((r) => !!r.hogarText);
+        const headCols = [
+          "<th>Plataforma</th>",
+          "<th>ID Venta</th>",
+          "<th>Cliente</th>",
+          showPerfil ? "<th>Perfil</th>" : "",
+          showHogar ? "<th>Perfil hogar</th>" : "",
+          "<th>Fecha corte</th>",
+          "<th>Acción</th>",
+        ].join("");
+        const body = rows
+          .map(
+            (r) => `
+            <tr>
+              <td>${r.plataforma || "-"}</td>
+              <td>#${r.id_venta}</td>
+              <td>${r.cliente || "-"}</td>
+              ${showPerfil ? `<td>${r.perfil || "-"}</td>` : ""}
+              ${showHogar ? `<td>${r.hogarText || "-"}</td>` : ""}
+              <td>${r.fecha_corte || "-"}</td>
+              <td>
+                <button
+                  type="button"
+                  class="btn-primary btn-renovar-row"
+                  data-cliente="${r.cliente || "-"}"
+                  data-perfil="${r.perfil || "-"}"
+                  data-fecha="${r.fecha_corte_raw || ""}"
+                  data-venta="${r.id_venta || ""}"
+                  data-id-plataforma="${r.id_plataforma || ""}"
+                  data-id-cuenta="${r.id_cuenta || ""}"
+                  data-id-usuario="${r.id_usuario_cliente || ""}"
+                  data-correo="${r.correo || ""}"
+                  data-clave="${r.clave || ""}"
+                  data-n-perfil="${r.n_perfil || ""}"
+                  data-pin="${r.pin || ""}"
+                  data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
+                >
+                  Renovar
+                </button>
+              </td>
+            </tr>
+          `
+          )
+          .join("");
+        resultadoEl.innerHTML = `
+          <div class="proximas-table-wrap">
+            <table class="proximas-table">
+              <thead><tr>${headCols}</tr></thead>
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+        `;
+        resultadoEl.classList.remove("hidden");
+      };
+
+      const renderSugerencias = (items, forceHide = false) => {
+        if (!sugerenciasEl) return;
+        if (forceHide || !items.length) {
+          limpiarSugerencias();
+          return;
+        }
+        sugerenciasEl.innerHTML = items
+          .map(
+            (it) => `
+              <button type="button" data-nombre="${it.nombre || ""}" data-apellido="${it.apellido || ""}">
+                ${[it.nombre, it.apellido].filter(Boolean).join(" ")}
+              </button>
+            `
+          )
+          .join("");
+        sugerenciasEl.classList.remove("hidden");
+      };
+
+      const buscarClientes = async (texto, mostrarTabla = false) => {
+        const term = texto.trim();
+        if (!term) {
+          limpiarSugerencias();
+          if (mostrarTabla) limpiarResultado();
+          return;
+        }
+
+        // Primera palabra -> nombre, resto -> apellido
+        const parts = term.split(/\s+/);
+        const nombreTerm = parts.shift() || "";
+        const apellidoTerm = parts.join(" ").trim();
+
+        const current = ++fetchCounter;
+        try {
+          let query = supabase
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido, correo")
+            .ilike("nombre", `%${nombreTerm}%`);
+          if (apellidoTerm) {
+            query = query.ilike("apellido", `%${apellidoTerm}%`);
+          }
+          const { data, error } = await query.limit(5);
+          if (current !== fetchCounter) return;
+          if (error) {
+            console.error("buscar clientes error", error);
+            limpiarSugerencias();
+            if (mostrarTabla) limpiarResultado();
+            return;
+          }
+          const parsed = (data || []).map((u) => ({
+            id_usuario: u.id_usuario,
+            nombre: u.nombre,
+            apellido: u.apellido,
+            correo: u.correo,
+            nombreCompleto: [u.nombre, u.apellido].filter(Boolean).join(" ").trim(),
+          }));
+          // Sugerencias solo cuando no es búsqueda por botón
+          renderSugerencias(parsed, mostrarTabla);
+          if (mostrarTabla) {
+            // Buscar ventas por los ids encontrados
+            const ids = parsed.map((u) => u.id_usuario).filter(Boolean);
+            if (!ids.length) {
+              renderResultado([]);
+              return;
+            }
+            const { data: ventas, error: ventErr } = await supabase
+              .from("ventas")
+              .select("id_venta, id_usuario, id_cuenta, id_perfil, fecha_corte")
+              .in("id_usuario", ids)
+              .limit(50);
+            if (ventErr) {
+              console.error("buscar ventas error", ventErr);
+              renderResultado([]);
+              return;
+            }
+            const cuentasIds = [...new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean))];
+            let cuentaMapa = {};
+            let plataformaMapa = {};
+            const perfilIds = [...new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean))];
+            if (cuentasIds.length) {
+              const { data: cuentas, error: ctaErr } = await supabase
+                .from("cuentas")
+                .select("id_cuenta, id_plataforma, correo, clave")
+                .in("id_cuenta", cuentasIds);
+              if (ctaErr) {
+                console.error("buscar cuentas error", ctaErr);
+              } else {
+                cuentaMapa = (cuentas || []).reduce((acc, c) => {
+                  acc[c.id_cuenta] = { id_plataforma: c.id_plataforma, correo: c.correo, clave: c.clave };
+                  return acc;
+                }, {});
+                const platIds = [
+                  ...new Set(Object.values(cuentaMapa).map((c) => c.id_plataforma).filter(Boolean)),
+                ];
+                if (platIds.length) {
+                  const { data: plats, error: platErr } = await supabase
+                    .from("plataformas")
+                    .select("id_plataforma, nombre, por_pantalla")
+                    .in("id_plataforma", platIds);
+                  if (platErr) {
+                    console.error("buscar plataformas error", platErr);
+                  } else {
+                    plataformaMapa = (plats || []).reduce((acc, p) => {
+                      acc[p.id_plataforma] = p;
+                      return acc;
+                    }, {});
+                  }
+                }
+              }
+            }
+            let perfilMapa = {};
+          if (perfilIds.length) {
+            const { data: perfiles, error: perfErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil, n_perfil, perfil_hogar, pin, id_cuenta_miembro")
+              .in("id_perfil", perfilIds);
+            if (perfErr) {
+              console.error("buscar perfiles error", perfErr);
+            } else {
+              perfilMapa = (perfiles || []).reduce((acc, p) => {
+                  acc[p.id_perfil] = p;
+                  return acc;
+                }, {});
+              }
+            }
+
+            const memberCuentaIds = Array.from(
+              new Set(
+                (Object.values(perfilMapa) || [])
+                  .map((p) => p.id_cuenta_miembro)
+                  .filter(Boolean),
+              ),
+            );
+            let memberCuentaMap = {};
+            if (memberCuentaIds.length) {
+              const { data: cuentasMiembro, error: cmErr } = await supabase
+                .from("cuentas")
+                .select("id_cuenta, correo, clave")
+                .in("id_cuenta", memberCuentaIds);
+              if (cmErr) {
+                console.error("buscar cuentas miembro error", cmErr);
+              } else {
+                memberCuentaMap = (cuentasMiembro || []).reduce((acc, c) => {
+                  acc[c.id_cuenta] = c;
+                  return acc;
+                }, {});
+              }
+            }
+
+            const rows = (ventas || []).map((v) => {
+              const user = parsed.find((u) => u.id_usuario === v.id_usuario) || {};
+              const cuentaInfo = cuentaMapa[v.id_cuenta] || {};
+              const platId = cuentaInfo.id_plataforma || null;
+              const platInfo = platId ? plataformaMapa[platId] : null;
+              const perfInfo = v.id_perfil ? perfilMapa[v.id_perfil] : null;
+              const memberId = perfInfo?.id_cuenta_miembro;
+              const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
+              const fechaRaw = v.fecha_corte || "";
+              const showPerfil = !!(platInfo?.por_pantalla || perfInfo?.n_perfil);
+              const isPlatPerfilHogar = platId === 1;
+              return {
+                id_venta: v.id_venta,
+                plataforma: platInfo?.nombre || "",
+                plataforma_nombre: platInfo?.nombre || "",
+                id_plataforma: platId,
+                id_cuenta: memberId || v.id_cuenta || null,
+                id_usuario_cliente: v.id_usuario || null,
+                correo: memberCuenta?.correo || cuentaInfo.correo || user.correo,
+                clave: memberCuenta?.clave || cuentaInfo.clave || "",
+                pin: perfInfo?.pin || "",
+                nombreCompleto: user.nombreCompleto,
+                id_perfil: v.id_perfil,
+                n_perfil: v.id_perfil ? perfInfo?.n_perfil : "",
+                perfil_hogar: perfInfo?.perfil_hogar,
+                perfil: perfInfo?.n_perfil ? `M${perfInfo.n_perfil}` : "",
+                showPerfil,
+                showHogar: isPlatPerfilHogar,
+                fecha_corte: formatFechaCorte(fechaRaw) || "-",
+                fecha_corte_raw: fechaRaw,
+              };
+            });
+            console.log("[renovar_cliente] rows clientes:", rows);
+            renderResultado(rows);
+          }
+        } catch (err) {
+          console.error("buscar clientes catch", err);
+          limpiarSugerencias();
+          if (mostrarTabla) limpiarResultado();
+        }
+      };
+
+      const buscarCuentas = async (texto, mostrarTabla = false) => {
+        const term = (texto || "").trim();
+        if (!term) {
+          limpiarSugerencias();
+          if (mostrarTabla) limpiarResultado();
+          return;
+        }
+        try {
+          const { data: cuentas, error: cErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, id_plataforma, clave, venta_dominio, id_cuenta_miembro")
+            .ilike("correo", `%${term}%`)
+            .limit(10);
+          if (cErr) throw cErr;
+          if (!mostrarTabla) {
+            if (!cuentas?.length) limpiarResultado();
+            return;
+          }
+          const cuentasList = cuentas || [];
+          const dominioCuentas = cuentasList.filter(
+            (c) => c.venta_dominio === true && c.id_cuenta_miembro
+          );
+          const cuentaIds = cuentasList.map((c) => c.id_cuenta).filter(Boolean);
+          if (!cuentaIds.length) {
+            renderResultadoCuentas([]);
+            return;
+          }
+
+          let dominioPerfilIds = [];
+          if (dominioCuentas.length) {
+            const childIds = dominioCuentas.map((c) => c.id_cuenta).filter(Boolean);
+            const { data: perfilesDom, error: perfDomErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil")
+              .in("id_cuenta_miembro", childIds);
+            if (perfDomErr) throw perfDomErr;
+            dominioPerfilIds = (perfilesDom || []).map((p) => p.id_perfil).filter(Boolean);
+          }
+
+          const ventasPromises = [];
+          if (cuentaIds.length) {
+            ventasPromises.push(
+              supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte")
+                .in("id_cuenta", cuentaIds)
+            );
+          } else {
+            ventasPromises.push(Promise.resolve({ data: [], error: null }));
+          }
+          if (dominioPerfilIds.length) {
+            ventasPromises.push(
+              supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte")
+                .in("id_perfil", dominioPerfilIds)
+            );
+          } else {
+            ventasPromises.push(Promise.resolve({ data: [], error: null }));
+          }
+          const [{ data: ventasBase, error: vErr1 }, { data: ventasDom, error: vErr2 }, { data: usuarios, error: uErr }] =
+            await Promise.all([
+              ventasPromises[0],
+              ventasPromises[1],
+              supabase.from("usuarios").select("id_usuario, nombre, apellido"),
+            ]);
+          const ventas = [...(ventasBase || []), ...(ventasDom || [])].reduce((acc, v) => {
+            if (!acc.find((x) => x.id_venta === v.id_venta)) acc.push(v);
+            return acc;
+          }, []);
+          if (vErr1) throw vErr1;
+          if (vErr2) throw vErr2;
+          if (uErr) throw uErr;
+
+          const userMap = (usuarios || []).reduce((acc, u) => {
+            acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim();
+            return acc;
+          }, {});
+
+          const perfIds = (ventas || []).map((v) => v.id_perfil).filter(Boolean);
+          const { data: perfiles, error: pErr } = perfIds.length
+            ? await supabase
+                .from("perfiles")
+                .select("id_perfil, n_perfil, perfil_hogar, pin, id_cuenta_miembro")
+                .in("id_perfil", perfIds)
+            : { data: [], error: null };
+          if (pErr) throw pErr;
+          const perfMap = (perfiles || []).reduce((acc, p) => {
+            acc[p.id_perfil] = p;
+            return acc;
+          }, {});
+
+          const memberCuentaIds = Array.from(
+            new Set((perfiles || []).map((p) => p.id_cuenta_miembro).filter(Boolean)),
+          );
+          let memberCuentaMap = {};
+          if (memberCuentaIds.length) {
+            const { data: cuentasMiembro, error: cmErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, correo, clave")
+              .in("id_cuenta", memberCuentaIds);
+            if (cmErr) throw cmErr;
+            memberCuentaMap = (cuentasMiembro || []).reduce((acc, c) => {
+              acc[c.id_cuenta] = c;
+              return acc;
+            }, {});
+          }
+
+          const ventaCuentaIds = Array.from(new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)));
+          const allCuentaIds = Array.from(new Set([...cuentaIds, ...ventaCuentaIds]));
+
+          let cuentaMap = cuentasList.reduce((acc, c) => {
+            acc[c.id_cuenta] = c;
+            return acc;
+          }, {});
+          const missingIds = allCuentaIds.filter((id) => !cuentaMap[id]);
+          if (missingIds.length) {
+            const { data: extraCuentas, error: extraErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, correo, id_plataforma, clave")
+              .in("id_cuenta", missingIds);
+            if (extraErr) throw extraErr;
+            (extraCuentas || []).forEach((c) => {
+              cuentaMap[c.id_cuenta] = c;
+            });
+          }
+
+          const platIds = Array.from(
+            new Set(Object.values(cuentaMap).map((c) => c.id_plataforma).filter(Boolean)),
+          );
+          const { data: plats, error: platErr } = platIds.length
+            ? await supabase
+                .from("plataformas")
+                .select("id_plataforma, nombre, por_pantalla, por_acceso")
+                .in("id_plataforma", platIds)
+            : { data: [], error: null };
+          if (platErr) throw platErr;
+          const platMap = (plats || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p;
+            return acc;
+          }, {});
+
+          const rows = (ventas || []).map((v) => {
+            const cuenta = cuentaMap[v.id_cuenta] || {};
+            const plat = platMap[cuenta.id_plataforma] || {};
+            const perf = v.id_perfil ? perfMap[v.id_perfil] : null;
+            const memberId = perf?.id_cuenta_miembro;
+            const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
+            const showPerfil = !!(plat?.por_pantalla || plat?.por_acceso || perf);
+            const isPlatPerfilHogar = plat?.id_plataforma === 1;
+            const fechaRaw = v.fecha_corte || "";
+            return {
+              plataforma: plat?.nombre || "",
+              plataforma_nombre: plat?.nombre || "",
+              id_venta: v.id_venta,
+              id_plataforma: cuenta.id_plataforma || plat?.id_plataforma || null,
+              id_cuenta: memberId || v.id_cuenta || null,
+              id_usuario_cliente: v.id_usuario || null,
+              correo: memberCuenta?.correo || cuenta?.correo || "",
+              clave: memberCuenta?.clave || cuenta?.clave || "",
+              id_perfil: v.id_perfil || null,
+              n_perfil: perf?.n_perfil || null,
+              pin: perf?.pin || "",
+              cliente: userMap[v.id_usuario] || "-",
+              perfil: perf?.n_perfil ? `M${perf.n_perfil}` : "",
+              hogarText: isPlatPerfilHogar && perf ? (perf.perfil_hogar ? "Activado" : "Desactivado") : "",
+              fecha_corte: formatFechaCorte(fechaRaw) || "-",
+              fecha_corte_raw: fechaRaw,
+            };
+          });
+
+          renderResultadoCuentas(rows);
+        } catch (err) {
+          console.error("buscar cuentas error", err);
+          if (mostrarTabla) renderResultadoCuentas([]);
+        }
+      };
+
+      const formatFechaCorte = (dateStr) => {
+        if (!dateStr) return "-";
+        return formatDDMMYYYY(dateStr) || "-";
+      };
+
+      inputBuscar?.addEventListener("input", (e) => {
+        if (inputCuenta) inputCuenta.value = "";
+        limpiarSugsCuentas();
+        buscarClientes(e.target.value || "");
+      });
+
+      inputCuenta?.addEventListener("input", (e) => {
+        if (inputBuscar) inputBuscar.value = "";
+        limpiarSugerencias();
+        buscarCuentas(e.target.value || "");
+      });
+
+      btnBuscar?.addEventListener("click", (e) => {
+        e.preventDefault();
+        limpiarSugerencias();
+        mostrarCargando("Cargando resultados...");
+        buscarClientes(inputBuscar?.value || "", true);
+      });
+
+      btnBuscarGeneral?.addEventListener("click", (e) => {
+        e.preventDefault();
+        limpiarResultado();
+        mostrarCargando("Cargando resultados...");
+        if (inputBuscar?.value) {
+          limpiarSugerencias();
+          buscarClientes(inputBuscar.value, true);
+        } else if (inputCuenta?.value) {
+          limpiarSugerencias();
+          buscarCuentas(inputCuenta.value, true);
+        }
+      });
+
+      inputBuscar?.addEventListener("focus", () => {
+        // No reabrir sugerencias automáticamente; solo se mostrarán al escribir.
+        limpiarSugerencias();
+      });
+
+      const dispararBusqueda = () => {
+        if (!btnBuscarGeneral) return;
+        btnBuscarGeneral.click();
+      };
+
+      inputBuscar?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          dispararBusqueda();
+        }
+      });
+
+      inputCuenta?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          dispararBusqueda();
+        }
+      });
+
+      sugerenciasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn || !inputBuscar) return;
+        const nombre = btn.dataset.nombre || "";
+        const apellido = btn.dataset.apellido || "";
+        inputBuscar.value = [nombre, apellido].filter(Boolean).join(" ").trim();
+        limpiarSugerencias();
+      });
+
+      const actualizarBotonRenovar = () => {
+        const checks = resultadoEl?.querySelectorAll('input[type="checkbox"]:checked') || [];
+        const hasSel = checks.length > 0;
+        if (btnRenovarSeleccion) {
+          btnRenovarSeleccion.disabled = !hasSel;
+          btnRenovarSeleccion.classList.toggle("btn-disabled", !hasSel);
+        }
+      };
+
+      resultadoEl?.addEventListener("change", (e) => {
+        if (e.target.matches('input[type="checkbox"]')) {
+          actualizarBotonRenovar();
+        }
+      });
+
+      const closeModalRenovarSel = () => {
+        modalRenovarSel?.classList.add("hidden");
+      };
+
+      const renderModalSeleccion = () => {
+        if (!modalRenovarSelBody) return;
+        if (!seleccionActual.length) {
+          modalRenovarSelBody.innerHTML = "<p class=\"status\">Sin selecciones.</p>";
+          return;
+        }
+        const grouped = seleccionActual.reduce((acc, it) => {
+          const key = it.plataforma || "Sin plataforma";
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(it);
+          return acc;
+        }, {});
+        const bloques = Object.entries(grouped)
+          .map(([plat, rows]) => {
+            const rowsHtml = rows
+              .map(
+                (it) => `
+                  <tr>
+                    <td>${it.correo || ""}</td>
+                    <td>
+                      <div class="modal-qty">
+                        <button type="button" class="sel-menos" data-index="${it.uid}" aria-label="menos">-</button>
+                        <span>${it.meses}</span>
+                        <button type="button" class="sel-mas" data-index="${it.uid}" aria-label="más">+</button>
+                        <span class="modal-duration-suffix">meses</span>
+                      </div>
+                    </td>
+                  </tr>
+                `
+              )
+              .join("");
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${plat}</h3>
+                <div class="proximas-table-wrap">
+                  <table class="proximas-table">
+                    <thead>
+                      <tr>
+                        <th>Correo</th>
+                        <th>Duración</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rowsHtml}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+        modalRenovarSelBody.innerHTML = bloques;
+      };
+
+      btnRenovarSeleccion?.addEventListener("click", () => {
+        const checks = resultadoEl?.querySelectorAll('input[type="checkbox"]:checked') || [];
+        if (!checks.length) return;
+        seleccionActual = Array.from(checks).map((chk, idx) => ({
+          id_venta: chk.dataset.venta || "",
+          correo: chk.dataset.correo || "",
+          clave: chk.dataset.clave || "",
+          n_perfil: chk.dataset.nperfil || "",
+          pin: chk.dataset.pin || "",
+          plataforma: chk.dataset.plataforma || "",
+          id_plataforma: chk.dataset.idPlataforma || null,
+          id_cuenta: chk.dataset.idCuenta || null,
+          id_usuario_cliente: chk.dataset.idUsuario || null,
+          meses: 1,
+          fecha_corte: chk.dataset.fechacorte || "",
+          uid: idx,
+        }));
+        renderModalSeleccion();
+        modalRenovarSel?.classList.remove("hidden");
+      });
+
+      modalRenovarSel?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
+          closeModalRenovarSel();
+        }
+      });
+
+      const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
+        const lines = ["*✅ Servicio renovado 🫡*", ""];
+        if (plataformaNombre || item.id_venta) {
+          lines.push(
+            `*${(plataformaNombre || "").toUpperCase()}*${item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""}`.trim()
+          );
+        }
+        if (item.correo) lines.push(`*Correo:* ${item.correo}`);
+        lines.push(`*Clave:* ${item.clave || "-"}`);
+        if (item.n_perfil) lines.push(`*Perfil:* M${item.n_perfil}`);
+        if (item.pin) lines.push(`*PIN:* ${item.pin}`);
+        if (fechaCorte) {
+          lines.push("*Próxima fecha de pago:*", `_${formatFechaCorte(fechaCorte)}_`);
+        }
+        return lines.join("\n");
+      };
+      modalRenovarSelClose?.addEventListener("click", closeModalRenovarSel);
+
+      modalRenovarSelBody?.addEventListener("click", (e) => {
+        const btnMas = e.target.closest(".sel-mas");
+        const btnMenos = e.target.closest(".sel-menos");
+        if (!btnMas && !btnMenos) return;
+        const uid = (btnMas || btnMenos).dataset.index;
+        const item = seleccionActual.find((it) => String(it.uid) === String(uid));
+        if (!item) return;
+        const delta = btnMas ? 1 : -1;
+        const next = Math.max(1, (item.meses || 1) + delta);
+        item.meses = next;
+        renderModalSeleccion();
+      });
+
+      // Cargar métodos de pago
+      const loadMetodosPago = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("metodos_de_pago")
+            .select("id_metodo_de_pago, nombre");
+          if (error) throw error;
+          metodosPago = data || [];
+          if (metodoRenovarSelect) {
+            metodoRenovarSelect.innerHTML = '<option value="">Seleccione</option>';
+            metodosPago.forEach((m) => {
+              const opt = document.createElement("option");
+              opt.value = m.id_metodo_de_pago;
+              opt.textContent = m.nombre || `Método ${m.id_metodo_de_pago}`;
+              metodoRenovarSelect.appendChild(opt);
+            });
+          }
+        } catch (err) {
+          console.error("metodos pago error", err);
+          if (metodoRenovarSelect) {
+            metodoRenovarSelect.innerHTML = '<option value="">Sin métodos</option>';
+          }
+        }
+      };
+
+      // Confirmar renovación
+      btnConfirmarRenovar?.addEventListener("click", async () => {
+        if (!seleccionActual.length) {
+          alert("Selecciona al menos un item.");
+          return;
+        }
+        const metodo = metodoRenovarSelect?.value || "";
+        const ref = refRenovarInput?.value.trim() || "";
+        if (!metodo) {
+          alert("Selecciona un método de pago.");
+          return;
+        }
+        if (!ref) {
+          alert("Ingresa la referencia.");
+          return;
+        }
+
+        try {
+          const userIds = [...new Set(seleccionActual.map((it) => Number(it.id_usuario_cliente)).filter(Boolean))];
+          const cuentaIds = [...new Set(seleccionActual.map((it) => Number(it.id_cuenta)).filter(Boolean))];
+          const platIds = [...new Set(seleccionActual.map((it) => Number(it.id_plataforma)).filter(Boolean))];
+
+          const userMap = {};
+          if (userIds.length) {
+            const { data: usersData, error: usersErr } = await supabase
+              .from("usuarios")
+              .select("id_usuario, acceso_cliente")
+              .in("id_usuario", userIds);
+            if (usersErr) throw usersErr;
+            (usersData || []).forEach((u) => {
+              userMap[u.id_usuario] = u;
+            });
+          }
+
+          const cuentaMap = {};
+          if (cuentaIds.length) {
+            const { data: cuentasData, error: cuentasErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, venta_perfil, venta_miembro, id_plataforma")
+              .in("id_cuenta", cuentaIds);
+            if (cuentasErr) throw cuentasErr;
+            (cuentasData || []).forEach((c) => {
+              cuentaMap[c.id_cuenta] = c;
+            });
+          }
+
+          let preciosMap = {};
+          if (platIds.length) {
+            const { data: preciosData, error: preciosErr } = await supabase
+              .from("precios")
+              .select("id_precio, id_plataforma, completa, sub_cuenta, precio_usd_detal, precio_usd_mayor")
+              .in("id_plataforma", platIds);
+            if (preciosErr) throw preciosErr;
+            preciosMap = (preciosData || []).reduce((acc, p) => {
+              if (!acc[p.id_plataforma]) acc[p.id_plataforma] = [];
+              acc[p.id_plataforma].push(p);
+              return acc;
+            }, {});
+          }
+
+          const pickPrecio = (price, acceso) => {
+            const esMayorista = acceso === false || acceso === "false" || acceso === 0 || acceso === "0";
+            const detal = Number(price?.precio_usd_detal) || 0;
+            const mayor = Number(price?.precio_usd_mayor) || 0;
+            return esMayorista ? mayor || detal : detal || mayor;
+          };
+
+          const resolvePrecio = (platId, cuenta, acceso) => {
+            const preciosPlat = preciosMap[platId] || [];
+            const ventaPerfil = cuenta?.venta_perfil === true;
+            const ventaMiembro = cuenta?.venta_miembro === true;
+            let candidatos = [];
+            if (ventaPerfil) {
+              candidatos = preciosPlat.filter((p) => p.completa === false && p.sub_cuenta === false);
+            } else if (!ventaPerfil && !ventaMiembro) {
+              candidatos = preciosPlat.filter((p) => p.completa === true && p.sub_cuenta === false);
+            } else if (ventaMiembro) {
+              candidatos = preciosPlat.filter((p) => p.sub_cuenta === true);
+            }
+            const price = candidatos[0] || preciosPlat[0] || null;
+            return price ? pickPrecio(price, acceso) : 0;
+          };
+
+          const hoy = new Date();
+          const fechaPago = hoy.toISOString().slice(0, 10);
+          const registradoPor = window.__RC_USER_ID__ || null;
+          const metodoId = metodo ? Number(metodo) : null;
+          const refValue = ref || null;
+          const updates = seleccionActual.map(async (it) => {
+            let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
+            if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
+            baseDate.setMonth(baseDate.getMonth() + (it.meses || 1));
+            const nuevaCorte = baseDate.toISOString().slice(0, 10);
+            const { error } = await supabase
+              .from("ventas")
+              .update({ fecha_corte: nuevaCorte, fecha_pago: fechaPago })
+              .eq("id_venta", it.id_venta);
+            if (error) throw error;
+
+            const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
+            const accesoCliente = it.id_usuario_cliente ? userMap[it.id_usuario_cliente]?.acceso_cliente : null;
+            const platIdNum = it.id_plataforma ? Number(it.id_plataforma) : cuentaInfo?.id_plataforma || null;
+            const montoCalc = resolvePrecio(platIdNum, cuentaInfo, accesoCliente) * (it.meses || 1);
+
+            const { error: histErr } = await supabase.from("historial_ventas").insert({
+              monto: Number(montoCalc) || 0,
+              fecha_pago: fechaPago,
+              venta_cliente: true,
+              renovacion: true,
+              id_venta: it.id_venta,
+              id_plataforma: it.id_plataforma ? Number(it.id_plataforma) : null,
+              id_cuenta: it.id_cuenta ? Number(it.id_cuenta) : null,
+              registrado_por: registradoPor,
+              id_usuario_cliente: it.id_usuario_cliente ? Number(it.id_usuario_cliente) : null,
+              id_metodo_de_pago: metodoId,
+              referencia: refValue,
+            });
+            if (histErr) throw histErr;
+            return { ...it, fecha_corte: nuevaCorte };
+          });
+          const resultados = await Promise.all(updates);
+          if (resultados?.length) {
+            const notifRows = [];
+            resultados.forEach((res) => {
+              const uids = pickNotificationUserIds("servicio_renovado", {
+                ventaUserId: res?.id_usuario_cliente ? Number(res.id_usuario_cliente) : null,
+              });
+              const payload = buildNotificationPayload(
+                "servicio_renovado",
+                {
+                  plataforma: res.plataforma || res.plataforma_nombre || "",
+                  correoCuenta: res.correo || "",
+                  fechaCorte: res.fecha_corte || "",
+                },
+                { idCuenta: res.id_cuenta ? Number(res.id_cuenta) : null }
+              );
+              uids.forEach((uid) => notifRows.push({ ...payload, id_usuario: uid }));
+            });
+            if (notifRows.length) {
+              try {
+                await supabase.from("notificaciones").insert(notifRows);
+              } catch (notifErr) {
+                console.error("notificacion servicio_renovado (seleccion) error", notifErr);
+              }
+            }
+          }
+          if (resultados?.length) {
+            const mensajes = resultados
+              .filter(Boolean)
+              .map((res) => buildRenovacionMensaje(res, res.fecha_corte, res.plataforma))
+              .join("\n\n");
+            if (modalRowConfirmText) modalRowConfirmText.textContent = mensajes;
+            if (modalRowConfirm) modalRowConfirm.classList.remove("hidden");
+          } else {
+            alert("Renovación aplicada.");
+          }
+          // limpiar selección
+          document.querySelectorAll('#buscador-resultado input[type="checkbox"]').forEach((c) => (c.checked = false));
+          seleccionActual = [];
+          closeModalRenovarSel();
+          actualizarBotonRenovar();
+        } catch (err) {
+          console.error("renovar confirmar error", err);
+          alert("No se pudo renovar. Intenta de nuevo.");
+        }
+      });
+
+      // Modal para renovar una fila individual
+      const modalRow = document.querySelector("#modal-renovar-row");
+      const modalRowCliente = document.querySelector("#modal-row-cliente");
+      const modalRowPerfil = document.querySelector("#modal-row-perfil");
+      const modalRowFecha = document.querySelector("#modal-row-fecha");
+      const modalRowMesesSpan = document.querySelector("#modal-row-meses");
+      const modalRowMonto = document.querySelector("#modal-row-monto");
+      const modalRowRef = document.querySelector("#modal-row-ref");
+      const modalRowClose = document.querySelector(".modal-renovar-row-close");
+      const btnRowRenovar = document.querySelector("#btn-row-renovar");
+      const modalRowConfirm = document.querySelector("#modal-renovar-confirm");
+      const modalRowConfirmBtn = document.querySelector("#btn-row-confirm-copy");
+      const modalRowConfirmClose = document.querySelector(".modal-renovar-confirm-close");
+      const modalRowConfirmText = document.querySelector("#modal-row-confirm-text");
+      let modalRowMeses = 1;
+      let modalRowContext = null;
+
+      const openRowModal = (data) => {
+        if (!modalRow) return;
+        modalRowMeses = 1;
+        if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
+        if (modalRowCliente) modalRowCliente.textContent = data.cliente || "";
+        if (modalRowPerfil) modalRowPerfil.textContent = data.perfil || "";
+        if (modalRowFecha) modalRowFecha.textContent = data.fecha ? formatFechaCorte(data.fecha) : "";
+        if (modalRowMonto) modalRowMonto.value = "";
+        if (modalRowRef) modalRowRef.value = "";
+        modalRow.dataset.idVenta = data.id_venta || "";
+        modalRowContext = {
+          id_venta: data.id_venta || null,
+          id_plataforma: data.id_plataforma || null,
+          id_cuenta: data.id_cuenta || null,
+          id_usuario_cliente: data.id_usuario_cliente || null,
+          correo: data.correo || "",
+          clave: data.clave || "",
+          n_perfil: data.n_perfil || "",
+          pin: data.pin || "",
+          plataforma_nombre: data.plataforma_nombre || "",
+          fecha_corte: data.fecha || null,
+        };
+        modalRow.classList.remove("hidden");
+      };
+
+      const closeRowModal = () => {
+        if (modalRow) modalRow.classList.add("hidden");
+      };
+
+      modalRowClose?.addEventListener("click", closeRowModal);
+      modalRow?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) closeRowModal();
+        if (e.target.classList.contains("row-mas") || e.target.closest(".row-mas")) {
+          modalRowMeses = modalRowMeses + 1;
+          if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
+        }
+        if (e.target.classList.contains("row-menos") || e.target.closest(".row-menos")) {
+          modalRowMeses = Math.max(1, modalRowMeses - 1);
+          if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
+        }
+      });
+
+      resultadoEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-renovar-row");
+        if (!btn) return;
+        const data = {
+          cliente: btn.dataset.cliente || "",
+          perfil: btn.dataset.perfil || "",
+          fecha: btn.dataset.fecha || "",
+          id_venta: btn.dataset.venta || "",
+          id_plataforma: btn.dataset.idPlataforma || "",
+          id_cuenta: btn.dataset.idCuenta || "",
+          id_usuario_cliente: btn.dataset.idUsuario || "",
+          correo: btn.dataset.correo || "",
+          clave: btn.dataset.clave || "",
+          n_perfil: btn.dataset.nPerfil || "",
+          pin: btn.dataset.pin || "",
+          plataforma_nombre: btn.dataset.plataformaNombre || "",
+        };
+        openRowModal(data);
+      });
+
+      const addMonths = (baseDate, months) => {
+        const d = new Date(baseDate);
+        if (Number.isNaN(d.valueOf())) return null;
+        d.setMonth(d.getMonth() + months);
+        return d.toISOString().slice(0, 10);
+      };
+
+      btnRowRenovar?.addEventListener("click", async () => {
+        if (!modalRowContext || !modalRowContext.id_venta) {
+          alert("Falta información para renovar.");
+          return;
+        }
+        const montoStr = modalRowMonto?.value?.trim() || "";
+        const monto = parseFloat(montoStr);
+        if (!monto || Number.isNaN(monto) || monto <= 0) {
+          alert("Ingresa un monto válido.");
+          return;
+        }
+        const ref = modalRowRef?.value?.trim() || "";
+        if (!ref) {
+          alert("Ingresa la referencia.");
+          return;
+        }
+        const meses = modalRowMeses || 1;
+        const baseFecha = modalRowContext.fecha_corte || new Date().toISOString().slice(0, 10);
+        const nuevaFecha = addMonths(baseFecha, meses) || baseFecha;
+        const fechaPago = new Date().toISOString().slice(0, 10);
+        const registradoPor = window.__RC_USER_ID__ || null;
+        try {
+          const { error: updErr } = await supabase
+            .from("ventas")
+            .update({ fecha_corte: nuevaFecha, fecha_pago: fechaPago })
+            .eq("id_venta", modalRowContext.id_venta);
+          if (updErr) throw updErr;
+
+          const { error: histErr } = await supabase.from("historial_ventas").insert({
+            monto,
+            fecha_pago: fechaPago,
+            venta_cliente: true,
+            renovacion: true,
+            id_venta: modalRowContext.id_venta,
+            id_plataforma: modalRowContext.id_plataforma || null,
+            id_cuenta: modalRowContext.id_cuenta || null,
+            registrado_por: registradoPor,
+            id_usuario_cliente: modalRowContext.id_usuario_cliente || null,
+            referencia: ref,
+          });
+          if (histErr) throw histErr;
+
+          // Notificación de servicio renovado para el cliente de esta venta
+          try {
+            const uids = pickNotificationUserIds("servicio_renovado", {
+              ventaUserId: modalRowContext.id_usuario_cliente ? Number(modalRowContext.id_usuario_cliente) : null,
+            });
+            const payload = buildNotificationPayload(
+              "servicio_renovado",
+              {
+                plataforma: modalRowContext.plataforma_nombre || "",
+                correoCuenta: modalRowContext.correo || "",
+                fechaCorte: nuevaFecha || "",
+              },
+              { idCuenta: modalRowContext.id_cuenta ? Number(modalRowContext.id_cuenta) : null }
+            );
+            if (uids.length) {
+              const rows = uids.map((uid) => ({ ...payload, id_usuario: uid }));
+              await supabase.from("notificaciones").insert(rows);
+            }
+          } catch (notifErr) {
+            console.error("notificacion servicio_renovado (fila) error", notifErr);
+          }
+
+          alert("Renovación aplicada.");
+          // Mostrar modal de confirmación con texto copiables
+          const lines = ["*✅ Servicio renovado 🫡*"];
+          lines.push("");
+          if (modalRowContext.plataforma_nombre || modalRowContext.id_venta) {
+            lines.push(
+              `*${modalRowContext.plataforma_nombre || ""}*${modalRowContext.id_venta ? ` 🫎 \`ID Venta: #${modalRowContext.id_venta}\`` : ""}`.trim()
+            );
+          }
+          if (modalRowContext.correo) lines.push(`*Correo:* ${modalRowContext.correo}`);
+          lines.push(`*Clave:* ${modalRowContext.clave || "-"}`);
+          if (modalRowContext.n_perfil) lines.push(`*Perfil:* M${modalRowContext.n_perfil}`);
+          if (modalRowContext.pin) lines.push(`*PIN:* ${modalRowContext.pin}`);
+          if (nuevaFecha) {
+            lines.push("Próxima fecha de pago:", `_${formatFechaCorte(nuevaFecha)}_`);
+          }
+          const texto = lines.join("\n");
+
+          if (modalRowConfirmText) modalRowConfirmText.textContent = texto;
+          if (modalRowConfirm) modalRowConfirm.classList.remove("hidden");
+
+          closeRowModal();
+        } catch (err) {
+          console.error("renovar fila error", err);
+          alert("No se pudo renovar. Intenta de nuevo.");
+        }
+      });
+
+      const copyConfirmText = async () => {
+        const txt = modalRowConfirmText?.textContent || "";
+        if (!txt) return;
+        try {
+          await navigator.clipboard.writeText(txt);
+        } catch (_) {
+          const ta = document.createElement("textarea");
+          ta.value = txt;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+      };
+
+      modalRowConfirmBtn?.addEventListener("click", copyConfirmText);
+      modalRowConfirmClose?.addEventListener("click", () => modalRowConfirm?.classList.add("hidden"));
+      modalRowConfirm?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) modalRowConfirm.classList.add("hidden");
+      });
+
+      attachLogout(clearServerSession);
+      loadMetodosPago();
+    </script>
+      <div id="modal-renovar-confirm" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card">
+          <button class="modal-close modal-renovar-confirm-close" aria-label="Cerrar">×</button>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+            <button type="button" class="btn-outline" id="btn-row-confirm-copy" style="width:100%; text-align:left; white-space:pre-wrap;">
+              Copiar mensaje
+            </button>
+            <pre id="modal-row-confirm-text" style="white-space:pre-wrap; margin:0; font-family: inherit;"></pre>
+          </div>
+        </div>
+      </div>
+      <div id="modal-renovar-sel" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card modal-card-resumen modal-card-renovar-sel">
+          <button class="modal-close modal-renovar-sel-close" aria-label="Cerrar">×</button>
+          <div class="modal-body modal-renovar-sel-body" id="modal-renovar-sel-body"></div>
+          <div class="modal-footer modal-renovar-sel-footer">
+            <div class="modal-field">
+              <label for="metodo-renovar">Método de pago</label>
+              <select id="metodo-renovar"></select>
+            </div>
+            <div class="modal-field">
+              <label for="ref-renovar">Referencia</label>
+              <input type="text" id="ref-renovar" placeholder="Número de referencia" />
+            </div>
+            <button type="button" class="btn-primary" id="btn-confirmar-renovar">Renovar</button>
+          </div>
+        </div>
+      </div>
+      <div id="modal-renovar-row" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card">
+          <button class="modal-close modal-renovar-row-close" aria-label="Cerrar">×</button>
+          <div class="modal-body">
+            <p><strong>Cliente:</strong> <span id="modal-row-cliente">-</span></p>
+            <p><strong>Perfil:</strong> <span id="modal-row-perfil">-</span></p>
+            <p><strong>Fecha de corte:</strong> <span id="modal-row-fecha">-</span></p>
+            <div class="modal-field">
+              <label>Meses</label>
+              <div class="modal-qty">
+                <button type="button" class="row-menos" aria-label="menos">-</button>
+                <span id="modal-row-meses">1</span>
+                <button type="button" class="row-mas" aria-label="más">+</button>
+                <span class="modal-duration-suffix">meses</span>
+              </div>
+            </div>
+            <div class="modal-field">
+              <label for="modal-row-monto">Monto</label>
+              <input type="text" inputmode="decimal" pattern="\\d+(\\.\\d{1,2})?" id="modal-row-monto" placeholder="Monto" />
+            </div>
+            <div class="modal-field">
+              <label for="modal-row-ref">Nro de referencia</label>
+              <input type="text" id="modal-row-ref" placeholder="Referencia" />
+            </div>
+            <div class="modal-footer" style="padding-left:0;">
+              <button type="button" class="btn-primary" id="btn-row-renovar">Renovar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+  </body>
+</html>

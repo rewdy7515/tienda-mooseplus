@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registrar proveedor</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .form-proveedor {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 480px;
+        margin-top: 16px;
+      }
+      .form-proveedor label {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .form-proveedor input {
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .form-proveedor .field {
+        display: flex;
+        flex-direction: column;
+      }
+      .form-proveedor button {
+        align-self: flex-start;
+        padding: 10px 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Registrar proveedor</h2>
+      <div class="form-proveedor">
+        <div class="field">
+          <label for="prov-nombre">Nombre</label>
+          <input type="text" id="prov-nombre" placeholder="Nombre" />
+        </div>
+        <div class="field">
+          <label for="prov-whatsapp">WhatsApp</label>
+          <input type="text" id="prov-whatsapp" placeholder="WhatsApp" />
+        </div>
+        <div class="field">
+          <label for="prov-telegram">Telegram</label>
+          <input type="text" id="prov-telegram" placeholder="Telegram" />
+        </div>
+        <button type="button" class="btn-primary" id="btn-registrar-prov">Registrar</button>
+        <p class="status" id="prov-status"></p>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const statusEl = document.querySelector("#prov-status");
+      const nombreEl = document.querySelector("#prov-nombre");
+      const whatsappEl = document.querySelector("#prov-whatsapp");
+      const telegramEl = document.querySelector("#prov-telegram");
+      const btnRegistrar = document.querySelector("#btn-registrar-prov");
+
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+        } catch (err) {
+          console.error("registrar proveedor init error", err);
+        }
+      })();
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      btnRegistrar?.addEventListener("click", async () => {
+        const nombre = nombreEl?.value.trim() || "";
+        const whatsapp = whatsappEl?.value.trim() || "";
+        const telegram = telegramEl?.value.trim() || "";
+
+        if (!nombre) {
+          alert("Ingresa un nombre.");
+          return;
+        }
+
+        try {
+          setStatus("Registrando proveedor...");
+          const { error } = await supabase
+            .from("proveedores")
+            .insert({ nombre, whatsapp, telegram });
+          if (error) throw error;
+          setStatus("Proveedor registrado correctamente.");
+          nombreEl.value = "";
+          whatsappEl.value = "";
+          telegramEl.value = "";
+        } catch (err) {
+          console.error("registrar proveedor error", err);
+          setStatus("No se pudo registrar el proveedor.");
+        }
+      });
+
+      attachLogout(clearServerSession);
+    </script>
+  </body>
+</html>

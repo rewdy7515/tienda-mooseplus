@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/index.js", "use": "@vercel/node" },
+    { "src": "src/frontend/**", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "handle": "filesystem" },
+    { "src": "/styles/(.*)", "dest": "/src/frontend/styles/$1" },
+    { "src": "/scripts/(.*)", "dest": "/src/frontend/scripts/$1" },
+    { "src": "/components/(.*)", "dest": "/src/frontend/components/$1" },
+    { "src": "/public/(.*)", "dest": "/src/frontend/public/$1" },
+    { "src": "/partials/(.*)", "dest": "/src/frontend/partials/$1" },
+    { "src": "/", "dest": "/src/frontend/pages/index.html" },
+    { "src": "/(.*)", "dest": "/src/frontend/pages/$1" }
+  ]
+}

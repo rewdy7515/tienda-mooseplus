@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reemplazos</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .buscador-wrapper {
+        margin-top: 16px;
+        max-width: 100%;
+        width: 100%;
+      }
+      .buscador-cliente {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .buscador-cliente input {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .buscador-cliente button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 14px;
+        background: #111;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .buscador-sugerencias {
+        margin-top: 6px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+        overflow: hidden;
+      }
+      .buscador-sugerencias.hidden {
+        display: none;
+      }
+      .buscador-sugerencias button {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+        text-align: left;
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .buscador-sugerencias button:last-child {
+        border-bottom: none;
+      }
+      .buscador-sugerencias button:hover {
+        background: #f7f7f7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Reemplazos</h2>
+      <div class="buscador-wrapper">
+        <div class="buscador-cliente" style="max-width:420px;">
+          <input
+            type="search"
+            id="input-reemplazo-cuenta"
+            placeholder="Buscar cuenta (correo)"
+            autocomplete="off"
+          />
+          <button type="button" id="btn-buscar-reemplazo" aria-label="Buscar">🔍</button>
+        </div>
+        <div id="reemplazo-sugerencias" class="buscador-sugerencias hidden"></div>
+      </div>
+      <div id="reemplazo-resultado" class="proximas-panel hidden"></div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogoHome } from "../../scripts/session.js";
+      import { supabase } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const inputCuenta = document.querySelector("#input-reemplazo-cuenta");
+      const sugEl = document.querySelector("#reemplazo-sugerencias");
+      const resultadoEl = document.querySelector("#reemplazo-resultado");
+      let fetchCounter = 0;
+
+      const limpiar = () => {
+        resultadoEl.innerHTML = "";
+        resultadoEl.classList.add("hidden");
+      };
+
+      const renderSugs = (items) => {
+        if (!sugEl) return;
+        if (!items.length) {
+          sugEl.innerHTML = "";
+          sugEl.classList.add("hidden");
+          return;
+        }
+        sugEl.innerHTML = items
+          .map((it) => `<button type="button" data-correo="${it.correo}">${it.correo}</button>`)
+          .join("");
+        sugEl.classList.remove("hidden");
+      };
+
+      const renderResultado = (cuentas) => {
+        if (!resultadoEl) return;
+        if (!cuentas.length) {
+          resultadoEl.innerHTML = '<p class="status">Sin resultados.</p>';
+          resultadoEl.classList.remove("hidden");
+          return;
+        }
+        const body = cuentas
+          .map(
+            (c) => `
+              <tr>
+                <td>${c.correo || ""}</td>
+                <td>${c.id_plataforma || ""}</td>
+              </tr>
+            `
+          )
+          .join("");
+        resultadoEl.innerHTML = `
+          <div class="proximas-table-wrap">
+            <table class="proximas-table">
+              <thead><tr><th>Correo</th><th>Plataforma</th></tr></thead>
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+        `;
+        resultadoEl.classList.remove("hidden");
+      };
+
+      const buscarCuentas = async (term, mostrar = false) => {
+        const q = (term || "").trim();
+        if (!q) {
+          renderSugs([]);
+          if (mostrar) limpiar();
+          return;
+        }
+        const current = ++fetchCounter;
+        const { data, error } = await supabase
+          .from("cuentas")
+          .select("id_cuenta, correo, id_plataforma")
+          .ilike("correo", `%${q}%`)
+          .limit(10);
+        if (current !== fetchCounter) return;
+        if (error) {
+          console.error("buscar cuentas error", error);
+          renderSugs([]);
+          if (mostrar) limpiar();
+          return;
+        }
+        const cuentas = data || [];
+        if (mostrar) {
+          renderResultado(cuentas);
+          renderSugs([]);
+        } else {
+          renderSugs(cuentas);
+        }
+      };
+
+      inputCuenta?.addEventListener("input", (e) => {
+        buscarCuentas(e.target.value || "");
+      });
+
+      inputCuenta?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          buscarCuentas(inputCuenta.value || "", true);
+        }
+      });
+
+      document.querySelector("#btn-buscar-reemplazo")?.addEventListener("click", () => {
+        buscarCuentas(inputCuenta?.value || "", true);
+      });
+
+      sugEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        inputCuenta.value = btn.dataset.correo || "";
+        renderSugs([]);
+        buscarCuentas(inputCuenta.value, true);
+      });
+    </script>
+  </body>
+</html>

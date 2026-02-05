@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cuenta nueva</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .cuenta-nueva-form {
+        max-width: 640px;
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .cuenta-nueva-form .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .cuenta-nueva-form label {
+        font-weight: 700;
+      }
+      .cuenta-nueva-form input,
+      .cuenta-nueva-form select {
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      /* Inputs numéricos sin flechas */
+      .cuenta-nueva-form input[type="number"]::-webkit-outer-spin-button,
+      .cuenta-nueva-form input[type="number"]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .cuenta-nueva-form input[type="number"] {
+        -moz-appearance: textfield;
+      }
+      .modal-qty.inline {
+        margin: 0;
+      }
+      .sugs {
+        position: relative;
+        width: 100%;
+      }
+      .sugs-list {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        width: 100%;
+        box-sizing: border-box;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        margin-top: 6px;
+        overflow: hidden;
+        z-index: 20;
+      }
+      .sugs-list.hidden {
+        display: none;
+      }
+      .sugs-list button {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+      }
+      .sugs-list button:last-child {
+        border-bottom: none;
+      }
+      .sugs-list button:hover {
+        background: #f7f7f7;
+      }
+      .sugs-empty {
+        padding: 10px 12px;
+        color: #666;
+        font-size: 13px;
+      }
+      .cn-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+      }
+      .cn-overlay.show {
+        display: flex;
+      }
+      .cn-modal {
+        background: #fff;
+        border-radius: 12px;
+        padding: 16px;
+        max-width: 360px;
+        width: calc(100% - 32px);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+      }
+      .cn-modal p {
+        margin: 8px 0;
+      }
+      .cn-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .cn-form input {
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      #cn-procesar {
+        margin-top: 4px;
+        align-self: flex-start;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .cn-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .cn-btn {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+      }
+      .cn-primary {
+        background: #111;
+        color: #fff;
+      }
+      .cn-close {
+        background: #e5e7eb;
+        color: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Cuenta nueva</h2>
+      <div class="cuenta-nueva-form">
+        <div class="field sugs">
+          <label for="cn-cliente">Cliente</label>
+          <input type="text" id="cn-cliente" placeholder="Nombre del cliente" autocomplete="off" />
+          <div id="cn-sugs" class="sugs-list hidden"></div>
+          <p id="cn-cliente-id" class="status" style="margin:4px 0 0; font-size:12px; color:#444;">ID usuario: -</p>
+          <p id="cn-cliente-acceso" class="status" style="margin:0; font-size:12px; color:#444;">Acceso: -</p>
+        </div>
+        <div class="field">
+          <label for="cn-ref">Nro de referencia</label>
+          <input type="number" id="cn-ref" step="1" min="0" inputmode="numeric" />
+        </div>
+        <button type="button" class="btn-primary" id="cn-procesar">Procesar</button>
+      </div>
+    </main>
+    <div id="cn-modal" class="cn-overlay">
+      <div class="cn-modal">
+        <div id="cn-modal-step1">
+          <p>No se encontró cliente en la base de datos.</p>
+          <p>¿Añadir nuevo cliente?</p>
+          <div class="cn-actions">
+            <button type="button" class="cn-btn cn-primary" id="cn-modal-si">Sí</button>
+            <button type="button" class="cn-btn cn-close" id="cn-modal-no">No</button>
+          </div>
+        </div>
+        <div id="cn-modal-step2" style="display:none;">
+          <p>Agregar nuevo cliente</p>
+          <div class="cn-form">
+            <input type="text" id="cn-nombre" placeholder="Nombre" />
+            <input type="text" id="cn-apellido" placeholder="Apellido" />
+            <input type="email" id="cn-correo" placeholder="Correo" />
+            <input type="tel" id="cn-telefono" placeholder="Teléfono" />
+          </div>
+          <div class="cn-actions">
+            <button type="button" class="cn-btn cn-primary" id="cn-modal-guardar">Guardar</button>
+            <button type="button" class="cn-btn cn-close" id="cn-modal-cancelar">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module">
+      import { requireSession, attachLogoHome } from "../scripts/session.js";
+      import { supabase, loadCurrentUser } from "../scripts/api.js";
+      import { buildNotificationPayload, pickNotificationUserIds } from "../scripts/notification-templates.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const clienteInput = document.querySelector("#cn-cliente");
+      const clienteSugs = document.querySelector("#cn-sugs");
+      const clienteIdLabel = document.querySelector("#cn-cliente-id");
+      const clienteAccesoLabel = document.querySelector("#cn-cliente-acceso");
+      const modal = document.querySelector("#cn-modal");
+      const modalSi = document.querySelector("#cn-modal-si");
+      const modalNo = document.querySelector("#cn-modal-no");
+      const modalStep1 = document.querySelector("#cn-modal-step1");
+      const modalStep2 = document.querySelector("#cn-modal-step2");
+      const modalGuardar = document.querySelector("#cn-modal-guardar");
+      const modalCancelar = document.querySelector("#cn-modal-cancelar");
+      const modalNombre = document.querySelector("#cn-nombre");
+      const modalApellido = document.querySelector("#cn-apellido");
+      const modalCorreo = document.querySelector("#cn-correo");
+      const modalTelefono = document.querySelector("#cn-telefono");
+      let sugsCounter = 0;
+      let suppressBlur = false;
+      let adminId = null;
+      let clienteSeleccionadoId = null;
+      const toTitleCase = (str) =>
+        (str || "").replace(/(\S+)/g, (w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ""));
+      const normalizeText = (val) =>
+        (val || "")
+          .toString()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .trim();
+
+      // --- Sugerencias de clientes (rehecho) ---
+      const clearSugs = () => {
+        if (!clienteSugs) return;
+        clienteSugs.innerHTML = "";
+        clienteSugs.classList.add("hidden");
+      };
+
+      const renderClienteSugs = (items) => {
+        if (!clienteSugs) return;
+        if (!items.length) {
+          clearSugs();
+          return;
+        }
+        clienteSugs.innerHTML = items
+          .map(
+            (u) => `
+              <button type="button" data-id="${u.id_usuario || ""}" data-nombre="${(u.nombre || "").trim()}" data-apellido="${(u.apellido || "").trim()}" data-acceso="${u.acceso_cliente}">
+                ${(u.nombre || "")} ${(u.apellido || "")}
+              </button>
+            `
+          )
+          .join("");
+        clienteSugs.classList.remove("hidden");
+      };
+
+      const buscarClientes = async (texto) => {
+        const termRaw = texto || "";
+        if (!termRaw.length) {
+          clearSugs();
+          return;
+        }
+        const tokens = termRaw.trim().split(/\s+/).filter(Boolean);
+        const firstToken = tokens[0] || "";
+        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
+        const term = normalizeText(termRaw);
+        const current = ++sugsCounter;
+        try {
+          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido, acceso_cliente").limit(10);
+          query = query.or(
+            lastToken && lastToken !== firstToken
+              ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
+              : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+          );
+          const { data, error } = await query;
+          if (current !== sugsCounter) return;
+          if (error) throw error;
+          const filtered = (data || []).filter((u) => {
+            const full = normalizeText(`${u.nombre || ""} ${u.apellido || ""}`);
+            return full.includes(term);
+          });
+          const top = filtered.slice(0, 4);
+          renderClienteSugs(top);
+        } catch (err) {
+          console.error("buscar clientes error", err);
+          clearSugs();
+        }
+      };
+
+      clienteInput?.addEventListener("input", (e) => {
+        const el = clienteInput;
+        const start = el.selectionStart;
+        el.value = toTitleCase(el.value);
+        if (start !== null) {
+          const pos = Math.min(start, el.value.length);
+          el.setSelectionRange(pos, pos);
+        }
+        buscarClientes(e.target.value);
+      });
+
+      clienteSugs?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn || !clienteInput) return;
+          const nombre = btn.dataset.nombre || "";
+          const apellido = btn.dataset.apellido || "";
+          const acceso = btn.dataset.acceso;
+          clienteInput.value = toTitleCase(`${nombre} ${apellido}`.trim());
+          suppressBlur = false;
+          clearSugs();
+          if (clienteIdLabel) clienteIdLabel.textContent = `ID usuario: ${btn.dataset.id || "-"}`;
+          if (clienteAccesoLabel) {
+            const accesoTxt = acceso === "false" ? "Revendedor" : "Cliente final";
+            clienteAccesoLabel.textContent = `Acceso: ${accesoTxt}`;
+          }
+        });
+
+      clienteSugs?.addEventListener("mousedown", () => {
+        suppressBlur = true;
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!clienteSugs) return;
+        const inside = clienteSugs.contains(e.target) || clienteInput?.contains(e.target);
+        if (!inside) renderClienteSugs([], true);
+      });
+
+      const hideModal = () => modal && modal.classList.remove("show");
+      const showModal = () => modal && modal.classList.add("show");
+
+      const goStep1 = () => {
+        if (modalStep1) modalStep1.style.display = "block";
+        if (modalStep2) modalStep2.style.display = "none";
+      };
+      const goStep2 = () => {
+        if (modalStep1) modalStep1.style.display = "none";
+        if (modalStep2) modalStep2.style.display = "block";
+      };
+
+      modalNo?.addEventListener("click", () => {
+        hideModal();
+        if (clienteInput) clienteInput.value = "";
+      });
+      modalSi?.addEventListener("click", () => {
+        if (clienteInput) {
+          const parts = (clienteInput.value || "").trim().split(/\s+/);
+          const nombre = toTitleCase(parts.shift() || "");
+          const apellido = toTitleCase(parts.join(" ").trim());
+          if (modalNombre) modalNombre.value = nombre;
+          if (modalApellido) modalApellido.value = apellido;
+        }
+        goStep2();
+      });
+      modalCancelar?.addEventListener("click", () => {
+        goStep1();
+        hideModal();
+        if (clienteInput) clienteInput.value = "";
+      });
+
+      const checkClienteExiste = async () => {
+        const valRaw = clienteInput?.value || "";
+        if (!valRaw) return;
+        const tokens = valRaw.trim().split(/\s+/).filter(Boolean);
+        const firstToken = tokens[0] || "";
+        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
+        const term = normalizeText(valRaw);
+        try {
+          console.log("[cuenta_nueva] buscar cliente", {
+            raw: valRaw,
+            nombre: firstToken,
+            apellido: lastToken,
+          });
+          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido").limit(10);
+          query = query.or(
+            lastToken && lastToken !== firstToken
+              ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
+              : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+          );
+          const { data, error } = await query;
+          if (error) throw error;
+          const filtered = (data || []).filter((u) => {
+            const full = normalizeText(`${u.nombre || ""} ${u.apellido || ""}`);
+            return full.includes(term);
+          });
+          if (!filtered.length) {
+            goStep1();
+            showModal();
+            clienteSeleccionadoId = null;
+            if (clienteIdLabel) clienteIdLabel.textContent = "ID usuario: -";
+          } else if (clienteIdLabel && filtered[0]?.id_usuario) {
+            clienteSeleccionadoId = filtered[0].id_usuario;
+            console.log("[cuenta_nueva] id_usuario encontrado", clienteSeleccionadoId);
+            clienteIdLabel.textContent = `ID usuario: ${clienteSeleccionadoId}`;
+            clearSugs();
+          }
+        } catch (err) {
+          console.error("check cliente error", err);
+          clienteSeleccionadoId = null;
+        }
+      };
+
+      clienteInput?.addEventListener("blur", () => {
+        if (suppressBlur) {
+          setTimeout(() => {
+            suppressBlur = false;
+            checkClienteExiste();
+            clearSugs();
+          }, 120);
+          return;
+        }
+        setTimeout(() => checkClienteExiste(), 100); // deja terminar click en sugerencias
+        clearSugs();
+      });
+
+      clienteInput?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          checkClienteExiste();
+        }
+      });
+
+      const titleCaseInput = (el) => {
+        if (!el) return;
+        const start = el.selectionStart;
+        el.value = toTitleCase(el.value);
+        if (start !== null) {
+          const pos = Math.min(start, el.value.length);
+          el.setSelectionRange(pos, pos);
+        }
+      };
+
+      modalNombre?.addEventListener("input", () => titleCaseInput(modalNombre));
+      modalApellido?.addEventListener("input", () => titleCaseInput(modalApellido));
+
+      modalGuardar?.addEventListener("click", async () => {
+        const nombre = toTitleCase(modalNombre?.value || "").trim();
+        const apellido = toTitleCase(modalApellido?.value || "").trim();
+        const correo = (modalCorreo?.value || "").trim();
+        const telefono = (modalTelefono?.value || "").trim();
+        if (!nombre || !apellido || !correo) {
+          alert("Nombre, apellido y correo son obligatorios.");
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from("usuarios")
+            .insert({
+              nombre,
+              apellido,
+              correo,
+              telefono,
+              acceso_cliente: true,
+            })
+            .select("id_usuario")
+            .single();
+          if (error) throw error;
+          if (clienteInput) clienteInput.value = `${nombre} ${apellido}`.trim();
+          goStep1();
+          hideModal();
+          modalNombre && (modalNombre.value = "");
+          modalApellido && (modalApellido.value = "");
+          modalCorreo && (modalCorreo.value = "");
+          modalTelefono && (modalTelefono.value = "");
+          alert("Cliente creado correctamente.");
+        } catch (err) {
+          console.error("crear cliente error", err);
+          alert("No se pudo crear el cliente.");
+        }
+      });
+
+      // Cargar info del admin actual
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          adminId = user?.id_usuario || null;
+          const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+          const isSuper = isTrue(user?.permiso_superadmin);
+          if (!isSuper) {
+            alert("Acceso denegado.");
+            window.location.href = "index.html";
+            return;
+          }
+        } catch (err) {
+          console.error("load current user error", err);
+        }
+      })();
+
+      // Procesar pedido: intenta checkout para el cliente indicado
+      document.querySelector("#cn-procesar")?.addEventListener("click", async () => {
+        const idCliente = clienteSeleccionadoId || null;
+        if (!idCliente) {
+          alert("Selecciona un cliente válido (ID no encontrado).");
+          return;
+        }
+        const referencia = (document.querySelector("#cn-ref")?.value || "").trim() || "N/A";
+        try {
+          const payload = {
+            id_metodo_de_pago: 1,
+            referencia,
+            comprobantes: [],
+            total: null,
+            tasa_bs: 400,
+            id_usuario_override: idCliente,
+          };
+          // Determinar monto según acceso_cliente
+          let totalOverride = null;
+          try {
+            const sessionUserId = requireSession();
+            // usa carrito del usuario actual (admin/logueado), la venta se asigna al cliente seleccionado
+            const { data: userAcc, error: userErr } = await supabase
+              .from("usuarios")
+              .select("acceso_cliente")
+              .eq("id_usuario", idCliente)
+              .maybeSingle();
+            if (userErr) throw userErr;
+            const acceso = userAcc?.acceso_cliente;
+            const { data: carritoRow } = await supabase
+              .from("carritos")
+              .select("id_carrito")
+              .eq("id_usuario", sessionUserId)
+              .maybeSingle();
+            const carritoId = carritoRow?.id_carrito || null;
+            if (!carritoId) {
+              totalOverride = null;
+            } else {
+              const { data: cartData, error: cartErr } = await supabase
+                .from("carrito_items")
+                .select("id_precio, cantidad, meses")
+                .eq("id_carrito", carritoId);
+              if (cartErr) throw cartErr;
+              const precioIds = (cartData || []).map((c) => c.id_precio);
+              let priceMap = {};
+              if (precioIds.length) {
+                const { data: precios, error: pErr } = await supabase
+                .from("precios")
+                .select("id_precio, precio_usd_detal, precio_usd_mayor")
+                .in("id_precio", precioIds);
+              if (pErr) throw pErr;
+              priceMap = (precios || []).reduce((acc, p) => {
+                acc[p.id_precio] = p;
+                return acc;
+              }, {});
+              }
+              const useMayor = acceso === false ? true : false;
+              totalOverride = (cartData || []).reduce((sum, it) => {
+                const price = priceMap[it.id_precio] || {};
+                const unit = useMayor ? price.precio_usd_mayor || price.precio_usd_detal || 0 : price.precio_usd_detal || 0;
+                const qty = it.cantidad || 0;
+                const meses = it.meses || 1;
+                return sum + unit * qty * meses;
+              }, 0);
+            }
+          } catch (calcErr) {
+            console.error("calc total override error", calcErr);
+          }
+          if (totalOverride !== null) {
+            payload.total = totalOverride;
+          }
+          const { submitCheckout } = await import("../scripts/api.js");
+          const resp = await submitCheckout(payload);
+          if (resp?.error) {
+            alert(`Error al procesar: ${resp.error}`);
+            return;
+          }
+          // Marca el admin que procesó la venta en ventas via id_orden
+          if (adminId && resp?.id_orden) {
+            const { error: updVentaErr } = await supabase
+              .from("ventas")
+              .update({ id_admin_venta: adminId })
+              .eq("id_orden", resp.id_orden);
+          if (updVentaErr) {
+            console.error("set id_admin_venta error", updVentaErr);
+          }
+        }
+
+        // Notificaciones de nuevo servicio por cada venta de la orden
+        try {
+          if (resp?.id_orden) {
+            const { data: ventasOrden, error: ventasOrdErr } = await supabase
+              .from("ventas")
+              .select(
+                "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuentas:cuentas!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+              )
+              .eq("id_orden", resp.id_orden);
+            if (ventasOrdErr) throw ventasOrdErr;
+            const rowsNotif = [];
+            (ventasOrden || []).forEach((v) => {
+              const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: v.id_usuario });
+              if (!userIds.length) return;
+              const platName = v.cuentas?.plataformas?.nombre || "Plataforma";
+              const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
+              const notif = buildNotificationPayload(
+                "nuevo_servicio",
+                {
+                  plataforma: platName,
+                  correoCuenta: v.cuentas?.correo || "",
+                  perfil: perfilTxt,
+                  fechaCorte: v.fecha_corte || "",
+                  idOrden: resp.id_orden,
+                },
+                { idCuenta: v.id_cuenta }
+              );
+              userIds.forEach((uid) => rowsNotif.push({ ...notif, id_usuario: uid }));
+            });
+            if (rowsNotif.length) {
+              const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);
+              if (notifErr) throw notifErr;
+            }
+          }
+        } catch (nErr) {
+          console.error("nuevo_servicio notif error", nErr);
+        }
+        alert("Pedido procesado y asignado al cliente.");
+        const dest = resp?.id_orden
+          ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+          : "entregar_servicios.html";
+        window.location.href = dest;
+      } catch (err) {
+        console.error("procesar cuenta nueva error", err);
+          alert("No se pudo procesar el pedido.");
+        }
+      });
+    </script>
+  </body>
+</html>

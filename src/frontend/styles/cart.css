@@ -1,0 +1,259 @@
+.cart-drawer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 120;
+}
+
+.cart-drawer.open {
+  pointer-events: auto;
+}
+
+.cart-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.cart-drawer.open .cart-backdrop {
+  opacity: 1;
+}
+
+.cart-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 360px;
+  max-width: 85%;
+  height: 100%;
+  background: #fff;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.2);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.cart-drawer.open .cart-panel {
+  transform: translateX(0);
+}
+
+.cart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.cart-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.cart-items {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 2px 12px;
+}
+
+.cart-empty {
+  margin: 0;
+  color: #666;
+}
+
+.cart-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin-top: auto;
+  position: sticky;
+  bottom: 20px;
+  background: #fff;
+}
+
+/* Contenedor de tabla en página de carrito */
+.cart-items.page-cart {
+  max-height: 70vh;
+  overflow: auto;
+  padding: 0;
+}
+
+@media (max-width: 640px) {
+  .cart-items.page-cart {
+    max-height: 60vh;
+  }
+}
+
+.cart-item {
+  display: grid;
+  grid-template-columns: 60px 1fr auto;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.cart-thumb img {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f7f7f7;
+}
+
+.cart-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cart-product {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cart-thumb-sm {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  background: #f7f7f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.cart-thumb-sm img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cart-product-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cart-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.cart-detail,
+.cart-qty {
+  margin: 0;
+  color: #555;
+  font-size: 14px;
+}
+
+.cart-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.cart-qty-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.cart-qty-inline button {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: #111;
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.cart-qty-inline span {
+  min-width: 18px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.cart-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* Tabla carrito página */
+.cart-page-table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+
+.cart-page-table th:nth-child(1),
+.cart-page-table td:nth-child(1) {
+  width: 28%;
+}
+.cart-page-table th:nth-child(2),
+.cart-page-table td:nth-child(2) {
+  width: 12%;
+}
+.cart-page-table th:nth-child(3),
+.cart-page-table td:nth-child(3) {
+  width: 18%;
+}
+.cart-page-table th:nth-child(4),
+.cart-page-table td:nth-child(4) {
+  width: 14%;
+}
+.cart-page-table th:nth-child(5),
+.cart-page-table td:nth-child(5) {
+  width: 14%;
+}
+.cart-page-table th:nth-child(6),
+.cart-page-table td:nth-child(6) {
+  width: 16%;
+}
+
+.cart-page-table th,
+.cart-page-table td {
+  padding: 10px;
+  vertical-align: middle;
+  word-wrap: break-word;
+  overflow: hidden;
+  text-align: center;
+}
+
+.cart-page-table tbody tr {
+  height: 52px;
+}
+
+.cart-page-table tfoot .cart-total-row td {
+  text-align: right;
+}
+
+.cart-total-discount {
+  font-weight: 600;
+}
+
+.cart-page-table .cart-qty-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 0 auto;
+  justify-content: center;
+}
+
+.cart-page-table .modal-qty {
+  margin: 0 auto;
+}

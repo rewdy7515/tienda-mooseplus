@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agregar pines</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .pines-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        max-width: 540px;
+      }
+      .pines-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .pines-field select {
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .pines-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .pines-row input {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .prefill-btn {
+        align-self: flex-start;
+        padding: 10px 14px;
+        border: none;
+        border-radius: 10px;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .toggle {
+        position: relative;
+        width: 50px;
+        height: 26px;
+        border-radius: 999px;
+        background: #d1d5db;
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      .toggle::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.2s ease;
+      }
+      .toggle-input {
+        display: none;
+      }
+      .toggle-input:checked + .toggle {
+        background: #22c55e;
+      }
+      .toggle-input:checked + .toggle::after {
+        transform: translateX(24px);
+      }
+      .pines-row button {
+        padding: 10px 14px;
+        border: none;
+        border-radius: 10px;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Agregar pines</h2>
+      <div class="pines-wrapper">
+        <button id="btn-prefill-netflix" class="prefill-btn" type="button">
+          Netflix 15USD
+        </button>
+        <div class="pines-field">
+          <label for="select-proveedor">Proveedor</label>
+          <select id="select-proveedor">
+            <option value="">Cargando proveedores...</option>
+          </select>
+        </div>
+        <div class="pines-row">
+          <div class="pines-field" style="flex:1;">
+            <label for="select-plataforma">Plataforma</label>
+            <select id="select-plataforma">
+              <option value="">Cargando plataformas...</option>
+            </select>
+          </div>
+          <div class="pines-field" style="flex:1;">
+            <label for="select-valor">Valor</label>
+            <select id="select-valor" disabled>
+              <option value="">Selecciona una plataforma primero</option>
+            </select>
+          </div>
+        </div>
+        <div class="pines-row" style="justify-content: flex-start;">
+          <label class="pines-row" style="gap: 8px; cursor: pointer;">
+            <input id="toggle-venta" type="checkbox" class="toggle-input" />
+            <span class="toggle"></span>
+            <span>Para venta</span>
+          </label>
+        </div>
+        <div class="pines-field">
+          <label for="input-costo">Costo</label>
+          <input id="input-costo" type="number" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div class="pines-row">
+          <input id="input-pines" type="text" placeholder="Introduce los pines separados por espacio" />
+          <button id="btn-agregar-pines" type="button">Agregar pines</button>
+        </div>
+        <p id="estado" class="status">Selecciona la plataforma con tarjetas de regalo.</p>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, supabase } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const selectProveedor = document.getElementById("select-proveedor");
+      const selectPlataforma = document.getElementById("select-plataforma");
+      const estadoEl = document.getElementById("estado");
+      const selectValor = document.getElementById("select-valor");
+      const inputPines = document.getElementById("input-pines");
+      const btnAgregar = document.getElementById("btn-agregar-pines");
+      const inputCosto = document.getElementById("input-costo");
+      const btnPrefillNetflix = document.getElementById("btn-prefill-netflix");
+
+      const setEstado = (msg) => {
+        if (estadoEl) estadoEl.textContent = msg || "";
+      };
+
+      const cargarProveedores = async () => {
+        try {
+          const { data, error } = await supabase.from("proveedores").select("id_proveedor, nombre");
+          if (error) throw error;
+          if (!data || !data.length) {
+            selectProveedor.innerHTML = `<option value="">No hay proveedores</option>`;
+            return;
+          }
+          selectProveedor.innerHTML =
+            `<option value="">Selecciona un proveedor</option>` +
+            data.map((p) => `<option value="${p.id_proveedor}">${p.nombre}</option>`).join("");
+        } catch (err) {
+          console.error("cargar proveedores error", err);
+          selectProveedor.innerHTML = `<option value="">Error cargando proveedores</option>`;
+        }
+      };
+
+      const cargarPlataformas = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("plataformas")
+            .select("id_plataforma, nombre")
+            .eq("tarjeta_de_regalo", true);
+          if (error) throw error;
+          if (!data || !data.length) {
+            selectPlataforma.innerHTML = `<option value="">No hay plataformas con tarjetas de regalo</option>`;
+            setEstado("No hay plataformas disponibles.");
+            return;
+          }
+          selectPlataforma.innerHTML =
+            `<option value="">Seleccione una plataforma</option>` +
+            data
+              .map(
+                (p) =>
+                  `<option value="${p.id_plataforma}">${p.nombre || `Plataforma ${p.id_plataforma}`}</option>`
+              )
+              .join("");
+          setEstado("Selecciona una plataforma con tarjetas de regalo.");
+        } catch (err) {
+          console.error("agregar pines cargar plataformas error", err);
+          selectPlataforma.innerHTML = `<option value="">Error cargando plataformas</option>`;
+          setEstado("Error cargando plataformas.");
+        }
+      };
+
+      const cargarValores = async (platId) => {
+        if (!platId) {
+          selectValor.innerHTML = `<option value="">Selecciona una plataforma primero</option>`;
+          selectValor.disabled = true;
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from("precios")
+            .select("valor_tarjeta_de_regalo, moneda")
+            .eq("id_plataforma", platId)
+            .not("valor_tarjeta_de_regalo", "is", null);
+          if (error) throw error;
+          if (!data || !data.length) {
+            selectValor.innerHTML = `<option value="">No hay valores para esta plataforma</option>`;
+            selectValor.disabled = true;
+            return;
+          }
+          selectValor.innerHTML =
+            `<option value="">Selecciona un valor</option>` +
+            data
+              .map(
+                (v) =>
+                  `<option value="${v.valor_tarjeta_de_regalo}">${v.valor_tarjeta_de_regalo} ${v.moneda || ""}</option>`
+              )
+              .join("");
+          selectValor.disabled = false;
+        } catch (err) {
+          console.error("agregar pines cargar valores error", err);
+          selectValor.innerHTML = `<option value="">Error cargando valores</option>`;
+          selectValor.disabled = true;
+        }
+      };
+
+      cargarProveedores();
+      cargarPlataformas();
+
+      selectPlataforma?.addEventListener("change", (e) => {
+        const platId = e.target.value;
+        cargarValores(platId);
+      });
+
+      btnPrefillNetflix?.addEventListener("click", async () => {
+        if (selectProveedor) selectProveedor.value = "3";
+        if (selectPlataforma) selectPlataforma.value = "21";
+        // Cargar valores y seleccionar el primero disponible
+        await cargarValores("21");
+        const opts = Array.from(selectValor?.options || []).filter((o) => o.value);
+        if (opts.length && selectValor) {
+          selectValor.value = opts[0].value;
+          selectValor.disabled = false;
+        }
+        setEstado("Prefijo Netflix 15USD seleccionado.");
+      });
+
+      btnAgregar?.addEventListener("click", async () => {
+        const proveedorId = selectProveedor.value;
+        const platId = selectPlataforma.value;
+        const valor = parseFloat(selectValor.value || "0");
+        const costo = parseFloat(inputCosto.value || "0");
+        const pinesRaw = (inputPines.value || "").trim();
+        if (!proveedorId) {
+          alert("Selecciona un proveedor.");
+          return;
+        }
+        if (!platId) {
+          alert("Selecciona una plataforma.");
+          return;
+        }
+        if (!pinesRaw) {
+          alert("Introduce al menos un pin.");
+          return;
+        }
+        if (!costo || costo <= 0) {
+          alert("Ingresa un costo mayor a 0.");
+          return;
+        }
+        if (!valor || valor <= 0) {
+          alert("Selecciona un valor válido.");
+          return;
+        }
+        const tokens = pinesRaw.split(/\s+/).filter(Boolean);
+        const today = new Date().toISOString().slice(0, 10);
+        const paraVenta = document.getElementById("toggle-venta")?.checked || false;
+        const costoUnitario = tokens.length ? costo / tokens.length : costo;
+        const rows = tokens.map((t) => ({
+          pin: t,
+          id_proveedor: Number(proveedorId),
+          id_plataforma: Number(platId),
+          costo: costoUnitario,
+          monto: valor,
+          para_venta: paraVenta,
+          usado: false,
+          fecha_compra: today,
+        }));
+        if (!rows.length) {
+          alert("No se encontraron pines válidos.");
+          return;
+        }
+        try {
+          const { error } = await supabase.from("tarjetas_de_regalo").insert(rows);
+          if (error) throw error;
+          setEstado(`Se agregaron ${rows.length} pines.`);
+          inputPines.value = "";
+        } catch (err) {
+          console.error("insert pines error", err);
+          alert("No se pudieron agregar los pines.");
+        }
+      });
+    </script>
+  </body>
+</html>

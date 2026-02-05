@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Carrito</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Carrito</h2>
+      <p id="cart-status" class="status"></p>
+      <div class="cart-table-wrap">
+        <div id="cart-page-items" class="cart-items page-cart"></div>
+      </div>
+      <p id="cart-saldo" class="cart-saldo">Saldo: $0.00</p>
+      <div class="page-actions">
+        <button id="btn-page-pay" class="btn-primary">Finalizar compra</button>
+      </div>
+    </main>
+
+    <script type="module" src="../scripts/cart-page.js"></script>
+  </body>
+</html>

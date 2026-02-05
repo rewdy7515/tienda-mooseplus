@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inicio de sesión</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body class="auth-page">
+    <main class="auth-container">
+      <section class="auth-card">
+        <img
+          src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png"
+          class="auth-logo"
+          alt="Logo"
+        />
+        <h1 class="auth-title">Inicia sesión</h1>
+        <p class="auth-subtitle">Accede con tu correo electrónico</p>
+
+        <form class="auth-form">
+          <label for="login-user" class="form-label">Correo electrónico</label>
+          <input
+            id="login-user"
+            name="login-user"
+            class="form-input"
+            type="email"
+            placeholder="usuario@correo.com"
+            autocomplete="email"
+            required
+          />
+          <p id="email-error" class="input-message"></p>
+
+          <label for="login-password" class="form-label">Clave</label>
+          <div class="input-with-toggle">
+            <input
+              id="login-password"
+              name="login-password"
+              class="form-input"
+              type="password"
+              placeholder="••••••••"
+              autocomplete="current-password"
+              required
+            />
+            <button
+              type="button"
+              class="toggle-password"
+              aria-label="Mostrar clave"
+              aria-pressed="false"
+            >
+              <svg class="icon-eye icon-open" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 5c-4.5 0-8.4 2.9-10 7 1.6 4.1 5.5 7 10 7s8.4-2.9 10-7c-1.6-4.1-5.5-7-10-7Zm0 12c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5Z"
+                />
+                <circle cx="12" cy="12" r="2.4" />
+              </svg>
+              <svg class="icon-eye icon-closed" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M3.3 2.3 2 3.6 5.2 6.8C3.6 8 2.2 9.7 1.4 12c1.6 4.1 5.5 7 10 7 2 0 3.8-.5 5.4-1.4l3 3 1.3-1.3L3.3 2.3Zm7.2 7.2 2.9 2.9a2.9 2.9 0 0 1-2.9-2.9Z"
+                />
+                <path
+                  d="M13.6 8.4a2.9 2.9 0 0 1 1.3 3.4l2.9 2.9c1.3-.9 2.5-2.2 3.2-3.7-1.6-4.1-5.5-7-10-7-.8 0-1.5.1-2.2.2l1.9 1.9a2.9 2.9 0 0 1 2.9 2.3Z"
+                />
+              </svg>
+            </button>
+          </div>
+          <p id="password-error" class="input-message"></p>
+
+          <button type="submit" class="btn-primary auth-submit">
+            Iniciar sesión
+          </button>
+        </form>
+
+        <p id="login-status" class="input-message status-message"></p>
+
+        <button type="button" class="btn-outline auth-secondary">
+          ¿No tienes cuenta? Regístrate
+        </button>
+      </section>
+    </main>
+
+    <script type="module" src="../scripts/session-guard.js"></script>
+    <script type="module" src="../scripts/login.js"></script>
+  </body>
+</html>

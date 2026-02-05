@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editar precios</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .precios-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+        max-width: none;
+      }
+      .plan-editor {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .plan-text {
+        flex: 1;
+      }
+      .plan-edit-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+      }
+      .plan-edit {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .plan-input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .plan-input,
+      .plan-select {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+      .plan-save {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .precio-block {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px;
+        background: #fff;
+      }
+      .precio-block h3 {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+      }
+      .precio-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .precio-table th,
+      .precio-table td {
+        border: 1px solid #e5e7eb;
+        padding: 8px;
+        text-align: left;
+      }
+      .precio-table th {
+        background: var(--table-header-bg, #2c2f36);
+        color: #fff;
+      }
+      .precio-table tbody tr:nth-child(odd) {
+        background: #fafafa;
+      }
+      .precio-cell {
+        position: relative;
+        padding-right: 42px;
+      }
+      .inline-edit {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+      }
+      .inline-edit input {
+        flex: 1;
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        box-sizing: border-box;
+        font-size: 14px;
+      }
+      .inline-save {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .precio-cell input {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        box-sizing: border-box;
+        font-size: 14px;
+      }
+      .precio-edit {
+        background: #111;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 6px 8px;
+        cursor: pointer;
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .qty-popover {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 10;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 180px;
+      }
+      .qty-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .qty-controls button {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        border: 1px solid #d1d5db;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+      }
+      .qty-value {
+        min-width: 40px;
+        text-align: center;
+        font-weight: 700;
+      }
+      .qty-popover select {
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+      }
+      .qty-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .qty-actions button {
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+      }
+      .btn-save {
+        background: #111;
+        color: #fff;
+      }
+      .btn-cancel {
+        background: #e5e7eb;
+        color: #111;
+      }
+      .row-add {
+        background: #d1d5db !important;
+        color: #111;
+        cursor: pointer;
+        height: 24px;
+      }
+      .row-add:hover {
+        background: #10b981 !important;
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Editar precios</h2>
+      <div class="precios-wrapper" id="precios-wrapper">
+        <p class="status" id="estado">Cargando plataformas y precios...</p>
+      </div>
+      <div style="height: 160px;"></div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, supabase } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const wrapper = document.getElementById("precios-wrapper");
+      const estadoEl = document.getElementById("estado");
+
+      const setEstado = (msg) => {
+        if (estadoEl) estadoEl.textContent = msg || "";
+      };
+
+      const formatCantidad = (cantidad, flags = {}, completa = false) => {
+        if (cantidad == null) return "-";
+        const { por_pantalla, por_acceso } = flags;
+        if (completa) return `${cantidad} cuenta completa`;
+        if (por_pantalla) return `${cantidad} pantalla${cantidad === 1 ? "" : "s"}`;
+        if (por_acceso) return `${cantidad} dispositivo${cantidad === 1 ? "" : "s"}`;
+        return `${cantidad}`;
+      };
+
+      const renderTabla = (titulo, precios, platFlags = {}, platMeta = {}, planKey = null, planOptions = []) => {
+        const esGift = !!platMeta.tarjeta_de_regalo;
+        const planOpts = (planOptions || []).filter(Boolean);
+        const sorted = [...precios].sort((a, b) => {
+          const aComp = a.completa ? 1 : 0;
+          const bComp = b.completa ? 1 : 0;
+          if (aComp !== bComp) return aComp - bComp; // primero pantallas/dispositivos, luego cuenta completa
+          const aCant = Number(a.cantidad ?? 0);
+          const bCant = Number(b.cantidad ?? 0);
+          if (aCant !== bCant) return aCant - bCant;
+          const aDur = Number(a.duracion ?? 0);
+          const bDur = Number(b.duracion ?? 0);
+          return aDur - bDur;
+        });
+        const rows = sorted
+          .map((p) => {
+            if (esGift) {
+              return `
+              <tr>
+                <td data-id="${p.id_precio || ""}" data-field="cantidad" class="precio-cell" data-completa="${p.completa ? "true" : "false"}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-cantidad="${p.cantidad ?? ""}">
+                  <span class="precio-text">${p.cantidad != null ? formatCantidad(p.cantidad, platFlags, p.completa) : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                </td>
+                <td data-id="${p.id_precio || ""}" data-field="valor_tarjeta_de_regalo" class="precio-cell" data-valor="${p.valor_tarjeta_de_regalo ?? ""}" data-moneda="${p.moneda || ""}">
+                  <span class="precio-text">${p.valor_tarjeta_de_regalo != null ? `${p.valor_tarjeta_de_regalo} ${p.moneda || ""}` : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar valor">✏️</button>
+                </td>
+                <td data-id="${p.id_precio || ""}" data-field="region" class="precio-cell" data-region="${p.region || ""}">
+                  <span class="precio-text">${p.region || "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar región">✏️</button>
+                </td>
+                <td data-id="${p.id_precio || ""}" data-field="precio_usd_detal" class="precio-cell">
+                  <span class="precio-text">${p.precio_usd_detal != null ? `$${p.precio_usd_detal}` : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                </td>
+                <td data-id="${p.id_precio || ""}" data-field="precio_usd_mayor" class="precio-cell">
+                  <span class="precio-text">${p.precio_usd_mayor != null ? `$${p.precio_usd_mayor}` : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                </td>
+              </tr>
+            `;
+            }
+            const planLabel = p.plan ? p.plan : "Sin plan";
+            const planCell = `
+                <td class="plan-cell">
+                  <div class="plan-editor" data-id="${p.id_precio || ""}">
+                    <span class="plan-text">${planLabel}</span>
+                    <button type="button" class="plan-edit" data-id="${p.id_precio || ""}" aria-label="Editar plan">✏️</button>
+                    <div class="plan-edit-controls hidden">
+                      <select class="plan-select">
+                        <option value="">Seleccionar</option>
+                        ${planOpts
+                          .map(
+                            (opt) =>
+                              `<option value="${opt}" ${p.plan === opt ? "selected" : ""}>${opt}</option>`
+                          )
+                          .join("")}
+                      </select>
+                      <span class="plan-input-wrap">
+                        <input type="text" class="plan-input" placeholder="Nuevo plan" />
+                        <button type="button" class="plan-save" data-id="${p.id_precio || ""}" aria-label="Guardar plan">💾</button>
+                        <button type="button" class="plan-cancel" aria-label="Cancelar">✖</button>
+                      </span>
+                    </div>
+                  </div>
+                </td>
+            `;
+            return `
+              <tr>
+                <td data-id="${p.id_precio || ""}" data-field="cantidad" class="precio-cell" data-completa="${p.completa ? "true" : "false"}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-cantidad="${p.cantidad ?? ""}">
+                  <span class="precio-text">${p.cantidad != null ? formatCantidad(p.cantidad, platFlags, p.completa) : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                </td>
+                ${planCell}
+                <td data-id="${p.id_precio || ""}" data-field="duracion" class="precio-cell">
+                  <span class="precio-text">${p.duracion != null ? `${p.duracion} mes${p.duracion === 1 ? "" : "es"}` : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar duración">✏️</button>
+                </td>
+                <td data-id="${p.id_precio || ""}" data-field="precio_usd_detal" class="precio-cell">
+                  <span class="precio-text">${p.precio_usd_detal != null ? `$${p.precio_usd_detal}` : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                </td>
+                <td data-id="${p.id_precio || ""}" data-field="precio_usd_mayor" class="precio-cell">
+                  <span class="precio-text">${p.precio_usd_mayor != null ? `$${p.precio_usd_mayor}` : "-"}</span>
+                  <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+        return `
+          <div class="precio-block">
+            <h3>${titulo}</h3>
+            <table class="table-base precio-table">
+              <thead>
+                <tr>
+                  <th>Cantidad</th>
+                  ${esGift ? "<th>Valor</th><th>Región</th>" : "<th>Plan</th><th>Duración</th>"}
+                  <th>Precio USD detal</th>
+                  <th>Precio USD mayor</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows || `<tr><td colspan="${esGift ? 5 : 5}">Sin precios</td></tr>`}
+                <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}">
+                  <td colspan="${esGift ? 5 : 5}" style="text-align:center; font-weight:700;">+</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const agruparPorPlan = (precios) => {
+        const planMap = new Map();
+        precios.forEach((p) => {
+          const key = p.plan || "__DEFAULT__";
+          if (!planMap.has(key)) planMap.set(key, []);
+          planMap.get(key).push(p);
+        });
+        return planMap;
+      };
+
+      const cargar = async () => {
+        try {
+          const { data: plataformas, error: platErr } = await supabase
+            .from("plataformas")
+            .select("id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo");
+          if (platErr) throw platErr;
+
+          const { data: precios, error: priceErr } = await supabase
+            .from("precios")
+            .select("id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region");
+          if (priceErr) throw priceErr;
+          const planOptionsByPlat = (precios || []).reduce((acc, p) => {
+            if (!acc[p.id_plataforma]) acc[p.id_plataforma] = new Set();
+            if (p.plan) acc[p.id_plataforma].add(p.plan);
+            return acc;
+          }, {});
+
+          if (!plataformas?.length) {
+            setEstado("No hay plataformas.");
+            return;
+          }
+
+          const priceByPlat = (precios || []).reduce((acc, p) => {
+            if (!acc[p.id_plataforma]) acc[p.id_plataforma] = [];
+            acc[p.id_plataforma].push(p);
+            return acc;
+          }, {});
+
+          plataformas.sort((a, b) => Number(a.id_plataforma) - Number(b.id_plataforma));
+          const blocks = plataformas.map((plat) => {
+            const preciosPlat = priceByPlat[plat.id_plataforma] || [];
+            const flags = {
+              por_pantalla: plat.por_pantalla,
+              por_acceso: plat.por_acceso,
+            };
+            const planOpts = Array.from(planOptionsByPlat[plat.id_plataforma] || []);
+            return renderTabla(
+              plat.nombre || `Plataforma ${plat.id_plataforma}`,
+              preciosPlat,
+              flags,
+              plat,
+              null,
+              planOpts
+            );
+          });
+
+          if (wrapper) {
+            wrapper.innerHTML = blocks.join("");
+          }
+          attachPrecioEditors();
+        } catch (err) {
+          console.error("editar precios init error", err);
+          setEstado("No se pudieron cargar las plataformas/precios.");
+        }
+      };
+
+      const attachPrecioEditors = () => {
+        wrapper?.addEventListener("click", (e) => {
+          const planEditBtn = e.target.closest(".plan-edit");
+          if (planEditBtn) {
+            const editor = planEditBtn.closest(".plan-editor");
+            const text = editor?.querySelector(".plan-text");
+            const controls = editor?.querySelector(".plan-edit-controls");
+            if (text) text.classList.add("hidden");
+            if (controls) controls.classList.remove("hidden");
+            planEditBtn.classList.add("hidden");
+            const input = editor?.querySelector(".plan-input");
+            if (input) input.focus();
+            return;
+          }
+          const planCancelBtn = e.target.closest(".plan-cancel");
+          if (planCancelBtn) {
+            const editor = planCancelBtn.closest(".plan-editor");
+            const text = editor?.querySelector(".plan-text");
+            const controls = editor?.querySelector(".plan-edit-controls");
+            const editBtn = editor?.querySelector(".plan-edit");
+            if (controls) controls.classList.add("hidden");
+            if (text) text.classList.remove("hidden");
+            if (editBtn) editBtn.classList.remove("hidden");
+            const input = editor?.querySelector(".plan-input");
+            if (input) input.value = "";
+            return;
+          }
+          const planSaveBtn = e.target.closest(".plan-save");
+          if (planSaveBtn) {
+            const editor = planSaveBtn.closest(".plan-editor");
+            const input = editor?.querySelector(".plan-input");
+            const select = editor?.querySelector(".plan-select");
+            const text = editor?.querySelector(".plan-text");
+            const controls = editor?.querySelector(".plan-edit-controls");
+            const editBtn = editor?.querySelector(".plan-edit");
+            const precioId = planSaveBtn.dataset.id;
+            const typed = (input?.value || "").trim();
+            const selected = (select?.value || "").trim();
+            const newPlan = typed || selected;
+            if (!precioId || !newPlan) {
+              alert("Ingresa o selecciona un plan.");
+              return;
+            }
+            (async () => {
+              try {
+                const { error } = await supabase
+                  .from("precios")
+                  .update({ plan: newPlan })
+                  .eq("id_precio", precioId);
+                if (error) throw error;
+                if (input) input.value = "";
+                if (select) select.value = newPlan;
+                if (text) {
+                  text.textContent = newPlan || "Sin plan";
+                  text.classList.remove("hidden");
+                }
+                if (controls) controls.classList.add("hidden");
+                if (editBtn) editBtn.classList.remove("hidden");
+                setEstado("Plan actualizado.");
+              } catch (err) {
+                console.error("update plan error", err);
+                alert("No se pudo actualizar el plan.");
+              }
+            })();
+            return;
+          }
+          const exitEdit = (cell, newText) => {
+            const displaySpan = cell.querySelector(".precio-text");
+            if (displaySpan) displaySpan.textContent = newText;
+            cell.querySelectorAll(".qty-popover").forEach((p) => p.remove());
+          };
+
+          const addRow = e.target.closest(".row-add");
+          if (addRow) {
+            (async () => {
+              const platId = addRow.dataset.plat;
+              const plan = addRow.dataset.plan || null;
+              const esGift = addRow.dataset.gift === "true";
+              const por_pantalla = addRow.dataset.porpantalla === "true";
+              const por_acceso = addRow.dataset.poracceso === "true";
+              try {
+                const payload = {
+                  id_plataforma: Number(platId),
+                  plan: plan || null,
+                  completa: false,
+                };
+                const { data, error } = await supabase
+                  .from("precios")
+                  .insert(payload)
+                  .select()
+                  .single();
+                if (error) throw error;
+                const tbody = addRow.closest("tbody");
+                if (!tbody) return;
+                const tr = document.createElement("tr");
+                if (esGift) {
+                  tr.innerHTML = `
+                    <td data-id="${data.id_precio}" data-field="cantidad" class="precio-cell" data-completa="${data.completa ? "true" : "false"}" data-porpantalla="${por_pantalla}" data-poracceso="${por_acceso}" data-cantidad="${data.cantidad ?? ""}">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="valor_tarjeta_de_regalo" class="precio-cell" data-valor="${data.valor_tarjeta_de_regalo ?? ""}" data-moneda="${data.moneda || ""}">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar valor">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="region" class="precio-cell" data-region="${data.region || ""}">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar región">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="precio_usd_detal" class="precio-cell">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="precio_usd_mayor" class="precio-cell">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                    </td>
+                  `;
+                } else {
+                  tr.innerHTML = `
+                    <td data-id="${data.id_precio}" data-field="cantidad" class="precio-cell" data-completa="${data.completa ? "true" : "false"}" data-porpantalla="${por_pantalla}" data-poracceso="${por_acceso}" data-cantidad="${data.cantidad ?? ""}">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="duracion" class="precio-cell">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar duración">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="precio_usd_detal" class="precio-cell">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                    </td>
+                    <td data-id="${data.id_precio}" data-field="precio_usd_mayor" class="precio-cell">
+                      <span class="precio-text">-</span>
+                      <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                    </td>
+                  `;
+                }
+                tbody.insertBefore(tr, addRow);
+              } catch (err) {
+                console.error("insert precio error", err);
+                alert("No se pudo crear la fila.");
+              }
+            })();
+            return;
+          }
+
+          const btn = e.target.closest(".precio-edit");
+          if (!btn) return;
+          const cell = btn.closest(".precio-cell");
+          if (!cell) return;
+          const precioId = cell.dataset.id;
+          const field = cell.dataset.field;
+          if (!precioId || !field) return;
+
+          // cerrar ediciones anteriores
+          wrapper.querySelectorAll(".qty-popover").forEach((p) => p.remove());
+          wrapper.querySelectorAll(".precio-cell input").forEach((inp) => {
+            const spanText = inp.dataset.original || inp.value;
+            const span = document.createElement("span");
+            span.className = "precio-text";
+            span.textContent = spanText;
+            inp.replaceWith(span);
+          });
+          wrapper.querySelectorAll(".precio-edit").forEach((b) => (b.textContent = "✏️"));
+
+          const span = cell.querySelector(".precio-text");
+          if (!span) return;
+
+          // Cantidad
+          if (field === "cantidad") {
+            const existingPop = cell.querySelector(".qty-popover");
+            if (existingPop) {
+              existingPop.remove();
+              btn.textContent = "✏️";
+              return;
+            }
+            const isCantidad = field === "cantidad";
+            const labelBase =
+              cell.dataset.porpantalla === "true"
+                ? "Pantalla"
+                : cell.dataset.poracceso === "true"
+                ? "Dispositivo"
+                : "Cantidad";
+            const isCompleta = cell.dataset.completa === "true";
+            const currentQty = parseInt(
+              isCantidad ? cell.dataset.cantidad || "1" : span.textContent.replace(/\D/g, "") || "1",
+              10
+            ) || 1;
+            const esGift = span.closest("table")?.querySelector(".row-add")?.dataset.gift === "true";
+
+            const pop = document.createElement("div");
+            pop.className = "qty-popover";
+            pop.innerHTML = `
+              <div class="qty-controls">
+                <button type="button" data-act="minus">-</button>
+                <input type="number" class="qty-input" value="${currentQty}" min="1" step="1" />
+                <button type="button" data-act="plus">+</button>
+              </div>
+              ${
+                isCantidad && !esGift
+                  ? `<select class="qty-select">
+                      <option value="unit" ${!isCompleta ? "selected" : ""}>${labelBase}</option>
+                      <option value="full" ${isCompleta ? "selected" : ""}>Cuenta completa</option>
+                    </select>`
+                  : ""
+              }
+              <div class="qty-actions">
+                <button type="button" class="btn-cancel">Cancelar</button>
+                <button type="button" class="btn-save">Guardar</button>
+              </div>
+            `;
+            cell.appendChild(pop);
+            btn.textContent = "💾";
+
+            const qtyInput = pop.querySelector(".qty-input");
+            const selectEl = pop.querySelector(".qty-select");
+            const updateQty = (delta) => {
+              const current = parseInt(qtyInput.value, 10) || 1;
+              const next = Math.max(1, current + delta);
+              qtyInput.value = next;
+            };
+            pop.addEventListener("click", (ev) => {
+              if (ev.target.dataset.act === "minus") updateQty(-1);
+              else if (ev.target.dataset.act === "plus") updateQty(1);
+            });
+
+            const saveQty = async () => {
+              const qty = parseInt(qtyInput.value, 10);
+              if (!qty || qty <= 0) {
+                alert("El valor debe ser mayor a 0.");
+                return;
+              }
+              if (isCantidad) {
+                const completaFlag = selectEl?.value === "full";
+                try {
+                  const { error } = await supabase
+                    .from("precios")
+                    .update({ cantidad: qty, completa: completaFlag })
+                    .eq("id_precio", precioId);
+                  if (error) throw error;
+                  cell.dataset.cantidad = qty;
+                  cell.dataset.completa = completaFlag ? "true" : "false";
+                  const flags = {
+                    por_pantalla: cell.dataset.porpantalla === "true",
+                    por_acceso: cell.dataset.poracceso === "true",
+                  };
+                  const flagsFormat = { por_pantalla: flags.porpantalla, por_acceso: flags.poracceso };
+                  exitEdit(cell, formatCantidad(qty, flagsFormat, completaFlag));
+                  setEstado("Cantidad actualizada.");
+                } catch (err) {
+                  console.error("update cantidad error", err);
+                  alert("No se pudo actualizar la cantidad.");
+                  return;
+                }
+              } else {
+                try {
+                  const { error } = await supabase
+                    .from("precios")
+                    .update({ duracion: qty })
+                    .eq("id_precio", precioId);
+                  if (error) throw error;
+                  exitEdit(cell, `${qty} mes${qty === 1 ? "" : "es"}`);
+                  setEstado("Duración actualizada.");
+                } catch (err) {
+                  console.error("update duración error", err);
+                  alert("No se pudo actualizar la duración.");
+                  return;
+                }
+              }
+              pop.remove();
+              btn.textContent = "✏️";
+            };
+
+            pop.querySelector(".btn-save")?.addEventListener("click", saveQty);
+            pop.querySelector(".btn-cancel")?.addEventListener("click", () => {
+              pop.remove();
+              btn.textContent = "✏️";
+            });
+            const outsideHandler = (ev) => {
+              if (!cell.contains(ev.target)) {
+                pop.remove();
+                btn.textContent = "✏️";
+                document.removeEventListener("click", outsideHandler);
+              }
+            };
+            setTimeout(() => document.addEventListener("click", outsideHandler, { once: true }), 0);
+            return;
+          }
+
+          // Duración inline
+          if (field === "duracion") {
+            const currentVal = span.textContent.replace(/\D/g, "") || cell.dataset.duracion || "";
+            const wrap = document.createElement("div");
+            wrap.className = "inline-edit";
+            wrap.innerHTML = `
+              <input type="number" min="1" step="1" value="${currentVal}" />
+              <button type="button" class="inline-save" aria-label="Guardar">💾</button>
+            `;
+            const input = wrap.querySelector("input");
+            const saveBtn = wrap.querySelector(".inline-save");
+            span.replaceWith(wrap);
+            btn.classList.add("hidden");
+            input?.focus();
+            const save = async () => {
+              const qty = parseInt(input.value, 10);
+              if (!qty || qty <= 0) {
+                alert("El valor debe ser mayor a 0.");
+                return;
+              }
+              try {
+                const { error } = await supabase
+                  .from("precios")
+                  .update({ duracion: qty })
+                  .eq("id_precio", precioId);
+                if (error) throw error;
+                const spanText = document.createElement("span");
+                spanText.className = "precio-text";
+                spanText.textContent = `${qty} mes${qty === 1 ? "" : "es"}`;
+                wrap.replaceWith(spanText);
+                btn.classList.remove("hidden");
+                setEstado("Duración actualizada.");
+              } catch (err) {
+                console.error("update duración error", err);
+                alert("No se pudo actualizar la duración.");
+              }
+            };
+            saveBtn?.addEventListener("click", save);
+            input?.addEventListener("keydown", (ev) => {
+              if (ev.key === "Enter") save();
+              if (ev.key === "Escape") {
+                const spanText = document.createElement("span");
+                spanText.className = "precio-text";
+                spanText.textContent = span.textContent;
+                wrap.replaceWith(spanText);
+                btn.classList.remove("hidden");
+              }
+            });
+            return;
+          }
+
+          // Valor tarjeta + moneda
+          if (field === "valor_tarjeta_de_regalo") {
+            const existingPop = cell.querySelector(".qty-popover");
+            if (existingPop) {
+              existingPop.remove();
+              btn.textContent = "✏️";
+              return;
+            }
+            const currentVal = parseFloat(cell.dataset.valor || "0") || 0;
+            const currentMon = cell.dataset.moneda || "";
+            const pop = document.createElement("div");
+            pop.className = "qty-popover";
+            pop.innerHTML = `
+              <div style="font-weight:600;font-size:13px;">Valor de tarjeta</div>
+              <div class="qty-controls">
+                <button type="button" data-act="minus">-</button>
+                <input type="number" class="qty-input" value="${currentVal || 1}" min="1" step="0.01" />
+                <button type="button" data-act="plus">+</button>
+              </div>
+              <div style="font-weight:600;font-size:13px;">Moneda</div>
+              <input type="text" class="price-input moneda-input" value="${currentMon}" placeholder="USD, Bs, etc." />
+              <div class="qty-actions">
+                <button type="button" class="btn-cancel">Cancelar</button>
+                <button type="button" class="btn-save">Guardar</button>
+              </div>
+            `;
+            cell.appendChild(pop);
+            btn.textContent = "💾";
+
+            const qtyInput = pop.querySelector(".qty-input");
+            const monedaEl = pop.querySelector(".moneda-input");
+            const updateQty = (delta) => {
+              const current = parseFloat(qtyInput.value) || 1;
+              const next = Math.max(1, current + delta);
+              qtyInput.value = next.toFixed(2).replace(/\.00$/, "");
+            };
+            pop.addEventListener("click", (ev) => {
+              if (ev.target.dataset.act === "minus") updateQty(-1);
+              else if (ev.target.dataset.act === "plus") updateQty(1);
+            });
+
+            const saveValor = async () => {
+              const raw = (qtyInput.value || "").trim();
+              if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+                alert("Ingresa un número válido (máx. 2 decimales).");
+                return;
+              }
+              const valNum = parseFloat(raw);
+              if (!valNum || valNum <= 0) {
+                alert("El valor debe ser mayor a 0.");
+                return;
+              }
+              const mon = (monedaEl.value || "").trim();
+              try {
+                const { error } = await supabase
+                  .from("precios")
+                  .update({ valor_tarjeta_de_regalo: valNum, moneda: mon })
+                  .eq("id_precio", precioId);
+                if (error) throw error;
+                cell.dataset.valor = valNum;
+                cell.dataset.moneda = mon;
+                exitEdit(cell, `${valNum} ${mon}`.trim());
+                setEstado("Valor actualizado.");
+                pop.remove();
+                btn.textContent = "✏️";
+              } catch (err) {
+                console.error("update valor error", err);
+                alert("No se pudo actualizar el valor.");
+              }
+            };
+
+            pop.querySelector(".btn-save")?.addEventListener("click", saveValor);
+            pop.querySelector(".btn-cancel")?.addEventListener("click", () => {
+              pop.remove();
+              btn.textContent = "✏️";
+            });
+            const outsideValor = (ev) => {
+              if (!cell.contains(ev.target)) {
+                pop.remove();
+                btn.textContent = "✏️";
+                document.removeEventListener("click", outsideValor);
+              }
+            };
+            setTimeout(() => document.addEventListener("click", outsideValor, { once: true }), 0);
+            return;
+          }
+
+          // Región
+          if (field === "region") {
+            const existingPop = cell.querySelector(".qty-popover");
+            if (existingPop) {
+              existingPop.remove();
+              btn.textContent = "✏️";
+              return;
+            }
+            const pop = document.createElement("div");
+            pop.className = "qty-popover";
+            pop.innerHTML = `
+              <input type="text" class="price-input" value="${cell.dataset.region || ""}" placeholder="Región" />
+              <div class="qty-actions">
+                <button type="button" class="btn-cancel">Cancelar</button>
+                <button type="button" class="btn-save">Guardar</button>
+              </div>
+            `;
+            cell.appendChild(pop);
+            btn.textContent = "💾";
+            const inputReg = pop.querySelector("input");
+            inputReg?.focus();
+            inputReg?.select();
+
+            const saveReg = async () => {
+              const val = (inputReg.value || "").trim();
+              try {
+                const { error } = await supabase
+                  .from("precios")
+                  .update({ region: val })
+                  .eq("id_precio", precioId);
+                if (error) throw error;
+                cell.dataset.region = val;
+                exitEdit(cell, val || "-");
+                setEstado("Región actualizada.");
+                pop.remove();
+                btn.textContent = "✏️";
+              } catch (err) {
+                console.error("update region error", err);
+                alert("No se pudo actualizar la región.");
+              }
+            };
+
+            pop.querySelector(".btn-save")?.addEventListener("click", saveReg);
+            pop.querySelector(".btn-cancel")?.addEventListener("click", () => {
+              pop.remove();
+              btn.textContent = "✏️";
+            });
+            const outsideReg = (ev) => {
+              if (!cell.contains(ev.target)) {
+                pop.remove();
+                btn.textContent = "✏️";
+                document.removeEventListener("click", outsideReg);
+              }
+            };
+            setTimeout(() => document.addEventListener("click", outsideReg, { once: true }), 0);
+            return;
+          }
+
+          // Editor precios (inline)
+          const current = span.textContent.replace("$", "").trim();
+          const wrap = document.createElement("div");
+          wrap.className = "inline-edit";
+          wrap.innerHTML = `
+            <input type="text" inputmode="decimal" value="${current === "-" ? "" : current}" placeholder="0.00" />
+            <button type="button" class="inline-save" aria-label="Guardar">💾</button>
+          `;
+          const input = wrap.querySelector("input");
+          const saveBtn = wrap.querySelector(".inline-save");
+          span.replaceWith(wrap);
+          btn.classList.add("hidden");
+          input?.focus();
+          input?.select();
+          const savePrice = async () => {
+            let raw = input.value.trim();
+            if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+              alert("Ingresa un número válido (máx. 2 decimales, usa punto).");
+              return;
+            }
+            if (!raw.includes(".")) raw = `${raw}.00`;
+            const value = parseFloat(raw);
+            if (!value || value <= 0) {
+              alert("El precio debe ser mayor a 0.");
+              return;
+            }
+            try {
+              const { error } = await supabase
+                .from("precios")
+                .update({ [field]: value })
+                .eq("id_precio", precioId);
+              if (error) throw error;
+              const spanText = document.createElement("span");
+              spanText.className = "precio-text";
+              spanText.textContent = `$${value.toFixed(2)}`;
+              wrap.replaceWith(spanText);
+              btn.classList.remove("hidden");
+              setEstado("Precio actualizado.");
+            } catch (err) {
+              console.error("update precio error", err);
+              alert("No se pudo actualizar el precio.");
+            }
+          };
+          saveBtn?.addEventListener("click", savePrice);
+          input?.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") savePrice();
+            if (ev.key === "Escape") {
+              const spanText = document.createElement("span");
+              spanText.className = "precio-text";
+              spanText.textContent = span.textContent;
+              wrap.replaceWith(spanText);
+              btn.classList.remove("hidden");
+            }
+          });
+        });
+      };
+
+      cargar();
+    </script>
+  </body>
+</html>

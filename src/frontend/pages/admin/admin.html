@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Administrar servicios</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .spotify-soon-1 {
+        background: #f59e0b33;
+      }
+      .spotify-soon-2 {
+        background: #f59e0b22;
+      }
+      .spotify-soon-3 {
+        background: #f59e0b14;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Administrar servicios</h2>
+      <div class="admin-dashboard">
+        <div class="admin-card reportes" id="dash-reportes">
+          <p class="card-title">Reportes</p>
+          <div class="card-count" id="count-reportes">--</div>
+          <p class="card-desc"></p>
+        </div>
+        <div class="admin-card cortes" id="dash-cortes">
+          <p class="card-title">Cortes</p>
+          <div class="card-count" id="count-cortes">--</div>
+          <p class="card-desc">Ventas por vencer</p>
+        </div>
+        <div class="admin-card pedidos" id="dash-pedidos">
+          <p class="card-title">Pedidos</p>
+          <div class="card-count" id="count-pedidos">--</div>
+          <p class="card-desc">Solicitudes recientes</p>
+        </div>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action" id="btn-renovar-servicio">Renovar servicio cliente</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action" id="btn-editar-precios">Editar precios</button>
+        <button class="btn-primary admin-action" id="btn-importar-datos">Importar datos</button>
+        <button class="btn-primary admin-action" id="btn-registrar-proveedor">Registrar proveedor</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
+      </div>
+      <div class="admin-actions admin-group">
+        <h3 style="margin: 0 0 6px 0;">Cuentas madre Spotify próximas a vencer</h3>
+        <button class="btn-primary admin-action" id="btn-renovar-spotify" style="margin: 6px 0 8px 0;">Renovar</button>
+        <div id="spotify-cuentas-status" class="status">Cargando...</div>
+        <div class="cuenta-table-wrap">
+          <table class="table-base" id="spotify-cuentas-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Correo</th>
+                <th>Fecha de corte</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="status" id="pines-por-comprar">Pines por comprar: --</p>
+      <p class="status">Selecciona una acción.</p>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const logo = document.querySelector(".logo");
+
+      const countReportesEl = document.querySelector("#count-reportes");
+      const countCortesEl = document.querySelector("#count-cortes");
+      const countPedidosEl = document.querySelector("#count-pedidos");
+      const pinesPorComprarEl = document.querySelector("#pines-por-comprar");
+      const spotifyTable = document.querySelector("#spotify-cuentas-table tbody");
+      const spotifyStatus = document.querySelector("#spotify-cuentas-status");
+      const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
+
+      const getMonthStart = () => {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        return start.toISOString().slice(0, 10);
+      };
+
+      const formatDDMMYYYY = (val) => {
+        if (!val) return "-";
+        const parts = String(val).split("-");
+        if (parts.length !== 3) return val;
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      };
+
+      async function loadCounts() {
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const monthStart = getMonthStart();
+          const [{ count: repCount }, { count: cortesCount }, { count: pedidosCount }] = await Promise.all([
+            supabase
+              .from("reportes")
+              .select("id_reporte", { count: "exact", head: true })
+              .eq("solucionado", false),
+            supabase
+              .from("ventas")
+              .select("id_venta, cuentas!ventas_id_cuenta_fkey!inner(inactiva)", { count: "exact", head: true })
+              .lte("fecha_corte", today)
+              .or("suspendido.is.null,suspendido.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
+            supabase
+              .from("ventas")
+              .select("id_venta", { count: "exact", head: true })
+              .eq("pendiente", true),
+          ]);
+          if (countReportesEl) countReportesEl.textContent = repCount ?? 0;
+          if (countCortesEl) countCortesEl.textContent = cortesCount ?? 0;
+          if (countPedidosEl) countPedidosEl.textContent = pedidosCount ?? 0;
+
+          if (pinesPorComprarEl) {
+            const { count: netflixCount, error: nfErr } = await supabase
+              .from("ventas")
+              .select("id_venta, precios:precios!ventas_id_precio_fkey(id_plataforma)", {
+                count: "exact",
+                head: true,
+              })
+              .gte("fecha_pago", monthStart)
+              .eq("precios.id_plataforma", 1);
+            if (nfErr) throw nfErr;
+            const pines = Math.floor((netflixCount ?? 0) / 7);
+            pinesPorComprarEl.textContent = `Pines por comprar: ${pines}`;
+          }
+        } catch (err) {
+          console.error("load dashboard counts error", err);
+          if (countReportesEl) countReportesEl.textContent = "-";
+          if (countCortesEl) countCortesEl.textContent = "-";
+          if (countPedidosEl) countPedidosEl.textContent = "-";
+          if (pinesPorComprarEl) pinesPorComprarEl.textContent = "Pines por comprar: -";
+        }
+      }
+
+      async function loadSpotifyMadres() {
+        if (!spotifyTable || !spotifyStatus) return;
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, fecha_corte")
+            .eq("id_plataforma", 9)
+            .eq("cuenta_madre", true)
+            .gte("fecha_corte", today)
+            .order("fecha_corte", { ascending: true });
+          if (error) throw error;
+          spotifyTable.innerHTML = "";
+          if (!data?.length) {
+            spotifyStatus.textContent = "Sin cuentas próximas.";
+            return;
+          }
+          spotifyStatus.textContent = "";
+          data.forEach((row) => {
+            const daysDiff = (() => {
+              if (!row.fecha_corte) return null;
+              const today = new Date();
+              const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+              const fc = new Date(row.fecha_corte);
+              const fcBase = new Date(fc.getFullYear(), fc.getMonth(), fc.getDate());
+              return Math.round((fcBase - base) / (1000 * 60 * 60 * 24));
+            })();
+            const rowClass =
+              daysDiff === 1
+                ? "spotify-soon-1"
+                : daysDiff === 2
+                ? "spotify-soon-2"
+                : daysDiff === 3
+                ? "spotify-soon-3"
+                : "";
+            const tr = document.createElement("tr");
+            if (rowClass) tr.className = rowClass;
+            tr.innerHTML = `
+              <td><input type="checkbox" class="spotify-renovar-check" data-correo="${row.correo || ""}" /></td>
+              <td>${row.correo || "-"}</td>
+              <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
+            `;
+            spotifyTable.appendChild(tr);
+          });
+        } catch (err) {
+          console.error("load spotify madres error", err);
+          spotifyStatus.textContent = "No se pudo cargar.";
+        }
+      }
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            document.querySelector("main .status").textContent =
+              "No tienes permisos para administrar servicios.";
+          }
+          await loadCounts();
+          await loadSpotifyMadres();
+        } catch (err) {
+          console.error("admin init error", err);
+        }
+      }
+
+      document.querySelector("#dash-reportes")?.addEventListener("click", () => {
+        window.location.href = "../reportes/revisar_reportes.html";
+      });
+      document.querySelector("#dash-cortes")?.addEventListener("click", () => {
+        window.location.href = "cortes.html";
+      });
+      document.querySelector("#dash-pedidos")?.addEventListener("click", () => {
+        window.location.href = "pedidos_pendientes.html";
+      });
+
+      init();
+      attachLogout(clearServerSession);
+
+      attachLogoHome();
+
+      document.querySelector("#btn-agregar-servicios")?.addEventListener("click", () => {
+        window.location.href = "admin/agregar_servicios.html";
+      });
+
+      document.querySelector("#btn-agregar-pines")?.addEventListener("click", () => {
+        window.location.href = "agregar_pines.html";
+      });
+
+      document.querySelector("#btn-editar-precios")?.addEventListener("click", () => {
+        window.location.href = "/src/frontend/pages/admin/editar_precios.html";
+      });
+
+      document.querySelector("#btn-importar-datos")?.addEventListener("click", () => {
+        window.location.href = "importar.html";
+      });
+
+      document.getElementById("btn-renovar-servicio")?.addEventListener("click", () => {
+        window.location.href = "renovar_cliente.html";
+      });
+
+      document.getElementById("btn-registrar-proveedor")?.addEventListener("click", () => {
+        window.location.href = "registrar_proveedor.html";
+      });
+
+      document.getElementById("btn-recordatorios")?.addEventListener("click", () => {
+        window.location.href = "recordatorios.html";
+      });
+
+      document.getElementById("btn-renovar")?.addEventListener("click", () => {
+        window.location.href = "renovar_cliente.html";
+      });
+
+      spotifyRenovarBtn?.addEventListener("click", () => {
+        const checks = document.querySelectorAll(".spotify-renovar-check:checked");
+        if (!checks.length) {
+          alert("Selecciona al menos una cuenta.");
+          return;
+        }
+        const correos = Array.from(checks)
+          .map((c) => c.dataset.correo || "")
+          .filter(Boolean);
+        const msg = `Deseas renovar:\n${correos.join("\n")}`;
+        const ok = confirm(msg);
+        if (!ok) return;
+      });
+
+    </script>
+  </body>
+</html>

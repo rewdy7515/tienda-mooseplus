@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Stock</h2>
+      <table class="stock-table">
+        <thead>
+          <tr>
+            <th>Plataforma</th>
+            <th>Perfiles libres</th>
+            <th>Cuentas libres</th>
+            <th>Vencidos por cortar</th>
+            <th>Reemplazos por cortar</th>
+          </tr>
+        </thead>
+        <tbody id="stock-body">
+          <tr>
+            <td colspan="5" class="status">Próximamente.</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const tbody = document.querySelector("#stock-body");
+      const todayIso = () => new Date().toISOString().slice(0, 10);
+
+      const setRows = (rows) => {
+        if (!tbody) return;
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="status">Sin datos.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows
+          .map(
+            (r) => `
+          <tr>
+            <td>${r.nombre}</td>
+            <td>${r.perfiles_libres}</td>
+            <td>${r.cuentas_libres}</td>
+            <td>${r.vencidos_perfiles}</td>
+            <td>${r.reemplazos}</td>
+          </tr>`
+          )
+          .join("");
+      };
+
+
+      async function loadData() {
+        try {
+          const [{ data: plataformas, error: platErr }, { data: cuentas, error: ctaErr }, { data: perfiles, error: perfErr }, { data: ventas, error: venErr }, { data: reemplazos, error: repErr }] = await Promise.all([
+            supabase.from("plataformas").select("id_plataforma, nombre").order("nombre"),
+            supabase.from("cuentas").select("id_cuenta, id_plataforma, venta_perfil, inactiva"),
+            supabase
+              .from("perfiles")
+              .select("id_perfil, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, venta_perfil, inactiva)")
+              .not("id_cuenta", "is", null),
+            supabase
+              .from("ventas")
+              .select("id_perfil, fecha_corte")
+              .lte("fecha_corte", todayIso())
+              .not("id_perfil", "is", null),
+            supabase.from("historial_reemplazos").select("perfil_anterior"),
+          ]);
+          if (platErr) throw platErr;
+          if (ctaErr) throw ctaErr;
+          if (perfErr) throw perfErr;
+          if (venErr) throw venErr;
+          if (repErr) throw repErr;
+
+          const platMap = {};
+          (plataformas || []).forEach((p) => {
+            platMap[p.id_plataforma] = {
+              id_plataforma: p.id_plataforma,
+              nombre: p.nombre || "-",
+              perfiles_libres: 0,
+              cuentas_libres: 0,
+              vencidos_perfiles: 0,
+              reemplazos: 0,
+            };
+          });
+
+          const perfilToPlat = {};
+          (perfiles || []).forEach((p) => {
+            const perfilId = Number(p.id_perfil);
+            const platId = p.cuentas?.id_plataforma;
+            const ventaPerfil = p.cuentas?.venta_perfil;
+            const inactiva = p.cuentas?.inactiva;
+            if (platId && platMap[platId] && !inactiva) {
+              perfilToPlat[perfilId] = { platId, ventaPerfil: !!ventaPerfil };
+              if (!p.ocupado) {
+                platMap[platId].perfiles_libres += 1;
+                if (ventaPerfil) {
+                  platMap[platId].cuentas_libres += 1;
+                }
+              }
+            }
+          });
+
+          (ventas || []).forEach((v) => {
+            const ref = perfilToPlat[Number(v.id_perfil)];
+            if (ref && platMap[ref.platId]) {
+              platMap[ref.platId].vencidos_perfiles += 1;
+            }
+          });
+
+          (reemplazos || []).forEach((r) => {
+            const idPerfil = Number(r.perfil_anterior);
+            const ref = perfilToPlat[idPerfil];
+            if (ref && platMap[ref.platId]) {
+              platMap[ref.platId].reemplazos += 1;
+            }
+          });
+
+          setRows(Object.values(platMap));
+        } catch (err) {
+          console.error("stock load error", err);
+          setRows([]);
+          if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="5" class="status">No se pudo cargar el stock.</td></tr>';
+          }
+        }
+      }
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+        } catch (err) {
+          console.error("stock init error", err);
+        }
+        loadData();
+      }
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+    </script>
+  </body>
+</html>

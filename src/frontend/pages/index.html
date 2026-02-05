@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tienda</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+
+  <body>
+    <div id="page-loader" class="page-loader">
+      <div class="page-loader__logo" aria-label="Cargando"></div>
+    </div>
+
+    <div id="app-shell" class="app-shell hidden">
+      <div id="app-header" data-header-root="../" data-header-pages=""></div>
+      <script src="../scripts/header-loader.js"></script>
+
+      <!-- CONTENEDOR DE CATEGORÍAS -->
+      <main>
+        <div id="testing-toggle-wrap" class="testing-toggle-wrap">
+          <button id="btn-testing-toggle" class="testing-toggle-btn">Testing</button>
+        </div>
+        <div id="missing-data-wrap" class="missing-data-wrap hidden">
+          <button id="missing-data-btn" class="btn-outline">
+            Datos faltantes para activar servicio
+          </button>
+        </div>
+        <section class="categorias-dinamicas">
+          <h2>Categorías</h2>
+          <p id="categorias-status" class="status"></p>
+          <div id="categorias-container" class="categorias-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Modal plataformas -->
+    <div id="platform-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <button class="modal-close" aria-label="Cerrar">×</button>
+        <div class="modal-body">
+          <div class="modal-media">
+            <img id="modal-image" src="" alt="Plataforma" />
+          </div>
+          <div class="modal-info">
+            <div class="modal-scroll">
+              <div class="modal-header">
+                <div class="modal-title">
+                  <h3 id="modal-name"></h3>
+                  <p id="modal-category" class="modal-category"></p>
+                </div>
+                <p id="modal-badge" class="modal-badge"></p>
+              </div>
+              <div id="modal-precios" class="modal-precios"></div>
+            </div>
+            <div class="modal-actions-fixed">
+              <div class="modal-qty modal-qty-disabled">
+                <span class="modal-duration-label">Duración:</span>
+                <button
+                  type="button"
+                  id="qty-months-minus"
+                  aria-label="Disminuir meses"
+                >
+                  -
+                </button>
+                <span id="qty-months-value">1</span>
+                <button
+                  type="button"
+                  id="qty-months-plus"
+                  aria-label="Aumentar meses"
+                >
+                  +
+                </button>
+                <span class="modal-duration-suffix">meses</span>
+                <span id="months-discount" class="discount-badge hidden"></span>
+              </div>
+              <div class="modal-qty modal-qty-disabled">
+                <span class="modal-duration-label">Cantidad:</span>
+                <button type="button" id="qty-minus" aria-label="Disminuir">
+                  -
+                </button>
+                <span id="qty-value">1</span>
+                <button type="button" id="qty-plus" aria-label="Aumentar">
+                  +
+                </button>
+                <span class="modal-duration-suffix">items</span>
+                <span id="items-discount" class="discount-badge hidden"></span>
+              </div>
+            </div>
+            <button id="add-cart" class="btn-add">Añadir al carrito</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="../scripts/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Importar Spotify</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Importar Spotify</h2>
+      <div class="form-admin">
+        <div class="field">
+          <label for="spotify-text">Correo cuenta madre</label>
+          <input type="text" id="spotify-text" placeholder="correo@dominio.com" />
+        </div>
+        <div class="field">
+          <label for="spotify-csv">Archivo CSV</label>
+          <input type="file" id="spotify-csv" accept=".csv,text/csv" />
+        </div>
+        <p class="status">Columnas requeridas: fecha_pago, fecha_corte, usuario, correo, clave</p>
+        <button type="button" class="btn-primary" id="btn-importar-spotify">Importar</button>
+        <p id="import-status" class="status"></p>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const inputCuentaMadre = document.querySelector("#spotify-text");
+      const inputCsv = document.querySelector("#spotify-csv");
+      const btnImportar = document.querySelector("#btn-importar-spotify");
+      const statusEl = document.querySelector("#import-status");
+
+      const parseCsv = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const sep = lines[0].includes(";") ? ";" : lines[0].includes("\t") ? "\t" : ",";
+        const splitLine = (line) =>
+          line
+            .split(new RegExp(`${sep}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
+            .map((c) => c.replace(/^\"(.*)\"$/, "$1").trim());
+        const headers = splitLine(lines[0]).map((h) => h.replace(/^\uFEFF/, "").toLowerCase());
+        return lines.slice(1).map((line) => {
+          const cols = splitLine(line);
+          const row = {};
+          headers.forEach((h, i) => {
+            row[h] = cols[i];
+          });
+          return row;
+        });
+      };
+
+      const normalizeDate = (val) => {
+        const raw = (val || "").trim();
+        if (!raw) return null;
+        if (raw.includes("/")) {
+          const parts = raw.split("/");
+          if (parts.length === 3) {
+            const d = parts[0].padStart(2, "0");
+            const m = parts[1].padStart(2, "0");
+            const y = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+            return `${y}-${m}-${d}`;
+          }
+        }
+        return raw;
+      };
+
+      const diffMonths = (start, end) => {
+        if (!start || !end) return 1;
+        const s = new Date(start);
+        const e = new Date(end);
+        if (Number.isNaN(s.valueOf()) || Number.isNaN(e.valueOf())) return 1;
+        let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+        if (e.getDate() < s.getDate()) months -= 1;
+        return Math.max(1, months);
+      };
+
+      const getOrCreateUsuario = async (raw) => {
+        const clean = (raw || "").trim();
+        if (!clean) return null;
+        const parts = clean.split(/\s+/);
+        const nombre = parts.shift() || "";
+        const apellido = parts.join(" ").trim();
+        const { data: found, error: findErr } = await supabase
+          .from("usuarios")
+          .select("id_usuario")
+          .eq("nombre", nombre)
+          .eq("apellido", apellido)
+          .limit(1)
+          .maybeSingle();
+        if (findErr) throw findErr;
+        if (found?.id_usuario) return found.id_usuario;
+        const { data: created, error: createErr } = await supabase
+          .from("usuarios")
+          .insert({ nombre, apellido, acceso_cliente: true })
+          .select("id_usuario")
+          .single();
+        if (createErr) throw createErr;
+        return created?.id_usuario || null;
+      };
+
+      const getCuentaMadre = async (correo) => {
+        const { data, error } = await supabase
+          .from("cuentas")
+          .select("id_cuenta, id_plataforma")
+          .eq("correo", correo)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data?.id_cuenta) return null;
+        if (Number(data.id_plataforma) !== 9) return null;
+        return data.id_cuenta;
+      };
+
+      const getPerfilLibre = async (idCuentaMadre) => {
+        const { data, error } = await supabase
+          .from("perfiles")
+          .select("id_perfil, n_perfil, ocupado")
+          .eq("id_cuenta", idCuentaMadre)
+          .eq("ocupado", false)
+          .order("n_perfil", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        return data?.id_perfil || null;
+      };
+
+      const createCuentaMiembro = async (correo, clave, idUsuario, idCuentaMadre) => {
+        const { data, error } = await supabase
+          .from("cuentas")
+          .insert({
+            id_plataforma: 9,
+            correo,
+            clave,
+            inactiva: false,
+            ocupado: false,
+            venta_dominio: true,
+            dominio_de: idUsuario,
+            id_cuenta_miembro: idCuentaMadre,
+            venta_perfil: false,
+            venta_miembro: false,
+            cuenta_madre: false,
+          })
+          .select("id_cuenta")
+          .single();
+        if (error) throw error;
+        return data?.id_cuenta || null;
+      };
+
+      async function importar() {
+        if (statusEl) statusEl.textContent = "";
+        const correoMadre = (inputCuentaMadre?.value || "").trim();
+        if (!correoMadre) {
+          statusEl.textContent = "Ingresa el correo de la cuenta madre.";
+          return;
+        }
+        const file = inputCsv?.files?.[0];
+        if (!file) {
+          statusEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        const parsed = parseCsv(text);
+        if (!parsed.length) {
+          statusEl.textContent = "No se encontraron filas válidas.";
+          return;
+        }
+        statusEl.textContent = "Importando...";
+        try {
+          const idCuentaMadre = await getCuentaMadre(correoMadre);
+          if (!idCuentaMadre) {
+            statusEl.textContent = "No se encontró cuenta madre válida (plataforma 9).";
+            return;
+          }
+          let inserted = 0;
+          let skipped = 0;
+          for (const row of parsed) {
+            const fechaPago = normalizeDate(row.fecha_pago);
+            const fechaCorte = normalizeDate(row.fecha_corte);
+            const usuario = (row.usuario || "").trim();
+            const correo = (row.correo || "").trim();
+            const clave = (row.clave || "").trim();
+            if (!fechaPago || !fechaCorte || !usuario || !correo || !clave) {
+              skipped += 1;
+              continue;
+            }
+            const idUsuario = await getOrCreateUsuario(usuario);
+            if (!idUsuario) {
+              skipped += 1;
+              continue;
+            }
+            const idCuentaMiembro = await createCuentaMiembro(correo, clave, idUsuario, idCuentaMadre);
+            if (!idCuentaMiembro) {
+              skipped += 1;
+              continue;
+            }
+            const idPerfil = await getPerfilLibre(idCuentaMadre);
+            if (!idPerfil) {
+              skipped += 1;
+              continue;
+            }
+            const meses = diffMonths(fechaPago, fechaCorte);
+            const { error: ventaErr } = await supabase.from("ventas").insert({
+              id_usuario: idUsuario,
+              id_cuenta: idCuentaMadre,
+              id_cuenta_miembro: idCuentaMiembro,
+              id_perfil: idPerfil,
+              fecha_pago: fechaPago,
+              fecha_corte: fechaCorte,
+              meses_contratados: meses,
+              pendiente: false,
+              correo_miembro: correo,
+              clave_miembro: clave,
+            });
+            if (ventaErr) throw ventaErr;
+            const { error: perfilErr } = await supabase
+              .from("perfiles")
+              .update({ ocupado: true, id_cuenta_miembro: idCuentaMiembro })
+              .eq("id_perfil", idPerfil);
+            if (perfilErr) throw perfilErr;
+            inserted += 1;
+          }
+          statusEl.textContent = `Importación completada. Ventas insertadas: ${inserted}. Omitidas: ${skipped}.`;
+        } catch (err) {
+          console.error("importar spotify error", err);
+          statusEl.textContent = "No se pudo importar.";
+        }
+      }
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+        } catch (err) {
+          console.error("importar spotify init error", err);
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+
+      btnImportar?.addEventListener("click", importar);
+    </script>
+  </body>
+</html>

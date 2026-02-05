@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cortes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .cortes-wrapper {
+        margin-top: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .cortes-btns {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+      }
+      .cortes-btn {
+        width: 100%;
+        text-align: left;
+        padding: 14px 18px;
+        font-size: 16px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: relative;
+      }
+      .cortes-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .cortes-table th,
+      .cortes-table td {
+        border: 1px solid #e5e7eb;
+        padding: 8px;
+      }
+      .cortes-table th {
+        background: #444;
+        color: #fff;
+      }
+      .cortes-table tbody tr:nth-child(odd) {
+        background: #f5f5f5;
+      }
+      .cortes-table tbody tr:nth-child(even) {
+        background: #fff;
+      }
+      .perfil-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-left: 6px;
+        border-radius: 50%;
+        background: #f97316;
+        vertical-align: middle;
+      }
+      .cortes-row {
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+      }
+      .cortes-row.selected {
+        background: #bfdbfe !important;
+      }
+      .cortes-hidden {
+        display: none;
+      }
+      .cortar-btn {
+        background: #ef4444;
+        color: #fff;
+        border: none;
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .row-disabled {
+        background: #e5e7eb !important;
+        color: #6b7280;
+      }
+      .row-disabled input {
+        background: #e5e7eb;
+        color: #6b7280;
+        pointer-events: none;
+      }
+      .cortar-btn.disabled {
+        background: #6b7280;
+        cursor: not-allowed;
+      }
+      .cortar-btn.pressed {
+        background: #b91c1c;
+        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
+        transform: translateY(1px);
+      }
+      .aviso-btn {
+        background: #facc15;
+        color: #1f2937;
+        border: none;
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .aviso-btn:hover {
+        background: #eab308;
+      }
+      .input-inline {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+      .copy-cell,
+      .copy-input {
+        cursor: pointer;
+      }
+
+      .cortes-block {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .cortes-badge {
+        background: #9ca3af;
+        color: #fff;
+        border-radius: 999px;
+        min-width: 26px;
+        padding: 4px 8px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 700;
+        margin-left: 12px;
+        line-height: 1;
+      }
+      .madre-bar {
+        background: #f3f4f6;
+        border: 2px solid #b5c1d3;
+        border-bottom: none;
+        border-radius: 10px 10px 0 0;
+        padding: 12px 16px;
+        margin: 10px 0 -6px;
+      }
+      .madre-bar p {
+        margin: 4px 0;
+      }
+      .madre-bar .copyable {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .madre-bar a {
+        color: #1d4ed8;
+        text-decoration: underline;
+      }
+      .madre-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .madre-link .input-inline {
+        max-width: 420px;
+      }
+      .madre-save-btn {
+        background: #111827;
+        color: #fff;
+        border: none;
+        padding: 6px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .cortes-subtitle {
+        margin: 14px 0 6px;
+        font-weight: 700;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 86px;
+        right: 24px;
+        background: #111;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        z-index: 2000;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Cortes</h2>
+      <button id="btn-delete-cortes" class="btn-outline hidden" style="margin-bottom: 12px; display:none;">
+        Eliminar filas cortadas
+      </button>
+      <div class="cortes-wrapper">
+        <div id="cortes-status" class="status">Cargando plataformas...</div>
+        <div id="cortes-tablas"></div>
+      </div>
+    </main>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, supabase, loadCurrentUser } from "../../scripts/api.js";
+      import { buildServiceCopyText } from "../../scripts/copy-format.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      // Mostrar botón de eliminación solo para superadmin
+      (async () => {
+        try {
+          const user = await loadCurrentUser();
+          const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+          const isSuper = isTrue(user?.permiso_superadmin);
+          const btnDelete = document.querySelector("#btn-delete-cortes");
+          if (isSuper && btnDelete) {
+            btnDelete.classList.remove("hidden");
+            btnDelete.style.display = "inline-flex";
+            btnDelete.addEventListener("click", async () => {
+              const ok = confirm("¿Eliminar todas las ventas con suspendido = true?");
+              if (!ok) return;
+              try {
+                const { data: ventasSusp, error: ventasErr } = await supabase
+                  .from("ventas")
+                  .select("id_venta, id_cuenta, id_perfil")
+                  .eq("suspendido", true);
+                if (ventasErr) throw ventasErr;
+
+                const cuentasIds = Array.from(
+                  new Set((ventasSusp || []).map((v) => v.id_cuenta).filter(Boolean))
+                );
+                const perfilesIds = Array.from(
+                  new Set((ventasSusp || []).map((v) => v.id_perfil).filter(Boolean))
+                );
+
+                const updates = [];
+                if (cuentasIds.length) {
+                  updates.push(
+                    supabase.from("cuentas").update({ ocupado: false }).in("id_cuenta", cuentasIds)
+                  );
+                }
+                if (perfilesIds.length) {
+                  updates.push(
+                    supabase.from("perfiles").update({ ocupado: false }).in("id_perfil", perfilesIds)
+                  );
+                }
+                if (updates.length) {
+                  const results = await Promise.all(updates);
+                  const errUpdates = results.find((r) => r.error)?.error;
+                  if (errUpdates) throw errUpdates;
+                }
+
+                const { error } = await supabase.from("ventas").delete().eq("suspendido", true);
+                if (error) throw error;
+
+                alert("Filas cortadas eliminadas.");
+                init(); // recarga la tabla
+              } catch (err) {
+                console.error("delete suspendidos error", err);
+                alert("No se pudieron eliminar las filas cortadas.");
+              }
+            });
+          }
+        } catch (err) {
+          console.error("init superadmin check error", err);
+        }
+      })();
+
+      const tablasEl = document.querySelector("#cortes-tablas");
+      const statusEl = document.querySelector("#cortes-status");
+      let platMaxMap = {};
+      let platCorteClaveMap = {};
+      let platCorteDirectoMap = {};
+
+      const copyToast = document.querySelector("#copy-toast");
+      let copyToastTimer = null;
+
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (copyToastTimer) clearTimeout(copyToastTimer);
+        copyToastTimer = setTimeout(() => {
+          copyToast.classList.remove("show");
+        }, 2000);
+      };
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const renderVentaRow = (v, plataforma) => {
+        const maxPin = plataforma.max_dig_pin || "";
+        const usaPines = !!plataforma.usa_pines;
+        const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
+        const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
+        const cliente = v.usuarios
+          ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
+          : "-";
+        const accountSource = v.id_cuenta_miembro ? v.cuentas_miembro : v.cuentas;
+        const correo = accountSource?.correo || "-";
+        const clave = accountSource?.clave || "";
+        const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
+        const showDot =
+          plataforma.id_plataforma === 1 &&
+          ((v.cuentas?.venta_perfil === true && v.perfiles?.perfil_hogar === true) ||
+            v.cuentas?.venta_miembro === true);
+        const perfilCell = `${perfil}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
+        const pin = v.perfiles?.pin ?? "";
+        const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
+        const cuentaId = accountSource?.id_cuenta || "";
+        const perfilId = v.perfiles?.id_perfil || "";
+        buildServiceCopyText({
+          plataforma: plataforma.nombre,
+          idVenta: v.id_venta,
+          correo,
+          clave,
+          nPerfil: v.perfiles?.n_perfil,
+          pin,
+          fechaCorte: v.fecha_corte,
+          porAcceso: plataforma.por_acceso,
+          usaPines: plataforma.usa_pines,
+          ventaPerfil: v.cuentas?.venta_perfil,
+          ventaMiembro: v.cuentas?.venta_miembro,
+          idPlataforma: plataforma.id_plataforma,
+          isSubCuenta: false,
+        });
+        return `
+          <tr class="cortes-row" data-row-type="venta" data-cuenta="${cuentaId}" data-fecha="${v.fecha_corte || ""}">
+            <td>${ventaId ? `#${ventaId}` : ""}</td>
+            <td>${cliente}</td>
+            <td class="copy-cell" data-copy="${correo}">${correo}</td>
+            <td>
+              <div class="copy-wrap" data-copy="${clave}">
+                <input type="text" class="input-inline copy-input" value="${clave}" data-venta="${v.id_venta}" data-cuenta="${cuentaId}" data-field="clave" data-original="${clave}">
+              </div>
+            </td>
+            <td>${perfilCell}</td>
+            <td><input type="text" class="input-inline copy-input" value="${pin}" data-perfil="${perfilId}" data-field="pin" data-original="${pin}" data-maxpin="${maxPin}"></td>
+            <td>${formatDDMMYYYY(v.fecha_corte)}</td>
+            <td style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${
+                plataforma.id_plataforma === 12 && v.aviso_corte !== true
+                  ? `<button class="aviso-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Aviso</button>`
+                  : `<button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>`
+              }
+            </td>
+          </tr>
+        `;
+      };
+
+      const renderReemplazoRow = (v, plataforma) => {
+        const maxPin = plataforma.max_dig_pin || "";
+        const usaPines = !!plataforma.usa_pines;
+        const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
+        const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
+        const perfilLabel = v.perfil ? `M${v.perfil}` : "-";
+        const showDot =
+          plataforma.id_plataforma === 1 &&
+          ((v.cuentas?.venta_perfil === true && v.perfil_hogar === true) ||
+            v.cuentas?.venta_miembro === true);
+        const perfilCell = `${perfilLabel}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
+        const cuentaId = v.id_cuenta || "";
+        const perfilId = v.id_perfil || "";
+        const subId = v.id_sub_cuenta || "";
+        buildServiceCopyText({
+          plataforma: plataforma.nombre,
+          idVenta: null,
+          correo: v.correo,
+          clave: v.clave,
+          nPerfil: v.perfil,
+          pin: v.pin,
+          fechaCorte: "",
+          porAcceso: plataforma.por_acceso,
+          usaPines: plataforma.usa_pines,
+          ventaPerfil: v.cuentas?.venta_perfil,
+          ventaMiembro: v.cuentas?.venta_miembro,
+          idPlataforma: plataforma.id_plataforma,
+          isSubCuenta: !!subId,
+        });
+        return `
+          <tr class="cortes-row" data-row-type="reemplazo">
+            <td>-</td>
+            <td>Reemplazado</td>
+            <td class="copy-cell" data-copy="${v.correo || ""}">${v.correo || "-"}</td>
+            <td>
+              <div class="copy-wrap" data-copy="${v.clave || ""}">
+                <input type="text" class="input-inline copy-input" value="${v.clave || ""}" data-reemplazo="${v.id_reemplazo || ""}" data-cuenta="${cuentaId}" data-subcuenta="${subId}" data-field="clave" data-original="${v.clave || ""}">
+              </div>
+            </td>
+            <td>${perfilCell}</td>
+            <td>
+              <input type="text" class="input-inline copy-input" value="${v.pin ?? ""}" data-reemplazo="${v.id_reemplazo || ""}" data-perfil="${perfilId}" data-subcuenta="${subId}" data-field="pin" data-original="${v.pin ?? ""}" data-maxpin="${maxPin}">
+            </td>
+            <td></td>
+            <td style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
+            </td>
+          </tr>
+        `;
+      };
+
+      const renderTable = (rowsHtml) => {
+        return `
+          <table class="cortes-table">
+            <thead>
+              <tr>
+                <th>ID Venta</th>
+                <th>Cliente</th>
+                <th>Correo</th>
+                <th>Clave</th>
+                <th>Perfil</th>
+                <th>PIN</th>
+                <th>Fecha de corte</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        `;
+      };
+
+      const renderBloques = (plataformasConItems) => {
+        if (!tablasEl) return;
+        if (!plataformasConItems.length) {
+          setStatus("No hay ventas próximas a corte.");
+          tablasEl.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        tablasEl.innerHTML = plataformasConItems
+          .map(({ plataforma, items }) => {
+            const sortedItems = [...items].sort((a, b) => {
+              const ca = (a.cuentas?.correo || a.correo || "").toLowerCase();
+              const cb = (b.cuentas?.correo || b.correo || "").toLowerCase();
+              if (ca === cb) return 0;
+              return ca > cb ? 1 : -1;
+            });
+            const ventasItems = sortedItems.filter((v) => v.tipo === "venta");
+            const reemplazosItems = sortedItems.filter((v) => v.tipo === "reemplazo");
+            const motherEnabled = plataforma.cuenta_madre === true;
+            let contentHtml = "";
+            if (motherEnabled && ventasItems.length) {
+              const motherMap = new Map();
+              const sinMadre = [];
+              ventasItems.forEach((v) => {
+                const motherId = v.cuentas?.id_cuenta;
+                if (!motherId) {
+                  sinMadre.push(v);
+                  return;
+                }
+                if (!motherMap.has(motherId)) motherMap.set(motherId, []);
+                motherMap.get(motherId).push(v);
+              });
+              const motherBlocks = Array.from(motherMap.values()).map((rows) => {
+                const madre = rows[0]?.cuentas || {};
+                const bar = `
+                  <div class="madre-bar">
+                    <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
+                    <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
+                    <div class="madre-link">
+                      <strong>Link:</strong>
+                      <input
+                        type="text"
+                        class="input-inline"
+                        value="${madre.link_codigo || ""}"
+                        data-madre="${madre.id_cuenta || ""}"
+                        data-field="link_codigo"
+                        data-original="${madre.link_codigo || ""}"
+                      />
+                      <button class="madre-save-btn" data-madre="${madre.id_cuenta || ""}" aria-label="Guardar link">
+                        💾
+                      </button>
+                    </div>
+                  </div>
+                `;
+                const rowsHtml = rows.map((v) => renderVentaRow(v, plataforma)).join("");
+                return `${bar}${renderTable(rowsHtml)}`;
+              });
+              contentHtml += motherBlocks.join("");
+              if (sinMadre.length) {
+                const rowsHtml = sinMadre.map((v) => renderVentaRow(v, plataforma)).join("");
+                contentHtml += `<div class="cortes-subtitle">Sin cuenta madre</div>${renderTable(rowsHtml)}`;
+              }
+            } else if (ventasItems.length) {
+              const rowsHtml = ventasItems.map((v) => renderVentaRow(v, plataforma)).join("");
+              contentHtml += renderTable(rowsHtml);
+            }
+            if (reemplazosItems.length) {
+              const rowsHtml = reemplazosItems.map((v) => renderReemplazoRow(v, plataforma)).join("");
+              contentHtml += `<div class="cortes-subtitle">Reemplazos</div>${renderTable(rowsHtml)}`;
+            }
+            return `
+              <div class="cortes-block">
+                <button type="button" data-plat="${plataforma.id_plataforma}" class="btn-outline inventario-btn cortes-btn">
+                  <span>${plataforma.nombre || `Plataforma ${plataforma.id_plataforma}`}</span>
+                  <span class="cortes-badge" aria-label="Total de registros">${items.length}</span>
+                </button>
+                <div class="cortes-tabla cortes-hidden" id="tabla-plat-${plataforma.id_plataforma}">
+                  ${contentHtml}
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const init = async () => {
+        try {
+          // Fecha de hoy en zona local (yyyy-mm-dd)
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, "0");
+          const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+          const { data: ventas, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, fecha_corte, aviso_corte, id_cuenta_miembro, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, correo, clave, link_codigo, id_plataforma, inactiva, venta_perfil, venta_miembro, cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, link_codigo), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
+            )
+            .lte("fecha_corte", today)
+            .or("suspendido.is.null,suspendido.eq.false")
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
+          if (error) throw error;
+
+          const map = new Map();
+          const ensureEntry = (platId) => {
+            if (!map.has(platId)) {
+              map.set(platId, { plataforma: { id_plataforma: platId, nombre: null }, items: [] });
+            }
+            return map.get(platId);
+          };
+
+          (ventas || []).forEach((v) => {
+            const platId = v.cuentas?.id_plataforma;
+            if (!platId) return;
+            const entry = ensureEntry(platId);
+            entry.items.push({ ...v, tipo: "venta" });
+          });
+
+          const { data: reemplazos, error: replErr } = await supabase
+            .from("reemplazos")
+            .select(
+              "id_reemplazo, id_cuenta, id_perfil, cuentas:cuentas!inner(id_cuenta, correo, clave, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
+            )
+            .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
+          if (replErr) throw replErr;
+          (reemplazos || []).forEach((r) => {
+            const platId = r.cuentas?.id_plataforma;
+            if (!platId) return;
+            const entry = ensureEntry(platId);
+            entry.items.push({
+              id_reemplazo: r.id_reemplazo,
+              tipo: "reemplazo",
+              id_cuenta: r.id_cuenta,
+              id_perfil: r.id_perfil,
+              id_sub_cuenta: null,
+              correo: r.cuentas?.correo || "-",
+              clave: r.cuentas?.clave || "",
+              perfil: r.perfiles?.n_perfil || null,
+              perfil_hogar: r.perfiles?.perfil_hogar === true,
+              pin: r.perfiles?.pin ?? "",
+            });
+          });
+
+          const platIds = Array.from(map.keys());
+          if (!platIds.length) {
+            renderBloques([]);
+            return;
+          }
+
+          const { data: plataformasInfo, error: platErr } = await supabase
+            .from("plataformas")
+            .select(
+              "id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso, cuenta_madre"
+            )
+            .in("id_plataforma", platIds);
+          if (platErr) throw platErr;
+          const platNameMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p.nombre;
+            return acc;
+          }, {});
+          platMaxMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p.max_dig_pin;
+            return acc;
+          }, {});
+          const platPinesMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.usa_pines;
+            return acc;
+          }, {});
+          const platAccessMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.por_acceso;
+            return acc;
+          }, {});
+          platCorteClaveMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.corte_por_clave;
+            return acc;
+          }, {});
+          platCorteDirectoMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.corte_directo;
+            return acc;
+          }, {});
+
+          const bloques = Array.from(map.values()).map((entry) => ({
+            plataforma: {
+              id_plataforma: entry.plataforma.id_plataforma,
+              nombre: platNameMap[entry.plataforma.id_plataforma] || `Plataforma ${entry.plataforma.id_plataforma}`,
+              max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
+              usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
+              por_acceso: platAccessMap[entry.plataforma.id_plataforma] || false,
+              cuenta_madre:
+                (plataformasInfo || []).find(
+                  (p) => p.id_plataforma === entry.plataforma.id_plataforma
+                )?.cuenta_madre === true,
+            },
+            items: entry.items,
+          }));
+
+          bloques.sort(
+            (a, b) => Number(a.plataforma.id_plataforma) - Number(b.plataforma.id_plataforma)
+          );
+
+          renderBloques(bloques);
+        } catch (err) {
+          console.error("cortes init error", err);
+        setStatus("No se pudieron cargar las plataformas/ventas.");
+      }
+    };
+
+      const copyToClipboard = async (text) => {
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          showCopyToast();
+        } catch (err) {
+          try {
+            const temp = document.createElement("textarea");
+            temp.value = text;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand("copy");
+            temp.remove();
+            showCopyToast();
+          } catch (_) {
+            console.error("No se pudo copiar al portapapeles");
+          }
+        }
+      };
+
+      const selectRow = (target) => {
+        const row = target?.closest(".cortes-row");
+        if (!row) return;
+        const tbody = row.closest("tbody");
+        if (tbody) {
+          tbody.querySelectorAll(".cortes-row.selected").forEach((r) => r.classList.remove("selected"));
+        }
+        row.classList.add("selected");
+      };
+
+      tablasEl?.addEventListener("click", async (e) => {
+        selectRow(e.target);
+        const copyCell = e.target.closest(".copy-cell");
+        if (copyCell) {
+          copyToClipboard(copyCell.dataset.copy || copyCell.textContent.trim(), copyCell);
+          return;
+        }
+        const copyInput = e.target.closest(".copy-input");
+        if (copyInput) {
+          copyToClipboard(copyInput.value, copyInput);
+          return;
+        }
+        const madreCopy = e.target.closest(".copyable");
+        if (madreCopy) {
+          copyToClipboard(madreCopy.dataset.clipboard || madreCopy.textContent.trim(), madreCopy);
+          return;
+        }
+        const madreSaveBtn = e.target.closest(".madre-save-btn");
+        if (madreSaveBtn) {
+          const madreId = madreSaveBtn.dataset.madre;
+          if (!madreId) return;
+          const wrapper = madreSaveBtn.closest(".madre-link");
+          const input = wrapper?.querySelector('input[data-field="link_codigo"]');
+          if (!input) return;
+          madreSaveBtn.disabled = true;
+          try {
+            const { error } = await supabase
+              .from("cuentas")
+              .update({ link_codigo: input.value || null })
+              .eq("id_cuenta", madreId);
+            if (error) throw error;
+            input.dataset.original = input.value || "";
+          } catch (err) {
+            console.error("madre link save error", err);
+            alert("No se pudo guardar el link.");
+          } finally {
+            madreSaveBtn.disabled = false;
+          }
+          return;
+        }
+        const avisoBtn = e.target.closest(".aviso-btn");
+        if (avisoBtn) {
+          const ventaId = avisoBtn.dataset.venta;
+          if (!ventaId) return;
+          avisoBtn.disabled = true;
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ aviso_corte: true })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            const cortarBtn = document.createElement("button");
+            cortarBtn.className = "cortar-btn";
+            cortarBtn.textContent = "Cortar";
+            cortarBtn.dataset.venta = ventaId;
+            cortarBtn.dataset.usapines = avisoBtn.dataset.usapines || "false";
+            cortarBtn.dataset.corteclave = avisoBtn.dataset.corteclave || "false";
+            cortarBtn.dataset.cortedirecto = avisoBtn.dataset.cortedirecto || "false";
+            cortarBtn.dataset.vperf = avisoBtn.dataset.vperf || "false";
+            cortarBtn.dataset.vmiem = avisoBtn.dataset.vmiem || "false";
+            avisoBtn.replaceWith(cortarBtn);
+          } catch (err) {
+            console.error("aviso corte error", err);
+            alert("No se pudo enviar el aviso.");
+            avisoBtn.disabled = false;
+          }
+          return;
+        }
+        const buildCortadoLabel = () => {
+          const label = document.createElement("span");
+          label.textContent = "Cortado";
+          label.className = "badge cortado-label";
+          label.style.background = "#16a34a";
+          label.style.color = "#fff";
+          label.style.padding = "4px 8px";
+          label.style.borderRadius = "8px";
+          return label;
+        };
+        const markRowCortado = (targetRow) => {
+          if (!targetRow) return;
+          targetRow.classList.add("row-disabled");
+          const inputs = targetRow.querySelectorAll("input");
+          inputs.forEach((inp) => (inp.disabled = true));
+          const actionCell = targetRow.querySelector("td:last-child");
+          if (!actionCell) return;
+          if (actionCell.querySelector(".cortado-label")) return;
+          const actionBtn = actionCell.querySelector(".cortar-btn, .aviso-btn");
+          if (actionBtn) {
+            actionBtn.style.display = "none";
+            actionBtn.classList.add("disabled");
+          }
+          actionCell.appendChild(buildCortadoLabel());
+        };
+        const markVentasCortadasByCuenta = (cuentaId) => {
+          if (!cuentaId) return;
+          const todayVe = new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
+          const rows = tablasEl?.querySelectorAll(
+            `tr.cortes-row[data-row-type="venta"][data-cuenta="${cuentaId}"]`,
+          );
+          if (!rows?.length) return;
+          rows.forEach((ventaRow) => {
+            const fecha = ventaRow.dataset.fecha || "";
+            if (fecha && fecha <= todayVe) {
+              markRowCortado(ventaRow);
+            }
+          });
+        };
+
+        const cortarBtn = e.target.closest(".cortar-btn");
+        if (cortarBtn) {
+          const row = cortarBtn.closest("tr");
+          if (!row) return;
+          const ventaId = cortarBtn.dataset.venta;
+          const replId = cortarBtn.dataset.reemplazo;
+          const claveInput = row.querySelector('input[data-field="clave"]');
+          const pinInput = row.querySelector('input[data-field="pin"]');
+          const cuentaId = claveInput?.dataset.cuenta || row.dataset.cuenta || "";
+          const usaPines = cortarBtn.dataset.usapines === "true";
+          const corteDirecto = cortarBtn.dataset.cortedirecto === "true";
+          const ventaPerfil = cortarBtn.dataset.vperf === "true";
+          const ventaMiembro = cortarBtn.dataset.vmiem === "true";
+          const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
+          const pinChanged = pinInput && pinInput.dataset.original !== pinInput.value;
+          const claveChanged = claveInput && claveInput.dataset.original !== claveInput.value;
+          if (!corteDirecto) {
+            const cortePorClave = cortarBtn.dataset.corteclave === "true";
+            if (cortePorClave) {
+              if (!claveChanged) {
+                alert("Debes modificar la contraseña para poder cortar");
+                return;
+              }
+            } else {
+              if (!pinInput || !pinChanged) {
+                alert("Debes modificar el pin del perfil para poder cortar");
+                return;
+              }
+            }
+          }
+          if (usaPines && pinInput && pinChanged) {
+            const max = Number(pinInput.dataset.maxpin);
+            const val = pinInput.value;
+            if (max && val) {
+              if (!/^[0-9]+$/.test(val) || val.length !== max) {
+                alert("Longitud invalida para el PIN");
+                pinInput.focus();
+                return;
+              }
+            }
+          }
+          // Si corte_directo = true no se exige cambio de clave/pin
+
+          cortarBtn.classList.add("pressed");
+          cortarBtn.disabled = true;
+
+          const cortePorClave = cortarBtn.dataset.corteclave === "true";
+          const shouldBulkCorte = cortePorClave && !!cuentaId;
+
+          const bulkSuspendVentasByCuenta = async () => {
+            if (!cuentaId) return;
+            const todayVe = new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
+            const { error } = await supabase
+              .from("ventas")
+              .update({ suspendido: true })
+              .eq("id_cuenta", cuentaId)
+              .lte("fecha_corte", todayVe);
+            if (error) throw error;
+          };
+
+          const updateVenta = async () => {
+            const updates = [];
+            if (ventaId) {
+              if (shouldBulkCorte) {
+                await bulkSuspendVentasByCuenta();
+              } else {
+                // Determina si la venta es de hoy/ayer (zona Caracas)
+                const todayVe = new Date().toLocaleDateString("en-CA", { timeZone: "America/Caracas" });
+                const ventaRow = await supabase
+                  .from("ventas")
+                  .select("fecha_corte")
+                  .eq("id_venta", ventaId)
+                  .maybeSingle();
+                const fechaCorte = ventaRow.data?.fecha_corte || null;
+                const ayerVe = (() => {
+                  const d = new Date(todayVe);
+                  d.setDate(d.getDate() - 1);
+                  return d.toISOString().slice(0, 10);
+                })();
+                const isHoyOAyer = fechaCorte === todayVe || fechaCorte === ayerVe;
+                if (corteDirecto) {
+                  updates.push(
+                    supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
+                  );
+                } else if (isHoyOAyer) {
+                  updates.push(
+                    supabase.from("ventas").update({ suspendido: true }).eq("id_venta", ventaId)
+                  );
+                } else {
+                  // fecha_corte anterior a ayer: eliminar venta
+                  updates.push(supabase.from("ventas").delete().eq("id_venta", ventaId));
+                }
+              }
+            }
+            if (claveInput && claveInput.dataset.original !== claveInput.value) {
+              const cuentaId = claveInput.dataset.cuenta;
+              if (cuentaId) {
+                updates.push(
+                  supabase.from("cuentas").update({ clave: claveInput.value }).eq("id_cuenta", cuentaId)
+                );
+                const cortePorClave = cortarBtn.dataset.corteclave === "true";
+                if (cortePorClave && !usaPines) {
+                  // Ya se maneja la suspensión/eliminación individual arriba
+                }
+              }
+            }
+            if (pinInput && pinInput.dataset.original !== pinInput.value) {
+              const perfilId = pinInput.dataset.perfil;
+              if (perfilId) {
+                updates.push(
+                  supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
+                );
+              }
+            }
+            if (updates.length) {
+              const results = await Promise.all(updates);
+              const err = results.find((r) => r.error)?.error;
+              if (err) throw err;
+              if (claveInput) claveInput.dataset.original = claveInput.value;
+              if (pinInput) pinInput.dataset.original = pinInput.value;
+            }
+          };
+
+          const updateReemplazo = async () => {
+            const updates = [];
+            if (claveInput && claveInput.dataset.original !== claveInput.value) {
+              const cuentaId = claveInput.dataset.cuenta;
+              if (cuentaId) {
+                updates.push(
+                  supabase.from("cuentas").update({ clave: claveInput.value }).eq("id_cuenta", cuentaId)
+                );
+              }
+            }
+            if (pinInput && pinInput.dataset.original !== pinInput.value) {
+              const perfilId = pinInput.dataset.perfil;
+              if (perfilId) {
+                updates.push(
+                  supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
+                );
+              }
+            }
+            const perfilIdForFree = pinInput?.dataset.perfil;
+            if (perfilIdForFree) {
+              updates.push(
+                supabase.from("perfiles").update({ ocupado: false }).eq("id_perfil", perfilIdForFree)
+              );
+            }
+            if (updates.length) {
+              const results = await Promise.all(updates);
+              const err = results.find((r) => r.error)?.error;
+              if (err) throw err;
+              if (claveInput) claveInput.dataset.original = claveInput.value;
+              if (pinInput) pinInput.dataset.original = pinInput.value;
+            }
+            if (replId) {
+              const { error: delErr } = await supabase.from("reemplazos").delete().eq("id_reemplazo", replId);
+              if (delErr) throw delErr;
+            }
+          };
+
+          (async () => {
+            try {
+              if (ventaId) {
+                await updateVenta();
+                if (shouldBulkCorte) {
+                  markVentasCortadasByCuenta(cuentaId);
+                } else {
+                  markRowCortado(row);
+                }
+              } else if (replId) {
+                await updateReemplazo();
+                if (shouldBulkCorte) {
+                  await bulkSuspendVentasByCuenta();
+                  markVentasCortadasByCuenta(cuentaId);
+                }
+                markRowCortado(row);
+              }
+            } catch (err) {
+              console.error("cortar update error", err);
+              alert("No se pudo guardar los cambios antes de cortar.");
+              cortarBtn.classList.remove("pressed");
+              cortarBtn.disabled = false;
+            }
+          })();
+          return;
+        }
+        const btn = e.target.closest("button[data-plat]");
+        if (!btn) return;
+        const platId = btn.dataset.plat;
+        const target = document.querySelector(`#tabla-plat-${platId}`);
+        if (!target) return;
+        const isHidden = target.classList.contains("cortes-hidden");
+        const tablas = tablasEl?.querySelectorAll(".cortes-tabla") || [];
+        if (isHidden) {
+          tablas.forEach((t) => t.classList.add("cortes-hidden"));
+          target.classList.remove("cortes-hidden");
+        } else {
+          target.classList.add("cortes-hidden");
+        }
+      });
+
+      tablasEl?.addEventListener("input", (e) => {
+        const pinInput = e.target.closest('input[data-field="pin"]');
+        if (!pinInput) return;
+        const max = Number(pinInput.dataset.maxpin);
+        let val = pinInput.value.replace(/\D/g, "");
+        if (max) val = val.slice(0, max);
+        pinInput.value = val;
+      });
+
+      init();
+    </script>
+  </body>
+</html>

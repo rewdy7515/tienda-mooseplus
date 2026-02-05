@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Entregar servicios</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .input-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        max-width: 100%;
+      }
+      .input-inline .form-input {
+        flex: 1;
+        min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .input-inline .btn-check {
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        line-height: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Entregar servicios</h2>
+      <div id="entregar-status" class="status">Cargando servicios...</div>
+      <div id="entregar-tablas"></div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase, fetchVentasOrden } from "../scripts/api.js";
+      import { buildServiceCopyText } from "../scripts/copy-format.js";
+      import { formatDDMMYYYY } from "../scripts/date-format.js";
+      import { buildNotification } from "../scripts/notification-templates.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#entregar-status");
+      const tablasEl = document.querySelector("#entregar-tablas");
+      const FORCE_CLIENT_INPUTS = true;
+
+      const params = new URLSearchParams(window.location.search);
+      const idOrdenParam = params.get("id_orden");
+      let ventasById = {};
+      let platById = {};
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const copyToClipboard = async (text, anchor) => {
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (err) {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        if (anchor) {
+          anchor.textContent = "Copiado";
+          setTimeout(() => (anchor.textContent = "Copiar"), 1200);
+        }
+      };
+
+      const formatFechaCorte = (value) => {
+        if (!value) return "";
+        return formatDDMMYYYY(value);
+      };
+
+      const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
+        const lines = ["*✅ Servicio renovado 🫡*", ""];
+        if (plataformaNombre || item.id_venta) {
+          lines.push(
+            `*${(plataformaNombre || "").toUpperCase()}*${
+              item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""
+            }`.trim()
+          );
+        }
+        if (item.correo) lines.push(`*Correo:* ${item.correo}`);
+        lines.push(`*Clave:* ${item.clave || "-"}`);
+        if (item.n_perfil) lines.push(`*Perfil:* M${item.n_perfil}`);
+        if (item.pin) lines.push(`*PIN:* ${item.pin}`);
+        if (fechaCorte) {
+          lines.push("*Próxima fecha de pago:*", `_${formatFechaCorte(fechaCorte)}_`);
+        }
+        return lines.join("\n");
+      };
+
+      const renderTablas = (plataformas, { title = "", isRenovacion = false } = {}) => {
+        if (!tablasEl) return;
+        if (!plataformas.length) {
+          if (!tablasEl.innerHTML) {
+            setStatus("No hay servicios para entregar.");
+            tablasEl.innerHTML = "";
+          }
+          return;
+        }
+        setStatus("");
+        const sectionHtml = plataformas
+          .map((platObj) => {
+            const rows = platObj.rows || [];
+            const hasPendiente = rows.some((r) => r.pendiente);
+            const showClientInputs =
+              FORCE_CLIENT_INPUTS ||
+              (platObj.entrega_inmediata === false && platObj.correo_cliente === true);
+            const showClaveInput = showClientInputs && platObj.clave_cliente === true;
+            const body = rows
+              .map((r) => {
+                const perfilTxt = r.perfil || "";
+                const isPendiente = r.pendiente;
+                const copyText = isRenovacion
+                  ? buildRenovacionMensaje(r, r.fecha_corte, r.plataforma)
+                  : isPendiente
+                    ? ""
+                    : buildServiceCopyText({
+                        plataforma: r.plataforma,
+                        idVenta: r.id_venta,
+                        correo: r.correo,
+                        clave: r.clave,
+                        nPerfil: r.n_perfil,
+                        pin: r.pin,
+                        fechaCorte: r.fecha_corte,
+                        porAcceso: r.por_acceso,
+                        usaPines: r.usa_pines,
+                        ventaPerfil: r.venta_perfil,
+                        ventaMiembro: r.venta_miembro,
+                        idPlataforma: r.id_plataforma,
+                        perfilHogar: r.perfil_hogar,
+                        isSubCuenta: r.es_subcuenta,
+                      });
+                return `
+                  <tr>
+                    <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
+                    <td>
+                      ${
+                        showClientInputs && isPendiente
+                          ? `<div class="fecha-wrap">
+                              <div class="input-inline">
+                                <input type="text" class="form-input input-correo" placeholder="Correo" value="" />
+                              </div>
+                            </div>`
+                          : r.correo || ""
+                      }
+                    </td>
+                    ${isRenovacion ? "" : `<td>${
+                      showClaveInput && isPendiente
+                        ? `<div class="fecha-wrap">
+                            <div class="input-inline">
+                              <input type="text" class="form-input input-clave" placeholder="Clave" value="" />
+                            </div>
+                          </div>`
+                        : r.clave || ""
+                    }</td>`}
+                    ${isRenovacion ? "" : `<td>${perfilTxt}</td>`}
+                    <td>${r.fecha_corte ? formatDDMMYYYY(r.fecha_corte) : isPendiente ? "Pendiente" : ""}</td>
+                    <td>
+                      ${
+                        isRenovacion
+                          ? `<button type="button" class="btn-outline btn-copy-renew" data-copy="${encodeURIComponent(copyText)}">Copiar mensaje de renovación</button>`
+                          : showClientInputs && isPendiente
+                            ? `<button type="button" class="btn-outline btn-send-datos" data-venta="${r.id_venta}">Enviar datos</button>`
+                            : isPendiente
+                              ? '<span class="badge badge-warning">Pendiente</span>'
+                              : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
+                      }
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${platObj.nombre}</h3>
+                ${showClientInputs && hasPendiente ? `<p class="status">Ingrese sus datos</p>` : ""}
+                <div class="cuenta-table-wrap">
+                  <table class="table-base" style="${platObj.color_1 ? `--table-header-bg:${platObj.color_1};` : ""}">
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Correo</th>
+                        ${isRenovacion ? "" : "<th>Clave</th>"}
+                        ${isRenovacion ? "" : "<th>Perfil / Acceso</th>"}
+                        <th>Fecha de corte</th>
+                        <th>Acción</th>
+                     </tr>
+                   </thead>
+                   <tbody>${body}</tbody>
+                 </table>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+        tablasEl.insertAdjacentHTML(
+          "beforeend",
+          `${title ? `<h3 style="margin: 16px 0 8px;">${title}</h3>` : ""}${sectionHtml}`
+        );
+      };
+
+      const loadServicios = async () => {
+        try {
+          const user = await loadCurrentUser();
+          const userId = user?.id_usuario;
+          const baseSelect =
+            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
+          let ventas = [];
+          if (idOrdenParam) {
+            const resp = await fetchVentasOrden(idOrdenParam);
+            if (resp?.error) throw new Error(resp.error);
+            ventas = resp?.ventas || [];
+          } else {
+            if (!userId) {
+              setStatus("Usuario no autenticado.");
+              return;
+            }
+            const { data, error } = await supabase
+              .from("ventas")
+              .select(baseSelect)
+              .order("id_venta", { ascending: false })
+              .eq("id_usuario", userId);
+            if (error) throw error;
+            ventas = data || [];
+          }
+
+          const platIds = Array.from(
+            new Set(
+              (ventas || []).map((v) => v.cuentas?.id_plataforma || v.precios?.id_plataforma).filter(Boolean)
+            )
+          );
+          let platMap = {};
+          if (platIds.length) {
+            const { data: plats, error: platErr } = await supabase
+              .from("plataformas")
+              .select(
+                "id_plataforma, nombre, por_acceso, usa_pines, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
+              )
+              .in("id_plataforma", platIds);
+            if (platErr) throw platErr;
+            platMap = (plats || []).reduce((acc, p) => {
+              acc[p.id_plataforma] = p;
+              return acc;
+            }, {});
+          }
+          platById = platMap;
+
+          const onlyFaltantes = params.get("faltantes") === "1";
+          const filteredVentas = (ventas || []).filter((v) => {
+            if (!onlyFaltantes) return true;
+            if (!v.pendiente) return false;
+            const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
+            if (!platId) return false;
+            const plat = platMap[platId] || {};
+            const needsCorreo =
+              plat.correo_cliente === true ||
+              plat.correo_cliente === "true" ||
+              plat.correo_cliente === "1";
+            if (!needsCorreo) return false;
+            const missingCorreo = !v.correo_miembro;
+            const needsClave =
+              plat.clave_cliente === true ||
+              plat.clave_cliente === "true" ||
+              plat.clave_cliente === "1";
+            const missingClave = needsClave ? !v.clave_miembro : false;
+            return missingCorreo || missingClave;
+          });
+
+          const grouped = {};
+          const onlyPendientes = (filteredVentas || []).filter((v) => v.pendiente);
+          const onlyNuevas = (filteredVentas || []).filter(
+            (v) => !v.pendiente && !v.renovacion
+          );
+
+          (onlyPendientes || []).forEach((v) => {
+            const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
+            if (!platId) return;
+            const plat = platMap[platId] || {};
+            const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
+            if (!grouped[platId])
+              grouped[platId] = {
+                nombre: platName,
+                color_1: plat.color_1 || null,
+                rows: [],
+                entrega_inmediata: plat.entrega_inmediata === true || plat.entrega_inmediata === "true" || plat.entrega_inmediata === "1",
+                correo_cliente: plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1",
+                clave_cliente: plat.clave_cliente === true || plat.clave_cliente === "true" || plat.clave_cliente === "1",
+                cuenta_madre: plat.cuenta_madre === true || plat.cuenta_madre === "true" || plat.cuenta_madre === "1",
+              };
+            const porAcceso = !!plat.por_acceso;
+            const usaPines = !!plat.usa_pines;
+            const ventaPerfil = v.cuentas?.venta_perfil;
+            const ventaMiembro = v.cuentas?.venta_miembro;
+            const perfilTxt = porAcceso
+              ? "1 acceso"
+              : v.perfiles?.n_perfil
+              ? `M${v.perfiles.n_perfil}`
+              : "";
+            const correoCuenta = Number(platId) === 12 ? v.correo_miembro || "" : v.cuentas?.correo || "";
+            grouped[platId].rows.push({
+              id_venta: v.id_venta,
+              correo: correoCuenta,
+              clave: v.cuentas?.clave || "",
+              n_perfil: v.perfiles?.n_perfil || "",
+              pin: v.perfiles?.pin || "",
+              fecha_corte: v.fecha_corte || "",
+              plataforma: platName,
+              id_plataforma: platId,
+              por_acceso: porAcceso,
+              usa_pines: usaPines,
+              venta_perfil: ventaPerfil,
+              venta_miembro: ventaMiembro,
+              perfil_hogar: v.perfiles?.perfil_hogar,
+              perfil: perfilTxt,
+              pendiente: !!v.pendiente,
+            });
+          });
+
+          const groupedNuevas = {};
+          (onlyNuevas || []).forEach((v) => {
+            const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
+            if (!platId) return;
+            const plat = platMap[platId] || {};
+            const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
+            if (!groupedNuevas[platId])
+              groupedNuevas[platId] = {
+                nombre: platName,
+                color_1: plat.color_1 || null,
+                rows: [],
+                entrega_inmediata: plat.entrega_inmediata === true || plat.entrega_inmediata === "true" || plat.entrega_inmediata === "1",
+                correo_cliente: plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1",
+                clave_cliente: plat.clave_cliente === true || plat.clave_cliente === "true" || plat.clave_cliente === "1",
+                cuenta_madre: plat.cuenta_madre === true || plat.cuenta_madre === "true" || plat.cuenta_madre === "1",
+              };
+            const porAcceso = !!plat.por_acceso;
+            const usaPines = !!plat.usa_pines;
+            const ventaPerfil = v.cuentas?.venta_perfil;
+            const ventaMiembro = v.cuentas?.venta_miembro;
+            const perfilTxt = porAcceso
+              ? "1 acceso"
+              : v.perfiles?.n_perfil
+              ? `M${v.perfiles.n_perfil}`
+              : "";
+            const correoCuenta = Number(platId) === 12 ? v.correo_miembro || "" : v.cuentas?.correo || "";
+            groupedNuevas[platId].rows.push({
+              id_venta: v.id_venta,
+              correo: correoCuenta,
+              clave: v.cuentas?.clave || "",
+              n_perfil: v.perfiles?.n_perfil || "",
+              pin: v.perfiles?.pin || "",
+              fecha_corte: v.fecha_corte || "",
+              plataforma: platName,
+              id_plataforma: platId,
+              por_acceso: porAcceso,
+              usa_pines: usaPines,
+              venta_perfil: ventaPerfil,
+              venta_miembro: ventaMiembro,
+              perfil_hogar: v.perfiles?.perfil_hogar,
+              perfil: perfilTxt,
+              pendiente: !!v.pendiente,
+            });
+          });
+
+          const ventasMap = (filteredVentas || []).reduce((acc, v) => {
+            if (v?.id_venta) acc[v.id_venta] = v;
+            return acc;
+          }, {});
+          ventasById = ventasMap;
+          let renovacionesRows = [];
+          if (!onlyFaltantes && (filteredVentas || []).length) {
+            const idsVentas = (filteredVentas || []).map((v) => v.id_venta).filter(Boolean);
+            if (idsVentas.length) {
+              const { data: hist, error: hErr } = await supabase
+                .from("historial_ventas")
+                .select("id_historial_ventas, id_venta, id_plataforma, renovacion")
+                .in("id_venta", idsVentas)
+                .eq("renovacion", true);
+              if (hErr) throw hErr;
+              renovacionesRows = (hist || [])
+                .map((h) => {
+                  const venta = ventasMap[h.id_venta] || {};
+                  const platId = h.id_plataforma || venta.cuentas?.id_plataforma || venta.precios?.id_plataforma;
+                  if (!platId) return null;
+                  const plat = platMap[platId] || {};
+                  const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
+                  const correoCuenta = Number(platId) === 12 ? venta.correo_miembro || "" : venta.cuentas?.correo || "";
+                  return {
+                    id_venta: h.id_venta,
+                    correo: correoCuenta,
+                    fecha_corte: venta.fecha_corte || "",
+                    plataforma: platName,
+                    id_plataforma: platId,
+                    color_1: plat.color_1 || null,
+                  };
+                })
+                .filter(Boolean);
+            }
+          }
+          const groupedPend = Object.values(grouped);
+          const groupedNew = Object.values(groupedNuevas);
+          const groupedRenov = renovacionesRows.reduce((acc, r) => {
+            const key = r.id_plataforma || "x";
+            if (!acc[key]) {
+              acc[key] = {
+                nombre: r.plataforma,
+                color_1: r.color_1 || null,
+                rows: [],
+              };
+            }
+            acc[key].rows.push(r);
+            return acc;
+          }, {});
+
+          tablasEl.innerHTML = "";
+          renderTablas(groupedPend, { title: "Cuentas que necesitan correo" });
+          if (Object.values(groupedRenov).length) {
+            renderTablas(Object.values(groupedRenov), {
+              title: "Renovaciones",
+              isRenovacion: true,
+            });
+          }
+          renderTablas(groupedNew, { title: "Cuentas nuevas" });
+        } catch (err) {
+          console.error("entregar servicios error", err);
+          setStatus("No se pudieron cargar los servicios.");
+        }
+      };
+
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-copy");
+        if (!btn) return;
+        const text = decodeURIComponent(btn.dataset.copy || "");
+        copyToClipboard(text, btn);
+      });
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-copy-renew");
+        if (!btn) return;
+        const text = decodeURIComponent(btn.dataset.copy || "");
+        copyToClipboard(text, btn);
+      });
+      tablasEl?.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".btn-send-datos");
+        if (!btn) return;
+        const row = btn.closest("tr");
+        const ventaId = btn.dataset.venta;
+        if (!ventaId) return;
+        const correoVal = row?.querySelector(".input-correo")?.value?.trim() || "";
+        const claveVal = row?.querySelector(".input-clave")?.value?.trim() || "";
+        if (!correoVal) {
+          alert("Ingresa el correo.");
+          return;
+        }
+        try {
+          const venta = ventasById[ventaId] || {};
+          const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
+          const platInfo = platById[platId] || {};
+          const needsMadre = platInfo.cuenta_madre === true;
+          let assignCuenta = null;
+          let assignPerfil = null;
+          let clientCuentaId = null;
+
+          if (needsMadre) {
+            const { data: cuentaCliente, error: cErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, id_cuenta_miembro")
+              .eq("correo", correoVal)
+              .maybeSingle();
+            if (cErr) throw cErr;
+            clientCuentaId = cuentaCliente?.id_cuenta || null;
+            const motherFromClient = cuentaCliente?.id_cuenta_miembro || null;
+
+            if (motherFromClient) {
+              const { data: perfPref, error: pErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil, id_cuenta, n_perfil")
+                .eq("id_cuenta", motherFromClient)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (pErr) throw pErr;
+              if (perfPref?.id_perfil) {
+                assignPerfil = perfPref.id_perfil;
+                assignCuenta = perfPref.id_cuenta;
+              }
+            }
+
+            if (!assignPerfil && platId) {
+              const { data: perfAlt, error: pAltErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil, id_cuenta, n_perfil, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, cuenta_madre)")
+                .eq("cuentas.id_plataforma", Number(platId))
+                .eq("cuentas.cuenta_madre", true)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (pAltErr) throw pAltErr;
+              if (perfAlt?.id_perfil) {
+                assignPerfil = perfAlt.id_perfil;
+                assignCuenta = perfAlt.id_cuenta;
+              }
+            }
+          }
+
+          if (assignPerfil && clientCuentaId) {
+            const { error: occErr } = await supabase
+              .from("perfiles")
+              .update({ ocupado: true, id_cuenta_miembro: clientCuentaId })
+              .eq("id_perfil", assignPerfil);
+            if (occErr) throw occErr;
+          }
+
+          if (assignCuenta && clientCuentaId) {
+            const { error: linkErr } = await supabase
+              .from("cuentas")
+              .update({ id_cuenta_miembro: assignCuenta })
+              .eq("id_cuenta", clientCuentaId);
+            if (linkErr) throw linkErr;
+          }
+
+          const payload = { correo_miembro: correoVal };
+          if (claveVal) payload.clave_miembro = claveVal;
+          if (assignCuenta) payload.id_cuenta = assignCuenta;
+          if (assignPerfil) payload.id_perfil = assignPerfil;
+
+          const { error } = await supabase
+            .from("ventas")
+            .update(payload)
+            .eq("id_venta", ventaId);
+          if (error) throw error;
+          btn.classList.add("hidden");
+          const status = document.createElement("span");
+          status.className = "badge badge-green";
+          status.textContent = "Datos enviados ✅";
+          btn.parentElement?.appendChild(status);
+          alert("Datos enviados.");
+        } catch (err) {
+          console.error("enviar datos error", err);
+          alert("No se pudieron enviar los datos.");
+        }
+      });
+
+      loadServicios();
+    </script>
+  </body>
+</html>

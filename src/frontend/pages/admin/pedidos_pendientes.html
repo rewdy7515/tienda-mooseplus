@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pedidos pendientes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .copyable {
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 86px;
+        right: 24px;
+        background: #111;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        z-index: 2000;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .madre-bar {
+        background: #f3f4f6;
+        border: 2px solid #cbd5e1;
+        border-bottom: none;
+        border-radius: 10px 10px 0 0;
+        padding: 12px 16px;
+        margin: 8px 0 -6px;
+        position: relative;
+      }
+      .madre-bar .copyable {
+        font-weight: 600;
+      }
+      .madre-region {
+        margin: 0 0 6px;
+        font-size: 18px;
+        font-weight: 800;
+        color: #111827;
+      }
+      .correo-edit-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .correo-edit-wrap .btn-edit-correo,
+      .correo-edit-wrap .btn-save-correo {
+        padding: 4px 6px;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .correo-edit-wrap input {
+        min-width: 180px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Pedidos pendientes</h2>
+      <p id="pp-status" class="status">Cargando pedidos...</p>
+      <div id="pp-tablas"></div>
+    </main>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
+
+    <script type="module">
+      import { supabase, loadCurrentUser, clearServerSession } from "../../scripts/api.js";
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
+      import { buildNotificationPayload } from "../../scripts/notification-templates.js";
+      import { buildServiceCopyText } from "../../scripts/copy-format.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#pp-status");
+      const tablasEl = document.querySelector("#pp-tablas");
+      const copyToast = document.querySelector("#copy-toast");
+      let copyToastTimer = null;
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+      const addMonthsKeepDay = (baseDate, months) => {
+        const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+        const day = baseDate.getDate();
+        d.setMonth(d.getMonth() + months);
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        d.setDate(Math.min(day, lastDay));
+        return d;
+      };
+
+      const render = (grouped) => {
+        if (!tablasEl) return;
+        const entries = Object.entries(grouped);
+        if (!entries.length) {
+          setStatus("No hay pedidos pendientes.");
+          tablasEl.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        tablasEl.innerHTML = entries
+          .map(([_, payload]) => {
+            const isEntregaInmediata = payload.entrega_inmediata === true;
+            const showClave = payload.clave_cliente === true;
+            const groups = Object.values(payload.groups || {});
+            const tablesHtml = groups
+              .map((group) => {
+                const rows = group.rows || [];
+                const madre = group.cuenta_info || {};
+                const madreBlock = payload.cuenta_madre
+                  ? `
+                    <div class="madre-bar">
+                      ${madre.region ? `<p class="madre-region">${madre.region}</p>` : ""}
+                      <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
+                      <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
+                      <p><strong>Link:</strong> ${
+                        madre.link
+                          ? `<a href="${madre.link}" target="_blank" rel="noopener noreferrer">${madre.link}</a>`
+                          : "-"
+                      }</p>
+                      <p><strong>Dirección:</strong> <span class="copyable" data-clipboard="${madre.direccion || ""}">${madre.direccion || "-"}</span></p>
+                    </div>
+                  `
+                  : "";
+                const body = rows
+                  .map((r) => {
+                    const isSpotify = String(r.id_plataforma || "") === "9";
+                    const correoText = r.correo || "-";
+                    const correoCell = isSpotify
+                      ? `
+                           <td>
+                             <div class="correo-edit-wrap" data-venta="${r.id_venta}" data-correo="${correoText}">
+                               <span class="copyable correo-text" data-clipboard="${correoText}">${correoText}</span>
+                               <button type="button" class="btn-outline btn-edit-correo" title="Editar">✏️</button>
+                             </div>
+                           </td>`
+                      : `<td class="copyable" data-clipboard="${correoText}">${correoText}</td>`;
+                    return `
+                  <tr>
+                    <td>#${String(r.id_venta).padStart(4, "0")}</td>
+                    <td>${r.cliente || "-"}</td>
+                    ${
+                      isEntregaInmediata
+                        ? `<td>${r.fecha_pago || "-"}</td>`
+                        : `<td>${r.servicio || "-"}</td>
+                           ${correoCell}
+                           ${showClave ? `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>` : ""}`
+                    }
+                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
+                    <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
+                    <td>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">📤</button>
+                      <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
+                      ${
+                        r.cuenta_madre
+                          ? `<button class="btn-outline btn-cambiar-madre" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">Cambiar cuenta madre</button>`
+                          : ""
+                      }
+                    </td>
+                  </tr>
+                `
+                  })
+                  .join("");
+                return `
+                  ${madreBlock}
+                  ${
+                    payload.cuenta_madre
+                      ? `<p class="status madre-stock-msg hidden" data-plat="${payload.id_plataforma || ""}">Sin stock de cuentas madres</p>`
+                      : ""
+                  }
+                  <div class="cuenta-table-wrap">
+                    <table class="table-base">
+                      <thead>
+                        <tr>
+                          ${
+                            isEntregaInmediata
+                              ? `<th>Venta</th>
+                                 <th>Cliente</th>
+                                 <th>Fecha de pago</th>
+                                 <th>Servicio solicitado</th>
+                                 <th>Fecha de pedido</th>
+                                 <th>Acción</th>`
+                              : `<th>ID venta</th>
+                                 <th>Cliente</th>
+                                 <th>Servicio solicitado</th>
+                                 <th>Correo</th>
+                                 ${showClave ? "<th>Clave</th>" : ""}
+                                 <th>Fecha de pedido</th>
+                                 <th>Acción</th>`
+                          }
+                        </tr>
+                      </thead>
+                      <tbody>${body}</tbody>
+                    </table>
+                  </div>
+                `;
+              })
+              .join("");
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${payload.nombre}</h3>
+                ${tablesHtml}
+              </div>
+            `;
+          })
+          .join("");
+      };
+
+      const loadPendientes = async () => {
+        try {
+          const user = await loadCurrentUser();
+          if (!user) {
+            setStatus("Usuario no autenticado.");
+            return;
+          }
+          const { data: ventas, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, id_usuario, id_precio, id_cuenta, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+            )
+            .eq("pendiente", true)
+            .order("id_venta", { ascending: false });
+          if (error) throw error;
+
+          if (!ventas?.length) {
+            render({});
+            return;
+          }
+
+          const precioIds = [...new Set(ventas.map((v) => v.id_precio).filter(Boolean))];
+          const userIds = [...new Set(ventas.map((v) => v.id_usuario).filter(Boolean))];
+
+          let precioMap = {};
+          if (precioIds.length) {
+            const { data: precios, error: pErr } = await supabase
+              .from("precios")
+              .select("id_precio, id_plataforma, plan")
+              .in("id_precio", precioIds);
+            if (pErr) throw pErr;
+            precioMap = (precios || []).reduce((acc, p) => {
+              acc[p.id_precio] = p;
+              return acc;
+            }, {});
+          }
+
+          let userMap = {};
+          if (userIds.length) {
+            const { data: usuarios, error: uErr } = await supabase
+              .from("usuarios")
+              .select("id_usuario, nombre, apellido")
+              .in("id_usuario", userIds);
+            if (uErr) throw uErr;
+            userMap = (usuarios || []).reduce((acc, u) => {
+              const full = [u.nombre, u.apellido].filter(Boolean).join(" ").trim();
+              acc[u.id_usuario] = full || `Usuario ${u.id_usuario}`;
+              return acc;
+            }, {});
+          }
+
+          let platMap = {};
+          const platIds = [
+            ...new Set(
+              ventas
+                .map((v) => v.precios?.id_plataforma || v.cuentas?.id_plataforma || precioMap[v.id_precio]?.id_plataforma)
+                .filter(Boolean)
+            ),
+          ];
+          if (platIds.length) {
+            const { data: plats, error: platErr } = await supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines")
+              .in("id_plataforma", platIds);
+            if (platErr) throw platErr;
+            platMap = (plats || []).reduce((acc, p) => {
+              acc[p.id_plataforma] = p;
+              return acc;
+            }, {});
+          }
+
+          const grouped = {};
+          (ventas || []).forEach((v) => {
+            const precio = precioMap[v.id_precio] || v.precios || {};
+            const platId = precio.id_plataforma || v.cuentas?.id_plataforma;
+            const platInfo = platMap[platId] || {};
+            const platName =
+              platInfo.nombre || `Plataforma ${platId || "-"}`;
+            const cliente = userMap[v.id_usuario] || "-";
+            const servicio = precio.plan ? `${platName} - ${precio.plan}` : platName;
+            if (!grouped[platId])
+              grouped[platId] = {
+                nombre: platName,
+                entrega_inmediata:
+                  platInfo.entrega_inmediata === true ||
+                  platInfo.entrega_inmediata === "true" ||
+                  platInfo.entrega_inmediata === "1",
+                correo_cliente:
+                  platInfo.correo_cliente === true ||
+                  platInfo.correo_cliente === "true" ||
+                  platInfo.correo_cliente === "1",
+                clave_cliente:
+                  platInfo.clave_cliente === true ||
+                  platInfo.clave_cliente === "true" ||
+                  platInfo.clave_cliente === "1",
+                cuenta_madre:
+                  platInfo.cuenta_madre === true ||
+                  platInfo.cuenta_madre === "true" ||
+                  platInfo.cuenta_madre === "1",
+                por_acceso:
+                  platInfo.por_acceso === true ||
+                  platInfo.por_acceso === "true" ||
+                  platInfo.por_acceso === "1",
+                usa_pines:
+                  platInfo.usa_pines === true ||
+                  platInfo.usa_pines === "true" ||
+                  platInfo.usa_pines === "1",
+                groups: {},
+              };
+            const motherId = v.id_cuenta || "sin-madre";
+            if (!grouped[platId].groups[motherId]) {
+              grouped[platId].groups[motherId] = {
+                cuenta_info: v.cuentas
+                  ? {
+                      correo: v.cuentas?.correo || "",
+                      clave: v.cuentas?.clave || "",
+                      link: v.cuentas?.link_codigo || "",
+                      direccion: v.cuentas?.direccion || "",
+                      region: v.cuentas?.region || "",
+                    }
+                  : null,
+                rows: [],
+              };
+            }
+            grouped[platId].groups[motherId].rows.push({
+              id_venta: v.id_venta,
+              cliente,
+              id_usuario: v.id_usuario,
+              fecha_pago: v.fecha_pago || "-",
+              servicio,
+              correo: v.correo_miembro || "-",
+              clave: v.clave_miembro || "-",
+              plataforma: platName,
+              fecha_corte: v.fecha_corte || "",
+              perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
+              n_perfil: v.perfiles?.n_perfil || null,
+              id_plataforma: platId,
+              cuenta_madre: grouped[platId].cuenta_madre,
+              por_acceso: grouped[platId].por_acceso,
+              usa_pines: grouped[platId].usa_pines,
+              meses_contratados: v.meses_contratados || 1,
+              id_cuenta: v.id_cuenta || null,
+              id_perfil: v.id_perfil || null,
+            });
+          });
+
+          render(grouped);
+        } catch (err) {
+          console.error("pedidos pendientes error", err);
+          setStatus("No se pudieron cargar los pedidos.");
+        }
+      };
+
+      tablasEl?.addEventListener("click", async (e) => {
+        const editBtn = e.target.closest(".btn-edit-correo");
+        if (editBtn) {
+          const wrap = editBtn.closest(".correo-edit-wrap");
+          if (!wrap) return;
+          const textEl = wrap.querySelector(".correo-text");
+          if (!textEl) return;
+          const current = textEl.textContent || "";
+          editBtn.classList.add("hidden");
+          textEl.classList.add("hidden");
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = current === "-" ? "" : current;
+          input.className = "input-text correo-edit-input";
+          const saveBtn = document.createElement("button");
+          saveBtn.type = "button";
+          saveBtn.className = "btn-outline btn-save-correo";
+          saveBtn.title = "Guardar";
+          saveBtn.textContent = "💾";
+          wrap.appendChild(input);
+          wrap.appendChild(saveBtn);
+          input.focus();
+          return;
+        }
+        const saveBtn = e.target.closest(".btn-save-correo");
+        if (saveBtn) {
+          const wrap = saveBtn.closest(".correo-edit-wrap");
+          if (!wrap) return;
+          const input = wrap.querySelector(".correo-edit-input");
+          const textEl = wrap.querySelector(".correo-text");
+          const editBtn = wrap.querySelector(".btn-edit-correo");
+          const idVenta = wrap.dataset.venta;
+          const nextVal = (input?.value || "").trim();
+          if (!idVenta || !nextVal) {
+            alert("Ingresa un correo válido.");
+            return;
+          }
+          try {
+            const { error: updErr } = await supabase
+              .from("ventas")
+              .update({ correo_miembro: nextVal })
+              .eq("id_venta", idVenta);
+            if (updErr) throw updErr;
+            if (textEl) {
+              textEl.textContent = nextVal;
+              textEl.dataset.clipboard = nextVal;
+              textEl.classList.remove("hidden");
+            }
+            if (editBtn) editBtn.classList.remove("hidden");
+            wrap.dataset.correo = nextVal;
+            input?.remove();
+            saveBtn.remove();
+            const row = wrap.closest("tr");
+            const entregarBtn = row?.querySelector(".btn-entregar");
+            if (entregarBtn) entregarBtn.dataset.correo = nextVal;
+          } catch (err) {
+            console.error("guardar correo_miembro error", err);
+            alert("No se pudo guardar el correo.");
+          }
+          return;
+        }
+        const btn = e.target.closest(".btn-entregar");
+        if (!btn) return;
+        const idVenta = btn.dataset.venta;
+        const idUsuario = btn.dataset.usuario;
+        const plataforma = btn.dataset.plataforma || "";
+        const idPlataforma = btn.dataset.idPlataforma || "";
+        const correoCuenta = btn.dataset.correo || "";
+        const claveCuenta = btn.dataset.clave || "";
+        const fechaCorte = btn.dataset.fecha || "Pendiente";
+        const perfil = btn.dataset.perfil || "";
+        const nPerfil = btn.dataset.nperfil || "";
+        const porAcceso = btn.dataset.poracceso === "true";
+        const usaPines = btn.dataset.usapines === "true";
+        const existingMadreId = btn.dataset.idCuenta || "";
+        const existingPerfilId = btn.dataset.idPerfil || "";
+        const cuentaMadreFlag = btn.dataset.cuentaMadre === "true";
+        const mesesContratados = Number(btn.dataset.meses || 1);
+        if (!idVenta) return;
+        try {
+          if (!correoCuenta) {
+            alert("Falta el correo del cliente.");
+            return;
+          }
+          const { data: cuentaNueva, error: cuentaErr } = await supabase
+            .from("cuentas")
+            .insert({
+              correo: correoCuenta,
+              clave: claveCuenta || null,
+              inactiva: false,
+              ocupado: false,
+              venta_dominio: true,
+              dominio_de: idUsuario ? Number(idUsuario) : null,
+              id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            })
+            .select("id_cuenta")
+            .single();
+          if (cuentaErr) throw cuentaErr;
+          const nuevaCuentaId = cuentaNueva?.id_cuenta;
+          if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
+
+          let cuentaMadreId = null;
+          let perfilId = null;
+          if (cuentaMadreFlag && idPlataforma) {
+            if (existingMadreId && existingPerfilId) {
+              cuentaMadreId = Number(existingMadreId);
+              perfilId = Number(existingPerfilId);
+            } else {
+            const { data: madre, error: madreErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta")
+              .eq("id_plataforma", Number(idPlataforma))
+              .eq("cuenta_madre", true)
+              .limit(1)
+              .maybeSingle();
+            if (madreErr) throw madreErr;
+            cuentaMadreId = madre?.id_cuenta || null;
+            if (cuentaMadreId) {
+              const { data: perf, error: perfErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil")
+                .eq("id_cuenta", cuentaMadreId)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (perfErr) throw perfErr;
+              perfilId = perf?.id_perfil || null;
+              if (!perfilId) {
+                const msg = document.querySelector(
+                  `.madre-stock-msg[data-plat="${idPlataforma}"]`
+                );
+                if (msg) msg.classList.remove("hidden");
+              }
+              if (perfilId) {
+                const { error: occErr } = await supabase
+                  .from("perfiles")
+                  .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
+                  .eq("id_perfil", perfilId);
+                if (occErr) throw occErr;
+              }
+            }
+            }
+          }
+          if (cuentaMadreId) {
+            const { error: linkErr } = await supabase
+              .from("cuentas")
+              .update({ id_cuenta_miembro: cuentaMadreId })
+              .eq("id_cuenta", nuevaCuentaId);
+            if (linkErr) throw linkErr;
+          }
+
+          const base = new Date();
+          const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
+          const nextIso = next.toISOString().slice(0, 10);
+          const { error: updErr } = await supabase
+            .from("ventas")
+            .update({
+              pendiente: false,
+              id_cuenta: cuentaMadreId || null,
+              id_cuenta_miembro: nuevaCuentaId,
+              id_perfil: perfilId || null,
+              fecha_corte: nextIso,
+            })
+            .eq("id_venta", idVenta);
+          if (updErr) throw updErr;
+          if (idUsuario) {
+            const notif = buildNotificationPayload("nuevo_servicio", {
+              plataforma,
+              correoCuenta,
+              perfil,
+              fechaCorte,
+            });
+            const { error: nErr } = await supabase
+              .from("notificaciones")
+              .insert({ ...notif, id_usuario: Number(idUsuario) });
+            if (nErr) throw nErr;
+          }
+          const status = document.createElement("span");
+          status.className = "badge badge-green";
+          status.textContent = "Servicio entregado";
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.className = "btn-outline btn-copy-row";
+          copyBtn.textContent = "Copiar";
+          const perfilNum = nPerfil ? Number(nPerfil) : null;
+          const copyText = buildServiceCopyText({
+            plataforma,
+            idVenta: idVenta || null,
+            correo: correoCuenta,
+            clave: claveCuenta,
+            nPerfil: Number.isFinite(perfilNum) ? perfilNum : null,
+            pin: "",
+            fechaCorte: nextIso,
+            porAcceso,
+            usaPines,
+            ventaPerfil: false,
+            ventaMiembro: false,
+            idPlataforma: idPlataforma ? Number(idPlataforma) : null,
+            perfilHogar: false,
+            isSubCuenta: false,
+          });
+          copyBtn.dataset.copy = encodeURIComponent(copyText);
+          btn.parentElement?.appendChild(status);
+          btn.parentElement?.appendChild(copyBtn);
+          btn.remove();
+        } catch (err) {
+          console.error("entregar servicio error", err);
+          alert("No se pudo entregar el servicio.");
+        }
+      });
+      tablasEl?.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".btn-cambiar-madre");
+        if (!btn) return;
+        const idVenta = btn.dataset.venta;
+        const idPlataforma = Number(btn.dataset.idPlataforma || "");
+        const currentMadreId = Number(btn.dataset.idCuenta || "");
+        const currentPerfilId = Number(btn.dataset.idPerfil || "");
+        const cuentaMiembroId = Number(btn.dataset.idCuentaMiembro || "");
+        if (!idVenta || !idPlataforma || !currentMadreId || !cuentaMiembroId) return;
+        try {
+          const { data: nextMadre, error: madreErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta")
+            .eq("id_plataforma", idPlataforma)
+            .eq("cuenta_madre", true)
+            .or("inactiva.is.null,inactiva.eq.false")
+            .gt("id_cuenta", currentMadreId)
+            .order("id_cuenta", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (madreErr) throw madreErr;
+          if (!nextMadre?.id_cuenta) {
+            alert("No hay mas cuentas validas");
+            return;
+          }
+          const nextMadreId = nextMadre.id_cuenta;
+          const { data: nextPerfil, error: perfErr } = await supabase
+            .from("perfiles")
+            .select("id_perfil")
+            .eq("id_cuenta", nextMadreId)
+            .eq("ocupado", false)
+            .order("n_perfil", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (perfErr) throw perfErr;
+          if (!nextPerfil?.id_perfil) {
+            alert("No hay mas cuentas validas");
+            return;
+          }
+
+          const nextPerfilId = nextPerfil.id_perfil;
+
+          if (currentPerfilId) {
+            const { error: oldPerfErr } = await supabase
+              .from("perfiles")
+              .update({ ocupado: false, id_cuenta_miembro: null })
+              .eq("id_perfil", currentPerfilId);
+            if (oldPerfErr) throw oldPerfErr;
+          }
+
+          const { error: newPerfErr } = await supabase
+            .from("perfiles")
+            .update({ ocupado: true, id_cuenta_miembro: cuentaMiembroId })
+            .eq("id_perfil", nextPerfilId);
+          if (newPerfErr) throw newPerfErr;
+
+          const { error: linkErr } = await supabase
+            .from("cuentas")
+            .update({ id_cuenta_miembro: nextMadreId })
+            .eq("id_cuenta", cuentaMiembroId);
+          if (linkErr) throw linkErr;
+
+          const { error: ventaErr } = await supabase
+            .from("ventas")
+            .update({ id_cuenta: nextMadreId, id_perfil: nextPerfilId })
+            .eq("id_venta", idVenta);
+          if (ventaErr) throw ventaErr;
+
+          btn.dataset.idCuenta = String(nextMadreId);
+          btn.dataset.idPerfil = String(nextPerfilId);
+          const row = btn.closest("tr");
+          const entregarBtn = row?.querySelector(".btn-entregar");
+          if (entregarBtn) {
+            entregarBtn.dataset.idCuenta = String(nextMadreId);
+            entregarBtn.dataset.idPerfil = String(nextPerfilId);
+          }
+          alert("Cuenta madre actualizada.");
+        } catch (err) {
+          console.error("cambiar cuenta madre error", err);
+          alert("No se pudo cambiar la cuenta madre.");
+        }
+      });
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (copyToastTimer) clearTimeout(copyToastTimer);
+        copyToastTimer = setTimeout(() => {
+          copyToast.classList.remove("show");
+        }, 2000);
+      };
+      tablasEl?.addEventListener("click", async (e) => {
+        const copyBtn = e.target.closest(".btn-copy-row");
+        if (copyBtn) {
+          const text = decodeURIComponent(copyBtn.dataset.copy || "");
+          if (!text) return;
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch (_err) {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          showCopyToast();
+          return;
+        }
+        const cell = e.target.closest(".copyable");
+        if (!cell) return;
+        const text = cell.dataset.clipboard || cell.textContent || "";
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (_err) {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        showCopyToast();
+      });
+
+      loadPendientes();
+    </script>
+  </body>
+</html>

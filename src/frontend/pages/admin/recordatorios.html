@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recordatorios</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .recordatorios-wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .rec-buttons {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 12px 0;
+      }
+      .rec-buttons button {
+        padding: 10px 14px;
+        border: none;
+        border-radius: 10px;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .rec-results {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .rec-card {
+        padding: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #fff;
+        text-align: left;
+        cursor: pointer;
+        transition: box-shadow 0.2s ease, transform 0.2s ease;
+      }
+      .rec-card:hover {
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+        transform: translateY(-1px);
+      }
+      .rec-card h4 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+      .rec-card p {
+        margin: 2px 0;
+        font-size: 13px;
+        color: #333;
+      }
+      .rec-card pre {
+        margin: 0;
+        white-space: pre-wrap;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+      }
+      .status {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <div class="recordatorios-wrap">
+        <h2>Recordatorios</h2>
+        <div class="rec-buttons">
+          <button type="button" id="btn-hoy">Fechas hoy</button>
+          <button type="button" id="btn-manana">Fechas mañana</button>
+          <button type="button" id="btn-hoy-manana">Fechas hoy-mañana</button>
+        </div>
+        <div id="rec-status" class="status"></div>
+        <div id="rec-results" class="rec-results"></div>
+      </div>
+    </main>
+    <script type="module">
+      import { requireSession, attachLogoHome } from "../../scripts/session.js";
+      import { supabase } from "../../scripts/api.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const btnHoy = document.querySelector("#btn-hoy");
+      const btnManana = document.querySelector("#btn-manana");
+      const btnHoyManana = document.querySelector("#btn-hoy-manana");
+      const statusEl = document.querySelector("#rec-status");
+      const resultsEl = document.querySelector("#rec-results");
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const fmtDate = (d) => d.toISOString().slice(0, 10);
+
+      const copyToClipboard = async (text) => {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (_) {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+      };
+
+      const renderCards = (items) => {
+        if (!resultsEl) return;
+        if (!items.length) {
+          resultsEl.innerHTML = "";
+          return;
+        }
+        resultsEl.innerHTML = items
+          .map(
+            (msg) => `
+              <button class="rec-card" type="button" data-copy="${encodeURIComponent(msg.plain)}">
+                ${msg.html}
+              </button>
+            `
+          )
+          .join("");
+        resultsEl.querySelectorAll(".rec-card").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const txt = btn.dataset.copy ? decodeURIComponent(btn.dataset.copy) : "";
+            if (txt) copyToClipboard(txt);
+          });
+        });
+      };
+
+      const fetchMessagesByDate = async (targetDate) => {
+        const fecha = fmtDate(targetDate);
+        const { data: ventas, error: ventErr } = await supabase
+          .from("ventas")
+          .select("id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro")
+          .eq("fecha_corte", fecha);
+        if (ventErr) throw ventErr;
+
+          const cuentasIds = Array.from(new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)));
+          const precioIds = Array.from(new Set((ventas || []).map((v) => v.id_precio).filter(Boolean)));
+          const userIds = Array.from(new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)));
+          const perfilIds = Array.from(new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean)));
+
+          const [
+            { data: cuentas, error: cErr },
+            { data: precios, error: pErr },
+            { data: users, error: uErr },
+            { data: perfiles, error: perfErr },
+          ] = await Promise.all([
+            cuentasIds.length
+              ? supabase.from("cuentas").select("id_cuenta, correo, id_plataforma").in("id_cuenta", cuentasIds)
+              : Promise.resolve({ data: [], error: null }),
+            precioIds.length
+              ? supabase.from("precios").select("id_precio, id_plataforma").in("id_precio", precioIds)
+              : Promise.resolve({ data: [], error: null }),
+            userIds.length
+              ? supabase.from("usuarios").select("id_usuario, nombre, apellido").in("id_usuario", userIds)
+              : Promise.resolve({ data: [], error: null }),
+            perfilIds.length
+              ? supabase.from("perfiles").select("id_perfil, n_perfil, perfil_hogar").in("id_perfil", perfilIds)
+              : Promise.resolve({ data: [], error: null }),
+          ]);
+          if (cErr) throw cErr;
+          if (pErr) throw pErr;
+          if (uErr) throw uErr;
+          if (perfErr) throw perfErr;
+
+          const platIds = Array.from(
+            new Set([
+              ...(cuentas || []).map((c) => c.id_plataforma).filter(Boolean),
+              ...(precios || []).map((p) => p.id_plataforma).filter(Boolean),
+            ])
+          );
+          const { data: plats, error: platErr } = platIds.length
+            ? await supabase
+                .from("plataformas")
+                .select("id_plataforma, nombre, correo_cliente")
+                .in("id_plataforma", platIds)
+            : { data: [], error: null };
+          if (platErr) throw platErr;
+
+          const mapCuenta = (cuentas || []).reduce((acc, c) => {
+            acc[c.id_cuenta] = c;
+            return acc;
+          }, {});
+          const mapPrecio = (precios || []).reduce((acc, p) => {
+            acc[p.id_precio] = p;
+            return acc;
+          }, {});
+          const mapPlat = (plats || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p;
+            return acc;
+          }, {});
+          const mapUser = (users || []).reduce((acc, u) => {
+            acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+            return acc;
+          }, {});
+          const mapPerf = (perfiles || []).reduce((acc, p) => {
+            acc[p.id_perfil] = { n: p.n_perfil, hogar: p.perfil_hogar === true };
+            return acc;
+          }, {});
+
+          // Construir mensajes agrupados por usuario
+          const grouped = (ventas || []).reduce((acc, v) => {
+            const cuenta = mapCuenta[v.id_cuenta] || {};
+            const precio = mapPrecio[v.id_precio] || {};
+            const platId = cuenta.id_plataforma || precio.id_plataforma || null;
+            const platInfo = platId ? mapPlat[platId] || {} : {};
+            const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
+            const cliente = mapUser[v.id_usuario] || "Cliente";
+            const useCorreoCliente =
+              platInfo.correo_cliente === true ||
+              platInfo.correo_cliente === "true" ||
+              platInfo.correo_cliente === "1";
+            const correo = useCorreoCliente ? v.correo_miembro || "-" : cuenta.correo || "-";
+            const perfInfo = v.id_perfil ? mapPerf[v.id_perfil] : null;
+            const perfilTxt = perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
+            const hogarTxt = perfInfo?.hogar ? " (HOGAR ACTUALIZADO)" : "";
+            const key = v.id_usuario || "sin_usuario";
+            if (!acc[key]) {
+              acc[key] = { cliente, bloques: [] };
+            }
+            const fechaPago = v.fecha_corte ? formatDDMMYYYY(v.fecha_corte) : "-";
+            acc[key].bloques.push(
+              `*${platNombre}${hogarTxt}* \`ID VENTA: #${v.id_venta}\`
+Correo: ${correo}
+${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
+            );
+          return acc;
+        }, {});
+
+        const messages = Object.values(grouped).map((g) => {
+          const bloques = g.bloques.join("\n\n");
+          const plain = `¡Hola ${g.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+          const html = `<pre>${plain}</pre>`;
+          return { html, plain };
+        });
+        return messages;
+      };
+
+      const loadFechas = async (targetDate, label) => {
+        setStatus(`Cargando fechas de ${label}...`);
+        resultsEl.innerHTML = "";
+        try {
+          const messages = await fetchMessagesByDate(targetDate);
+          renderCards(messages);
+          setStatus(messages.length ? "" : `Sin resultados para ${label}.`);
+        } catch (err) {
+          console.error(`recordatorios ${label} error`, err);
+          setStatus(`No se pudieron cargar las fechas de ${label}.`);
+        }
+      };
+
+      const loadHoy = () => {
+        const hoy = new Date();
+        loadFechas(hoy, "hoy");
+      };
+
+      const loadManana = () => {
+        const mañana = new Date();
+        mañana.setDate(mañana.getDate() + 1);
+        loadFechas(mañana, "mañana");
+      };
+
+      btnHoy?.addEventListener("click", loadHoy);
+      btnManana?.addEventListener("click", loadManana);
+
+      const loadHoyManana = async () => {
+        setStatus("Cargando fechas de hoy y mañana...");
+        resultsEl.innerHTML = "";
+        try {
+          const hoy = new Date();
+          const manana = new Date();
+          manana.setDate(manana.getDate() + 1);
+          const [msgHoy, msgManana] = await Promise.all([
+            fetchMessagesByDate(hoy),
+            fetchMessagesByDate(manana),
+          ]);
+          const messages = [...(msgHoy || []), ...(msgManana || [])];
+          renderCards(messages);
+          setStatus(messages.length ? "" : "Sin resultados para hoy y mañana.");
+        } catch (err) {
+          console.error("recordatorios hoy-mañana error", err);
+          setStatus("No se pudieron cargar las fechas de hoy y mañana.");
+        }
+      };
+
+      btnHoyManana?.addEventListener("click", loadHoyManana);
+    </script>
+  </body>
+</html>

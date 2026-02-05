@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inventario</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .copyable {
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 80px;
+        right: 16px;
+        background: #111;
+        color: #fff;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 14px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+        z-index: 1200;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      /* Estilo para botones dentro de tablas */
+      .table-base button {
+        border-radius: 8px;
+        border: 1px solid #cccccc;
+        outline: none;
+        box-shadow: none;
+        transition: filter 0.15s ease, opacity 0.15s ease;
+      }
+      .table-base button:hover {
+        filter: brightness(1.08);
+      }
+      .table-base button:active {
+        filter: brightness(0.9);
+      }
+      .table-base .btn-copy-row {
+        background: #111 !important;
+        border-color: #111 !important;
+      }
+      .table-base .btn-copy-row:hover {
+        background: #1f2937 !important;
+        border-color: #1f2937 !important;
+        filter: none;
+      }
+      .table-base .btn-copy-row:active {
+        background: #0b0b0b !important;
+        border-color: #0b0b0b !important;
+        filter: none;
+      }
+      .table-base th,
+      .table-base td {
+        height: 30px;
+      }
+      /* Unificar fondo de los botones de plataformas */
+      .inventario-list {
+        background: #fff;
+        padding: 12px;
+        border-radius: 12px;
+      }
+      .inventario-item {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+      }
+      .inventario-item + .inventario-item {
+        margin-top: 8px;
+      }
+      .inventario-btn {
+        display: block;
+        width: 100%;
+        margin: 0;
+        border-radius: 8px;
+        background: var(--btn-plat-bg, #111);
+        color: #fff;
+        border: 1px solid var(--btn-plat-bg, #111);
+        transition: filter 0.15s ease, opacity 0.15s ease;
+        /* Evita que estilos globales de btn-outline alteren el color base */
+        box-shadow: none;
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .inventario-btn:hover {
+        background: var(--btn-plat-bg, #111);
+        border-color: var(--btn-plat-bg, #111);
+        filter: brightness(1.15);
+      }
+      .inventario-btn:active {
+        background: var(--btn-plat-bg, #111);
+        border-color: var(--btn-plat-bg, #111);
+        filter: brightness(0.9);
+      }
+      .inventario-plan-list {
+        margin-top: 0;
+      }
+      .inventario-plan {
+        margin-top: 0;
+      }
+      /* Quitar borde curvo superior de tablas en inventario */
+      .inventario-plan .table-base {
+        border-radius: 0 0 8px 8px;
+      }
+      .inventario-item.open .inventario-btn {
+        border-radius: 8px 8px 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+    <div id="copy-toast" class="copy-toast" aria-live="polite">
+      Texto copiado al portapapeles
+    </div>
+
+    <main class="categorias-dinamicas">
+      <h2>Inventario</h2>
+      <div class="cuentas-busqueda" style="margin: 0 0 12px 0">
+        <div class="input-wrap">
+          <input
+            type="search"
+            id="inv-search"
+            placeholder="Buscar por correo"
+            autocomplete="off"
+          />
+          <div id="inv-sugs" class="sugerencias-cuentas hidden"></div>
+        </div>
+      </div>
+      <div id="inv-search-results"></div>
+      <div class="inventario-actions">
+        <button
+          type="button"
+          id="btn-proximas"
+          class="btn-primary"
+          style="background-color: #22c55e; border-color: #22c55e"
+        >
+          Renovar cuentas
+        </button>
+      </div>
+      <p id="inventario-status" class="status">Cargando inventario...</p>
+      <div id="inventario-list" class="inventario-list"></div>
+    </main>
+
+    <script type="module">
+      import {
+        requireSession,
+        attachLogout,
+        getSessionRoles,
+        setSessionRoles,
+        attachLogoHome,
+      } from "../scripts/session.js";
+      import { formatDDMMYYYY } from "../scripts/date-format.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        fetchInventario,
+        ensureServerSession,
+        sendCartDelta,
+        supabase,
+      } from "../scripts/api.js";
+      import { refreshCartFromServer } from "../scripts/cart.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) =>
+        v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const logo = document.querySelector(".logo");
+      const listEl = document.querySelector("#inventario-list");
+      const statusEl = document.querySelector("#inventario-status");
+      const searchInput = document.querySelector("#inv-search");
+      const searchSugs = document.querySelector("#inv-sugs");
+      const searchResults = document.querySelector("#inv-search-results");
+      const copyToast = document.querySelector("#copy-toast");
+      const actionsEl = document.querySelector(".inventario-actions");
+      const btnProximas = document.querySelector("#btn-proximas");
+      const modalProximas = document.querySelector("#modal-proximas");
+      const modalProximasClose = document.querySelector(
+        ".modal-proximas-close"
+      );
+      const proximasContent = document.querySelector("#proximas-content");
+      const btnProximasAdd = document.querySelector("#btn-proximas-add");
+      let ultimasPlataformas = [];
+      let proximasSeleccionadas = new Set();
+      let ventasIndex = [];
+      let descuentosMap = {};
+
+      const getPlatId = (p) =>
+        p?.id_plataforma ??
+        p?.idPlataforma ??
+        p?.plataforma_id ??
+        p?.id ??
+        null;
+      const getColor2 = (p) => p?.color_2 ?? p?.color2 ?? null;
+      const buildVentasIndex = () => {
+        const rows = [];
+        (ultimasPlataformas || []).forEach((p) => {
+          const platNombre = p.nombre || "";
+          const platId = getPlatId(p);
+          const color2 = getColor2(p) || "";
+          console.log(
+            "[inventario] plataforma idx",
+            p?.idx,
+            "id",
+            platId,
+            "color_2",
+            color2,
+            "keys",
+            Object.keys(p || {})
+          );
+          (p.planes || []).forEach((planObj) => {
+            const planNombre = planObj.plan || "";
+            (planObj.ventas || []).forEach((v) => {
+              const rowCorreo =
+                Number(platId) === 12 ? v.correo_cliente || "" : v.correo || "";
+              rows.push({
+                id_venta: v.id_venta ?? "",
+                correo: rowCorreo,
+                clave: v.clave || "",
+                n_perfil: v.n_perfil ?? "",
+                pin: v.pin ?? "",
+                fecha_corte: v.fecha_corte || "",
+                plataforma: platNombre,
+                plan: planNombre,
+                id_plataforma: platId,
+                color_2: color2,
+              });
+            });
+          });
+        });
+        ventasIndex = rows;
+      };
+
+      const loadDescuentos = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("descuentos")
+            .select("meses, descuento_1");
+          if (error) throw error;
+          descuentosMap = (data || []).reduce((acc, d) => {
+            const meses = Number(d.meses) || 0;
+            if (meses > 0) acc[meses] = Number(d.descuento_1) || 0;
+            return acc;
+          }, {});
+        } catch (err) {
+          console.error("inventario descuentos error", err);
+          descuentosMap = {};
+        }
+      };
+
+      const updateRenovarDiscount = () => {
+        const badge = document.querySelector("#renovar-discount");
+        if (!badge) return;
+        const meses = Number(renovarSpan?.textContent || 1);
+        const keys = Object.keys(descuentosMap)
+          .map((k) => Number(k))
+          .filter((n) => Number.isFinite(n) && n <= meses)
+          .sort((a, b) => b - a);
+        const pct = descuentosMap[meses] || (keys.length ? descuentosMap[keys[0]] || 0 : 0);
+        if (pct > 0) {
+          badge.textContent = `-${pct}%`;
+          badge.classList.remove("hidden");
+        } else {
+          badge.classList.add("hidden");
+        }
+        updateRenovarCosto();
+      };
+
+      const updateRenovarCosto = () => {
+        if (!renovarCostoEl) return;
+        const base = Number(selectedRenovarCostoBase);
+        if (!Number.isFinite(base)) {
+          renovarCostoEl.textContent = "Costo: -";
+          return;
+        }
+        const meses = Number(renovarSpan?.textContent || 1);
+        const keys = Object.keys(descuentosMap)
+          .map((k) => Number(k))
+          .filter((n) => Number.isFinite(n) && n <= meses)
+          .sort((a, b) => b - a);
+        const pct = descuentosMap[meses] || (keys.length ? descuentosMap[keys[0]] || 0 : 0);
+        let total = base * Math.max(1, meses);
+        if (pct > 0) {
+          total = total * (1 - pct / 100);
+        }
+        renovarCostoEl.textContent = `Costo: $${total.toFixed(2)}`;
+      };
+
+      const renderSearchResults = (items = [], term = "") => {
+        if (!searchResults) return;
+        if (!term || !items.length) {
+          searchResults.innerHTML = term
+            ? '<p class="status">No se encontraron resultados.</p>'
+            : "";
+          return;
+        }
+        const rows = items
+          .map(
+            (it) => `
+            <tr>
+              <td>${it.id_venta}</td>
+              <td class="copyable" data-label="Correo">${it.correo}</td>
+              <td class="copyable" data-label="Clave">${it.clave}</td>
+              <td>${it.n_perfil ? `M${it.n_perfil}` : ""}</td>
+              <td class="copyable" data-label="PIN">${it.pin || ""}</td>
+              <td>${formatDate(it.fecha_corte)}</td>
+              <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
+              <td>
+                <div class="actions-inline">
+                  <button class="btn-small btn-renovar" style="background-color:#22c55e;color:white;">🔄</button>
+                  <button class="btn-small btn-red-report" style="background-color:#ef4444;color:white;">❕</button>
+                  <button class="btn-small btn-copy-row" data-copy="Correo: ${
+                    it.correo
+                  }\nClave: ${it.clave}\nPIN: ${
+              it.pin || ""
+            }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
+                    <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:14px;height:14px;filter:invert(1);" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `
+          )
+          .join("");
+        const headerColor = items[0]?.color_2 || items[0]?.color2 || "";
+        if (Number(items[0]?.id_plataforma) === 1) {
+          console.log("[inventario] search header color_2 plat1:", headerColor);
+        }
+        const headerStyle = headerColor
+          ? `style="--table-header-bg:${headerColor};"`
+          : "";
+        searchResults.innerHTML = `
+          <div class="cuenta-table-wrap">
+            <table class="table-base" ${headerStyle}>
+              <thead>
+                <tr>
+                  <th>ID Venta</th>
+                  <th>Correo</th>
+                  <th>Clave</th>
+                  <th>Perfil</th>
+                  <th>PIN</th>
+                  <th>Fecha corte</th>
+                  <th>Plataforma / Plan</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      };
+
+      const showSuggestions = (items) => {
+        if (!searchSugs) return;
+        if (!items.length) {
+          searchSugs.classList.add("hidden");
+          searchSugs.innerHTML = "";
+          return;
+        }
+        searchSugs.innerHTML = items
+          .map(
+            (it) =>
+              `<div class="sugerencia-item" data-value="${it.correo}">${it.correo}</div>`
+          )
+          .join("");
+        searchSugs.classList.remove("hidden");
+      };
+
+      const toggleInventoryView = (show) => {
+        const displayVal = show ? "" : "none";
+        if (actionsEl) actionsEl.style.display = displayVal;
+        if (statusEl) statusEl.style.display = displayVal;
+        if (listEl) listEl.style.display = displayVal;
+      };
+
+      const copyToClipboard = (text) => {
+        if (!text) return;
+        const doFallbackCopy = () => {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        };
+        const done = () => showCopyToast();
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard
+            .writeText(text)
+            .then(done)
+            .catch(() => {
+              doFallbackCopy();
+              done();
+            });
+        } else {
+          doFallbackCopy();
+          done();
+        }
+      };
+
+      let toastTimer = null;
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          copyToast.classList.remove("show");
+        }, 1000);
+      };
+
+      const handleSearch = (termRaw) => {
+        const term = (termRaw || "").trim().toLowerCase();
+        if (!term) {
+          showSuggestions([]);
+          renderSearchResults([], "");
+          toggleInventoryView(true);
+          return;
+        }
+        const matches = ventasIndex.filter((v) =>
+          v.correo.toLowerCase().includes(term)
+        );
+        showSuggestions(matches.slice(0, 6));
+        renderSearchResults(matches, term);
+        toggleInventoryView(false);
+      };
+
+      // Copiar valores de celdas marcadas como copyable
+      document.addEventListener("click", (e) => {
+        const cell = e.target.closest(".copyable");
+        const btnCopy = e.target.closest(".btn-copy-row");
+        const txt = cell?.textContent?.trim() || btnCopy?.dataset.copy;
+        if (!txt) return;
+        copyToClipboard(txt);
+      });
+
+      const formatDate = (iso) => formatDDMMYYYY(iso);
+
+      const diffDias = (iso) => {
+        if (!iso) return null;
+        const hoy = new Date();
+        const fecha = new Date(iso);
+        if (Number.isNaN(fecha.valueOf())) return null;
+        const diff = fecha - hoy;
+        return Math.ceil(diff / (1000 * 60 * 60 * 24));
+      };
+
+      const renderProximas = (plataformas) => {
+        if (!proximasContent) return;
+        proximasContent.innerHTML = "";
+        if (!plataformas.length) {
+          proximasContent.innerHTML =
+            '<p class="status">Sin datos de próximas renovaciones.</p>';
+          return;
+        }
+
+        const bloques = [];
+        plataformas.forEach((p) => {
+          const items = [];
+          (p.planes || []).forEach((planObj) => {
+            (planObj.ventas || []).forEach((v) => {
+              const dias = diffDias(v.fecha_corte);
+              if (dias === null) return;
+              items.push({
+                id_venta: v.id_venta,
+                id_precio: v.id_precio,
+                correo:
+                  Number(p.id_plataforma) === 12
+                    ? v.correo_cliente || ""
+                    : v.correo || "",
+                perfil: v.n_perfil ?? "",
+                dias,
+              });
+            });
+          });
+          if (items.length) {
+            items.sort((a, b) => a.dias - b.dias);
+            const rows = items
+              .map(
+                (it) => `
+                  <tr>
+                    <td>
+                      <label class="proximas-check">
+                        <input type="checkbox" data-venta="${
+                          it.id_venta ?? ""
+                        }" data-precio="${it.id_precio ?? ""}" />
+                        <span>${it.correo}</span>
+                      </label>
+                    </td>
+                    <td>${it.perfil}</td>
+                    <td>${it.dias} días</td>
+                  </tr>
+                `
+              )
+              .join("");
+            bloques.push(`
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${p.nombre || "Plataforma"}</h3>
+                <table class="table-base">
+                  <tbody>
+                    ${rows}
+                  </tbody>
+                </table>
+              </div>
+            `);
+          }
+        });
+
+        if (!bloques.length) {
+          proximasContent.innerHTML =
+            '<p class="status">Sin datos de próximas renovaciones.</p>';
+          return;
+        }
+
+        proximasContent.innerHTML = `
+          <div class="proximas-header">Cuentas próximas a vencerse:</div>
+          ${bloques.join("")}
+        `;
+      };
+
+      const renderPlataformas = (plataformas) => {
+        if (!listEl || !statusEl) return;
+        listEl.innerHTML = "";
+        if (!plataformas.length) {
+          statusEl.textContent = "No hay ventas asociadas a este usuario.";
+          return;
+        }
+        statusEl.textContent = "";
+        plataformas.forEach((p, idx) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "inventario-item";
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn-outline inventario-btn";
+          btn.textContent = p.nombre || `Plataforma ${idx + 1}`;
+          if (p.color_1) {
+            btn.style.setProperty("--btn-plat-bg", p.color_1);
+          }
+          const headerColor = getColor2(p) || "";
+          if (Number(p.id_plataforma) === 1) {
+            console.log("[inventario] headerColor tabla plat1:", headerColor);
+          }
+
+          const planList = document.createElement("div");
+          planList.className = "inventario-plan-list hidden";
+
+          (p.planes || []).forEach((planObj) => {
+            const planWrapper = document.createElement("div");
+            planWrapper.className = "inventario-plan";
+            const planName = (planObj.plan || "").trim();
+
+            const table = document.createElement("table");
+            table.className = "table-base";
+            table.style.display = "";
+            if (headerColor) {
+              table.style.setProperty("--table-header-bg", headerColor);
+              if (Number(p.id_plataforma) === 1) {
+                console.log(
+                  "[inventario] aplicando header color_2 plat1 en tabla:",
+                  headerColor
+                );
+              }
+            }
+            table.innerHTML = `
+              <thead>
+                <tr>
+                  <th>ID Venta</th>
+                  <th>Correo</th>
+                  <th>Clave</th>
+                  <th>Perfil</th>
+                  <th>PIN</th>
+                  <th>Fecha de Corte</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(planObj.ventas || [])
+                  .map(
+                    (v) => `
+                    <tr>
+                      <td>${v.id_venta ?? ""}</td>
+                      <td class="copyable" data-label="Correo">${
+                        Number(v.id_plataforma) === 12
+                          ? v.correo_cliente || ""
+                          : v.correo || ""
+                      }</td>
+                      <td class="copyable" data-label="Clave">${
+                        v.clave || ""
+                      }</td>
+                      <td>${v.n_perfil ? `M${v.n_perfil}` : ""}</td>
+                      <td class="copyable" data-label="PIN">${v.pin ?? ""}</td>
+                      <td>${formatDate(v.fecha_corte)}</td>
+                      <td>
+                        <div class="actions-inline">
+                          <button class="btn-small btn-renovar" data-venta="${
+                            v.id_venta ?? ""
+                          }" data-precio="${v.id_precio ?? ""}" data-plan="${
+                      planName || ""
+                    }" data-plataforma="${v.id_plataforma ?? ""}" data-vperf="${
+                      v.venta_perfil ?? ""
+                    }" data-vmiem="${v.venta_miembro ?? ""}" data-phogar="${
+                      v.perfil_hogar ?? ""
+                    }" data-cuenta="${
+                      v.id_cuenta ?? ""
+                    }" data-perfil="${v.id_perfil ?? ""}" data-correo="${
+                      Number(v.id_plataforma) === 12
+                        ? v.correo_cliente || ""
+                        : v.correo || ""
+                    }" data-correo-cliente="${
+                      v.correo_cliente || ""
+                    }" data-nperfil="${
+                      v.n_perfil ?? ""
+                    }" style="background-color:#22c55e;color:white;">🔄</button>
+                          <button class="btn-small btn-red-report" data-plataforma="${
+                            v.id_plataforma ?? ""
+                          }" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${
+                      v.id_perfil ?? ""
+                    }" style="background-color:#ef4444;color:white;">❕</button>
+                          <button class="btn-small btn-copy-row" data-copy="Correo: ${
+                            Number(v.id_plataforma) === 12
+                              ? v.correo_cliente || ""
+                              : v.correo || ""
+                          }\nClave: ${v.clave || ""}\nPIN: ${
+                      v.pin || ""
+                    }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
+                            <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:14px;height:14px;filter:invert(1);" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>`
+                  )
+                  .join("")}
+              </tbody>
+            `;
+
+            const tableWrap = document.createElement("div");
+            tableWrap.style.overflowX = "auto";
+            tableWrap.style.width = "100%";
+            tableWrap.appendChild(table);
+
+            planWrapper.appendChild(tableWrap);
+            planList.appendChild(planWrapper);
+          });
+
+          btn.addEventListener("click", () => {
+            planList.classList.toggle("hidden");
+            const isOpen = !planList.classList.contains("hidden");
+            wrapper.classList.toggle("open", isOpen);
+          });
+
+          wrapper.appendChild(btn);
+          wrapper.appendChild(planList);
+          listEl.appendChild(wrapper);
+        });
+      };
+
+      const loadInventario = async () => {
+        if (statusEl) statusEl.textContent = "Cargando inventario...";
+        // Garantiza que la cookie de sesión esté activa antes de pedir datos protegidos
+        await ensureServerSession();
+        const resp = await fetchInventario();
+        if (resp?.error) {
+          statusEl.textContent = resp.error;
+          return;
+        }
+        console.log("[inventario] resp raw inventario:", resp);
+        const plats =
+          resp?.plataformas ||
+          resp?.plataformas?.plataformas ||
+          resp?.data?.plataformas ||
+          [];
+        ultimasPlataformas = plats;
+        console.log(
+          "[inventario] plataformas colores:",
+          (ultimasPlataformas || []).map((p) => ({
+            id: p.id_plataforma,
+            nombre: p.nombre,
+            color_1: p.color_1,
+            color_2: p.color_2,
+            keys: Object.keys(p || {}),
+          }))
+        );
+        buildVentasIndex();
+        renderPlataformas(ultimasPlataformas);
+        handleSearch(searchInput?.value || "");
+      };
+
+      async function init() {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const correoParam = params.get("correo");
+          if (correoParam && searchInput) {
+            searchInput.value = correoParam;
+          }
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          setSessionRoles(user || {});
+          const sessionRoles = getSessionRoles();
+          const isAdmin =
+            isTrue(sessionRoles?.permiso_admin) ||
+            isTrue(sessionRoles?.permiso_superadmin) ||
+            isTrue(user?.permiso_admin) ||
+            isTrue(user?.permiso_superadmin);
+          if (!sessionRoles && user) {
+            setSessionRoles(user);
+          }
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          await loadDescuentos();
+          await loadInventario();
+        } catch (err) {
+          console.error("inventario init error", err);
+          if (statusEl)
+            statusEl.textContent = "No se pudo cargar el inventario.";
+        }
+      }
+
+      init();
+      attachLogout(clearServerSession);
+
+      attachLogoHome();
+      searchInput?.addEventListener("input", (e) => {
+        handleSearch(e.target.value);
+      });
+
+      searchSugs?.addEventListener("click", (e) => {
+        const item = e.target.closest(".sugerencia-item");
+        if (!item) return;
+        const val = item.dataset.value || "";
+        if (searchInput) searchInput.value = val;
+        handleSearch(val);
+        searchSugs.classList.add("hidden");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!searchSugs) return;
+        if (!searchSugs.contains(e.target) && e.target !== searchInput) {
+          searchSugs.classList.add("hidden");
+        }
+      });
+
+      btnProximas?.addEventListener("click", () => {
+        renderProximas(ultimasPlataformas);
+        modalProximas?.classList.remove("hidden");
+      });
+
+      const closeProximas = () => {
+        modalProximas?.classList.add("hidden");
+      };
+
+      modalProximas?.addEventListener("click", (e) => {
+        if (
+          e.target.classList.contains("modal-backdrop") ||
+          e.target.classList.contains("modal-close")
+        ) {
+          closeProximas();
+        }
+      });
+      modalProximasClose?.addEventListener("click", closeProximas);
+
+      listEl?.addEventListener("click", (e) => {
+        const copyCell = e.target.closest(".copyable");
+        if (copyCell) {
+          const txt = copyCell.textContent?.trim() || "";
+          if (txt) {
+            try {
+              navigator.clipboard.writeText(txt);
+            } catch (_err) {
+              const textarea = document.createElement("textarea");
+              textarea.value = txt;
+              document.body.appendChild(textarea);
+              textarea.select();
+              document.execCommand("copy");
+              document.body.removeChild(textarea);
+            }
+          }
+          return;
+        }
+        const btn = e.target.closest(".btn-red-report");
+        if (!btn) return;
+        const plat = btn.dataset.plataforma || "";
+        const cuenta = btn.dataset.cuenta || "";
+        const perfil = btn.dataset.perfil || "";
+        const params = new URLSearchParams();
+        if (plat) params.set("plataforma", plat);
+        if (cuenta) params.set("cuenta", cuenta);
+        if (perfil) params.set("perfil", perfil);
+        const url = `reportes/crear_reporte.html${
+          params.toString() ? `?${params.toString()}` : ""
+        }`;
+        window.location.href = url;
+      });
+
+      // Modal renovar
+      const modalRenovar = document.querySelector("#modal-renovar");
+      const modalRenovarClose = document.querySelector(".modal-renovar-close");
+      const renovarSpan = document.querySelector("#renovar-meses");
+      const btnRenovarMas = document.querySelector("#renovar-mas");
+      const btnRenovarMenos = document.querySelector("#renovar-menos");
+      const btnRenovarAgregar = document.querySelector("#btn-renovar-agregar");
+      const renovarCostoEl = document.querySelector("#renovar-costo");
+      let selectedRenovarVenta = null;
+      let selectedRenovarPrecio = null;
+      let selectedRenovarPlan = "";
+      let selectedRenovarPlat = "";
+      let selectedRenovarCostoBase = null;
+      let selectedVentaFlags = {
+        venta_perfil: null,
+        venta_miembro: null,
+        perfil_hogar: null,
+      };
+      let selectedRenovarCuenta = null;
+      let selectedRenovarPerfil = null;
+      let selectedRenovarCorreo = "";
+      let selectedRenovarNPerfil = "";
+      let selectedRenovarCorreoCliente = "";
+
+      const closeRenovarModal = () => {
+        modalRenovar?.classList.add("hidden");
+        selectedRenovarVenta = null;
+        if (renovarSpan) renovarSpan.textContent = "1";
+        selectedRenovarCorreoCliente = "";
+        selectedRenovarCostoBase = null;
+        if (renovarCostoEl) renovarCostoEl.textContent = "";
+        updateRenovarDiscount();
+      };
+
+      listEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-renovar");
+        if (!btn) return;
+        selectedRenovarVenta = btn.dataset.venta || null;
+        selectedRenovarPrecio = btn.dataset.precio || null;
+        selectedRenovarPlan = btn.dataset.plan || "";
+        selectedRenovarPlat = btn.dataset.plataforma || "";
+        if (renovarCostoEl) {
+          renovarCostoEl.textContent = "Costo: ...";
+          const precioId = selectedRenovarPrecio || null;
+          if (precioId) {
+            supabase
+              .from("precios")
+              .select("precio_usd_detal")
+              .eq("id_precio", precioId)
+              .maybeSingle()
+              .then(({ data, error }) => {
+                if (error) throw error;
+                const monto = Number(data?.precio_usd_detal);
+                selectedRenovarCostoBase = Number.isFinite(monto) ? monto : null;
+                renovarCostoEl.textContent = Number.isFinite(monto)
+                  ? `Costo: $${monto.toFixed(2)}`
+                  : "Costo: -";
+                updateRenovarCosto();
+              })
+              .catch((err) => {
+                console.error("renovar costo error", err);
+                selectedRenovarCostoBase = null;
+                renovarCostoEl.textContent = "Costo: -";
+              });
+          } else {
+            selectedRenovarCostoBase = null;
+            renovarCostoEl.textContent = "Costo: -";
+          }
+        }
+        selectedVentaFlags = {
+          venta_perfil: btn.dataset.vperf,
+          venta_miembro: btn.dataset.vmiem,
+          perfil_hogar: btn.dataset.phogar,
+        };
+        selectedRenovarCuenta = btn.dataset.cuenta || null;
+        selectedRenovarPerfil = btn.dataset.perfil || null;
+        selectedRenovarCorreo = btn.dataset.correo || "";
+        selectedRenovarNPerfil = btn.dataset.nperfil || "";
+        selectedRenovarCorreoCliente = btn.dataset.correoCliente || "";
+        modalRenovar?.classList.remove("hidden");
+        updateRenovarDiscount();
+      });
+
+      modalRenovar?.addEventListener("click", (e) => {
+        if (
+          e.target.classList.contains("modal-backdrop") ||
+          e.target.classList.contains("modal-close")
+        ) {
+          closeRenovarModal();
+        }
+      });
+      modalRenovarClose?.addEventListener("click", closeRenovarModal);
+
+      btnRenovarAgregar?.addEventListener("click", () => {
+        const meses = Number(renovarSpan?.textContent || 1);
+        if (!meses || meses < 1) {
+          alert("Selecciona al menos 1 mes.");
+          return;
+        }
+        const agregar = async () => {
+          let precioId = selectedRenovarPrecio || null;
+          if (!precioId && selectedRenovarVenta) {
+            try {
+              const { data: ventaRow, error: ventaErr } = await supabase
+                .from("ventas")
+                .select("id_precio")
+                .eq("id_venta", selectedRenovarVenta)
+                .maybeSingle();
+              if (ventaErr) throw ventaErr;
+              precioId = ventaRow?.id_precio || null;
+            } catch (err) {
+              console.error("buscar precio para renovar error", err);
+            }
+          }
+          if (!precioId) {
+            alert("No se pudo identificar el precio de la venta.");
+            return;
+          }
+          const platNum = Number(selectedRenovarPlat) || null;
+          return sendCartDelta(precioId, 1, meses, {
+            renovacion: true,
+            id_venta: selectedRenovarVenta,
+            id_cuenta: platNum === 12 ? null : selectedRenovarCuenta || null,
+            id_perfil: selectedRenovarPerfil || null,
+            correo: selectedRenovarCorreo || null,
+            correo_cliente:
+              platNum === 12 ? selectedRenovarCorreoCliente || null : null,
+            n_perfil: selectedRenovarNPerfil || null,
+          });
+        };
+        agregar()
+          .then(async () => {
+            alert("Agregado al carrito.");
+            // Simula animación de carrito (requiere .carrito en DOM)
+            const cartIcon = document.querySelector(".carrito");
+            if (cartIcon) {
+              cartIcon.classList.add("flying-price");
+              setTimeout(() => cartIcon.classList.remove("flying-price"), 600);
+            }
+            try {
+              await refreshCartFromServer();
+            } catch (_err) {
+              // noop
+            }
+            closeRenovarModal();
+          })
+          .catch((err) => {
+            console.error("renovar add cart error", err);
+            alert("No se pudo agregar al carrito.");
+          });
+      });
+
+      const adjustMeses = (delta) => {
+        const current = Number(renovarSpan?.textContent || 1);
+        const next = Math.max(1, current + delta);
+        if (renovarSpan) renovarSpan.textContent = String(next);
+        updateRenovarDiscount();
+      };
+      btnRenovarMas?.addEventListener("click", () => adjustMeses(1));
+      btnRenovarMenos?.addEventListener("click", () => adjustMeses(-1));
+
+      // Agregar renovaciones seleccionadas
+      btnProximasAdd?.addEventListener("click", async () => {
+        if (!proximasContent) return;
+        const checks = proximasContent.querySelectorAll(
+          'input[type="checkbox"]:checked'
+        );
+        if (!checks.length) {
+          alert("Selecciona al menos una cuenta.");
+          return;
+        }
+        for (const chk of checks) {
+          const idVenta = chk.dataset.venta || null;
+          let idPrecio = chk.dataset.precio || null;
+          if (!idVenta) continue;
+          if (!idPrecio) {
+            try {
+              const { data: ventaRow, error: ventaErr } = await supabase
+                .from("ventas")
+                .select("id_precio")
+                .eq("id_venta", idVenta)
+                .maybeSingle();
+              if (ventaErr) throw ventaErr;
+              idPrecio = ventaRow?.id_precio || null;
+            } catch (err) {
+              console.error("buscar precio por venta error", err);
+            }
+          }
+          if (!idPrecio) continue;
+          await sendCartDelta(idPrecio, 1, 1, {
+            renovacion: true,
+            id_venta: idVenta,
+          }).catch((err) => console.error("add renovaciones error", err));
+        }
+        try {
+          await refreshCartFromServer();
+        } catch (_err) {
+          // noop
+        }
+        alert("Renovaciones agregadas al carrito.");
+        closeProximas();
+      });
+    </script>
+    <div id="modal-renovar" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <button class="modal-close modal-renovar-close" aria-label="Cerrar">
+          ×
+        </button>
+        <div class="modal-body modal-renovar-stack">
+          <h3>Renovar</h3>
+          <p id="renovar-costo" class="status"></p>
+          <p>¿Cuántos meses quieres renovar?</p>
+          <div class="modal-qty" id="modal-renovar-qty">
+            <span class="modal-duration-label">Duración:</span>
+            <button type="button" id="renovar-menos">-</button>
+            <span id="renovar-meses">1</span>
+            <button type="button" id="renovar-mas">+</button>
+            <span class="modal-duration-suffix">meses</span>
+            <span id="renovar-discount" class="discount-badge hidden"></span>
+          </div>
+          <button class="btn-primary" id="btn-renovar-agregar">
+            Agregar al carrito
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="modal-proximas" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen modal-card-proximas">
+        <button class="modal-close modal-proximas-close" aria-label="Cerrar">
+          ×
+        </button>
+        <div class="modal-body modal-proximas-body">
+          <h3 class="proximas-header modal-proximas-title">
+            Cuentas próximas a vencerse:
+          </h3>
+          <div id="proximas-content" class="proximas-panel"></div>
+          <div class="proximas-actions">
+            <button type="button" class="btn-primary" id="btn-proximas-add">
+              Añadir renovaciones al carrito
+            </button>
+            <p class="proximas-footnote">
+              (Puedes modificar la duración en el carrito)
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
