@@ -18,15 +18,15 @@
         <p class="auth-subtitle">Completa tus datos para registrarte.</p>
 
         <form class="auth-form" id="signup-form">
-          <label for="signup-nombre" class="form-label">Nombre</label>
+          <label for="signup-nombre" class="form-label required">Nombre</label>
           <input id="signup-nombre" name="nombre" class="form-input" type="text" required />
           <p id="nombre-error" class="input-message"></p>
 
-          <label for="signup-apellido" class="form-label">Apellido</label>
+          <label for="signup-apellido" class="form-label required">Apellido</label>
           <input id="signup-apellido" name="apellido" class="form-input" type="text" required />
           <p id="apellido-error" class="input-message"></p>
 
-          <label for="signup-telefono" class="form-label">Teléfono</label>
+          <label for="signup-telefono" class="form-label required">Teléfono</label>
           <input
             id="signup-telefono"
             name="telefono"
@@ -36,7 +36,7 @@
           />
           <p id="telefono-error" class="input-message"></p>
 
-          <label for="signup-correo" class="form-label">Correo electrónico</label>
+          <label for="signup-correo" class="form-label required">Correo electrónico</label>
           <input
             id="signup-correo"
             name="correo"
@@ -48,7 +48,7 @@
           />
           <p id="correo-error" class="input-message"></p>
 
-          <label for="signup-clave" class="form-label">Clave</label>
+          <label for="signup-clave" class="form-label required">Clave</label>
           <div class="input-with-toggle">
             <input
               id="signup-clave"
@@ -84,7 +84,7 @@
           </div>
           <p id="clave-error" class="input-message"></p>
 
-          <label for="signup-clave2" class="form-label">Confirmación de clave</label>
+          <label for="signup-clave2" class="form-label required">Confirmación de clave</label>
           <div class="input-with-toggle">
             <input
               id="signup-clave2"
@@ -127,9 +127,9 @@
 
         <p id="signup-status" class="input-message status-message"></p>
 
-        <button type="button" class="btn-outline auth-secondary" id="signup-login-btn">
-          ¿Ya tienes cuenta? Inicia sesión
-        </button>
+        <p class="auth-secondary">
+          ¿Ya tienes cuenta? Inicia sesión <a href="login.html" id="signup-login-link">aquí</a>
+        </p>
       </section>
     </main>
 

@@ -104,6 +104,7 @@
               <div id="prov-sugerencias" class="proveedor-sugerencias hidden"></div>
             </div>
             <button type="button" id="prov-buscar-btn" class="btn-primary">🔍</button>
+            <button type="button" id="prov-add-btn" class="btn-outline" title="Registrar proveedor">+</button>
             <button type="button" id="btn-netflix" class="btn-outline" title="Autocompletar Netflix">Netflix</button>
             <button type="button" id="btn-spotify" class="btn-outline" title="Autocompletar Spotify">Spotify</button>
           </div>
@@ -213,6 +214,7 @@
       const provInput = document.querySelector("#prov-buscar");
       const provSugs = document.querySelector("#prov-sugerencias");
       const provBtn = document.querySelector("#prov-buscar-btn");
+      const provAddBtn = document.querySelector("#prov-add-btn");
       const platSelect = document.querySelector("#plat-select");
       const durMenos = document.querySelector("#duracion-menos");
       const durMas = document.querySelector("#duracion-mas");
@@ -542,6 +544,10 @@
       provBtn?.addEventListener("click", (e) => {
         e.preventDefault();
         buscarProveedores(provInput?.value || "", false);
+      });
+      provAddBtn?.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.open("registrar_proveedor.html", "_blank");
       });
 
       const setProveedor = (id, nombre) => {

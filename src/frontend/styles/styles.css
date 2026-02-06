@@ -116,6 +116,7 @@ body {
     flex: 1 1 auto;
     min-width: 0;
     justify-content: flex-end;
+    margin-left: auto;
     gap: 6px;
     flex-wrap: wrap;
   }
@@ -252,12 +253,23 @@ body {
   text-align: left;
   padding: 8px 14px;
   font-weight: 600;
+  font-size: inherit;
+  line-height: inherit;
   cursor: pointer;
   color: inherit;
 }
 
 .dropdown-button:hover {
   background: #f2f2f2;
+}
+
+.logout-btn {
+  color: #dc2626;
+}
+
+.logout-btn:hover,
+.logout-btn:focus {
+  background: #fee2e2;
 }
 
 .carrito {
@@ -1551,6 +1563,12 @@ input[type="number"].input-inline {
   align-items: flex-start;
 }
 
+.form-label.required::after {
+  content: " *";
+  color: #dc2626;
+  font-weight: 700;
+}
+
 .auth-form .form-input,
 .auth-form .input-with-toggle {
   width: 100%;
@@ -1560,6 +1578,7 @@ input[type="number"].input-inline {
 
 .auth-submit {
   margin-top: 6px;
+  align-self: center;
 }
 
 .auth-secondary {

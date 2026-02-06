@@ -22,7 +22,7 @@ const errors = {
 
 const statusEl = document.getElementById("signup-status");
 const submitBtn = document.getElementById("signup-submit");
-const goLoginBtn = document.getElementById("signup-login-btn");
+const goLoginBtn = document.getElementById("signup-login-link");
 let iti = null;
 const toggleButtons = document.querySelectorAll(".toggle-password");
 let phoneMaxDigits = null;
@@ -90,13 +90,18 @@ async function handleSubmit(e) {
     hasError = true;
   }
   const digitsOnly = telefono.replace(/\D+/g, "");
+  if (phoneMaxDigits && digitsOnly.length > 0 && digitsOnly.length < phoneMaxDigits) {
+    errors.telefono.textContent = "Numero de telefono incompleto";
+    fields.telefono.classList.add("input-error");
+    hasError = true;
+  }
   if (phoneMaxDigits && digitsOnly.length > phoneMaxDigits) {
     errors.telefono.textContent = limitMessage();
     fields.telefono.classList.add("input-error");
     hasError = true;
   }
   if (!correo || !fields.correo.checkValidity()) {
-    errors.correo.textContent = "Ingresa un correo válido.";
+    errors.correo.textContent = "Correo invalido";
     fields.correo.classList.add("input-error");
     hasError = true;
   }
@@ -111,7 +116,10 @@ async function handleSubmit(e) {
     hasError = true;
   }
   if (clave && clave2 && clave !== clave2) {
-    errors.clave2.textContent = "Las contraseñas no coinciden.";
+    fields.clave.value = "";
+    fields.clave2.value = "";
+    errors.clave2.textContent = "Las claves no coinciden";
+    fields.clave.classList.add("input-error");
     fields.clave2.classList.add("input-error");
     hasError = true;
   }
@@ -277,7 +285,10 @@ function init() {
         errors.telefono.textContent = limitMessage();
         fields.telefono.classList.add("input-error");
         return;
-      } else if (errors.telefono.textContent === limitMessage()) {
+      } else if (
+        errors.telefono.textContent === limitMessage() ||
+        errors.telefono.textContent === "Numero de telefono incompleto"
+      ) {
         errors.telefono.textContent = "";
         fields.telefono.classList.remove("input-error");
       }
@@ -289,10 +300,19 @@ function init() {
         fields.telefono.maxLength = patternLength;
       }
     });
+    fields.telefono.addEventListener("blur", () => {
+      const digits = fields.telefono.value.replace(/\D+/g, "");
+      if (!digits) return;
+      if (phoneMaxDigits && digits.length < phoneMaxDigits) {
+        errors.telefono.textContent = "Numero de telefono incompleto";
+        fields.telefono.classList.add("input-error");
+      }
+    });
   }
 
   form?.addEventListener("submit", handleSubmit);
-  goLoginBtn?.addEventListener("click", () => {
+  goLoginBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
     window.location.href = "login.html";
   });
 
@@ -325,6 +345,15 @@ function init() {
       btn.setAttribute("aria-label", visible ? "Ocultar clave" : "Mostrar clave");
       btn.setAttribute("aria-pressed", String(visible));
     });
+  });
+
+  fields.correo?.addEventListener("blur", () => {
+    const val = fields.correo.value.trim();
+    if (!val) return;
+    if (!fields.correo.checkValidity()) {
+      errors.correo.textContent = "Correo invalido";
+      fields.correo.classList.add("input-error");
+    }
   });
 }
 

@@ -1070,28 +1070,24 @@
           const updates = seleccionActual.map(async (it) => {
             const entregaInmediata = resolveEntregaInmediata(it.entrega_inmediata);
             const isSuspendido = isTrue(it.suspendido);
-            let nuevaCorte = it.fecha_corte || "";
-            if (!entregaInmediata && !isSuspendido) {
-              const { error } = await supabase
-                .from("ventas")
-                .update({ pendiente: true, meses_contratados: it.meses || 1 })
-                .eq("id_venta", it.id_venta);
-              if (error) throw error;
-            } else {
-              let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
-              if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
-              baseDate.setMonth(baseDate.getMonth() + (it.meses || 1));
-              nuevaCorte = baseDate.toISOString().slice(0, 10);
-              const { error } = await supabase
-                .from("ventas")
-                .update({
-                  fecha_corte: nuevaCorte,
-                  fecha_pago: fechaPago,
-                  meses_contratados: it.meses || 1,
-                })
-                .eq("id_venta", it.id_venta);
-              if (error) throw error;
+            let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
+            if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
+            baseDate.setMonth(baseDate.getMonth() + (it.meses || 1));
+            const nuevaCorte = baseDate.toISOString().slice(0, 10);
+            const updatePayload = {
+              fecha_corte: nuevaCorte,
+              fecha_pago: fechaPago,
+              meses_contratados: it.meses || 1,
+              suspendido: false,
+            };
+            if (!entregaInmediata && isSuspendido) {
+              updatePayload.pendiente = true;
             }
+            const { error } = await supabase
+              .from("ventas")
+              .update(updatePayload)
+              .eq("id_venta", it.id_venta);
+            if (error) throw error;
 
             const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
             const accesoCliente = it.id_usuario_cliente ? userMap[it.id_usuario_cliente]?.acceso_cliente : null;
@@ -1247,10 +1243,20 @@
       });
 
       const addMonths = (baseDate, months) => {
-        const d = new Date(baseDate);
-        if (Number.isNaN(d.valueOf())) return null;
-        d.setMonth(d.getMonth() + months);
-        return d.toISOString().slice(0, 10);
+        if (!baseDate) return null;
+        const parts = String(baseDate).split("-");
+        let base =
+          parts.length === 3
+            ? new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+            : new Date(baseDate);
+        if (Number.isNaN(base.valueOf())) return null;
+        const day = base.getDate();
+        const temp = new Date(base.getFullYear(), base.getMonth(), 1);
+        temp.setMonth(temp.getMonth() + months);
+        const lastDay = new Date(temp.getFullYear(), temp.getMonth() + 1, 0).getDate();
+        temp.setDate(Math.min(day, lastDay));
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${temp.getFullYear()}-${pad(temp.getMonth() + 1)}-${pad(temp.getDate())}`;
       };
 
       btnRowRenovar?.addEventListener("click", async () => {
@@ -1273,31 +1279,25 @@
         const entregaInmediata = resolveEntregaInmediata(modalRowContext.entrega_inmediata);
         const isSuspendido = isTrue(modalRowContext.suspendido);
         const baseFecha = modalRowContext.fecha_corte || "";
-        let nuevaFecha = baseFecha;
-        if (entregaInmediata || isSuspendido) {
-          const baseForCalc = baseFecha || new Date().toISOString().slice(0, 10);
-          nuevaFecha = addMonths(baseForCalc, meses) || baseForCalc;
-        }
+        const baseForCalc = baseFecha || new Date().toISOString().slice(0, 10);
+        const nuevaFecha = addMonths(baseForCalc, meses) || baseForCalc;
         const fechaPago = new Date().toISOString().slice(0, 10);
         const registradoPor = window.__RC_USER_ID__ || null;
         try {
-          if (!entregaInmediata && !isSuspendido) {
-            const { error: updErr } = await supabase
-              .from("ventas")
-              .update({ pendiente: true, meses_contratados: meses })
-              .eq("id_venta", modalRowContext.id_venta);
-            if (updErr) throw updErr;
-          } else {
-            const { error: updErr } = await supabase
-              .from("ventas")
-              .update({
-                fecha_corte: nuevaFecha,
-                fecha_pago: fechaPago,
-                meses_contratados: meses,
-              })
-              .eq("id_venta", modalRowContext.id_venta);
-            if (updErr) throw updErr;
+          const updatePayload = {
+            fecha_corte: nuevaFecha,
+            fecha_pago: fechaPago,
+            meses_contratados: meses,
+            suspendido: false,
+          };
+          if (!entregaInmediata && isSuspendido) {
+            updatePayload.pendiente = true;
           }
+          const { error: updErr } = await supabase
+            .from("ventas")
+            .update(updatePayload)
+            .eq("id_venta", modalRowContext.id_venta);
+          if (updErr) throw updErr;
 
           const { error: histErr } = await supabase.from("historial_ventas").insert({
             monto,

@@ -18,6 +18,15 @@
       .table-base tbody tr.spotify-soon-3 td {
         background: #f59e0b14 !important;
       }
+      .admin-actions.admin-group .admin-loading {
+        display: none;
+      }
+      .admin-actions.admin-group[data-loading="true"] .admin-loading {
+        display: block;
+      }
+      .admin-actions.admin-group[data-loading="true"] > :not(.admin-loading) {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -43,18 +52,21 @@
           <p class="card-desc">Solicitudes recientes</p>
         </div>
       </div>
-      <div class="admin-actions admin-group">
+      <div class="admin-actions admin-group" data-loading="true">
+        <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-renovar-servicio">Renovar servicio cliente</button>
       </div>
-      <div class="admin-actions admin-group">
+      <div class="admin-actions admin-group" data-loading="true">
+        <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-editar-precios">Editar precios</button>
         <button class="btn-primary admin-action" id="btn-importar-datos">Importar datos</button>
-        <button class="btn-primary admin-action" id="btn-registrar-proveedor">Registrar proveedor</button>
       </div>
-      <div class="admin-actions admin-group">
+      <div class="admin-actions admin-group" data-loading="true">
+        <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
       </div>
-      <div class="admin-actions admin-group">
+      <div class="admin-actions admin-group" data-loading="true">
+        <div class="admin-loading status">Cargando...</div>
         <h3 style="margin: 0 0 6px 0;">Cuentas madre Spotify próximas a vencer</h3>
         <button class="btn-primary admin-action" id="btn-renovar-spotify" style="margin: 6px 0 8px 0;">Renovar</button>
         <div id="spotify-cuentas-status" class="status">Cargando...</div>
@@ -111,6 +123,9 @@
       const countCortesEl = document.querySelector("#count-cortes");
       const countPedidosEl = document.querySelector("#count-pedidos");
       const pinesPorComprarEl = document.querySelector("#pines-por-comprar");
+      const adminGroups = Array.from(
+        document.querySelectorAll(".admin-actions.admin-group"),
+      );
       const spotifyTable = document.querySelector("#spotify-cuentas-table tbody");
       const spotifyStatus = document.querySelector("#spotify-cuentas-status");
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
@@ -140,6 +155,13 @@
         const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
         d.setDate(Math.min(day, lastDay));
         return d;
+      };
+
+      const setAdminGroupsLoading = (isLoading) => {
+        adminGroups.forEach((group) => {
+          if (!group) return;
+          group.dataset.loading = isLoading ? "true" : "false";
+        });
       };
 
       async function loadCounts() {
@@ -239,6 +261,7 @@
       }
 
       async function init() {
+        setAdminGroupsLoading(true);
         try {
           const user = await loadCurrentUser();
           if (user && usernameEl) {
@@ -259,6 +282,8 @@
           await loadSpotifyMadres();
         } catch (err) {
           console.error("admin init error", err);
+        } finally {
+          setAdminGroupsLoading(false);
         }
       }
 

@@ -309,6 +309,18 @@
         font-size: 12px;
         color: #111;
       }
+      .cuenta-estado-pill.inactiva {
+        background: #e5e7eb;
+        color: #374151;
+      }
+      .cuenta-estado-pill.vencido {
+        background: #fed7aa;
+        color: #9a3412;
+      }
+      .cuenta-estado-pill.activo {
+        background: #d1fae5;
+        color: #065f46;
+      }
       .correo-copy {
         cursor: pointer;
       }
@@ -402,6 +414,7 @@
             <div class="cuentas-acciones" style="margin-top: 6px">
               <button type="button" id="btn-buscar-venta">🔍</button>
             </div>
+            <p id="venta-search-msg" class="status" style="margin-top:6px; display:none;"></p>
           </div>
           <div class="input-wrap">
             <select id="select-plataforma" class="form-select">
@@ -416,6 +429,7 @@
               autocomplete="off"
             />
             <div id="sugs-clientes" class="sugerencias-cuentas hidden"></div>
+            <p id="cliente-search-msg" class="status" style="margin-top:6px; display:none;"></p>
           </div>
           <div class="input-wrap">
             <input
@@ -425,6 +439,7 @@
               autocomplete="off"
             />
             <div id="sugs-cuentas" class="sugerencias-cuentas hidden"></div>
+            <p id="cuenta-search-msg" class="status" style="margin-top:6px; display:none;"></p>
           </div>
           <div class="cuentas-acciones">
             <button type="button" id="btn-buscar-cuenta">🔍</button>
@@ -632,6 +647,57 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) =>
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const parseDateValue = (value) => {
+        if (!value) return null;
+        const str = String(value).trim();
+        const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) {
+          const [, yyyy, mm, dd] = isoMatch;
+          const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+          if (!Number.isNaN(parsed.valueOf())) return parsed;
+        }
+        const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (match) {
+          const [, dd, mm, yyyy] = match;
+          const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+          if (!Number.isNaN(parsed.valueOf())) return parsed;
+        }
+        const fallback = new Date(str);
+        return Number.isNaN(fallback.valueOf()) ? null : fallback;
+      };
+      const isOnOrBeforeToday = (value) => {
+        const d = parseDateValue(value);
+        if (!d) return false;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const cmp = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        return cmp <= today;
+      };
+      const getEstadoVenta = ({ suspendido, fecha_corte } = {}) => {
+        if (suspendido === true) {
+          return { label: "Suspendido", className: "suspendido" };
+        }
+        if (!fecha_corte) {
+          return { label: "-", className: "" };
+        }
+        if (isOnOrBeforeToday(fecha_corte)) {
+          return { label: "Vencido", className: "vencido" };
+        }
+        return { label: "Activo", className: "activo" };
+      };
+      const getEstadoCuenta = (cuenta) => {
+        if (!cuenta) return { label: "-", className: "" };
+        if (cuenta.inactiva === true) {
+          return { label: "Inactiva", className: "inactiva" };
+        }
+        if (!cuenta.fecha_corte) {
+          return { label: "-", className: "" };
+        }
+        if (isOnOrBeforeToday(cuenta.fecha_corte)) {
+          return { label: "Vencido", className: "vencido" };
+        }
+        return { label: "Activo", className: "activo" };
+      };
       const decorateCopyColumns = (root) => {
         if (!root) return;
         root.querySelectorAll("table").forEach((table) => {
@@ -680,6 +746,9 @@
       const btnBuscar = document.querySelector("#btn-buscar-cuenta");
       const btnBuscarVenta = document.querySelector("#btn-buscar-venta");
       const inputVentaId = document.querySelector("#input-venta-id");
+      const ventaSearchMsg = document.querySelector("#venta-search-msg");
+      const clienteSearchMsg = document.querySelector("#cliente-search-msg");
+      const cuentaSearchMsg = document.querySelector("#cuenta-search-msg");
       const btnIrAgregar = document.querySelector("#btn-ir-agregar");
       const btnCanva = document.querySelector("#btn-canva");
       const detalleEl = document.querySelector("#cuenta-detalle");
@@ -730,6 +799,16 @@
           .replace(/[\u0300-\u036f]/g, "")
           .toLowerCase()
           .trim();
+      const setSearchMsg = (el, msg) => {
+        if (!el) return;
+        if (msg) {
+          el.textContent = msg;
+          el.style.display = "block";
+        } else {
+          el.textContent = "";
+          el.style.display = "none";
+        }
+      };
       const findClienteByTerm = async (term) => {
         const txt = (term || "").trim();
         if (!txt) return null;
@@ -802,13 +881,7 @@
         userId,
         cuentaId,
       }) => {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        let estado = "Activo";
-        if (currentCanvaCuenta?.inactiva === true) {
-          estado = "Inactiva";
-        } else if (fechaCorte && fechaCorte <= todayStr) {
-          estado = "Vencido";
-        }
+        const estadoInfo = getEstadoVenta({ fecha_corte: fechaCorte });
         const correoCell = isSuperadmin
           ? `<div class="fecha-wrap">
               <span class="correo-copy correo-text" data-clipboard="${correo || ""}">${correo || "-"}</span>
@@ -838,15 +911,15 @@
           : `${formatDDMMYYYY(fechaCorte) || ""}`;
         const deleteBtn =
           isSuperadmin && idVenta
-            ? `<button type="button" class="btn-delete-venta" data-id-venta="${idVenta}">Eliminar</button>`
-            : "";
+          ? `<button type="button" class="btn-delete-venta" data-id-venta="${idVenta}">Eliminar</button>`
+          : "";
         return `
           <tr data-id-venta="${idVenta || ""}">
             <td>${idVenta ? `#${idVenta}` : ""}</td>
             <td>${clienteCell}</td>
             <td>${correoCell}</td>
             <td>${fechaCell}</td>
-            <td>${estado}</td>
+            <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
             <td>
               <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${cuentaId || ""}">Ver cuenta</button>
               ${deleteBtn}
@@ -1142,7 +1215,7 @@
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
           hideDetalle();
           clearCorreoPlataformas();
-          return;
+          return [];
         }
         const current = ++fetchCounter;
         try {
@@ -1162,9 +1235,11 @@
             ).values(),
           ).slice(0, 5);
           renderSugerencias(unique, forceHide);
+          return unique;
         } catch (err) {
           console.error("buscar cuentas error", err);
           renderSugerencias([], true);
+          return [];
         }
       };
 
@@ -1183,12 +1258,19 @@
       };
 
       inputCuenta?.addEventListener("input", (e) => {
+        setSearchMsg(cuentaSearchMsg, "");
         buscarCuentas(e.target.value || "");
       });
 
       btnBuscar?.addEventListener("click", (e) => {
         e.preventDefault();
-        buscarCuentas(inputCuenta?.value || "", false);
+        const term = inputCuenta?.value || "";
+        setSearchMsg(cuentaSearchMsg, "");
+        buscarCuentas(term, false).then((results) => {
+          if (!results?.length) {
+            setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
+          }
+        });
         // si solo hay un match con id, carga detalle directamente
         setTimeout(() => {
           if (inputCuenta?.value) {
@@ -1198,12 +1280,17 @@
         renderSugerencias([], true);
       });
 
-      inputCuenta?.addEventListener("keydown", (e) => {
+      inputCuenta?.addEventListener("keydown", async (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          buscarCuentas(inputCuenta?.value || "", true);
-          loadCuentaDetalleByCorreo(inputCuenta?.value || "");
+          const term = inputCuenta?.value || "";
+          setSearchMsg(cuentaSearchMsg, "");
+          const results = await buscarCuentas(term, true);
+          loadCuentaDetalleByCorreo(term);
           renderSugerencias([], true);
+          if (!results?.length) {
+            setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
+          }
         }
       });
 
@@ -1211,8 +1298,14 @@
       inputCuenta?.addEventListener("keyup", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          buscarCuentas(inputCuenta?.value || "", true);
-          loadCuentaDetalleByCorreo(inputCuenta?.value || "");
+          const term = inputCuenta?.value || "";
+          setSearchMsg(cuentaSearchMsg, "");
+          buscarCuentas(term, true).then((results) => {
+            if (!results?.length) {
+              setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
+            }
+          });
+          loadCuentaDetalleByCorreo(term);
           renderSugerencias([], true);
         }
       });
@@ -1242,7 +1335,7 @@
         const term = (texto || "").trim();
         if (!term) {
           renderSugerenciasClientes([], true);
-          return;
+          return [];
         }
         const tokens = term.split(/\s+/).filter(Boolean);
         const firstToken = tokens[0] || "";
@@ -1273,10 +1366,37 @@
             }))
             .slice(0, 5);
           renderSugerenciasClientes(parsed, false);
+          return parsed;
         } catch (err) {
           console.error("buscar clientes error", err);
           renderSugerenciasClientes([], true);
+          return [];
         }
+      };
+
+      const runClienteSearch = async () => {
+        const term = (inputCliente?.value || "").trim();
+        setSearchMsg(clienteSearchMsg, "");
+        if (!term) {
+          setSearchMsg(clienteSearchMsg, "No se encontraron coincidencias");
+          return;
+        }
+        const found = await findClienteByTerm(term);
+        renderSugerenciasClientes([], true);
+        renderSugerencias([], true);
+        if (!found?.id_usuario) {
+          setSearchMsg(clienteSearchMsg, "No se encontraron coincidencias");
+          return;
+        }
+        if (inputCliente) {
+          const fullName = [found.nombre, found.apellido]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          if (fullName) inputCliente.value = fullName;
+          inputCliente.dataset.selectedId = found.id_usuario;
+        }
+        loadVentasByCliente(found.id_usuario);
       };
 
       const renderVentaResultado = (ventaData, notFound = false) => {
@@ -1319,14 +1439,14 @@
       const buscarVentaPorId = async (id) => {
         if (!id) {
           renderVentaResultado(null);
-          return;
+          return false;
         }
         try {
           const cleaned = String(id).replace(/[^0-9]/g, "");
           const idNum = Number(cleaned);
           if (!idNum) {
             renderVentaResultado(null, true);
-            return;
+            return false;
           }
           const { data: venta, error } = await supabase
             .from("ventas")
@@ -1336,7 +1456,7 @@
           if (error) throw error;
           if (!venta) {
             renderVentaResultado(null, true);
-            return;
+            return false;
           }
           let usuarioNombre = "Vacío";
           if (venta.id_usuario) {
@@ -1372,9 +1492,11 @@
             id_cuenta: venta.id_cuenta,
             id_venta: venta.id_venta,
           });
+          return true;
         } catch (err) {
           console.error("buscar venta por id error", err);
           renderVentaResultado(null, true);
+          return false;
         }
       };
 
@@ -1638,17 +1760,20 @@
           inputCliente.value = "";
           delete inputCliente.dataset.selectedId;
         }
+        setSearchMsg(clienteSearchMsg, "");
         renderSugerenciasClientes([], true);
       };
 
       const resetCuentaBusqueda = () => {
         if (inputCuenta) inputCuenta.value = "";
+        setSearchMsg(cuentaSearchMsg, "");
         renderSugerencias([], true);
         detalleEl && (detalleEl.innerHTML = "");
         clearCorreoPlataformas();
       };
 
       inputCliente?.addEventListener("input", (e) => {
+        setSearchMsg(clienteSearchMsg, "");
         if (e.target.value?.length) {
           resetCuentaBusqueda();
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
@@ -1659,9 +1784,17 @@
         buscarClientes(e.target.value || "");
       });
 
+      inputCliente?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          runClienteSearch();
+        }
+      });
+
       sugsClientes?.addEventListener("click", (e) => {
         const btn = e.target.closest("button");
         if (!btn) return;
+        setSearchMsg(clienteSearchMsg, "");
         const texto = btn.textContent || "";
         if (inputCliente) {
           const nameOnly = texto.replace(/\s*\(.+\)\s*$/, "").trim();
@@ -1677,6 +1810,7 @@
       });
 
       inputCuenta?.addEventListener("input", (e) => {
+        setSearchMsg(cuentaSearchMsg, "");
         if (e.target.value?.length) {
           resetClienteBusqueda();
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
@@ -1698,15 +1832,28 @@
         if (!insideClientes) renderSugerenciasClientes([], true);
       });
 
-      btnBuscarVenta?.addEventListener("click", (e) => {
+      inputVentaId?.addEventListener("input", () => {
+        setSearchMsg(ventaSearchMsg, "");
+      });
+
+      btnBuscarVenta?.addEventListener("click", async (e) => {
         e.preventDefault();
-        buscarVentaPorId(inputVentaId?.value || "");
+        setSearchMsg(ventaSearchMsg, "");
+        const found = await buscarVentaPorId(inputVentaId?.value || "");
+        if (!found) {
+          setSearchMsg(ventaSearchMsg, "No se encontraron coincidencias");
+        }
       });
 
       inputVentaId?.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          buscarVentaPorId(inputVentaId?.value || "");
+          setSearchMsg(ventaSearchMsg, "");
+          buscarVentaPorId(inputVentaId?.value || "").then((found) => {
+            if (!found) {
+              setSearchMsg(ventaSearchMsg, "No se encontraron coincidencias");
+            }
+          });
         }
       });
 
@@ -2150,6 +2297,7 @@
       sugs?.addEventListener("click", (e) => {
         const btn = e.target.closest("button");
         if (!btn || !inputCuenta) return;
+        setSearchMsg(cuentaSearchMsg, "");
         inputCuenta.value = btn.dataset.correo || "";
         renderSugerencias([], true);
         if (btn.dataset.correo) {
@@ -2240,16 +2388,11 @@
             }, {});
           }
 
-          const todayStr = new Date().toISOString().slice(0, 10);
           const rows = (ventas || []).map((v) => {
-            let estado = "Activo";
-            if (cuenta.inactiva === true) {
-              estado = "Inactiva";
-            } else if (v.suspendido === true) {
-              estado = "Suspendido";
-            } else if (v.fecha_corte && v.fecha_corte <= todayStr) {
-              estado = "Vencido";
-            }
+            const estadoInfo = getEstadoVenta({
+              suspendido: v.suspendido === true,
+              fecha_corte: v.fecha_corte,
+            });
             const perfilInfo = perfilesMap[v.id_perfil] || {};
             const cliente = usersMap[v.id_usuario] || "-";
             const copyText = `Correo: ${v.correo_miembro || ""}`;
@@ -2260,7 +2403,7 @@
                 <td>${cliente}</td>
                 <td>${v.correo_miembro || "-"}</td>
                 <td>${formatDDMMYYYY(v.fecha_corte) || "-"}</td>
-                <td>${estado}</td>
+                <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
@@ -2411,35 +2554,7 @@
           });
         }
 
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const parseDateValue = (value) => {
-          if (!value) return null;
-          const d = new Date(value);
-          if (!Number.isNaN(d.valueOf())) return d;
-          const match = String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-          if (match) {
-            const [, dd, mm, yyyy] = match;
-            const parsed = new Date(`${yyyy}-${mm}-${dd}`);
-            if (!Number.isNaN(parsed.valueOf())) return parsed;
-          }
-          return null;
-        };
-        const isBeforeToday = (value) => {
-          const d = parseDateValue(value);
-          if (!d) return false;
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          return d < today;
-        };
-        const getEstado = (row) => {
-          if (row.suspendido === true) {
-            return { label: "Suspendido", className: "suspendido" };
-          }
-          if (row.fecha_corte && isBeforeToday(row.fecha_corte)) {
-            return { label: "Activo", className: "activo" };
-          }
-          return { label: "-", className: "" };
-        };
+        const getEstado = (row) => getEstadoVenta(row);
 
         const tbodyRows = rows
           .map((p) => {
@@ -2849,7 +2964,7 @@
                   <button type="button" class="btn-cancel-fecha-cuenta hidden">✖</button>
                 </span>
               </p>
-              <p><span class="cuenta-estado-pill">${info.estadoCuenta || "-"}</span></p>
+              <p><span class="cuenta-estado-pill ${info.estadoCuentaClass || ""}">${info.estadoCuenta || "-"}</span></p>
             </div>
             <div>
               <p><strong>Acceso a códigos</strong></p>
@@ -3039,13 +3154,7 @@
 
           const platId = cuenta.id_plataforma;
           const provId = cuenta.id_proveedor;
-          const todayStr = new Date().toISOString().slice(0, 10);
-          let estadoCuenta = "Activo";
-          if (cuenta.inactiva === true) {
-            estadoCuenta = "Inactiva";
-          } else if (cuenta.fecha_corte && cuenta.fecha_corte <= todayStr) {
-            estadoCuenta = "Vencido";
-          }
+          const cuentaEstado = getEstadoCuenta(cuenta);
 
           const [
             { data: prov, error: provErr },
@@ -3364,7 +3473,8 @@
             clave: cuenta.clave || "",
             fecha_corte: cuenta.fecha_corte || "",
             fecha_corte_fmt: formatDDMMYYYY(cuenta.fecha_corte) || "",
-            estadoCuenta,
+            estadoCuenta: cuentaEstado.label,
+            estadoCuentaClass: cuentaEstado.className,
             perfiles: perfilesRows,
             madreRows,
             colMode,
@@ -4126,9 +4236,7 @@
               const correoVal = (correoInput?.value || "").trim();
               const claveVal = (claveInput?.value || "").trim();
               const fechaFmt = formatDDMMYYYY(fechaVal) || fechaVal || "";
-              const todayStr = new Date().toISOString().slice(0, 10);
-              const estadoLabel = fechaVal && fechaVal < todayStr ? "Activo" : "-";
-              const estadoClass = estadoLabel === "Activo" ? "activo" : "";
+              const estadoInfo = getEstadoVenta({ fecha_corte: fechaVal });
               const showClaveCliente =
                 currentCuentaDetalle?.clave_cliente === true;
 
@@ -4147,9 +4255,10 @@
               if (showClaveCliente && claveCell) claveCell.textContent = claveVal || "-";
               if (fechaCell) fechaCell.textContent = fechaFmt;
               if (estadoCell) {
-                estadoCell.textContent = estadoLabel;
+                estadoCell.textContent = estadoInfo.label;
                 estadoCell.classList.remove("activo", "vencido", "suspendido");
-                if (estadoClass) estadoCell.classList.add(estadoClass);
+                if (estadoInfo.className)
+                  estadoCell.classList.add(estadoInfo.className);
               }
 
               let nPerfil = "";

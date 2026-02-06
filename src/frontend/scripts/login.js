@@ -8,7 +8,7 @@ const emailError = document.getElementById("email-error");
 const passwordError = document.getElementById("password-error");
 const statusMessage = document.getElementById("login-status");
 const toggleBtn = document.querySelector(".toggle-password");
-const signupBtn = document.querySelector(".auth-secondary");
+const signupBtn = document.getElementById("login-signup-link");
 const submitBtn = document.querySelector(".auth-submit");
 
 function clearFeedback() {
@@ -60,7 +60,32 @@ async function handleLogin(event) {
       password,
     });
     if (authErr) {
-      throw authErr;
+      const msg = (authErr.message || "").toLowerCase();
+      if (msg.includes("invalid login credentials")) {
+        try {
+          const { data: userRow } = await supabase
+            .from("usuarios")
+            .select("id_usuario")
+            .ilike("correo", email)
+            .maybeSingle();
+          if (!userRow) {
+            emailError.innerHTML =
+              'Correo no registrado. <a class="link-inline" href="signup.html">Registrate aquí</a>';
+            emailInput.classList.add("input-error");
+          } else {
+            passwordInput.value = "";
+            passwordError.textContent = "Contraseña incorrecta";
+            passwordInput.classList.add("input-error");
+          }
+        } catch (_) {
+          passwordInput.value = "";
+          passwordError.textContent = "Contraseña incorrecta";
+          passwordInput.classList.add("input-error");
+        }
+        return;
+      }
+      setStatus("No se pudo iniciar sesión. Intenta de nuevo.", true);
+      return;
     }
 
     // 2) Buscar usuario en tabla usuarios por correo (para id_usuario)
@@ -130,7 +155,8 @@ function initToggle() {
 
 function initSignupRedirect() {
   if (!signupBtn) return;
-  signupBtn.addEventListener("click", () => {
+  signupBtn.addEventListener("click", (e) => {
+    e.preventDefault();
     window.location.href = "signup.html";
   });
 }
