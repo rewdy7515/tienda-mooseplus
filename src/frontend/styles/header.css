@@ -165,8 +165,13 @@
     width: 100%;
     min-width: 0;
   }
-  .user-info {
+  #btn-admin-header {
     order: 2;
+    margin-left: auto;
+    margin-right: 6px;
+  }
+  .user-info {
+    order: 3;
     width: auto;
     justify-content: flex-end;
     gap: 6px;

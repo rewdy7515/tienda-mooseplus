@@ -223,7 +223,10 @@
             const correo = useCorreoCliente ? v.correo_miembro || "-" : cuenta.correo || "-";
             const perfInfo = v.id_perfil ? mapPerf[v.id_perfil] : null;
             const perfilTxt = perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
-            const hogarTxt = perfInfo?.hogar ? " (HOGAR ACTUALIZADO)" : "";
+            const isNetflix = platId === 1;
+            const isPlan2Precio = v.id_precio === 4 || v.id_precio === 5;
+            const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfInfo?.hogar);
+            const hogarTxt = isNetflixPlan2 ? " (HOGAR ACTUALIZADO)" : "";
             const key = v.id_usuario || "sin_usuario";
             if (!acc[key]) {
               acc[key] = { cliente, bloques: [] };

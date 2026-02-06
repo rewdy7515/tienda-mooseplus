@@ -25,8 +25,6 @@ const dropzone = document.querySelector("#dropzone");
 const totalEl = document.querySelector("#checkout-total");
 const btnSendPayment = document.querySelector("#btn-send-payment");
 const refInput = document.querySelector("#input-ref");
-const phoneInput = document.querySelector("#input-phone");
-const phoneWrap = document.querySelector("#phone-wrap");
 const btnVerifyPayment = document.querySelector("#btn-verify-payment");
 
 let metodos = [];
@@ -218,7 +216,6 @@ const renderDetalle = () => {
     { label: "Correo", valor: m.correo, copy: true },
     { label: "ID", valor: m.id, copy: true },
     { label: "Cédula", valor: m.cedula, copy: false },
-    { label: "Teléfono", valor: m.telefono, copy: false },
   ].filter((c) => c.valor !== null && c.valor !== undefined && c.valor !== "");
 
   const detalleHtml = campos
@@ -232,9 +229,6 @@ const renderDetalle = () => {
     .join("");
 
   const isMetodoBs = Number(m.id_metodo_de_pago ?? m.id) === 1;
-  if (phoneWrap) {
-    phoneWrap.classList.toggle("hidden", !isMetodoBs);
-  }
   if (pagoMovilNote) {
     pagoMovilNote.classList.toggle("hidden", !isMetodoBs);
   }
@@ -463,7 +457,6 @@ const verifyPagoMovil = async () => {
   }
 
   const refDigits = refInput.value.trim();
-  const telefono = phoneInput?.value.trim() || "";
   let montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
   let cartMontoBs = null;
   let cartTasaBs = null;
@@ -489,11 +482,11 @@ const verifyPagoMovil = async () => {
     alert("No se pudo obtener el monto o la tasa del carrito.");
     return { ok: false };
   }
-  console.log("[pago movil] input", { refDigits, telefono, montoBs, tasaBs, totalUsd, cartId });
+  console.log("[pago movil] input", { refDigits, montoBs, tasaBs, totalUsd, cartId });
 
   const resp = await supabase
     .from("pagomoviles")
-    .select("id, referencia, texto, num_telefono, monto_bs, saldo_acreditado")
+    .select("id, referencia, texto, monto_bs, saldo_acreditado")
     .or("saldo_acreditado.is.null,saldo_acreditado.eq.false")
     .order("id", { ascending: false });
   const pagos = resp.data || [];
@@ -597,16 +590,6 @@ const verifyPagoMovil = async () => {
   return { ok: false };
 };
 
-const formatPhoneValue = (raw = "") => {
-  const digits = raw.replace(/\D/g, "").slice(0, 11);
-  if (digits.length <= 4) return digits;
-  return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-};
-
-phoneInput?.addEventListener("input", () => {
-  phoneInput.value = formatPhoneValue(phoneInput.value);
-});
-
 const calcularTotalRpc = async (id_carrito) => {
   if (!id_carrito) return null;
   try {
@@ -644,7 +627,7 @@ async function init() {
     const [cartData, catalog, metodosResp, tasaResp, user] = await Promise.all([
       fetchCart(),
       loadCatalog(),
-      supabase.from("metodos_de_pago").select("id_metodo_de_pago, nombre, correo, id, cedula, telefono"),
+      supabase.from("metodos_de_pago").select("id_metodo_de_pago, nombre, correo, id, cedula"),
       fetchP2PRate(),
       loadCurrentUser(),
     ]);
@@ -783,11 +766,6 @@ btnSendPayment?.addEventListener("click", async () => {
     return;
   }
   if (isMetodoBs) {
-    if (!phoneInput?.value.trim()) {
-      alert("Ingresa el número de teléfono.");
-      phoneInput?.classList.add("input-error");
-      return;
-    }
     if (!Number.isFinite(tasaBs)) {
       alert("No se pudo obtener la tasa.");
       return;

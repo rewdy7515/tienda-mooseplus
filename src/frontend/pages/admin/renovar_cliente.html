@@ -63,6 +63,46 @@
       .buscador-sugerencias button:hover {
         background: #f7f7f7;
       }
+      .modal-row-layout {
+        display: flex;
+        gap: 20px;
+        align-items: stretch;
+      }
+      .modal-row-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .modal-row-aside {
+        width: 190px;
+        border-left: 1px solid #eee;
+        padding-left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .modal-row-aside .monto-label {
+        font-weight: 700;
+        font-size: 13px;
+        color: #374151;
+        margin: 0;
+      }
+      .modal-row-aside .monto-value {
+        font-weight: 800;
+        font-size: 22px;
+        color: #111;
+      }
+      @media (max-width: 640px) {
+        .modal-row-layout {
+          flex-direction: column;
+        }
+        .modal-row-aside {
+          width: 100%;
+          border-left: none;
+          border-top: 1px solid #eee;
+          padding-left: 0;
+          padding-top: 12px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -329,11 +369,12 @@
                   data-id-cuenta="${r.id_cuenta || ""}"
                   data-id-usuario="${r.id_usuario_cliente || ""}"
                   data-correo="${r.correo || ""}"
-                  data-clave="${r.clave || ""}"
-                  data-n-perfil="${r.n_perfil || ""}"
-                  data-pin="${r.pin || ""}"
-                  data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
-                  data-entrega="${r.entrega_inmediata ? "true" : "false"}"
+          data-clave="${r.clave || ""}"
+          data-n-perfil="${r.n_perfil || ""}"
+          data-pin="${r.pin || ""}"
+          data-id-precio="${r.id_precio || ""}"
+          data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
+          data-entrega="${r.entrega_inmediata ? "true" : "false"}"
                   data-suspendido="${r.suspendido ? "true" : "false"}"
                   data-hogar="${r.hogar_actualizado ? "true" : "false"}"
                 >
@@ -421,7 +462,7 @@
             }
             const { data: ventas, error: ventErr } = await supabase
               .from("ventas")
-              .select("id_venta, id_usuario, id_cuenta, id_perfil, fecha_corte, suspendido")
+              .select("id_venta, id_usuario, id_cuenta, id_perfil, fecha_corte, suspendido, id_precio")
               .in("id_usuario", ids)
               .limit(50);
             if (ventErr) {
@@ -521,6 +562,7 @@
                   !!memberId);
               return {
                 id_venta: v.id_venta,
+                id_precio: v.id_precio || null,
                 plataforma: platInfo?.nombre || "",
                 plataforma_nombre: platInfo?.nombre || "",
                 id_plataforma: platId,
@@ -597,7 +639,7 @@
             ventasPromises.push(
               supabase
                 .from("ventas")
-                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte, suspendido")
+                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte, suspendido, id_precio")
                 .in("id_cuenta", cuentaIds)
             );
           } else {
@@ -607,7 +649,7 @@
             ventasPromises.push(
               supabase
                 .from("ventas")
-                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte, suspendido")
+                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte, suspendido, id_precio")
                 .in("id_perfil", dominioPerfilIds)
             );
           } else {
@@ -709,11 +751,12 @@
                 cuenta?.venta_miembro === true ||
                 !!memberId);
             const fechaRaw = v.fecha_corte || "";
-            return {
-              plataforma: plat?.nombre || "",
-              plataforma_nombre: plat?.nombre || "",
-              id_venta: v.id_venta,
-              id_plataforma: cuenta.id_plataforma || plat?.id_plataforma || null,
+              return {
+                plataforma: plat?.nombre || "",
+                plataforma_nombre: plat?.nombre || "",
+                id_venta: v.id_venta,
+                id_precio: v.id_precio || null,
+                id_plataforma: cuenta.id_plataforma || plat?.id_plataforma || null,
               id_cuenta: memberId || v.id_cuenta || null,
               id_usuario_cliente: v.id_usuario || null,
               correo: memberCuenta?.correo || cuenta?.correo || "",
@@ -916,6 +959,115 @@
         const base = name || "";
         if (!base) return base;
         return hogarActualizado ? `${base} (HOGAR ACTUALIZADO)` : base;
+      };
+
+      const formatMonto = (value) => {
+        if (!Number.isFinite(value)) return "--";
+        return Number(value).toLocaleString("es-VE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      };
+
+      const pickPrecioByAcceso = (price, acceso) => {
+        const esMayorista =
+          acceso === false || acceso === "false" || acceso === 0 || acceso === "0";
+        const detal = Number(price?.precio_usd_detal) || 0;
+        const mayor = Number(price?.precio_usd_mayor) || 0;
+        return esMayorista ? mayor || detal : detal || mayor;
+      };
+
+      const resolvePrecioByCuenta = (preciosPlat, cuenta) => {
+        const ventaPerfil = cuenta?.venta_perfil === true;
+        const ventaMiembro = cuenta?.venta_miembro === true;
+        let candidatos = [];
+        if (ventaPerfil) {
+          candidatos = preciosPlat.filter((p) => p.completa === false && p.sub_cuenta === false);
+        } else if (!ventaPerfil && !ventaMiembro) {
+          candidatos = preciosPlat.filter((p) => p.completa === true && p.sub_cuenta === false);
+        } else if (ventaMiembro) {
+          candidatos = preciosPlat.filter((p) => p.sub_cuenta === true);
+        }
+        return candidatos[0] || preciosPlat[0] || null;
+      };
+
+      const fetchMontoBaseForRow = async (ctx) => {
+        if (!ctx) return null;
+        const idVenta = ctx.id_venta ? Number(ctx.id_venta) : null;
+        let idPrecio = ctx.id_precio ? Number(ctx.id_precio) : null;
+        let accesoCliente = null;
+        if (ctx.id_usuario_cliente) {
+          const { data: userRow, error: userErr } = await supabase
+            .from("usuarios")
+            .select("acceso_cliente")
+            .eq("id_usuario", ctx.id_usuario_cliente)
+            .maybeSingle();
+          if (userErr) throw userErr;
+          accesoCliente = userRow?.acceso_cliente;
+        }
+        if (!idPrecio && idVenta) {
+          const { data: ventaRow, error: ventaErr } = await supabase
+            .from("ventas")
+            .select("id_precio")
+            .eq("id_venta", idVenta)
+            .maybeSingle();
+          if (ventaErr) throw ventaErr;
+          idPrecio = ventaRow?.id_precio ? Number(ventaRow.id_precio) : null;
+        }
+        if (idPrecio) {
+          const { data: precioRow, error: precioErr } = await supabase
+            .from("precios")
+            .select("id_precio, precio_usd_detal, precio_usd_mayor")
+            .eq("id_precio", idPrecio)
+            .maybeSingle();
+          if (precioErr) throw precioErr;
+          return pickPrecioByAcceso(precioRow, accesoCliente);
+        }
+
+        let cuentaInfo = null;
+        if (ctx.id_cuenta) {
+          const { data: cuentaRow, error: cErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, id_plataforma, venta_perfil, venta_miembro")
+            .eq("id_cuenta", ctx.id_cuenta)
+            .maybeSingle();
+          if (cErr) throw cErr;
+          cuentaInfo = cuentaRow || null;
+        }
+        const platId =
+          ctx.id_plataforma ? Number(ctx.id_plataforma) : cuentaInfo?.id_plataforma || null;
+        if (!platId) return null;
+        const { data: precios, error: preciosErr } = await supabase
+          .from("precios")
+          .select("id_precio, completa, sub_cuenta, precio_usd_detal, precio_usd_mayor")
+          .eq("id_plataforma", platId);
+        if (preciosErr) throw preciosErr;
+        const priceRow = resolvePrecioByCuenta(precios || [], cuentaInfo);
+        return pickPrecioByAcceso(priceRow, accesoCliente);
+      };
+
+      const renderModalRowMonto = () => {
+        if (!modalRowMonto || !modalRowContext) return;
+        const base = Number(modalRowContext.monto_base);
+        if (!Number.isFinite(base) || base <= 0) {
+          modalRowMonto.textContent = "--";
+          return;
+        }
+        const total = base * (modalRowMeses || 1);
+        modalRowMonto.textContent = formatMonto(total);
+      };
+
+      const updateModalRowMonto = async () => {
+        if (!modalRowMonto || !modalRowContext) return;
+        modalRowMonto.textContent = "Cargando...";
+        try {
+          const base = await fetchMontoBaseForRow(modalRowContext);
+          modalRowContext.monto_base = base;
+          renderModalRowMonto();
+        } catch (err) {
+          console.error("calcular monto error", err);
+          modalRowMonto.textContent = "--";
+        }
       };
 
       const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
@@ -1181,7 +1333,7 @@
         if (modalRowCliente) modalRowCliente.textContent = data.cliente || "";
         if (modalRowPerfil) modalRowPerfil.textContent = data.perfil || "";
         if (modalRowFecha) modalRowFecha.textContent = data.fecha ? formatFechaCorte(data.fecha) : "";
-        if (modalRowMonto) modalRowMonto.value = "";
+        if (modalRowMonto) modalRowMonto.textContent = "--";
         if (modalRowRef) modalRowRef.value = "";
         modalRow.dataset.idVenta = data.id_venta || "";
         modalRowContext = {
@@ -1189,6 +1341,7 @@
           id_plataforma: data.id_plataforma || null,
           id_cuenta: data.id_cuenta || null,
           id_usuario_cliente: data.id_usuario_cliente || null,
+          id_precio: data.id_precio || null,
           correo: data.correo || "",
           clave: data.clave || "",
           n_perfil: data.n_perfil || "",
@@ -1198,8 +1351,10 @@
           entrega_inmediata: data.entrega_inmediata,
           suspendido: data.suspendido,
           hogar_actualizado: data.hogar_actualizado === true,
+          monto_base: null,
         };
         modalRow.classList.remove("hidden");
+        updateModalRowMonto();
       };
 
       const closeRowModal = () => {
@@ -1212,10 +1367,12 @@
         if (e.target.classList.contains("row-mas") || e.target.closest(".row-mas")) {
           modalRowMeses = modalRowMeses + 1;
           if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
+          renderModalRowMonto();
         }
         if (e.target.classList.contains("row-menos") || e.target.closest(".row-menos")) {
           modalRowMeses = Math.max(1, modalRowMeses - 1);
           if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
+          renderModalRowMonto();
         }
       });
 
@@ -1234,6 +1391,7 @@
           clave: btn.dataset.clave || "",
           n_perfil: btn.dataset.nPerfil || "",
           pin: btn.dataset.pin || "",
+          id_precio: btn.dataset.idPrecio || "",
           plataforma_nombre: btn.dataset.plataformaNombre || "",
           hogar_actualizado: btn.dataset.hogar === "true",
           entrega_inmediata: btn.dataset.entrega || "",
@@ -1264,18 +1422,24 @@
           alert("Falta información para renovar.");
           return;
         }
-        const montoStr = modalRowMonto?.value?.trim() || "";
-        const monto = parseFloat(montoStr);
-        if (!monto || Number.isNaN(monto) || monto <= 0) {
-          alert("Ingresa un monto válido.");
-          return;
-        }
         const ref = modalRowRef?.value?.trim() || "";
         if (!ref) {
           alert("Ingresa la referencia.");
           return;
         }
         const meses = modalRowMeses || 1;
+        let montoBase = Number(modalRowContext?.monto_base);
+        if (!Number.isFinite(montoBase) || montoBase <= 0) {
+          const recalculated = await fetchMontoBaseForRow(modalRowContext);
+          modalRowContext.monto_base = recalculated;
+          montoBase = Number(recalculated);
+          renderModalRowMonto();
+        }
+        if (!Number.isFinite(montoBase) || montoBase <= 0) {
+          alert("No se pudo calcular el monto.");
+          return;
+        }
+        const monto = montoBase * meses;
         const entregaInmediata = resolveEntregaInmediata(modalRowContext.entrega_inmediata);
         const isSuspendido = isTrue(modalRowContext.suspendido);
         const baseFecha = modalRowContext.fecha_corte || "";
@@ -1426,29 +1590,31 @@
         <div class="modal-backdrop"></div>
         <div class="modal-card">
           <button class="modal-close modal-renovar-row-close" aria-label="Cerrar">×</button>
-          <div class="modal-body">
-            <p><strong>Cliente:</strong> <span id="modal-row-cliente">-</span></p>
-            <p><strong>Perfil:</strong> <span id="modal-row-perfil">-</span></p>
-            <p><strong>Fecha de corte:</strong> <span id="modal-row-fecha">-</span></p>
-            <div class="modal-field">
-              <label>Meses</label>
-              <div class="modal-qty">
-                <button type="button" class="row-menos" aria-label="menos">-</button>
-                <span id="modal-row-meses">1</span>
-                <button type="button" class="row-mas" aria-label="más">+</button>
-                <span class="modal-duration-suffix">meses</span>
+          <div class="modal-body modal-row-layout">
+            <div class="modal-row-main">
+              <p><strong>Cliente:</strong> <span id="modal-row-cliente">-</span></p>
+              <p><strong>Perfil:</strong> <span id="modal-row-perfil">-</span></p>
+              <p><strong>Fecha de corte:</strong> <span id="modal-row-fecha">-</span></p>
+              <div class="modal-field">
+                <label>Meses</label>
+                <div class="modal-qty">
+                  <button type="button" class="row-menos" aria-label="menos">-</button>
+                  <span id="modal-row-meses">1</span>
+                  <button type="button" class="row-mas" aria-label="más">+</button>
+                  <span class="modal-duration-suffix">meses</span>
+                </div>
+              </div>
+              <div class="modal-field">
+                <label for="modal-row-ref">Nro de referencia</label>
+                <input type="text" id="modal-row-ref" placeholder="Referencia" />
+              </div>
+              <div class="modal-footer" style="padding-left:0;">
+                <button type="button" class="btn-primary" id="btn-row-renovar">Renovar</button>
               </div>
             </div>
-            <div class="modal-field">
-              <label for="modal-row-monto">Monto</label>
-              <input type="text" inputmode="decimal" pattern="\\d+(\\.\\d{1,2})?" id="modal-row-monto" placeholder="Monto" />
-            </div>
-            <div class="modal-field">
-              <label for="modal-row-ref">Nro de referencia</label>
-              <input type="text" id="modal-row-ref" placeholder="Referencia" />
-            </div>
-            <div class="modal-footer" style="padding-left:0;">
-              <button type="button" class="btn-primary" id="btn-row-renovar">Renovar</button>
+            <div class="modal-row-aside">
+              <p class="monto-label">Monto a cobrar</p>
+              <div id="modal-row-monto" class="monto-value">--</div>
             </div>
           </div>
         </div>

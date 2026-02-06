@@ -60,6 +60,7 @@
         <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-editar-precios">Editar precios</button>
         <button class="btn-primary admin-action" id="btn-importar-datos">Importar datos</button>
+        <button class="btn-primary admin-action" id="btn-editar-logos">Editar logos</button>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
@@ -316,6 +317,10 @@
 
       document.querySelector("#btn-importar-datos")?.addEventListener("click", () => {
         window.location.href = "importar.html";
+      });
+      
+      document.querySelector("#btn-editar-logos")?.addEventListener("click", () => {
+        window.location.href = "editar_logos.html";
       });
 
       document.getElementById("btn-renovar-servicio")?.addEventListener("click", () => {

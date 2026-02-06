@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editar logos</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .logos-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        width: 100%;
+        max-width: 820px;
+      }
+      .logos-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .logos-field select {
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        font-size: 14px;
+      }
+      .logo-editor {
+        display: flex;
+        gap: 20px;
+        align-items: stretch;
+      }
+      .logo-editor.hidden {
+        display: none;
+      }
+      .logo-editor.no-logo .logo-current {
+        display: none;
+      }
+      .logo-current {
+        flex: 1;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .logo-frame {
+        width: 100%;
+        height: 160px;
+        border: 1px dashed #d1d5db;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fafafa;
+      }
+      .logo-frame img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+      .logo-upload {
+        flex: 1;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .logo-label {
+        font-weight: 700;
+        margin: 0;
+        color: #111;
+      }
+      .logo-upload input[type="file"] {
+        padding: 6px 0;
+      }
+      .logo-status {
+        margin: 0;
+      }
+      @media (max-width: 720px) {
+        .logo-editor {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Editar logos</h2>
+      <div class="logos-wrapper">
+        <div class="logos-field">
+          <label for="logo-plataforma"><strong>Plataforma</strong></label>
+          <select id="logo-plataforma">
+            <option value="">Seleccione una plataforma</option>
+          </select>
+        </div>
+
+        <div id="logo-editor" class="logo-editor hidden">
+          <div class="logo-current" id="logo-current">
+            <p class="logo-label">Logo actual</p>
+            <div class="logo-frame">
+              <img id="logo-preview" src="" alt="Logo actual" />
+            </div>
+          </div>
+          <div class="logo-upload">
+            <p class="logo-label">Nuevo logo</p>
+            <input type="file" id="logo-file" accept="image/*" />
+            <button type="button" class="btn-primary" id="btn-logo-update">
+              Actualizar logo
+            </button>
+            <p id="logo-status" class="status logo-status"></p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase, uploadComprobantes } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const selectPlataforma = document.querySelector("#logo-plataforma");
+      const editor = document.querySelector("#logo-editor");
+      const currentWrap = document.querySelector("#logo-current");
+      const previewImg = document.querySelector("#logo-preview");
+      const fileInput = document.querySelector("#logo-file");
+      const btnUpdate = document.querySelector("#btn-logo-update");
+      const statusEl = document.querySelector("#logo-status");
+
+      let plataformasMap = {};
+      let selectedId = null;
+
+      const setStatus = (msg, isError = false) => {
+        if (!statusEl) return;
+        statusEl.textContent = msg || "";
+        statusEl.classList.toggle("is-error", isError);
+        statusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+
+      const renderEditor = (plat) => {
+        if (!editor) return;
+        if (!plat) {
+          editor.classList.add("hidden");
+          return;
+        }
+        editor.classList.remove("hidden");
+        const hasLogo = !!plat.imagen;
+        editor.classList.toggle("no-logo", !hasLogo);
+        if (currentWrap) currentWrap.style.display = hasLogo ? "flex" : "none";
+        if (previewImg) previewImg.src = hasLogo ? plat.imagen : "";
+      };
+
+      const loadPlataformas = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("plataformas")
+            .select("id_plataforma, nombre, imagen")
+            .order("nombre", { ascending: true });
+          if (error) throw error;
+          plataformasMap = (data || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p;
+            return acc;
+          }, {});
+          if (selectPlataforma) {
+            selectPlataforma.innerHTML =
+              '<option value="">Seleccione una plataforma</option>' +
+              (data || [])
+                .map((p) => `<option value="${p.id_plataforma}">${p.nombre}</option>`)
+                .join("");
+          }
+        } catch (err) {
+          console.error("load plataformas error", err);
+          setStatus("No se pudieron cargar las plataformas.", true);
+        }
+      };
+
+      selectPlataforma?.addEventListener("change", () => {
+        const val = selectPlataforma.value;
+        selectedId = val ? Number(val) : null;
+        setStatus("");
+        if (fileInput) fileInput.value = "";
+        const plat = selectedId ? plataformasMap[selectedId] : null;
+        renderEditor(plat);
+      });
+
+      btnUpdate?.addEventListener("click", async () => {
+        if (!selectedId) {
+          setStatus("Selecciona una plataforma.", true);
+          return;
+        }
+        const file = fileInput?.files?.[0];
+        if (!file) {
+          setStatus("Selecciona una imagen.", true);
+          return;
+        }
+        if (!file.type?.startsWith("image/")) {
+          setStatus("Solo se permiten archivos de imagen.", true);
+          return;
+        }
+        try {
+          setStatus("Subiendo logo...");
+          const { urls, error: uploadErr } = await uploadComprobantes([file]);
+          if (uploadErr) throw uploadErr;
+          const url = urls?.[0];
+          if (!url) throw new Error("No se obtuvo URL del logo.");
+          const { error: updErr } = await supabase
+            .from("plataformas")
+            .update({ imagen: url })
+            .eq("id_plataforma", selectedId);
+          if (updErr) throw updErr;
+          plataformasMap[selectedId] = {
+            ...plataformasMap[selectedId],
+            imagen: url,
+          };
+          renderEditor(plataformasMap[selectedId]);
+          setStatus("Logo actualizado correctamente.");
+          if (fileInput) fileInput.value = "";
+        } catch (err) {
+          console.error("actualizar logo error", err);
+          setStatus("No se pudo actualizar el logo.", true);
+        }
+      });
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            setStatus("No tienes permisos para administrar servicios.", true);
+          }
+        } catch (err) {
+          console.error("editar logos init error", err);
+        }
+      }
+
+      init();
+      loadPlataformas();
+      attachLogout(clearServerSession);
+    </script>
+  </body>
+</html>

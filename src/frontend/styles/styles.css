@@ -110,13 +110,18 @@ body {
     margin: 0 auto;
     box-sizing: border-box;
   }
-  .user-info {
+  #btn-admin-header {
     order: 2;
+    margin-left: auto;
+    margin-right: 6px;
+  }
+  .user-info {
+    order: 3;
     width: auto;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
     justify-content: flex-end;
-    margin-left: auto;
+    margin-left: 0;
     gap: 6px;
     flex-wrap: wrap;
   }
