@@ -476,12 +476,12 @@
           if (needsMadre) {
             const { data: cuentaCliente, error: cErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, id_cuenta_miembro")
+              .select("id_cuenta, id_cuenta_madre")
               .eq("correo", correoVal)
               .maybeSingle();
             if (cErr) throw cErr;
             clientCuentaId = cuentaCliente?.id_cuenta || null;
-            const motherFromClient = cuentaCliente?.id_cuenta_miembro || null;
+            const motherFromClient = cuentaCliente?.id_cuenta_madre || null;
 
             if (motherFromClient) {
               const { data: perfPref, error: pErr } = await supabase
@@ -528,7 +528,7 @@
           if (assignCuenta && clientCuentaId) {
             const { error: linkErr } = await supabase
               .from("cuentas")
-              .update({ id_cuenta_miembro: assignCuenta })
+              .update({ id_cuenta_madre: assignCuenta })
               .eq("id_cuenta", clientCuentaId);
             if (linkErr) throw linkErr;
           }

@@ -6,14 +6,17 @@
     <title>Administrar servicios</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
-      .spotify-soon-1 {
-        background: #f59e0b33;
+      .table-base tbody tr.spotify-soon-1,
+      .table-base tbody tr.spotify-soon-1 td {
+        background: #f59e0b33 !important;
       }
-      .spotify-soon-2 {
-        background: #f59e0b22;
+      .table-base tbody tr.spotify-soon-2,
+      .table-base tbody tr.spotify-soon-2 td {
+        background: #f59e0b22 !important;
       }
-      .spotify-soon-3 {
-        background: #f59e0b14;
+      .table-base tbody tr.spotify-soon-3,
+      .table-base tbody tr.spotify-soon-3 td {
+        background: #f59e0b14 !important;
       }
     </style>
   </head>
@@ -72,6 +75,27 @@
       <p class="status">Selecciona una acción.</p>
     </main>
 
+    <div id="modal-renovar-spotify" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-renovar">
+        <button type="button" class="modal-close" aria-label="Cerrar">✖</button>
+        <h3 style="margin: 0;">Renovar:</h3>
+        <div id="spotify-renovar-list" class="modal-renovar-stack"></div>
+        <input
+          type="number"
+          id="spotify-renovar-monto"
+          placeholder="Monto"
+          step="0.01"
+          min="0"
+          style="width: 100%;"
+        />
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top: 8px;">
+          <button type="button" class="btn-outline" id="spotify-renovar-no">Cancelar</button>
+          <button type="button" class="btn-primary" id="spotify-renovar-yes">Renovar</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
@@ -90,6 +114,12 @@
       const spotifyTable = document.querySelector("#spotify-cuentas-table tbody");
       const spotifyStatus = document.querySelector("#spotify-cuentas-status");
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
+      const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
+      const modalRenovarList = document.querySelector("#spotify-renovar-list");
+      const modalRenovarYes = document.querySelector("#spotify-renovar-yes");
+      const modalRenovarNo = document.querySelector("#spotify-renovar-no");
+      const modalRenovarMonto = document.querySelector("#spotify-renovar-monto");
+      let currentUserId = null;
 
       const getMonthStart = () => {
         const now = new Date();
@@ -102,6 +132,14 @@
         const parts = String(val).split("-");
         if (parts.length !== 3) return val;
         return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      };
+      const addMonthsKeepDay = (baseDate, months) => {
+        const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+        const day = baseDate.getDate();
+        d.setMonth(d.getMonth() + months);
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        d.setDate(Math.min(day, lastDay));
+        return d;
       };
 
       async function loadCounts() {
@@ -207,6 +245,7 @@
             const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
             usernameEl.textContent = fullName || user.correo || "Usuario";
           }
+          currentUserId = user?.id_usuario || null;
           const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
           if (adminLink) {
             adminLink.classList.toggle("hidden", !isAdmin);
@@ -279,10 +318,97 @@
         const correos = Array.from(checks)
           .map((c) => c.dataset.correo || "")
           .filter(Boolean);
-        const msg = `Deseas renovar:\n${correos.join("\n")}`;
-        const ok = confirm(msg);
-        if (!ok) return;
+        if (!modalRenovarSpotify || !modalRenovarList) return;
+        modalRenovarList.innerHTML = "";
+        correos.forEach((correo) => {
+          const item = document.createElement("div");
+          item.textContent = correo;
+          modalRenovarList.appendChild(item);
+        });
+        if (modalRenovarMonto) modalRenovarMonto.value = "";
+        modalRenovarSpotify.classList.remove("hidden");
       });
+
+      const hideRenovarSpotifyModal = () => {
+        modalRenovarSpotify?.classList.add("hidden");
+      };
+      modalRenovarNo?.addEventListener("click", hideRenovarSpotifyModal);
+      modalRenovarYes?.addEventListener("click", async () => {
+        if (!modalRenovarList) return;
+        const montoVal = Number(modalRenovarMonto?.value || 0);
+        if (!Number.isFinite(montoVal) || montoVal <= 0) {
+          alert("Ingresa un monto válido.");
+          return;
+        }
+        const correos = Array.from(modalRenovarList.querySelectorAll("div"))
+          .map((el) => el.textContent || "")
+          .filter(Boolean);
+        if (!correos.length) {
+          alert("No hay correos seleccionados.");
+          return;
+        }
+        try {
+          const { data: cuentas, error: cErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, id_plataforma, correo, fecha_corte")
+            .in("correo", correos)
+            .eq("id_plataforma", 9);
+          if (cErr) throw cErr;
+          const cuentaMap = (cuentas || []).reduce((acc, c) => {
+            acc[c.correo] = c;
+            return acc;
+          }, {});
+          const todayIso = new Date().toISOString().slice(0, 10);
+          const updates = correos
+            .map((correo) => cuentaMap[correo])
+            .filter(Boolean)
+            .map((c) => {
+              const base = c.fecha_corte ? new Date(c.fecha_corte) : new Date();
+              base.setHours(12, 0, 0, 0);
+              const next = addMonthsKeepDay(base, 1);
+              const nextIso = next.toISOString().slice(0, 10);
+              return { id_cuenta: c.id_cuenta, id_plataforma: c.id_plataforma || 9, nextIso };
+            });
+          const rows = updates.map((u) => ({
+            monto: montoVal,
+            fecha_pago: todayIso,
+            venta_cliente: false,
+            renovacion: true,
+            id_venta: null,
+            id_plataforma: u.id_plataforma,
+            id_cuenta: u.id_cuenta,
+            registrado_por: currentUserId,
+            referencia: null,
+          }));
+          if (!rows.length) {
+            alert("No se encontraron cuentas válidas.");
+            return;
+          }
+          const updateResults = await Promise.all(
+            updates.map((u) =>
+              supabase.from("cuentas").update({ fecha_corte: u.nextIso }).eq("id_cuenta", u.id_cuenta),
+            ),
+          );
+          const updErr = updateResults.find((r) => r.error)?.error;
+          if (updErr) throw updErr;
+          const { error: histErr } = await supabase
+            .from("historial_ventas")
+            .insert(rows);
+          if (histErr) throw histErr;
+          hideRenovarSpotifyModal();
+          await loadSpotifyMadres();
+          alert("Renovación registrada.");
+        } catch (err) {
+          console.error("renovar spotify error", err);
+          alert("No se pudo registrar la renovación.");
+        }
+      });
+      modalRenovarSpotify?.addEventListener("click", (e) => {
+        if (e.target?.classList?.contains("modal-backdrop")) {
+          hideRenovarSpotifyModal();
+        }
+      });
+      modalRenovarSpotify?.querySelector(".modal-close")?.addEventListener("click", hideRenovarSpotifyModal);
 
     </script>
   </body>

@@ -116,13 +116,45 @@
       const getCuentaMadre = async (correo) => {
         const { data, error } = await supabase
           .from("cuentas")
-          .select("id_cuenta, id_plataforma")
+          .select("id_cuenta")
           .eq("correo", correo)
+          .eq("id_plataforma", 9)
+          .order("id_cuenta", { ascending: true })
+          .limit(1)
           .maybeSingle();
         if (error) throw error;
         if (!data?.id_cuenta) return null;
-        if (Number(data.id_plataforma) !== 9) return null;
         return data.id_cuenta;
+      };
+
+      const validarCuentaMadre = async () => {
+        const correo = (inputCuentaMadre?.value || "").trim();
+        if (!correo) {
+          if (statusEl) statusEl.textContent = "";
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, id_plataforma")
+            .eq("correo", correo)
+            .order("id_cuenta", { ascending: true })
+            .limit(10);
+          if (error) throw error;
+          if (!data?.length) {
+            if (statusEl) statusEl.textContent = "No se encontró la cuenta madre.";
+            return;
+          }
+          const hasPlat9 = data.some((c) => Number(c.id_plataforma) === 9);
+          if (!hasPlat9) {
+            if (statusEl) statusEl.textContent = "El correo no es de plataforma 9.";
+            return;
+          }
+          if (statusEl) statusEl.textContent = "";
+        } catch (err) {
+          console.error("validar cuenta madre error", err);
+          if (statusEl) statusEl.textContent = "No se pudo validar la cuenta madre.";
+        }
       };
 
       const getPerfilLibre = async (idCuentaMadre) => {
@@ -138,6 +170,9 @@
         return data?.id_perfil || null;
       };
 
+      inputCuentaMadre?.addEventListener("blur", validarCuentaMadre);
+      inputCuentaMadre?.addEventListener("change", validarCuentaMadre);
+
       const createCuentaMiembro = async (correo, clave, idUsuario, idCuentaMadre) => {
         const { data, error } = await supabase
           .from("cuentas")
@@ -149,7 +184,7 @@
             ocupado: false,
             venta_dominio: true,
             dominio_de: idUsuario,
-            id_cuenta_miembro: idCuentaMadre,
+            id_cuenta_madre: idCuentaMadre,
             venta_perfil: false,
             venta_miembro: false,
             cuenta_madre: false,

@@ -226,10 +226,10 @@
             return;
           }
           const { data: ventas, error } = await supabase
-            .from("ventas")
-            .select(
-              "id_venta, id_usuario, id_precio, id_cuenta, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
-            )
+              .from("ventas")
+              .select(
+                "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
           if (error) throw error;
@@ -518,7 +518,7 @@
           if (cuentaMadreId) {
             const { error: linkErr } = await supabase
               .from("cuentas")
-              .update({ id_cuenta_miembro: cuentaMadreId })
+              .update({ id_cuenta_madre: cuentaMadreId })
               .eq("id_cuenta", nuevaCuentaId);
             if (linkErr) throw linkErr;
           }
@@ -640,7 +640,7 @@
 
           const { error: linkErr } = await supabase
             .from("cuentas")
-            .update({ id_cuenta_miembro: nextMadreId })
+            .update({ id_cuenta_madre: nextMadreId })
             .eq("id_cuenta", cuentaMiembroId);
           if (linkErr) throw linkErr;
 

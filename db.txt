@@ -55,7 +55,7 @@ CREATE TABLE public.cuentas (
   instaddr boolean,
   venta_perfil boolean,
   venta_miembro boolean,
-  id_cuenta_miembro bigint,
+  id_cuenta_madre bigint,
   direccion text,
   dominio_de bigint,
   venta_dominio boolean,
@@ -64,7 +64,7 @@ CREATE TABLE public.cuentas (
   CONSTRAINT cuentas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT cuentas_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
   CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario),
-  CONSTRAINT cuentas_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta)
+  CONSTRAINT cuentas_id_cuenta_madre_fkey FOREIGN KEY (id_cuenta_madre) REFERENCES public.cuentas(id_cuenta)
 );
 CREATE TABLE public.descuentos (
   id_descuento bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -178,8 +178,7 @@ CREATE TABLE public.perfiles (
   correo text,
   id_cuenta_miembro bigint,
   CONSTRAINT perfiles_pkey PRIMARY KEY (id_perfil),
-  CONSTRAINT perfiles_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
-  CONSTRAINT perfiles_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta)
+  CONSTRAINT perfiles_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta)
 );
 CREATE TABLE public.plataformas (
   id_plataforma bigint GENERATED ALWAYS AS IDENTITY NOT NULL,

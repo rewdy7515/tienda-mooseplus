@@ -642,7 +642,8 @@
         const maxMiembros = Number(platMeta.max_miembros) > 0 ? Number(platMeta.max_miembros) : 0;
         const usaPines = platMeta.usa_pines === true || platMeta.usa_pines === "true" || platMeta.usa_pines === 1 || platMeta.usa_pines === "1";
         const maxDigPin = Number(platMeta.max_dig_pin) > 0 ? Number(platMeta.max_dig_pin) : 4;
-        const requierePinRecarga = String(selectedProveedor) === "2";
+        const requierePinRecarga =
+          String(selectedProveedor) === "2" && String(plataforma) === "1";
 
         if (!selectedProveedor) {
           alert("Selecciona un proveedor.");

@@ -113,6 +113,10 @@
       const usernameEl = document.querySelector(".username");
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const resolveEntregaInmediata = (v) => {
+        if (v === undefined || v === null || v === "") return true;
+        return isTrue(v);
+      };
       const inputBuscar = document.querySelector("#input-buscar-cliente");
       const inputCuenta = document.querySelector("#input-cuenta");
       const sugerenciasEl = document.querySelector("#buscador-sugerencias");
@@ -248,6 +252,8 @@
                           data-id-cuenta="${it.id_cuenta || ""}"
                           data-id-usuario="${it.id_usuario_cliente || ""}"
                           data-fechacorte="${it.fecha_corte_raw || ""}"
+                          data-entrega="${it.entrega_inmediata ? "true" : "false"}"
+                          data-suspendido="${it.suspendido ? "true" : "false"}"
                           data-hogar="${it.hogar_actualizado ? "true" : "false"}"
                         />
                       </label>
@@ -327,6 +333,8 @@
                   data-n-perfil="${r.n_perfil || ""}"
                   data-pin="${r.pin || ""}"
                   data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
+                  data-entrega="${r.entrega_inmediata ? "true" : "false"}"
+                  data-suspendido="${r.suspendido ? "true" : "false"}"
                   data-hogar="${r.hogar_actualizado ? "true" : "false"}"
                 >
                   Renovar
@@ -413,7 +421,7 @@
             }
             const { data: ventas, error: ventErr } = await supabase
               .from("ventas")
-              .select("id_venta, id_usuario, id_cuenta, id_perfil, fecha_corte")
+              .select("id_venta, id_usuario, id_cuenta, id_perfil, fecha_corte, suspendido")
               .in("id_usuario", ids)
               .limit(50);
             if (ventErr) {
@@ -443,7 +451,7 @@
                 if (platIds.length) {
                   const { data: plats, error: platErr } = await supabase
                     .from("plataformas")
-                    .select("id_plataforma, nombre, por_pantalla")
+                    .select("id_plataforma, nombre, por_pantalla, entrega_inmediata")
                     .in("id_plataforma", platIds);
                   if (platErr) {
                     console.error("buscar plataformas error", platErr);
@@ -529,6 +537,8 @@
                 showPerfil,
                 showHogar: isPlatPerfilHogar,
                 hogar_actualizado: hogarActualizado,
+                suspendido: v.suspendido === true,
+                entrega_inmediata: platInfo?.entrega_inmediata === true,
                 fecha_corte: formatFechaCorte(fechaRaw) || "-",
                 fecha_corte_raw: fechaRaw,
               };
@@ -553,7 +563,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, id_plataforma, clave, venta_dominio, id_cuenta_miembro, venta_miembro")
+            .select("id_cuenta, correo, id_plataforma, clave, venta_dominio, id_cuenta_madre, venta_miembro")
             .ilike("correo", `%${term}%`)
             .limit(10);
           if (cErr) throw cErr;
@@ -563,7 +573,7 @@
           }
           const cuentasList = cuentas || [];
           const dominioCuentas = cuentasList.filter(
-            (c) => c.venta_dominio === true && c.id_cuenta_miembro
+            (c) => c.venta_dominio === true && c.id_cuenta_madre
           );
           const cuentaIds = cuentasList.map((c) => c.id_cuenta).filter(Boolean);
           if (!cuentaIds.length) {
@@ -587,7 +597,7 @@
             ventasPromises.push(
               supabase
                 .from("ventas")
-                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte")
+                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte, suspendido")
                 .in("id_cuenta", cuentaIds)
             );
           } else {
@@ -597,7 +607,7 @@
             ventasPromises.push(
               supabase
                 .from("ventas")
-                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte")
+                .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte, suspendido")
                 .in("id_perfil", dominioPerfilIds)
             );
           } else {
@@ -676,7 +686,7 @@
           const { data: plats, error: platErr } = platIds.length
             ? await supabase
                 .from("plataformas")
-                .select("id_plataforma, nombre, por_pantalla, por_acceso")
+              .select("id_plataforma, nombre, por_pantalla, por_acceso, entrega_inmediata")
                 .in("id_plataforma", platIds)
             : { data: [], error: null };
           if (platErr) throw platErr;
@@ -715,6 +725,8 @@
               perfil: perf?.n_perfil ? `M${perf.n_perfil}` : "",
               hogarText: isPlatPerfilHogar && perf ? (perf.perfil_hogar ? "Activado" : "Desactivado") : "",
               hogar_actualizado: hogarActualizado,
+              suspendido: v.suspendido === true,
+              entrega_inmediata: plat?.entrega_inmediata === true,
               fecha_corte: formatFechaCorte(fechaRaw) || "-",
               fecha_corte_raw: fechaRaw,
             };
@@ -885,6 +897,8 @@
           id_usuario_cliente: chk.dataset.idUsuario || null,
           meses: 1,
           fecha_corte: chk.dataset.fechacorte || "",
+          entrega_inmediata: chk.dataset.entrega || "",
+          suspendido: chk.dataset.suspendido || "",
           hogar_actualizado: chk.dataset.hogar === "true",
           uid: idx,
         }));
@@ -1054,15 +1068,30 @@
           const metodoId = metodo ? Number(metodo) : null;
           const refValue = ref || null;
           const updates = seleccionActual.map(async (it) => {
-            let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
-            if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
-            baseDate.setMonth(baseDate.getMonth() + (it.meses || 1));
-            const nuevaCorte = baseDate.toISOString().slice(0, 10);
-            const { error } = await supabase
-              .from("ventas")
-              .update({ fecha_corte: nuevaCorte, fecha_pago: fechaPago })
-              .eq("id_venta", it.id_venta);
-            if (error) throw error;
+            const entregaInmediata = resolveEntregaInmediata(it.entrega_inmediata);
+            const isSuspendido = isTrue(it.suspendido);
+            let nuevaCorte = it.fecha_corte || "";
+            if (!entregaInmediata && !isSuspendido) {
+              const { error } = await supabase
+                .from("ventas")
+                .update({ pendiente: true, meses_contratados: it.meses || 1 })
+                .eq("id_venta", it.id_venta);
+              if (error) throw error;
+            } else {
+              let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
+              if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
+              baseDate.setMonth(baseDate.getMonth() + (it.meses || 1));
+              nuevaCorte = baseDate.toISOString().slice(0, 10);
+              const { error } = await supabase
+                .from("ventas")
+                .update({
+                  fecha_corte: nuevaCorte,
+                  fecha_pago: fechaPago,
+                  meses_contratados: it.meses || 1,
+                })
+                .eq("id_venta", it.id_venta);
+              if (error) throw error;
+            }
 
             const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
             const accesoCliente = it.id_usuario_cliente ? userMap[it.id_usuario_cliente]?.acceso_cliente : null;
@@ -1170,6 +1199,8 @@
           pin: data.pin || "",
           plataforma_nombre: data.plataforma_nombre || "",
           fecha_corte: data.fecha || null,
+          entrega_inmediata: data.entrega_inmediata,
+          suspendido: data.suspendido,
           hogar_actualizado: data.hogar_actualizado === true,
         };
         modalRow.classList.remove("hidden");
@@ -1209,6 +1240,8 @@
           pin: btn.dataset.pin || "",
           plataforma_nombre: btn.dataset.plataformaNombre || "",
           hogar_actualizado: btn.dataset.hogar === "true",
+          entrega_inmediata: btn.dataset.entrega || "",
+          suspendido: btn.dataset.suspendido || "",
         };
         openRowModal(data);
       });
@@ -1237,16 +1270,34 @@
           return;
         }
         const meses = modalRowMeses || 1;
-        const baseFecha = modalRowContext.fecha_corte || new Date().toISOString().slice(0, 10);
-        const nuevaFecha = addMonths(baseFecha, meses) || baseFecha;
+        const entregaInmediata = resolveEntregaInmediata(modalRowContext.entrega_inmediata);
+        const isSuspendido = isTrue(modalRowContext.suspendido);
+        const baseFecha = modalRowContext.fecha_corte || "";
+        let nuevaFecha = baseFecha;
+        if (entregaInmediata || isSuspendido) {
+          const baseForCalc = baseFecha || new Date().toISOString().slice(0, 10);
+          nuevaFecha = addMonths(baseForCalc, meses) || baseForCalc;
+        }
         const fechaPago = new Date().toISOString().slice(0, 10);
         const registradoPor = window.__RC_USER_ID__ || null;
         try {
-          const { error: updErr } = await supabase
-            .from("ventas")
-            .update({ fecha_corte: nuevaFecha, fecha_pago: fechaPago })
-            .eq("id_venta", modalRowContext.id_venta);
-          if (updErr) throw updErr;
+          if (!entregaInmediata && !isSuspendido) {
+            const { error: updErr } = await supabase
+              .from("ventas")
+              .update({ pendiente: true, meses_contratados: meses })
+              .eq("id_venta", modalRowContext.id_venta);
+            if (updErr) throw updErr;
+          } else {
+            const { error: updErr } = await supabase
+              .from("ventas")
+              .update({
+                fecha_corte: nuevaFecha,
+                fecha_pago: fechaPago,
+                meses_contratados: meses,
+              })
+              .eq("id_venta", modalRowContext.id_venta);
+            if (updErr) throw updErr;
+          }
 
           const { error: histErr } = await supabase.from("historial_ventas").insert({
             monto,

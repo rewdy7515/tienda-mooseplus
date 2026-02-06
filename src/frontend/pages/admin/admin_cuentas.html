@@ -355,6 +355,28 @@
         opacity: 1;
         transform: translateY(0);
       }
+      .correo-plataformas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 8px 0 12px;
+      }
+      .correo-plataformas.hidden {
+        display: none;
+      }
+      .correo-plataformas .correo-tab-btn {
+        border: 1px solid #111;
+        background: #fff;
+        color: #111;
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .correo-plataformas .correo-tab-btn.active {
+        background: #111;
+        color: #fff;
+      }
     </style>
   </head>
   <body>
@@ -416,6 +438,7 @@
         </div>
         <div id="plataforma-resultados"></div>
         <div id="venta-resultado"></div>
+        <div id="correo-plataformas" class="correo-plataformas hidden"></div>
         <div id="cuenta-detalle" class="cuenta-detalle"></div>
         <div id="cliente-ventas" class="cliente-ventas"></div>
       </div>
@@ -651,6 +674,7 @@
         "#plataforma-resultados",
       );
       const ventaResultadoEl = document.querySelector("#venta-resultado");
+      const correoPlataformasEl = document.querySelector("#correo-plataformas");
       const sugs = document.querySelector("#sugs-cuentas");
       const sugsClientes = document.querySelector("#sugs-clientes");
       const btnBuscar = document.querySelector("#btn-buscar-cuenta");
@@ -1062,6 +1086,28 @@
         detalleEl.style.display = "none";
       };
 
+      const clearCorreoPlataformas = () => {
+        if (!correoPlataformasEl) return;
+        correoPlataformasEl.innerHTML = "";
+        correoPlataformasEl.classList.add("hidden");
+      };
+
+      const renderCorreoPlataformas = (cuentas, activeId = null) => {
+        if (!correoPlataformasEl) return;
+        if (!Array.isArray(cuentas) || cuentas.length <= 1) {
+          clearCorreoPlataformas();
+          return;
+        }
+        correoPlataformasEl.innerHTML = cuentas
+          .map((c) => {
+            const label = c.plataformaNombre || `Plataforma ${c.id_plataforma || ""}`;
+            const isActive = String(c.id_cuenta) === String(activeId);
+            return `<button type="button" class="correo-tab-btn ${isActive ? "active" : ""}" data-cuenta="${c.id_cuenta}">${label}</button>`;
+          })
+          .join("");
+        correoPlataformasEl.classList.remove("hidden");
+      };
+
       const toggleBusquedaViews = (showBusqueda) => {
         const displayVal = showBusqueda ? "" : "none";
         if (detalleEl) detalleEl.style.display = showBusqueda ? "block" : "none";
@@ -1095,6 +1141,7 @@
           renderSugerencias([], true);
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
           hideDetalle();
+          clearCorreoPlataformas();
           return;
         }
         const current = ++fetchCounter;
@@ -1598,6 +1645,7 @@
         if (inputCuenta) inputCuenta.value = "";
         renderSugerencias([], true);
         detalleEl && (detalleEl.innerHTML = "");
+        clearCorreoPlataformas();
       };
 
       inputCliente?.addEventListener("input", (e) => {
@@ -1634,6 +1682,7 @@
           clienteVentasEl && (clienteVentasEl.innerHTML = "");
           if (selectPlataforma) selectPlataforma.value = "";
           clearPlataformaResultados();
+          clearCorreoPlataformas();
           toggleBusquedaViews(true);
         }
         renderSugerenciasClientes([], true);
@@ -1876,6 +1925,7 @@
       const loadVentasByCliente = async (idUsuario) => {
         if (!idUsuario) return;
         if (detalleEl) detalleEl.innerHTML = "";
+        clearCorreoPlataformas();
         try {
           const { data: ventas, error } = await supabase
             .from("ventas")
@@ -2102,16 +2152,31 @@
         if (!btn || !inputCuenta) return;
         inputCuenta.value = btn.dataset.correo || "";
         renderSugerencias([], true);
-        if (btn.dataset.id) {
-          loadCuentaDetalle(btn.dataset.id);
+        if (btn.dataset.correo) {
+          loadCuentaDetalleByCorreo(btn.dataset.correo);
         }
+      });
+
+      correoPlataformasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".correo-tab-btn");
+        if (!btn) return;
+        const cuentaId = btn.dataset.cuenta;
+        if (!cuentaId) return;
+        if (String(currentCuentaId) === String(cuentaId)) return;
+        correoPlataformasEl
+          .querySelectorAll(".correo-tab-btn")
+          .forEach((b) => b.classList.toggle("active", b === btn));
+        loadCuentaDetalle(cuentaId);
       });
 
       ventaResultadoEl?.addEventListener("click", (e) => {
         const btn = e.target.closest(".btn-ver-cuenta");
         if (!btn) return;
         const cuentaId = btn.dataset.cuenta;
-        if (cuentaId) loadCuentaDetalle(cuentaId);
+        if (cuentaId) {
+          clearCorreoPlataformas();
+          loadCuentaDetalle(cuentaId);
+        }
       });
 
       const loadCuentaCanva = async () => {
@@ -2737,7 +2802,17 @@
               const correoVal = info.correo_codigo || "";
               const claveVal = info.pin_codigo || "";
               const linkHtml = linkVal
-                ? `<a href="${linkVal}" target="_blank" rel="noopener noreferrer">${linkVal}</a>`
+                ? `<span class="codigo-field" data-field="link_codigo">
+                    <span class="codigo-view">
+                      <a href="${linkVal}" target="_blank" rel="noopener noreferrer">${linkVal}</a>
+                    </span>
+                    <button type="button" class="codigo-edit-btn" data-field="link_codigo" data-cuenta="${info.id_cuenta}" aria-label="Editar link">✏️</button>
+                    <span class="codigo-input-wrap hidden">
+                      <input type="text" class="input-inline" value="${linkVal}" placeholder="-" data-field="link_codigo" />
+                      <button type="button" class="codigo-save-btn" data-field="link_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar link">💾</button>
+                      <button type="button" class="codigo-cancel-btn" aria-label="Cancelar">✖</button>
+                    </span>
+                  </span>`
                 : `<span class="codigo-input-wrap">
                     <input type="text" class="input-inline" value="" placeholder="-" data-field="link_codigo" />
                     <button type="button" class="codigo-save-btn" data-field="link_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar link">💾</button>
@@ -2952,7 +3027,7 @@
           const { data: cuenta, error } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_miembro, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre",
+              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_madre, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre",
             )
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
@@ -3019,20 +3094,20 @@
           perfiles = perfData || [];
 
           let correoMadre = "";
-          if (cuenta.venta_miembro === true && cuenta.id_cuenta_miembro) {
+          if (cuenta.venta_miembro === true && cuenta.id_cuenta_madre) {
             const { data: madre, error: madreErr } = await supabase
               .from("cuentas")
               .select("correo")
-              .eq("id_cuenta", cuenta.id_cuenta_miembro)
+              .eq("id_cuenta", cuenta.id_cuenta_madre)
               .maybeSingle();
             if (madreErr) throw madreErr;
             correoMadre = madre?.correo || "";
           }
-          if (cuenta.venta_dominio === true && cuenta.id_cuenta_miembro) {
+          if (cuenta.venta_dominio === true && cuenta.id_cuenta_madre) {
             const { data: madreDom, error: madreDomErr } = await supabase
               .from("cuentas")
               .select("correo")
-              .eq("id_cuenta", cuenta.id_cuenta_miembro)
+              .eq("id_cuenta", cuenta.id_cuenta_madre)
               .maybeSingle();
             if (madreDomErr) throw madreDomErr;
             correoMadre = madreDom?.correo || correoMadre;
@@ -3209,13 +3284,13 @@
             }));
           }
 
-          // Miembros extras por id_cuenta_miembro
+          // Miembros extras por id_cuenta_madre
           const { data: miembros, error: membErr } = await supabase
             .from("cuentas")
             .select(
               "id_cuenta, correo, clave, id_plataforma, venta_miembro, venta_perfil",
             )
-            .eq("id_cuenta_miembro", idCuenta);
+            .eq("id_cuenta_madre", idCuenta);
           if (membErr) throw membErr;
 
           let miembrosConUsuario = [];
@@ -3346,12 +3421,37 @@
         try {
           const { data, error } = await supabase
             .from("cuentas")
-            .select("id_cuenta")
+            .select("id_cuenta, id_plataforma")
             .eq("correo", correo)
-            .maybeSingle();
+            .order("id_plataforma", { ascending: true });
           if (error) throw error;
-          if (data?.id_cuenta) {
-            loadCuentaDetalle(data.id_cuenta);
+          if (!data?.length) {
+            clearCorreoPlataformas();
+            return;
+          }
+          const platIds = Array.from(
+            new Set(data.map((c) => c.id_plataforma).filter(Boolean)),
+          );
+          let platMap = {};
+          if (platIds.length) {
+            const { data: plats, error: pErr } = await supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre")
+              .in("id_plataforma", platIds);
+            if (pErr) throw pErr;
+            platMap = (plats || []).reduce((acc, p) => {
+              acc[p.id_plataforma] = p.nombre;
+              return acc;
+            }, {});
+          }
+          const cuentas = data.map((c) => ({
+            ...c,
+            plataformaNombre: platMap[c.id_plataforma] || "",
+          }));
+          const firstId = cuentas[0]?.id_cuenta;
+          renderCorreoPlataformas(cuentas, firstId);
+          if (firstId) {
+            loadCuentaDetalle(firstId);
           }
         } catch (err) {
           console.error("buscar por correo error", err);
@@ -3437,6 +3537,41 @@
 
       // Guardar datos de acceso a códigos
       detalleEl?.addEventListener("click", async (e) => {
+        const editBtn = e.target.closest(".codigo-edit-btn");
+        if (editBtn) {
+          const wrap = editBtn.closest(".codigo-field");
+          const inputWrap = wrap?.querySelector(".codigo-input-wrap");
+          const view = wrap?.querySelector(".codigo-view");
+          const input = inputWrap?.querySelector("input");
+          if (input) {
+            input.dataset.original = input.value || "";
+            input.classList.remove("hidden");
+            input.classList.add("show");
+            input.focus();
+            input.select();
+          }
+          if (inputWrap) inputWrap.classList.remove("hidden");
+          if (view) view.classList.add("hidden");
+          editBtn.classList.add("hidden");
+          return;
+        }
+        const cancelBtn = e.target.closest(".codigo-cancel-btn");
+        if (cancelBtn) {
+          const inputWrap = cancelBtn.closest(".codigo-input-wrap");
+          const wrap = cancelBtn.closest(".codigo-field");
+          const view = wrap?.querySelector(".codigo-view");
+          const edit = wrap?.querySelector(".codigo-edit-btn");
+          const input = inputWrap?.querySelector("input");
+          if (input) {
+            input.value = input.dataset.original || input.value;
+            input.classList.add("hidden");
+            input.classList.remove("show");
+          }
+          if (inputWrap) inputWrap.classList.add("hidden");
+          if (view) view.classList.remove("hidden");
+          if (edit) edit.classList.remove("hidden");
+          return;
+        }
         const saveBtn = e.target.closest(".codigo-save-btn");
         if (!saveBtn) return;
         const field = saveBtn.dataset.field;
@@ -3845,11 +3980,90 @@
                   }
                 }
               }
+              const isSpotify = Number(currentCuentaDetalle?.plataformaId) === 9;
+              let memberCuentaId = null;
+              if (isSpotify) {
+                if (!finalUserId) {
+                  alert("Selecciona un cliente válido.");
+                  return;
+                }
+                const { data: cuentaExist, error: cErr } = await supabase
+                  .from("cuentas")
+                  .select(
+                    "id_cuenta, id_cuenta_madre, dominio_de, venta_dominio, venta_miembro, venta_perfil, cuenta_madre",
+                  )
+                  .eq("id_plataforma", 9)
+                  .eq("correo", correoVal)
+                  .maybeSingle();
+                if (cErr) throw cErr;
+                if (!cuentaExist?.id_cuenta) {
+                  const payloadCuenta = {
+                    id_plataforma: 9,
+                    correo: correoVal,
+                    clave: claveVal || null,
+                    inactiva: false,
+                    ocupado: false,
+                    venta_dominio: true,
+                    dominio_de: finalUserId,
+                    id_cuenta_madre: Number(cuentaId),
+                    venta_perfil: false,
+                    venta_miembro: false,
+                    cuenta_madre: false,
+                    id_proveedor: currentCuentaDetalle?.proveedorId || null,
+                  };
+                  const { data: newCuenta, error: insErr } = await supabase
+                    .from("cuentas")
+                    .insert(payloadCuenta)
+                    .select("id_cuenta")
+                    .single();
+                  if (insErr) throw insErr;
+                  memberCuentaId = newCuenta?.id_cuenta || null;
+                } else {
+                  if (cuentaExist.cuenta_madre === true) {
+                    alert("El correo corresponde a una cuenta madre. Usa el correo del cliente.");
+                    return;
+                  }
+                  memberCuentaId = cuentaExist.id_cuenta;
+                  const updates = {};
+                  if (
+                    Number(cuentaExist.id_cuenta_madre || 0) !==
+                    Number(cuentaId)
+                  ) {
+                    updates.id_cuenta_madre = Number(cuentaId);
+                  }
+                  if (claveVal) updates.clave = claveVal;
+                  if (
+                    finalUserId &&
+                    Number(cuentaExist.dominio_de || 0) !== Number(finalUserId)
+                  ) {
+                    updates.dominio_de = Number(finalUserId);
+                  }
+                  if (cuentaExist.venta_dominio !== true) updates.venta_dominio = true;
+                  if (cuentaExist.venta_miembro !== false) updates.venta_miembro = false;
+                  if (cuentaExist.venta_perfil !== false) updates.venta_perfil = false;
+                  if (cuentaExist.cuenta_madre === true) updates.cuenta_madre = false;
+                  if (Object.keys(updates).length) {
+                    const { error: updErr } = await supabase
+                      .from("cuentas")
+                      .update(updates)
+                      .eq("id_cuenta", memberCuentaId);
+                    if (updErr) throw updErr;
+                  }
+                }
+                if (perfilId && memberCuentaId) {
+                  const { error: perfErr } = await supabase
+                    .from("perfiles")
+                  .update({ ocupado: true, id_cuenta_miembro: memberCuentaId })
+                    .eq("id_perfil", perfilId);
+                  if (perfErr) throw perfErr;
+                }
+              }
               const { data: ventaRow, error } = await supabase
                 .from("ventas")
                 .insert({
                   id_usuario: finalUserId,
                   id_cuenta: Number(cuentaId),
+                  id_cuenta_miembro: isSpotify ? memberCuentaId : null,
                   id_perfil: perfilId ? Number(perfilId) : null,
                   fecha_corte: fechaVal,
                   fecha_pago: new Date().toISOString().slice(0, 10),
@@ -3906,6 +4120,74 @@
               if (newRow && tbody) {
                 row.remove();
                 insertCanvaRowSorted(tbody, newRow, addRow);
+              }
+            } else if (correoInput) {
+              const nombreVal = (nameInput?.value || "").trim();
+              const correoVal = (correoInput?.value || "").trim();
+              const claveVal = (claveInput?.value || "").trim();
+              const fechaFmt = formatDDMMYYYY(fechaVal) || fechaVal || "";
+              const todayStr = new Date().toISOString().slice(0, 10);
+              const estadoLabel = fechaVal && fechaVal < todayStr ? "Activo" : "-";
+              const estadoClass = estadoLabel === "Activo" ? "activo" : "";
+              const showClaveCliente =
+                currentCuentaDetalle?.clave_cliente === true;
+
+              const cells = Array.from(row.children);
+              const accesoCell = cells[1];
+              const clienteCell = cells[2];
+              const correoCell = cells[3];
+              const claveCell = cells[4];
+              const fechaCell = cells[showClaveCliente ? 5 : 4];
+              const estadoCell = cells[showClaveCliente ? 6 : 5];
+              const accionCell = cells[showClaveCliente ? 7 : 6];
+
+              if (cells[0]) cells[0].textContent = newVentaId ? `#${newVentaId}` : "";
+              if (clienteCell) clienteCell.textContent = nombreVal || "-";
+              if (correoCell) correoCell.textContent = correoVal || "-";
+              if (showClaveCliente && claveCell) claveCell.textContent = claveVal || "-";
+              if (fechaCell) fechaCell.textContent = fechaFmt;
+              if (estadoCell) {
+                estadoCell.textContent = estadoLabel;
+                estadoCell.classList.remove("activo", "vencido", "suspendido");
+                if (estadoClass) estadoCell.classList.add(estadoClass);
+              }
+
+              let nPerfil = "";
+              let perfilHogar = false;
+              if (accesoCell) {
+                nPerfil = (accesoCell.textContent || "").replace(/\D/g, "");
+                perfilHogar = !!accesoCell.querySelector(".perfil-dot");
+              }
+
+              const copyText = buildServiceCopyText({
+                plataforma: currentCuentaDetalle?.plataformaNombre || "",
+                idVenta: newVentaId,
+                correo: correoVal,
+                clave: claveVal,
+                nPerfil: nPerfil || "",
+                pin: "",
+                fechaCorte: fechaVal,
+                porAcceso: currentCuentaDetalle?.por_acceso,
+                usaPines: currentCuentaDetalle?.usa_pines,
+                ventaPerfil: currentCuentaDetalle?.venta_perfil,
+                ventaMiembro: currentCuentaDetalle?.venta_miembro,
+                idPlataforma: currentCuentaDetalle?.plataformaId,
+                perfilHogar,
+                isSubCuenta: false,
+              });
+
+              if (accionCell) {
+                accionCell.innerHTML = `
+                  <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
+                  <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
+                    data-perfil="${perfilId || ""}"
+                  >Registrar servicio</button>
+                  ${
+                    isSuperadmin && newVentaId
+                      ? `<button type="button" class="btn-delete-venta" data-id-venta="${newVentaId}">Eliminar</button>`
+                      : ""
+                  }
+                `;
               }
             }
             alert("Servicio registrado.");
@@ -4497,7 +4779,7 @@
           const payload = {
             venta_miembro: true,
             venta_perfil: false,
-            id_cuenta_miembro: currentCuentaId,
+            id_cuenta_madre: currentCuentaId,
           };
           if (claveVal) payload.clave = claveVal;
           const { error: updErr } = await supabase
@@ -4551,7 +4833,7 @@
             inactiva: false,
             venta_miembro: true,
             venta_perfil: false,
-            id_cuenta_miembro: idCuentaMiembro,
+            id_cuenta_madre: idCuentaMiembro,
             id_proveedor: currentCuentaDetalle?.proveedorId || null,
             ocupado: ocupado === false ? false : null,
           };
