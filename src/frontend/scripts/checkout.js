@@ -3,6 +3,7 @@ import {
   fetchCart,
   loadCatalog,
   submitCheckout,
+  updateCartMontos,
   uploadComprobantes,
   fetchP2PRate,
   loadCurrentUser,
@@ -681,6 +682,12 @@ async function init() {
     fixedHora = cartData?.hora ?? null;
     fixedFecha = cartData?.fecha ?? null;
     if (fixedHora) startCountdown();
+
+    try {
+      await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
+    } catch (syncErr) {
+      console.warn("checkout sync cart montos error", syncErr);
+    }
 
     // Selecciona por defecto el método con id 1 si existe
     // Prefill de pruebas: seleccionar índice 5 si existe, si no cae al método id 1

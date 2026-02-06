@@ -248,6 +248,7 @@
                           data-id-cuenta="${it.id_cuenta || ""}"
                           data-id-usuario="${it.id_usuario_cliente || ""}"
                           data-fechacorte="${it.fecha_corte_raw || ""}"
+                          data-hogar="${it.hogar_actualizado ? "true" : "false"}"
                         />
                       </label>
                     </td>
@@ -326,6 +327,7 @@
                   data-n-perfil="${r.n_perfil || ""}"
                   data-pin="${r.pin || ""}"
                   data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
+                  data-hogar="${r.hogar_actualizado ? "true" : "false"}"
                 >
                   Renovar
                 </button>
@@ -426,7 +428,7 @@
             if (cuentasIds.length) {
               const { data: cuentas, error: ctaErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo, clave")
+                .select("id_cuenta, id_plataforma, correo, clave, venta_miembro")
                 .in("id_cuenta", cuentasIds);
               if (ctaErr) {
                 console.error("buscar cuentas error", ctaErr);
@@ -481,7 +483,7 @@
             if (memberCuentaIds.length) {
               const { data: cuentasMiembro, error: cmErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, correo, clave")
+                .select("id_cuenta, correo, clave, venta_miembro")
                 .in("id_cuenta", memberCuentaIds);
               if (cmErr) {
                 console.error("buscar cuentas miembro error", cmErr);
@@ -504,6 +506,11 @@
               const fechaRaw = v.fecha_corte || "";
               const showPerfil = !!(platInfo?.por_pantalla || perfInfo?.n_perfil);
               const isPlatPerfilHogar = platId === 1;
+              const hogarActualizado =
+                platId === 1 &&
+                (perfInfo?.perfil_hogar === true ||
+                  cuentaInfo?.venta_miembro === true ||
+                  !!memberId);
               return {
                 id_venta: v.id_venta,
                 plataforma: platInfo?.nombre || "",
@@ -521,6 +528,7 @@
                 perfil: perfInfo?.n_perfil ? `M${perfInfo.n_perfil}` : "",
                 showPerfil,
                 showHogar: isPlatPerfilHogar,
+                hogar_actualizado: hogarActualizado,
                 fecha_corte: formatFechaCorte(fechaRaw) || "-",
                 fecha_corte_raw: fechaRaw,
               };
@@ -545,7 +553,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, id_plataforma, clave, venta_dominio, id_cuenta_miembro")
+            .select("id_cuenta, correo, id_plataforma, clave, venta_dominio, id_cuenta_miembro, venta_miembro")
             .ilike("correo", `%${term}%`)
             .limit(10);
           if (cErr) throw cErr;
@@ -634,7 +642,7 @@
           if (memberCuentaIds.length) {
             const { data: cuentasMiembro, error: cmErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, clave")
+              .select("id_cuenta, correo, clave, venta_miembro")
               .in("id_cuenta", memberCuentaIds);
             if (cmErr) throw cmErr;
             memberCuentaMap = (cuentasMiembro || []).reduce((acc, c) => {
@@ -654,7 +662,7 @@
           if (missingIds.length) {
             const { data: extraCuentas, error: extraErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, id_plataforma, clave")
+              .select("id_cuenta, correo, id_plataforma, clave, venta_miembro")
               .in("id_cuenta", missingIds);
             if (extraErr) throw extraErr;
             (extraCuentas || []).forEach((c) => {
@@ -685,6 +693,11 @@
             const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
             const showPerfil = !!(plat?.por_pantalla || plat?.por_acceso || perf);
             const isPlatPerfilHogar = plat?.id_plataforma === 1;
+            const hogarActualizado =
+              isPlatPerfilHogar &&
+              (perf?.perfil_hogar === true ||
+                cuenta?.venta_miembro === true ||
+                !!memberId);
             const fechaRaw = v.fecha_corte || "";
             return {
               plataforma: plat?.nombre || "",
@@ -701,6 +714,7 @@
               cliente: userMap[v.id_usuario] || "-",
               perfil: perf?.n_perfil ? `M${perf.n_perfil}` : "",
               hogarText: isPlatPerfilHogar && perf ? (perf.perfil_hogar ? "Activado" : "Desactivado") : "",
+              hogar_actualizado: hogarActualizado,
               fecha_corte: formatFechaCorte(fechaRaw) || "-",
               fecha_corte_raw: fechaRaw,
             };
@@ -871,6 +885,7 @@
           id_usuario_cliente: chk.dataset.idUsuario || null,
           meses: 1,
           fecha_corte: chk.dataset.fechacorte || "",
+          hogar_actualizado: chk.dataset.hogar === "true",
           uid: idx,
         }));
         renderModalSeleccion();
@@ -883,11 +898,22 @@
         }
       });
 
+      const formatPlataformaLabel = (name, hogarActualizado) => {
+        const base = name || "";
+        if (!base) return base;
+        return hogarActualizado ? `${base} (HOGAR ACTUALIZADO)` : base;
+      };
+
       const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
         const lines = ["*✅ Servicio renovado 🫡*", ""];
-        if (plataformaNombre || item.id_venta) {
+        const platLabelRaw = formatPlataformaLabel(
+          plataformaNombre || "",
+          item?.hogar_actualizado === true,
+        );
+        const platLabel = platLabelRaw ? platLabelRaw.toUpperCase() : "";
+        if (platLabel || item.id_venta) {
           lines.push(
-            `*${(plataformaNombre || "").toUpperCase()}*${item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""}`.trim()
+            `*${platLabel}*${item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""}`.trim()
           );
         }
         if (item.correo) lines.push(`*Correo:* ${item.correo}`);
@@ -1144,6 +1170,7 @@
           pin: data.pin || "",
           plataforma_nombre: data.plataforma_nombre || "",
           fecha_corte: data.fecha || null,
+          hogar_actualizado: data.hogar_actualizado === true,
         };
         modalRow.classList.remove("hidden");
       };
@@ -1181,6 +1208,7 @@
           n_perfil: btn.dataset.nPerfil || "",
           pin: btn.dataset.pin || "",
           plataforma_nombre: btn.dataset.plataformaNombre || "",
+          hogar_actualizado: btn.dataset.hogar === "true",
         };
         openRowModal(data);
       });
@@ -1260,9 +1288,14 @@
           // Mostrar modal de confirmación con texto copiables
           const lines = ["*✅ Servicio renovado 🫡*"];
           lines.push("");
-          if (modalRowContext.plataforma_nombre || modalRowContext.id_venta) {
+          const platLabelRaw = formatPlataformaLabel(
+            modalRowContext.plataforma_nombre || "",
+            modalRowContext.hogar_actualizado === true,
+          );
+          const platLabel = platLabelRaw ? platLabelRaw.toUpperCase() : "";
+          if (platLabel || modalRowContext.id_venta) {
             lines.push(
-              `*${modalRowContext.plataforma_nombre || ""}*${modalRowContext.id_venta ? ` 🫎 \`ID Venta: #${modalRowContext.id_venta}\`` : ""}`.trim()
+              `*${platLabel}*${modalRowContext.id_venta ? ` 🫎 \`ID Venta: #${modalRowContext.id_venta}\`` : ""}`.trim()
             );
           }
           if (modalRowContext.correo) lines.push(`*Correo:* ${modalRowContext.correo}`);

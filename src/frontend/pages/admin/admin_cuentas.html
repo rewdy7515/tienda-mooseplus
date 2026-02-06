@@ -91,6 +91,8 @@
         width: 18px;
         height: 18px;
         border-radius: 50%;
+        border: none;
+        padding: 0;
         background: #111;
         color: #fff;
         font-size: 12px;
@@ -1797,13 +1799,21 @@
         }
         const blocks = Object.entries(grouped).map(([platName, rows]) => {
           const trs = rows
-            .map(
-              (r) => `
+            .map((r) => {
+              const correo = r.correo || "";
+              const correoSafe = correo.replace(/"/g, "&quot;");
+              const correoCell = correo
+                ? `<span class="copyable-text" data-clipboard="${correoSafe}">${correo}</span>`
+                : "-";
+              const alertBtn = correo
+                ? `<button type="button" class="cliente-alert" data-correo="${correoSafe}" title="Ver cuenta">!</button>`
+                : "";
+              return `
               <tr>
                 <td>${r.id_venta ?? ""}</td>
                 <td>
-                  ${r.correo || ""}
-                  <span class="cliente-alert" data-correo="${r.correo || ""}" title="Ver cuenta">!</span>
+                  ${correoCell}
+                  ${alertBtn}
                 </td>
                 <td>${r.clave || ""}</td>
                 <td>${r.n_perfil ?? ""}${r.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
@@ -1835,8 +1845,8 @@
                   <button class="btn-delete" data-id-venta="${r.id_venta ?? ""}">Eliminar</button>
                 </td>
               </tr>
-            `,
-            )
+            `;
+            })
             .join("");
           return `
             <div class="ventas-bloque">

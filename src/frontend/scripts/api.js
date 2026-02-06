@@ -136,8 +136,24 @@ export async function submitCheckout(payload) {
 }
 
 export async function updateCartMontos(monto_usd, tasa_bs) {
-  // Deshabilitado: el monto del carrito debe calcularse solo desde trigger SQL.
-  return { ok: true, skipped: true, monto_usd, tasa_bs };
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/cart/montos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ monto_usd, tasa_bs }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("cart/montos response", res.status, text);
+      return { error: text || "No se pudo actualizar montos del carrito" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("updateCartMontos error", err);
+    return { error: err.message };
+  }
 }
 
 export async function uploadComprobantes(files = []) {
