@@ -124,7 +124,7 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase, uploadComprobantes } from "../../scripts/api.js";
+      import { clearServerSession, loadCurrentUser, supabase, uploadPlatformLogos } from "../../scripts/api.js";
 
       requireSession();
       attachLogoHome();
@@ -149,6 +149,54 @@
         statusEl.textContent = msg || "";
         statusEl.classList.toggle("is-error", isError);
         statusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+
+      const resizeImageIfNeeded = (file, maxSide = 1200, maxBytes = 1500000) => {
+        return new Promise((resolve, reject) => {
+          if (!file || !file.type?.startsWith("image/")) return resolve(file);
+          const shouldResize = file.size > maxBytes;
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const { width, height } = img;
+            if (!shouldResize && Math.max(width, height) <= maxSide) {
+              resolve(file);
+              return;
+            }
+            const scale = Math.min(1, maxSide / Math.max(width, height));
+            const targetW = Math.max(1, Math.round(width * scale));
+            const targetH = Math.max(1, Math.round(height * scale));
+            const canvas = document.createElement("canvas");
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              resolve(file);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
+            const quality = mime === "image/jpeg" ? 0.85 : undefined;
+            canvas.toBlob(
+              (blob) => {
+                if (!blob) {
+                  resolve(file);
+                  return;
+                }
+                const resized = new File([blob], file.name, { type: blob.type });
+                resolve(resized);
+              },
+              mime,
+              quality
+            );
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(file);
+          };
+          img.src = url;
+        });
       };
 
       const renderEditor = (plat) => {
@@ -202,7 +250,7 @@
           setStatus("Selecciona una plataforma.", true);
           return;
         }
-        const file = fileInput?.files?.[0];
+        let file = fileInput?.files?.[0];
         if (!file) {
           setStatus("Selecciona una imagen.", true);
           return;
@@ -212,15 +260,23 @@
           return;
         }
         try {
+          console.log("[editar_logos] selectedId", selectedId);
+          console.log("[editar_logos] file", { name: file.name, type: file.type, size: file.size });
+          setStatus("Optimizando imagen...");
+          file = await resizeImageIfNeeded(file);
+          console.log("[editar_logos] optimized file", { name: file.name, type: file.type, size: file.size });
           setStatus("Subiendo logo...");
-          const { urls, error: uploadErr } = await uploadComprobantes([file]);
+          const { urls, error: uploadErr } = await uploadPlatformLogos([file]);
+          console.log("[editar_logos] upload response", { urls, uploadErr });
           if (uploadErr) throw uploadErr;
           const url = urls?.[0];
           if (!url) throw new Error("No se obtuvo URL del logo.");
+          console.log("[editar_logos] updating plataforma imagen", { id_plataforma: selectedId, url });
           const { error: updErr } = await supabase
             .from("plataformas")
             .update({ imagen: url })
             .eq("id_plataforma", selectedId);
+          console.log("[editar_logos] update response", { updErr });
           if (updErr) throw updErr;
           plataformasMap[selectedId] = {
             ...plataformasMap[selectedId],

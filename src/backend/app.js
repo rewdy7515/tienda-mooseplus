@@ -11,7 +11,7 @@ app.use(
     credentials: true,
   })
 );
-const jsonParser = express.json({ limit: "10mb" });
+const jsonParser = express.json({ limit: "25mb" });
 
 const clearCorsHeaders = (res) => {
   res.removeHeader("Access-Control-Allow-Origin");
@@ -614,6 +614,59 @@ app.post("/api/checkout/upload", async (req, res) => {
     res.json({ urls });
   } catch (err) {
     console.error("[checkout:upload] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sube logos de plataformas al bucket público (public_assets/logos)
+app.post("/api/logos/upload", async (req, res) => {
+  const files = req.body?.files;
+  if (!Array.isArray(files) || !files.length) {
+    return res.status(400).json({ error: "files es requerido" });
+  }
+
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    const urls = [];
+
+    const sanitizeFileName = (name = "file") => {
+      const cleaned = String(name)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9._-]/g, "");
+      return cleaned || "file";
+    };
+
+    for (const file of files) {
+      const { name, content, type } = file || {};
+      if (!name || !content) {
+        return res
+          .status(400)
+          .json({ error: "Cada archivo necesita name y content en base64" });
+      }
+      const buffer = Buffer.from(content, "base64");
+      const safeName = sanitizeFileName(name);
+      const path = `logos/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}-${safeName}`;
+
+      const { error } = await supabaseAdmin.storage
+        .from("public_assets")
+        .upload(path, buffer, {
+          contentType: type || "application/octet-stream",
+        });
+      if (error) throw error;
+      const { data } = supabaseAdmin.storage.from("public_assets").getPublicUrl(path);
+      if (data?.publicUrl) urls.push(data.publicUrl);
+    }
+
+    res.json({ urls });
+  } catch (err) {
+    console.error("[logos:upload] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }

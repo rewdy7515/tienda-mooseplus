@@ -1481,7 +1481,7 @@ input[type="number"].input-inline {
 
 .plataforma-thumb {
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 4 / 5;
   background: #fff;
   border-radius: 8px;
   display: flex;

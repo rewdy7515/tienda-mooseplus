@@ -190,6 +190,40 @@ export async function uploadComprobantes(files = []) {
   }
 }
 
+export async function uploadPlatformLogos(files = []) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const payloadFiles = await Promise.all(
+      files.map(async (file) => ({
+        name: file.name,
+        type: file.type,
+        content: bufferToBase64(await file.arrayBuffer()),
+      }))
+    );
+
+    const res = await fetch(`${API_BASE}/api/logos/upload`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ files: payloadFiles, id_usuario }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("upload logos response", res.status, text);
+      return { error: text || "No se pudieron subir los logos" };
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error("No se pudieron subir los logos:", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchInventario() {
   await ensureServerSession();
   try {
