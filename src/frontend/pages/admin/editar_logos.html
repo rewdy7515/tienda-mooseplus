@@ -151,7 +151,7 @@
         statusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
-      const resizeImageIfNeeded = (file, maxSide = 1200, maxBytes = 150000) => {
+      const resizeImageIfNeeded = (file, targetW = 148, targetH = 185, maxBytes = 150000) => {
         return new Promise((resolve, reject) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
           const shouldResize = file.size > maxBytes;
@@ -160,13 +160,10 @@
           img.onload = () => {
             URL.revokeObjectURL(url);
             const { width, height } = img;
-            if (!shouldResize && Math.max(width, height) <= maxSide) {
+            if (!shouldResize && width === targetW && height === targetH) {
               resolve(file);
               return;
             }
-            const scale = Math.min(1, maxSide / Math.max(width, height));
-            const targetW = Math.max(1, Math.round(width * scale));
-            const targetH = Math.max(1, Math.round(height * scale));
             const canvas = document.createElement("canvas");
             canvas.width = targetW;
             canvas.height = targetH;
@@ -175,10 +172,17 @@
               resolve(file);
               return;
             }
-            ctx.drawImage(img, 0, 0, targetW, targetH);
+            // Contener imagen dentro del tamaño objetivo manteniendo proporción
+            const scale = Math.min(targetW / width, targetH / height);
+            const drawW = Math.max(1, Math.round(width * scale));
+            const drawH = Math.max(1, Math.round(height * scale));
+            const offsetX = Math.round((targetW - drawW) / 2);
+            const offsetY = Math.round((targetH - drawH) / 2);
+            ctx.clearRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
             const tryWebp = true;
             const mime = tryWebp ? "image/webp" : "image/jpeg";
-            const quality = 0.85;
+            const quality = 0.8;
             canvas.toBlob(
               (blob) => {
                 if (blob) {
