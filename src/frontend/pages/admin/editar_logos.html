@@ -176,16 +176,32 @@
               return;
             }
             ctx.drawImage(img, 0, 0, targetW, targetH);
-            const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
-            const quality = mime === "image/jpeg" ? 0.85 : undefined;
+            const tryWebp = true;
+            const mime = tryWebp ? "image/webp" : "image/jpeg";
+            const quality = 0.85;
             canvas.toBlob(
               (blob) => {
-                if (!blob) {
-                  resolve(file);
+                if (blob) {
+                  const baseName = file.name.replace(/\.[^.]+$/, "");
+                  const ext = blob.type === "image/webp" ? "webp" : "jpg";
+                  const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type });
+                  resolve(resized);
                   return;
                 }
-                const resized = new File([blob], file.name, { type: blob.type });
-                resolve(resized);
+                // Fallback a JPEG si WebP no está soportado
+                canvas.toBlob(
+                  (jpegBlob) => {
+                    if (!jpegBlob) {
+                      resolve(file);
+                      return;
+                    }
+                    const baseName = file.name.replace(/\.[^.]+$/, "");
+                    const resized = new File([jpegBlob], `${baseName}.jpg`, { type: jpegBlob.type });
+                    resolve(resized);
+                  },
+                  "image/jpeg",
+                  0.85
+                );
               },
               mime,
               quality
