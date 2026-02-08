@@ -216,6 +216,7 @@ const renderDetalle = () => {
     { label: "Correo", valor: m.correo, copy: true },
     { label: "ID", valor: m.id, copy: true },
     { label: "Cédula", valor: m.cedula, copy: false },
+    { label: "Teléfono", valor: m.telefono, copy: false },
   ].filter((c) => c.valor !== null && c.valor !== undefined && c.valor !== "");
 
   const detalleHtml = campos
@@ -627,7 +628,7 @@ async function init() {
     const [cartData, catalog, metodosResp, tasaResp, user] = await Promise.all([
       fetchCart(),
       loadCatalog(),
-      supabase.from("metodos_de_pago").select("id_metodo_de_pago, nombre, correo, id, cedula"),
+      supabase.from("metodos_de_pago").select("id_metodo_de_pago, nombre, correo, id, cedula, telefono"),
       fetchP2PRate(),
       loadCurrentUser(),
     ]);

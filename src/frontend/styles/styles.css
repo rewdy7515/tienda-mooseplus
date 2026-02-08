@@ -2,7 +2,7 @@
 
 body {
   margin: 0;
-  background: #f5f5f5;
+  background: #fff;
   font-family: sans-serif;
   overflow-x: hidden;
 }
@@ -89,46 +89,48 @@ body {
   object-fit: contain;
 }
 
-/* Header responsive (móvil) */
 @media (max-width: 640px) {
   .header {
-    flex-wrap: wrap;
-    padding: 8px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "logo user"
+      "search cart";
     gap: 8px;
+    padding: 8px;
     align-items: center;
   }
   .logo {
-    display: block;
-    flex: 0 0 auto;
+    grid-area: logo;
+    justify-self: start;
+  }
+  .header-user {
+    grid-area: user;
+    justify-self: end;
+    margin-left: 0;
+    gap: 6px;
+  }
+  #btn-admin-header {
+    margin: 0;
+  }
+  .user-info {
+    margin: 0;
+    gap: 6px;
   }
   .search-box {
-    order: 4;
-    flex: 1 1 100%;
+    grid-area: search;
     width: 100%;
     min-width: 0;
     max-width: 100%;
-    margin: 0 auto;
+    margin: 0;
     box-sizing: border-box;
   }
-  #btn-admin-header {
-    order: 2;
-    margin-left: auto;
-    margin-right: 6px;
-  }
-  .user-info {
-    order: 3;
-    width: auto;
-    flex: 0 0 auto;
-    min-width: 0;
-    justify-content: flex-end;
-    margin-left: 0;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
   .carrito {
+    grid-area: cart;
+    justify-self: end;
     width: 26px;
-    margin-left: 4px;
-    padding-left: 18px;
+    margin: 0;
+    padding: 0;
   }
 }
 
@@ -142,6 +144,13 @@ body {
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .user-menu {
@@ -959,6 +968,20 @@ input[type="number"].input-inline {
   max-width: 100%;
 }
 
+#platform-modal .modal-actions-fixed {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#platform-modal .modal-actions-fixed .btn-add {
+  width: 100%;
+}
+
 /* Mueve el scrollbar al borde del modal (evita scrollbar interno en modal-body) */
 #platform-modal .modal-card {
   overflow-y: auto;
@@ -1445,6 +1468,15 @@ input[type="number"].input-inline {
 /* CATEGORÍAS */
 .categorias-dinamicas {
   margin: 20px;
+  padding-top: 12px;
+}
+
+.categoria-card {
+  margin-top: 20px;
+}
+
+.categorias-dinamicas > .categoria-card:first-child {
+  margin-top: 0;
 }
 
 .testing-toggle-wrap {
@@ -1504,13 +1536,13 @@ input[type="number"].input-inline {
 
 .categoria-card h3 {
   margin: 0 0 12px;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
 }
 
 /* Refuerzo para evitar sobrescrituras externas */
 .categorias-dinamicas .categoria-card h3 {
-  font-size: 20px !important;
+  font-size: 22px !important;
   font-weight: 700 !important;
 }
 
@@ -1521,7 +1553,7 @@ input[type="number"].input-inline {
 }
 
 .plataforma-card {
-  background: #f9fafb;
+  background: #f8f8f8;
   border-radius: 10px;
   padding: 10px;
   text-align: left;
@@ -1763,6 +1795,18 @@ input[type="number"].input-inline {
     align-items: center;
   }
 
+  /* Quitar cajas de categorías en móvil */
+  .categoria-card {
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .categorias-dinamicas > .categoria-card + .categoria-card {
+    margin-top: 12px;
+  }
+
   .modal-card {
     max-width: 420px;
     width: 80%;
@@ -1803,21 +1847,22 @@ input[type="number"].input-inline {
     max-height: 70vh;
   }
 
-#platform-modal .modal-actions-fixed {
-  flex: 0 0 auto;
-  position: sticky;
-  bottom: 0;
-  background: #fff;
-  padding: 10px 0 6px;
-  border-top: 1px solid #eee;
-}
+  #platform-modal .modal-actions-fixed {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    background: #f9fafb;
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+  }
 
-#platform-modal .modal-scroll {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding-right: 16px;
-  margin-right: -16px;
-}
+  #platform-modal .modal-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 16px;
+    margin-right: -16px;
+  }
 }
 
 .btn-alert {

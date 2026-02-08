@@ -16,47 +16,48 @@
     <div id="search-results" class="search-results hidden"></div>
   </div>
 
-  <button id="btn-admin-header" class="btn-outline hidden" style="white-space: nowrap;">
-    Admin Cuentas
-  </button>
-
-  <div class="user-info">
-    <button id="btn-login" class="btn-outline hidden">Iniciar sesión</button>
-    <div class="user-menu">
-      <img
-        src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/default-icono-perfil.png"
-        class="avatar"
-        alt="Foto de perfil"
-      />
-      <span class="username">Usuario</span>
-      <div class="user-dropdown">
-        <a href="__PAGES__saldo.html" class="dropdown-item saldo-item">Saldo: 0.00</a>
-        <a href="__PAGES__inventario.html" class="dropdown-item">
-          Inventario<span class="delivery-dot hidden"></span>
-        </a>
-        <a href="__PAGES__notificaciones.html" class="dropdown-item"
-          >Notificaciones<span class="notify-dot hidden"></span></a
-        >
-        <a href="__PAGES__reportes/report.html" class="dropdown-item"
-          >Reportes</a
-        >
-        <a href="__PAGES__historial_ventas.html" class="dropdown-item"
-          >Historial de Ventas</a
-        >
-        <a href="__PAGES__admin/admin.html" class="dropdown-item admin-link hidden"
-          >Administrar servicios</a
-        >
-        <button type="button" class="dropdown-item dropdown-button logout-btn">
-          Cerrar sesión
-        </button>
+  <div class="header-user">
+    <button id="btn-admin-header" class="btn-outline hidden" style="white-space: nowrap;">
+      Admin Cuentas
+    </button>
+    <div class="user-info">
+      <button id="btn-login" class="btn-outline hidden">Iniciar sesión</button>
+      <div class="user-menu">
+        <img
+          src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/default-icono-perfil.png"
+          class="avatar"
+          alt="Foto de perfil"
+        />
+        <span class="username">Usuario</span>
+        <div class="user-dropdown">
+          <a href="__PAGES__saldo.html" class="dropdown-item saldo-item">Saldo: 0.00</a>
+          <a href="__PAGES__inventario.html" class="dropdown-item">
+            Inventario<span class="delivery-dot hidden"></span>
+          </a>
+          <a href="__PAGES__notificaciones.html" class="dropdown-item"
+            >Notificaciones<span class="notify-dot hidden"></span></a
+          >
+          <a href="__PAGES__reportes/report.html" class="dropdown-item"
+            >Reportes</a
+          >
+          <a href="__PAGES__historial_ventas.html" class="dropdown-item"
+            >Historial de Ventas</a
+          >
+          <a href="__PAGES__admin/admin.html" class="dropdown-item admin-link hidden"
+            >Administrar servicios</a
+          >
+          <button type="button" class="dropdown-item dropdown-button logout-btn">
+            Cerrar sesión
+          </button>
+        </div>
       </div>
     </div>
-    <img
-      src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/carrito.png"
-      class="carrito"
-      alt="Carrito"
-    />
   </div>
+  <img
+    src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/carrito.png"
+    class="carrito"
+    alt="Carrito"
+  />
 </header>
 
 <div id="cart-drawer" class="cart-drawer">
