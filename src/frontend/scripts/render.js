@@ -1,4 +1,4 @@
-export function renderCategorias(container, categorias, plataformasPorCategoria) {
+export function renderCategorias(container, categorias, plataformasPorCategoria, preciosMinByPlat = {}) {
   container.innerHTML = categorias
     .map(({ id_categoria, nombre }) => {
       const items = plataformasPorCategoria[id_categoria] || [];
@@ -19,6 +19,12 @@ export function renderCategorias(container, categorias, plataformasPorCategoria)
                 mostrar_stock,
               }) => {
                 const platId = id_plataforma || id;
+                const minPrecio = Number(preciosMinByPlat?.[String(platId)] ?? preciosMinByPlat?.[platId]);
+                const precioTxt = (() => {
+                  if (!Number.isFinite(minPrecio)) return "Desde $--";
+                  const [intPart, decPart] = minPrecio.toFixed(2).split(".");
+                  return `Desde $${intPart}<sup>${decPart}</sup>`;
+                })();
                 return `
                 <div class="plataforma-card"
                   data-nombre="${nomPlat}"
@@ -36,6 +42,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria)
                     <img src="${imagen || ""}" alt="${nomPlat}" loading="lazy" />
                   </div>
                   <div class="plataforma-nombre">${nomPlat}</div>
+                  <div class="plataforma-precio">${precioTxt}</div>
                 </div>`;
               }
             )

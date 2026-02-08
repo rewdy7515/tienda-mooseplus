@@ -424,8 +424,18 @@ async function init() {
       });
     });
 
+    const preciosMinByPlat = Object.entries(preciosMap || {}).reduce((acc, [platId, list]) => {
+      const min = (list || []).reduce((m, p) => {
+        const val = Number(p?.precio_usd_detal);
+        if (!Number.isFinite(val)) return m;
+        return m === null || val < m ? val : m;
+      }, null);
+      if (min !== null) acc[platId] = min;
+      return acc;
+    }, {});
+
     setEstado("");
-    renderCategorias(contenedor, categorias, plataformasPorCategoria);
+    renderCategorias(contenedor, categorias, plataformasPorCategoria, preciosMinByPlat);
     attachPlatformClicks(openModal);
 
     initCart({
