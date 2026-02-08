@@ -124,9 +124,12 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase, uploadPlatformLogos } from "../../scripts/api.js";
+      import { clearServerSession, loadCurrentUser, supabase, uploadPlatformLogos, startSession } from "../../scripts/api.js";
 
-      requireSession();
+      const sessionId = requireSession();
+      console.log("[editar_logos] location", window.location.href);
+      console.log("[editar_logos] online", navigator?.onLine);
+      console.log("[editar_logos] sessionId", sessionId);
       attachLogoHome();
 
       const usernameEl = document.querySelector(".username");
@@ -151,8 +154,8 @@
         statusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
-      // Exporta a 2x para mejor nitidez en el display 148x185
-      const resizeImageIfNeeded = (file, targetW = 296, targetH = 370, maxBytes = 150000) => {
+      // Exporta a 3x para mejor nitidez en el display 148x185
+      const resizeImageIfNeeded = (file, targetW = 444, targetH = 555, maxBytes = 150000) => {
         return new Promise((resolve, reject) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
           const shouldResize = file.size > maxBytes;
@@ -183,34 +186,39 @@
             ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
             const tryWebp = true;
             const mime = tryWebp ? "image/webp" : "image/jpeg";
-            const quality = 0.9;
-            canvas.toBlob(
-              (blob) => {
-                if (blob) {
-                  const baseName = file.name.replace(/\.[^.]+$/, "");
-                  const ext = blob.type === "image/webp" ? "webp" : "jpg";
-                  const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type });
-                  resolve(resized);
-                  return;
-                }
-                // Fallback a JPEG si WebP no está soportado
-                canvas.toBlob(
-                  (jpegBlob) => {
-                    if (!jpegBlob) {
-                      resolve(file);
-                      return;
-                    }
-                    const baseName = file.name.replace(/\.[^.]+$/, "");
-                    const resized = new File([jpegBlob], `${baseName}.jpg`, { type: jpegBlob.type });
-                    resolve(resized);
-                  },
-                  "image/jpeg",
-                  0.85
-                );
-              },
-              mime,
-              quality
-            );
+            const makeBlob = (type, quality) =>
+              new Promise((res) => {
+                canvas.toBlob((blob) => res(blob), type, quality);
+              });
+            (async () => {
+              let quality = 0.92;
+              let blob = await makeBlob(mime, quality);
+              while (blob && blob.size > maxBytes && quality > 0.7) {
+                quality = Math.max(0.7, quality - 0.05);
+                blob = await makeBlob(mime, quality);
+              }
+              if (blob) {
+                const baseName = file.name.replace(/\.[^.]+$/, "");
+                const ext = blob.type === "image/webp" ? "webp" : "jpg";
+                const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type });
+                resolve(resized);
+                return;
+              }
+              // Fallback a JPEG si WebP no está soportado
+              let jpegQuality = 0.9;
+              let jpegBlob = await makeBlob("image/jpeg", jpegQuality);
+              while (jpegBlob && jpegBlob.size > maxBytes && jpegQuality > 0.7) {
+                jpegQuality = Math.max(0.7, jpegQuality - 0.05);
+                jpegBlob = await makeBlob("image/jpeg", jpegQuality);
+              }
+              if (!jpegBlob) {
+                resolve(file);
+                return;
+              }
+              const baseName = file.name.replace(/\.[^.]+$/, "");
+              const resized = new File([jpegBlob], `${baseName}.jpg`, { type: jpegBlob.type });
+              resolve(resized);
+            })().catch(() => resolve(file));
           };
           img.onerror = () => {
             URL.revokeObjectURL(url);
@@ -314,6 +322,10 @@
 
       async function init() {
         try {
+          if (sessionId) {
+            const ss = await startSession(sessionId);
+            console.log("[editar_logos] startSession", ss);
+          }
           const user = await loadCurrentUser();
           if (user && usernameEl) {
             const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();

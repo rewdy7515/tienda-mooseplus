@@ -1767,12 +1767,14 @@ app.post("/api/checkout", async (req, res) => {
     }
 
     // Historial de ventas (nuevas + renovaciones) con monto como float completo
-    const caracasNow = new Date(
+    const caracasNowPago = new Date(
       new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
     );
-    const pad2 = (val) => String(val).padStart(2, "0");
-    const horaPago = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
-      caracasNow.getSeconds()
+    const pad2Pago = (val) => String(val).padStart(2, "0");
+    const horaPago = `${pad2Pago(caracasNowPago.getHours())}:${pad2Pago(
+      caracasNowPago.getMinutes()
+    )}:${pad2Pago(
+      caracasNowPago.getSeconds()
     )}`;
     const histRows = [];
     // Nuevas (insertadas recién)
