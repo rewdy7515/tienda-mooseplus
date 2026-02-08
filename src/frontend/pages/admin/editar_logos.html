@@ -151,7 +151,8 @@
         statusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
-      const resizeImageIfNeeded = (file, targetW = 148, targetH = 185, maxBytes = 150000) => {
+      // Exporta a 2x para mejor nitidez en el display 148x185
+      const resizeImageIfNeeded = (file, targetW = 296, targetH = 370, maxBytes = 150000) => {
         return new Promise((resolve, reject) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
           const shouldResize = file.size > maxBytes;
@@ -182,7 +183,7 @@
             ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
             const tryWebp = true;
             const mime = tryWebp ? "image/webp" : "image/jpeg";
-            const quality = 0.8;
+            const quality = 0.9;
             canvas.toBlob(
               (blob) => {
                 if (blob) {

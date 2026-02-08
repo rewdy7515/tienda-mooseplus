@@ -780,11 +780,6 @@ btnSendPayment?.addEventListener("click", async () => {
     return;
   }
   try {
-    if (isMetodoBs) {
-      const verified = await verifyPagoMovil();
-      if (!verified.ok) return;
-    }
-
     const comprobantes = isMetodoBs ? [] : await uploadFiles();
     const payload = {
       id_metodo_de_pago: metodo.id_metodo_de_pago ?? metodo.id,
@@ -846,7 +841,11 @@ btnSendPayment?.addEventListener("click", async () => {
 
     alert("Pago enviado correctamente.");
     const nextUrl = resp?.id_orden
-      ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+      ? isMetodoBs
+        ? `verificando_pago.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+        : `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+      : isMetodoBs
+      ? "verificando_pago.html"
       : "entregar_servicios.html";
     window.location.href = nextUrl;
   } catch (err) {

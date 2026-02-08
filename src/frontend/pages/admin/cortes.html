@@ -195,6 +195,54 @@
         opacity: 1;
         transform: translateY(0);
       }
+      .cortes-modal.hidden {
+        display: none;
+      }
+      .cortes-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 3000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .cortes-modal .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .cortes-modal .modal-card {
+        position: relative;
+        z-index: 1;
+        background: #fff;
+        border-radius: 14px;
+        padding: 16px;
+        max-width: 860px;
+        width: min(92vw, 860px);
+        max-height: 80vh;
+        overflow: auto;
+      }
+      .cortes-modal table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .cortes-modal th,
+      .cortes-modal td {
+        border: 1px solid #e5e7eb;
+        padding: 8px;
+        font-size: 13px;
+        text-align: left;
+      }
+      .cortes-modal th {
+        background: #f9fafb;
+      }
+      .cortes-modal .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 12px;
+      }
     </style>
   </head>
   <body>
@@ -204,7 +252,7 @@
     <main class="categorias-dinamicas">
       <h2>Cortes</h2>
       <button id="btn-delete-cortes" class="btn-outline hidden" style="margin-bottom: 12px; display:none;">
-        Eliminar filas cortadas
+        Eliminar filas vencidas
       </button>
       <div class="cortes-wrapper">
         <div id="cortes-status" class="status">Cargando plataformas...</div>
@@ -212,6 +260,32 @@
       </div>
     </main>
     <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
+    <div id="modal-delete-cortes" class="cortes-modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <h3 style="margin: 0 0 6px;">Eliminar ventas suspendidas</h3>
+        <p style="margin: 0; color:#555; font-size: 13px;">
+          Selecciona las ventas que quieres eliminar.
+        </p>
+        <div class="modal-content">
+          <table>
+            <thead>
+              <tr>
+                <th>Plataforma</th>
+                <th>Cliente</th>
+                <th>Correo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="modal-cortes-body"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-outline" id="btn-cancel-delete">Cancelar</button>
+          <button type="button" class="btn-primary" id="btn-confirm-delete">Eliminar ventas</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
@@ -230,24 +304,94 @@
           const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
           const isSuper = isTrue(user?.permiso_superadmin);
           const btnDelete = document.querySelector("#btn-delete-cortes");
+          const modal = document.querySelector("#modal-delete-cortes");
+          const modalBody = document.querySelector("#modal-cortes-body");
+          const btnCancel = document.querySelector("#btn-cancel-delete");
+          const btnConfirm = document.querySelector("#btn-confirm-delete");
+          const backdrop = modal?.querySelector(".modal-backdrop");
           if (isSuper && btnDelete) {
             btnDelete.classList.remove("hidden");
             btnDelete.style.display = "inline-flex";
+            const closeModal = () => {
+              modal?.classList.add("hidden");
+              if (modal) modal.setAttribute("aria-hidden", "true");
+              if (modalBody) modalBody.innerHTML = "";
+            };
+            const openModal = () => {
+              modal?.classList.remove("hidden");
+              if (modal) modal.setAttribute("aria-hidden", "false");
+            };
+
+            const loadSuspendedVentas = async () => {
+              const { data: ventasSusp, error: ventasErr } = await supabase
+                .from("ventas")
+                .select(
+                  "id_venta, id_cuenta, id_perfil, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(correo, id_plataforma, plataformas:plataformas(nombre)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo), usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido)"
+                )
+                .eq("suspendido", true);
+              if (ventasErr) throw ventasErr;
+              return ventasSusp || [];
+            };
+
+            const renderModalRows = (rows = []) => {
+              if (!modalBody) return;
+              if (!rows.length) {
+                modalBody.innerHTML = `<tr><td colspan="4">No hay ventas suspendidas.</td></tr>`;
+                return;
+              }
+              modalBody.innerHTML = rows
+                .map((v) => {
+                  const cliente = v.usuarios
+                    ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() ||
+                      "Cliente"
+                    : "Cliente";
+                  const accountSource = v.id_cuenta_miembro ? v.cuentas_miembro : v.cuentas;
+                  const correo = accountSource?.correo || "-";
+                  const platNombre = v.cuentas?.plataformas?.nombre || "Plataforma";
+                  return `
+                    <tr data-id-venta="${v.id_venta}">
+                      <td>${platNombre}</td>
+                      <td>${cliente}</td>
+                      <td>${correo}</td>
+                      <td><input type="checkbox" class="venta-check" data-id="${v.id_venta}" /></td>
+                    </tr>`;
+                })
+                .join("");
+            };
+
             btnDelete.addEventListener("click", async () => {
-              const ok = confirm("¿Eliminar todas las ventas con suspendido = true?");
-              if (!ok) return;
               try {
-                const { data: ventasSusp, error: ventasErr } = await supabase
+                const rows = await loadSuspendedVentas();
+                renderModalRows(rows);
+                openModal();
+              } catch (err) {
+                console.error("load suspendidos error", err);
+                alert("No se pudieron cargar las ventas suspendidas.");
+              }
+            });
+
+            btnCancel?.addEventListener("click", closeModal);
+            backdrop?.addEventListener("click", closeModal);
+
+            btnConfirm?.addEventListener("click", async () => {
+              try {
+                const checks = modalBody?.querySelectorAll(".venta-check:checked") || [];
+                const ids = Array.from(checks).map((c) => Number(c.dataset.id)).filter((id) => id);
+                if (!ids.length) {
+                  alert("Selecciona al menos una venta.");
+                  return;
+                }
+                const { data: ventasSel, error: ventasSelErr } = await supabase
                   .from("ventas")
                   .select("id_venta, id_cuenta, id_perfil")
-                  .eq("suspendido", true);
-                if (ventasErr) throw ventasErr;
+                  .in("id_venta", ids);
+                if (ventasSelErr) throw ventasSelErr;
 
                 const cuentasIds = Array.from(
-                  new Set((ventasSusp || []).map((v) => v.id_cuenta).filter(Boolean))
+                  new Set((ventasSel || []).map((v) => v.id_cuenta).filter(Boolean))
                 );
                 const perfilesIds = Array.from(
-                  new Set((ventasSusp || []).map((v) => v.id_perfil).filter(Boolean))
+                  new Set((ventasSel || []).map((v) => v.id_perfil).filter(Boolean))
                 );
 
                 const updates = [];
@@ -267,14 +411,15 @@
                   if (errUpdates) throw errUpdates;
                 }
 
-                const { error } = await supabase.from("ventas").delete().eq("suspendido", true);
+                const { error } = await supabase.from("ventas").delete().in("id_venta", ids);
                 if (error) throw error;
 
-                alert("Filas cortadas eliminadas.");
-                init(); // recarga la tabla
+                alert("Ventas eliminadas.");
+                closeModal();
+                init();
               } catch (err) {
                 console.error("delete suspendidos error", err);
-                alert("No se pudieron eliminar las filas cortadas.");
+                alert("No se pudieron eliminar las ventas.");
               }
             });
           }

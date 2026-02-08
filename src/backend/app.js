@@ -1386,6 +1386,13 @@ app.post("/api/checkout", async (req, res) => {
     const isoHoy = todayInVenezuela();
     const referenciaNum = Number.isFinite(Number(referencia)) ? Number(referencia) : null;
 
+    const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+    const pad2 = (val) => String(val).padStart(2, "0");
+    const hora_orden = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
+      caracasNow.getSeconds()
+    )}`;
+    const en_espera = Number(id_metodo_de_pago) === 1;
+
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
       .insert({
@@ -1395,6 +1402,8 @@ app.post("/api/checkout", async (req, res) => {
         id_metodo_de_pago,
         referencia,
         comprobante: archivos,
+        en_espera,
+        hora_orden,
       })
       .select("id_orden")
       .single();

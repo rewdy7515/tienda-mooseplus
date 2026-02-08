@@ -65,11 +65,13 @@
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
+        <button class="btn-primary admin-action" id="btn-agregar-pines">Agregar pines</button>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
         <h3 style="margin: 0 0 6px 0;">Cuentas madre Spotify próximas a vencer</h3>
         <button class="btn-primary admin-action" id="btn-renovar-spotify" style="margin: 6px 0 8px 0;">Renovar</button>
+        <div id="spotify-libres" class="status">Espacios libres: --</div>
         <div id="spotify-cuentas-status" class="status">Cargando...</div>
         <div class="cuenta-table-wrap">
           <table class="table-base" id="spotify-cuentas-table">
@@ -103,6 +105,7 @@
           style="width: 100%;"
         />
         <div style="display:flex; gap:8px; justify-content:flex-end; margin-top: 8px;">
+          <button type="button" class="btn-outline" id="spotify-renovar-copy">Copiar</button>
           <button type="button" class="btn-outline" id="spotify-renovar-no">Cancelar</button>
           <button type="button" class="btn-primary" id="spotify-renovar-yes">Renovar</button>
         </div>
@@ -129,12 +132,14 @@
       );
       const spotifyTable = document.querySelector("#spotify-cuentas-table tbody");
       const spotifyStatus = document.querySelector("#spotify-cuentas-status");
+      const spotifyLibresEl = document.querySelector("#spotify-libres");
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
       const modalRenovarList = document.querySelector("#spotify-renovar-list");
       const modalRenovarYes = document.querySelector("#spotify-renovar-yes");
       const modalRenovarNo = document.querySelector("#spotify-renovar-no");
       const modalRenovarMonto = document.querySelector("#spotify-renovar-monto");
+      const modalRenovarCopy = document.querySelector("#spotify-renovar-copy");
       let currentUserId = null;
 
       const getMonthStart = () => {
@@ -214,42 +219,57 @@
       async function loadSpotifyMadres() {
         if (!spotifyTable || !spotifyStatus) return;
         try {
-          const today = new Date().toISOString().slice(0, 10);
           const { data, error } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, fecha_corte")
+            .select("id_cuenta, correo, clave, fecha_corte")
             .eq("id_plataforma", 9)
             .eq("cuenta_madre", true)
-            .gte("fecha_corte", today)
             .order("fecha_corte", { ascending: true });
           if (error) throw error;
           spotifyTable.innerHTML = "";
           if (!data?.length) {
             spotifyStatus.textContent = "Sin cuentas próximas.";
+            if (spotifyLibresEl) spotifyLibresEl.textContent = "Espacios libres: 0";
             return;
           }
           spotifyStatus.textContent = "";
+          const cuentasIds = data.map((r) => r.id_cuenta).filter(Boolean);
+          let libres = 0;
+          if (cuentasIds.length) {
+            const { data: perfiles, error: perfErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil, id_cuenta")
+              .in("id_cuenta", cuentasIds)
+              .eq("ocupado", false)
+              .eq("perfil_hogar", false);
+            if (perfErr) throw perfErr;
+            libres = (perfiles || []).length;
+          }
+          if (spotifyLibresEl) spotifyLibresEl.textContent = `Espacios libres: ${libres}`;
           data.forEach((row) => {
             const daysDiff = (() => {
               if (!row.fecha_corte) return null;
               const today = new Date();
               const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-              const fc = new Date(row.fecha_corte);
-              const fcBase = new Date(fc.getFullYear(), fc.getMonth(), fc.getDate());
+              const [y, m, d] = row.fecha_corte.split("-").map(Number);
+              if (!y || !m || !d) return null;
+              const fcBase = new Date(y, m - 1, d);
               return Math.round((fcBase - base) / (1000 * 60 * 60 * 24));
             })();
             const rowClass =
-              daysDiff === 1
+              daysDiff !== null && daysDiff <= 1
                 ? "spotify-soon-1"
-                : daysDiff === 2
+                : daysDiff !== null && daysDiff <= 2
                 ? "spotify-soon-2"
-                : daysDiff === 3
+                : daysDiff !== null && daysDiff <= 3
                 ? "spotify-soon-3"
                 : "";
             const tr = document.createElement("tr");
             if (rowClass) tr.className = rowClass;
+            const correoData = encodeURIComponent(row.correo || "");
+            const claveData = encodeURIComponent(row.clave || "");
             tr.innerHTML = `
-              <td><input type="checkbox" class="spotify-renovar-check" data-correo="${row.correo || ""}" /></td>
+              <td><input type="checkbox" class="spotify-renovar-check" data-correo="${correoData}" data-clave="${claveData}" /></td>
               <td>${row.correo || "-"}</td>
               <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
             `;
@@ -346,7 +366,7 @@
           return;
         }
         const correos = Array.from(checks)
-          .map((c) => c.dataset.correo || "")
+          .map((c) => (c.dataset.correo ? decodeURIComponent(c.dataset.correo) : ""))
           .filter(Boolean);
         if (!modalRenovarSpotify || !modalRenovarList) return;
         modalRenovarList.innerHTML = "";
@@ -357,6 +377,37 @@
         });
         if (modalRenovarMonto) modalRenovarMonto.value = "";
         modalRenovarSpotify.classList.remove("hidden");
+      });
+
+      modalRenovarCopy?.addEventListener("click", async () => {
+        const checks = document.querySelectorAll(".spotify-renovar-check:checked");
+        if (!checks.length) {
+          alert("Selecciona al menos una cuenta.");
+          return;
+        }
+        const lines = Array.from(checks)
+          .map((c) => {
+            const correo = c.dataset.correo ? decodeURIComponent(c.dataset.correo) : "";
+            const clave = c.dataset.clave ? decodeURIComponent(c.dataset.clave) : "";
+            return `correo: ${correo}\nclave: ${clave}`;
+          })
+          .join("\n\n");
+        try {
+          if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(lines);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = lines;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+          alert("Copiado al portapapeles.");
+        } catch (err) {
+          console.error("copy renovar spotify error", err);
+          alert("No se pudo copiar.");
+        }
       });
 
       const hideRenovarSpotifyModal = () => {

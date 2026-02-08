@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verificando pago</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .verif-card {
+        max-width: 720px;
+        margin: 24px auto;
+        background: #fff;
+        border-radius: 14px;
+        padding: 18px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      }
+      .verif-message {
+        color: #444;
+        margin: 6px 0 16px;
+      }
+      .progress-track {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        background: #fef3c7;
+        overflow: hidden;
+      }
+      .progress-bar {
+        height: 100%;
+        width: 100%;
+        background: #f59e0b;
+        transition: width 0.6s linear;
+      }
+      .countdown {
+        font-size: 13px;
+        color: #555;
+        margin: 8px 0 16px;
+      }
+      .detalle {
+        margin-top: 10px;
+        border-top: 1px solid #eee;
+        padding-top: 12px;
+      }
+      .ref-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .ref-row .ref-label {
+        font-weight: 600;
+      }
+      .ref-edit-btn {
+        border: none;
+        background: #f3f4f6;
+        border-radius: 8px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      #ref-edit-wrap {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      #ref-edit-wrap.hidden {
+        display: none;
+      }
+      #ref-input {
+        flex: 1;
+        min-width: 220px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <div class="verif-card">
+        <div id="processing-block">
+          <h2>Verificando pago</h2>
+          <p class="verif-message">
+            Su pago está siendo procesado. Esto puede tardar aproximadamente 2min
+          </p>
+          <div class="progress-track">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="countdown" id="countdown">2min 0seg</div>
+        </div>
+
+        <div class="detalle">
+          <h3>Detalles del pago:</h3>
+          <div class="ref-row">
+            <span class="ref-label">N. de referencia:</span>
+            <span id="ref-display">-</span>
+            <button type="button" class="ref-edit-btn" id="btn-edit-ref">✎</button>
+          </div>
+          <div id="ref-edit-wrap" class="hidden">
+            <input
+              type="text"
+              id="ref-input"
+              class="form-input"
+              placeholder="Ingrese los ultimos 4 digitos del N. de referencia."
+            />
+            <button type="button" class="btn-primary" id="btn-save-ref">Guardar</button>
+          </div>
+        </div>
+
+        <p id="verif-status" class="status"></p>
+      </div>
+    </main>
+
+    <script type="module" src="../scripts/verificando_pago.js"></script>
+  </body>
+</html>
