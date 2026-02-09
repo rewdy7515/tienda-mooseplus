@@ -125,6 +125,560 @@ function addMonthsKeepDay(baseDate, months) {
   return result.toISOString().slice(0, 10);
 }
 
+const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const isInactive = (v) => isTrue(v);
+
+const normalizeFilesArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (value == null) return [];
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (err) {
+        // ignore JSON parse errors, fallback to plain string
+      }
+    }
+    return [trimmed];
+  }
+  return [];
+};
+
+const getPrecioPicker = async (idUsuarioVentas) => {
+  const { data: usuarioVenta, error: userVentaErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("acceso_cliente")
+    .eq("id_usuario", idUsuarioVentas)
+    .single();
+  if (userVentaErr && userVentaErr.code !== "PGRST116") throw userVentaErr;
+  const accesoCliente = usuarioVenta?.acceso_cliente;
+  const esMayorista =
+    accesoCliente === false || accesoCliente === "false" || accesoCliente === 0 || accesoCliente === "0";
+  const pickPrecio = (price) => {
+    const detal = Number(price?.precio_usd_detal) || 0;
+    const mayor = Number(price?.precio_usd_mayor) || 0;
+    return esMayorista ? mayor || detal : detal || mayor;
+  };
+  return { esMayorista, pickPrecio };
+};
+
+const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, tasa_bs }) => {
+  const { pickPrecio } = await getPrecioPicker(idUsuarioVentas);
+  const { data: items, error: itemErr } = await supabaseAdmin
+    .from("carrito_items")
+    .select("id_precio, cantidad, meses, renovacion, id_venta")
+    .eq("id_carrito", carritoId);
+  if (itemErr) throw itemErr;
+
+  if (!items?.length) {
+    const total = Number.isFinite(Number(totalCliente)) ? Number(totalCliente) : 0;
+    const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
+    return { items: [], priceMap: {}, platInfoById: {}, platNameById: {}, pickPrecio, total, tasaBs };
+  }
+
+  const preciosIds = (items || []).map((i) => i.id_precio).filter(Boolean);
+  const { data: precios, error: precioErr } = await supabaseAdmin
+    .from("precios")
+    .select("id_precio, precio_usd_detal, precio_usd_mayor, id_plataforma, completa, sub_cuenta")
+    .in("id_precio", preciosIds);
+  if (precioErr) throw precioErr;
+  const priceMap = (precios || []).reduce((acc, p) => {
+    acc[p.id_precio] = p;
+    return acc;
+  }, {});
+
+  const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
+  const { data: plataformas, error: platErr } = await supabaseAdmin
+    .from("plataformas")
+    .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre")
+    .in("id_plataforma", plataformaIds);
+  if (platErr) throw platErr;
+  const platInfoById = (plataformas || []).reduce((acc, p) => {
+    acc[p.id_plataforma] = p;
+    return acc;
+  }, {});
+  const platNameById = (plataformas || []).reduce((acc, p) => {
+    acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
+    return acc;
+  }, {});
+
+  const totalCalc = (items || []).reduce((sum, it) => {
+    const unit = pickPrecio(priceMap[it.id_precio]);
+    const mesesVal = it.meses || 1;
+    return sum + unit * (it.cantidad || 0) * mesesVal;
+  }, 0);
+  const total = Number.isFinite(Number(totalCliente)) ? Number(totalCliente) : totalCalc;
+  const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
+
+  return { items: items || [], priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs };
+};
+
+const processOrderFromItems = async ({
+  ordenId,
+  idUsuarioSesion,
+  idUsuarioVentas,
+  items,
+  priceMap,
+  platInfoById,
+  platNameById,
+  pickPrecio,
+  referencia,
+  archivos,
+  id_metodo_de_pago,
+  carritoId,
+}) => {
+  const isoHoy = todayInVenezuela();
+  const referenciaNum = Number.isFinite(Number(referencia)) ? Number(referencia) : null;
+  const archivosArr = Array.isArray(archivos) ? archivos : [];
+  const comprobanteHist = archivosArr?.[0] || null;
+
+  // Renovaciones (no asignan stock nuevo)
+  const renovaciones = (items || []).filter((it) => it.renovacion === true && it.id_venta);
+  const idsVentasRenovar = renovaciones.map((r) => r.id_venta).filter(Boolean);
+  const ventaMap = {};
+  if (idsVentasRenovar.length) {
+    const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, fecha_corte, id_cuenta, id_usuario")
+      .in("id_venta", idsVentasRenovar);
+    if (ventErr) throw ventErr;
+    (ventasExistentes || []).forEach((v) => {
+      ventaMap[v.id_venta] = v;
+    });
+  }
+
+  const renovPromises = renovaciones.map((it) => {
+    const price = priceMap[it.id_precio] || {};
+    const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
+    const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
+    const base = pickPrecio(price) * cantidadVal * mesesVal;
+    const monto = Number(base.toFixed(2));
+    const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || isoHoy;
+    const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
+    return supabaseAdmin
+      .from("ventas")
+      .update({
+        fecha_pago: isoHoy,
+        fecha_corte,
+        monto,
+        id_orden: ordenId,
+        renovacion: true,
+      })
+      .eq("id_venta", it.id_venta);
+  });
+  if (renovPromises.length) {
+    const renovRes = await Promise.all(renovPromises);
+    const renovErr = renovRes.find((r) => r?.error);
+    if (renovErr?.error) throw renovErr.error;
+  }
+
+  // Filtra items nuevos (no renovaciones) para asignación de stock
+  const itemsNuevos = (items || []).filter((it) => !it.id_venta);
+
+  // Verificación de stock y asignación de recursos
+  const asignaciones = [];
+  const pendientes = [];
+  const subCuentasAsignadas = [];
+  for (const it of itemsNuevos) {
+    const price = priceMap[it.id_precio];
+    if (!price) {
+      throw new Error(`Precio no encontrado para item ${it.id_precio}`);
+    }
+    const cantidad = it.cantidad || 0;
+    if (cantidad <= 0) continue;
+    const platId = Number(price.id_plataforma) || null;
+    const entregaInmediata = isTrue(platInfoById[platId]?.entrega_inmediata);
+    const cuentaMadrePlat = isTrue(platInfoById[platId]?.cuenta_madre);
+    const pendienteVenta = !entregaInmediata || cuentaMadrePlat;
+    const mesesItemRaw = it.meses || 1;
+    const mesesItem = Number.isFinite(Number(mesesItemRaw))
+      ? Math.max(1, Math.round(Number(mesesItemRaw)))
+      : 1;
+    console.log("[checkout] item", it, "mesesRaw", mesesItemRaw, "meses", mesesItem);
+
+    const priceId = Number(price.id_precio) || Number(it.id_precio) || null;
+    const isNetflixPlan2 = platId === 1 && [4, 5].includes(priceId);
+    console.log("[checkout] asignacion start", {
+      id_precio: price?.id_precio,
+      id_plataforma: platId,
+      completa: price?.completa,
+      isNetflixPlan2,
+      cantidad,
+    });
+
+    if (price.completa) {
+      const { data: cuentasLibres, error: ctaErr } = await supabaseAdmin
+        .from("cuentas")
+        .select("id_cuenta, id_plataforma, ocupado, inactiva")
+        .eq("id_plataforma", platId)
+        .eq("venta_perfil", false)
+        .eq("venta_miembro", false)
+        .eq("ocupado", false)
+        .or("inactiva.is.null,inactiva.eq.false")
+        .limit(cantidad);
+      if (ctaErr) throw ctaErr;
+      const disponibles = (cuentasLibres || []).filter((c) => !isInactive(c.inactiva));
+      const faltantes = Math.max(0, cantidad - disponibles.length);
+      disponibles.slice(0, cantidad).forEach((cta) => {
+        asignaciones.push({
+          id_precio: price.id_precio,
+          monto: pickPrecio(price),
+          id_cuenta: cta.id_cuenta,
+          id_perfil: null,
+          id_sub_cuenta: null,
+          meses: mesesItem,
+          pendiente: pendienteVenta,
+        });
+      });
+      if (faltantes > 0) {
+        for (let i = 0; i < faltantes; i += 1) {
+          pendientes.push({
+            id_precio: price.id_precio,
+            monto: pickPrecio(price),
+            id_cuenta: null,
+            id_perfil: null,
+            id_sub_cuenta: null,
+            meses: mesesItem,
+            pendiente: true,
+          });
+        }
+      }
+    } else if (isNetflixPlan2) {
+      const usedPerfiles = [];
+      const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
+        .from("perfiles")
+        .select(
+          "id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil)",
+        )
+        .eq("perfil_hogar", true)
+        .eq("cuentas.id_plataforma", platId)
+        .eq("cuentas.venta_perfil", true)
+        .eq("ocupado", false)
+        .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+        .limit(cantidad);
+      if (perfErr) throw perfErr;
+      const libresHogar = (perfilesHogar || []).filter(
+        (p) => !isInactive(p?.cuentas?.inactiva) && p.ocupado === false
+      );
+      const takeHogar = libresHogar.slice(0, cantidad);
+      takeHogar.forEach((p) => {
+        asignaciones.push({
+          id_precio: price.id_precio,
+          monto: pickPrecio(price),
+          id_cuenta: p.id_cuenta,
+          id_perfil: p.id_perfil,
+          id_sub_cuenta: null,
+          meses: mesesItem,
+          pendiente: pendienteVenta,
+        });
+        usedPerfiles.push(p.id_perfil);
+      });
+
+      const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
+      if (faltantesPerf > 0) {
+        const { data: cuentasMiembro, error: ctaMiembroErr } = await supabaseAdmin
+          .from("cuentas")
+          .select("id_cuenta, ocupado, inactiva, venta_miembro, venta_perfil")
+          .eq("id_plataforma", platId)
+          .eq("venta_perfil", false)
+          .eq("venta_miembro", true)
+          .eq("ocupado", false)
+          .or("inactiva.is.null,inactiva.eq.false")
+          .limit(faltantesPerf);
+        if (ctaMiembroErr) throw ctaMiembroErr;
+        const cuentasLibres = (cuentasMiembro || []).filter(
+          (c) => c.inactiva === false && c.ocupado === false
+        );
+        const takeCtas = cuentasLibres.slice(0, faltantesPerf);
+        takeCtas.forEach((cta) => {
+          asignaciones.push({
+            id_precio: price.id_precio,
+            monto: pickPrecio(price),
+            id_cuenta: cta.id_cuenta,
+            id_perfil: null,
+            id_sub_cuenta: null,
+            meses: mesesItem,
+            pendiente: pendienteVenta,
+          });
+        });
+        const faltantesPerf2 = Math.max(0, faltantesPerf - takeCtas.length);
+        if (faltantesPerf2 > 0) {
+          for (let i = 0; i < faltantesPerf2; i += 1) {
+            pendientes.push({
+              id_precio: price.id_precio,
+              monto: pickPrecio(price),
+              id_cuenta: null,
+              id_perfil: null,
+              id_sub_cuenta: null,
+              meses: mesesItem,
+              pendiente: true,
+            });
+          }
+        }
+      }
+    } else {
+      const isSpotify = platId === 9;
+      let perfilesQuery = supabaseAdmin
+        .from("perfiles")
+        .select(
+          "id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil, cuenta_madre)"
+        )
+        .eq("cuentas.id_plataforma", platId)
+        .eq("cuentas.venta_perfil", isSpotify ? false : true)
+        .eq("perfil_hogar", false)
+        .eq("ocupado", false)
+        .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+        .limit(cantidad);
+      perfilesQuery = isSpotify
+        ? perfilesQuery.eq("cuentas.cuenta_madre", true)
+        : perfilesQuery.or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" });
+      const { data: perfilesLibres, error: perfErr } = await perfilesQuery;
+      if (perfErr) throw perfErr;
+      console.log("[checkout] perfiles libres raw", {
+        platId,
+        count: perfilesLibres?.length || 0,
+        first: perfilesLibres?.[0] || null,
+      });
+      if (platId === 1 || platId === 9) {
+        console.log("[checkout][netflix] filtros", {
+          platId,
+          venta_perfil: isSpotify ? false : true,
+          cuenta_madre: isSpotify ? true : false,
+          perfil_hogar: false,
+          ocupado: false,
+          inactiva: "null|false",
+        });
+        const rawSample = (perfilesLibres || []).slice(0, 5).map((p) => ({
+          id_perfil: p.id_perfil,
+          id_cuenta: p.id_cuenta,
+          perfil_hogar: p.perfil_hogar,
+          ocupado: p.ocupado,
+          cuenta_plat: p.cuentas?.id_plataforma,
+          cuenta_inactiva: p.cuentas?.inactiva,
+          cuenta_venta_perfil: p.cuentas?.venta_perfil,
+          cuenta_madre: p.cuentas?.cuenta_madre,
+        }));
+        console.log("[checkout][stock] raw sample", rawSample);
+      }
+      const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
+      console.log("[checkout] perfiles libres disponibles", {
+        platId,
+        count: disponibles.length,
+        first: disponibles[0] || null,
+      });
+      if (platId === 1 || platId === 9) {
+        const dispSample = disponibles.slice(0, 5).map((p) => ({
+          id_perfil: p.id_perfil,
+          id_cuenta: p.id_cuenta,
+          perfil_hogar: p.perfil_hogar,
+          ocupado: p.ocupado,
+          cuenta_inactiva: p.cuentas?.inactiva,
+        }));
+        console.log("[checkout][stock] disponibles sample", dispSample);
+      }
+      const faltantes = Math.max(0, cantidad - disponibles.length);
+      disponibles.slice(0, cantidad).forEach((p) => {
+        asignaciones.push({
+          id_precio: price.id_precio,
+          monto: pickPrecio(price),
+          id_cuenta: p.id_cuenta,
+          id_perfil: p.id_perfil,
+          id_sub_cuenta: null,
+          meses: mesesItem,
+          pendiente: pendienteVenta,
+        });
+      });
+      if (faltantes > 0) {
+        for (let i = 0; i < faltantes; i += 1) {
+          pendientes.push({
+            id_precio: price.id_precio,
+            monto: pickPrecio(price),
+            id_cuenta: null,
+            id_perfil: null,
+            id_sub_cuenta: null,
+            meses: mesesItem,
+            pendiente: true,
+          });
+        }
+      }
+    }
+    console.log("[checkout] asignacion end", {
+      id_precio: price?.id_precio,
+      platId,
+      asignaciones: asignaciones.map((a) => ({
+        id_precio: a.id_precio,
+        id_cuenta: a.id_cuenta,
+        id_perfil: a.id_perfil,
+      })),
+    });
+  }
+
+  // Validación final: jamás usar cuentas inactivas
+  const assignedCuentaIds = Array.from(new Set(asignaciones.map((a) => a.id_cuenta).filter(Boolean)));
+  const assignedPerfilIds = Array.from(new Set(asignaciones.map((a) => a.id_perfil).filter(Boolean)));
+  if (assignedCuentaIds.length) {
+    const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
+      .from("cuentas")
+      .select("id_cuenta, id_plataforma, inactiva")
+      .in("id_cuenta", assignedCuentaIds);
+    if (ctaValErr) throw ctaValErr;
+    const bad = (cuentasAsignadas || []).find((c) => isInactive(c.inactiva));
+    if (bad) {
+      throw new Error("Se intentó asignar una cuenta inactiva.");
+    }
+    const cuentaPlatMap = (cuentasAsignadas || []).reduce((acc, c) => {
+      acc[c.id_cuenta] = c.id_plataforma;
+      return acc;
+    }, {});
+    const badPlat = (asignaciones || []).find((a) => {
+      const platId = priceMap[a.id_precio]?.id_plataforma || null;
+      const cuentaPlat = cuentaPlatMap[a.id_cuenta];
+      return platId && cuentaPlat && Number(cuentaPlat) !== Number(platId);
+    });
+    if (badPlat) {
+      throw new Error("Asignación con plataforma incorrecta.");
+    }
+  }
+  if (assignedPerfilIds.length) {
+    const { data: perfilesAsignados, error: perfValErr } = await supabaseAdmin
+      .from("perfiles")
+      .select("id_perfil, cuentas:cuentas!perfiles_id_cuenta_fkey(inactiva)")
+      .in("id_perfil", assignedPerfilIds);
+    if (perfValErr) throw perfValErr;
+    const bad = (perfilesAsignados || []).find((p) => isInactive(p?.cuentas?.inactiva));
+    if (bad) {
+      throw new Error("Se intentó asignar una cuenta inactiva.");
+    }
+  }
+
+  const ventasToInsert = [...asignaciones, ...pendientes].map((a) => {
+    const mesesValRaw = a.meses || 1;
+    const mesesVal =
+      Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
+        ? Math.max(1, Math.round(Number(mesesValRaw)))
+        : 1;
+    const fechaCorte = a.pendiente ? null : addMonthsKeepDay(isoHoy, mesesVal);
+    return {
+      id_usuario: idUsuarioVentas,
+      id_precio: a.id_precio,
+      id_cuenta: a.id_cuenta,
+      id_perfil: a.id_perfil,
+      // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
+      id_orden: ordenId,
+      monto: Number(a.monto) || 0,
+      pendiente: !!a.pendiente,
+      meses_contratados: mesesVal,
+      fecha_corte: fechaCorte,
+      fecha_pago: isoHoy,
+      renovacion: false,
+    };
+  });
+  console.log("[checkout] asignaciones", asignaciones);
+  console.log("[checkout] pendientes", pendientes);
+  console.log("[checkout] ventasToInsert", ventasToInsert);
+
+  let insertedVentas = [];
+  if (ventasToInsert.length) {
+    const { data: ventasRes, error: ventaErr } = await supabaseAdmin
+      .from("ventas")
+      .insert(ventasToInsert)
+      .select("id_venta, id_cuenta, id_precio");
+    if (ventaErr) throw ventaErr;
+    insertedVentas = ventasRes || [];
+  }
+
+  // Historial de ventas (nuevas + renovaciones) con monto como float completo
+  const caracasNowPago = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+  const pad2Pago = (val) => String(val).padStart(2, "0");
+  const horaPago = `${pad2Pago(caracasNowPago.getHours())}:${pad2Pago(
+    caracasNowPago.getMinutes()
+  )}:${pad2Pago(caracasNowPago.getSeconds())}`;
+  const histRows = [];
+  // Nuevas (insertadas recién)
+  insertedVentas.forEach((v, idx) => {
+    const src = ventasToInsert[idx] || {};
+    const platId = priceMap[v.id_precio]?.id_plataforma || null;
+    histRows.push({
+      id_usuario_cliente: idUsuarioVentas,
+      id_proveedor: null,
+      monto: Number(src.monto) || 0,
+      fecha_pago: isoHoy,
+      venta_cliente: true,
+      renovacion: false,
+      id_venta: v.id_venta,
+      id_plataforma: platId,
+      id_cuenta: v.id_cuenta,
+      registrado_por: idUsuarioSesion,
+      id_metodo_de_pago,
+      referencia: referenciaNum,
+      comprobante: comprobanteHist,
+      hora_pago: horaPago,
+    });
+  });
+  // Renovaciones
+  renovaciones.forEach((it) => {
+    const platId = priceMap[it.id_precio]?.id_plataforma || null;
+    const ventaAnt = ventaMap[it.id_venta] || {};
+    const cuentaAnt = ventaAnt.id_cuenta || null;
+    const usuarioAnt = ventaAnt.id_usuario || idUsuarioVentas;
+    // monto ya calculado arriba como base (unit * cantidad * meses)
+    const price = priceMap[it.id_precio] || {};
+    const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
+    const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
+    const base = pickPrecio(price) * cantidadVal * mesesVal;
+    histRows.push({
+      id_usuario_cliente: usuarioAnt,
+      id_proveedor: null,
+      monto: Number(base) || 0,
+      fecha_pago: isoHoy,
+      venta_cliente: true,
+      renovacion: true,
+      id_venta: it.id_venta,
+      id_plataforma: platId,
+      id_cuenta: cuentaAnt,
+      registrado_por: idUsuarioSesion,
+      id_metodo_de_pago,
+      referencia: referenciaNum,
+      comprobante: comprobanteHist,
+      hora_pago: horaPago,
+    });
+  });
+  if (histRows.length) {
+    const { error: histErr } = await supabaseAdmin.from("historial_ventas").insert(histRows);
+    if (histErr) throw histErr;
+  }
+
+  // marca recursos como ocupados
+  const perfilesIds = asignaciones.map((a) => a.id_perfil).filter(Boolean);
+  const cuentasIds = asignaciones
+    .filter((a) => a.id_perfil === null && a.id_cuenta)
+    .map((a) => a.id_cuenta);
+  if (perfilesIds.length) {
+    const { error: updPerfErr } = await supabaseAdmin
+      .from("perfiles")
+      .update({ ocupado: true })
+      .in("id_perfil", perfilesIds);
+    if (updPerfErr) throw updPerfErr;
+  }
+  if (cuentasIds.length) {
+    const { error: updCtaErr } = await supabaseAdmin
+      .from("cuentas")
+      .update({ ocupado: true })
+      .in("id_cuenta", cuentasIds);
+    if (updCtaErr) throw updCtaErr;
+  }
+
+  // limpia carrito (desvincula orden para evitar FK)
+  await supabaseAdmin.from("ordenes").update({ id_carrito: null }).eq("id_orden", ordenId);
+  await supabaseAdmin.from("carrito_items").delete().eq("id_carrito", carritoId);
+  await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
+
+  return { ventasCount: ventasToInsert.length, pendientesCount: pendientes.length };
+};
+
 // Usa el id de usuario autenticado que envíe el cliente.
 const parseSessionUserId = (req) => {
   const raw = req?.headers?.cookie || "";
@@ -1280,7 +1834,7 @@ app.post("/api/admin/import-pines", async (req, res) => {
   }
 });
 
-// Checkout: crea orden y ventas, sube referencia y comprobante
+// Checkout: crea orden (y procesa ventas si ya está verificado)
 app.post("/api/checkout", async (req, res) => {
   const {
     id_metodo_de_pago,
@@ -1292,7 +1846,6 @@ app.post("/api/checkout", async (req, res) => {
     id_usuario_override,
   } = req.body || {};
   const archivos = Array.isArray(comprobantes) ? comprobantes : Array.isArray(comprobante) ? comprobante : [];
-  const comprobanteHist = archivos?.[0] || null;
   if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
     return res
       .status(400)
@@ -1305,93 +1858,35 @@ app.post("/api/checkout", async (req, res) => {
       id_usuario_override && Number.isFinite(Number(id_usuario_override))
         ? Number(id_usuario_override)
         : idUsuarioSesion;
-    const { data: usuarioVenta, error: userVentaErr } = await supabaseAdmin
-      .from("usuarios")
-      .select("acceso_cliente")
-      .eq("id_usuario", idUsuarioVentas)
-      .single();
-    if (userVentaErr && userVentaErr.code !== "PGRST116") throw userVentaErr;
-    const accesoCliente = usuarioVenta?.acceso_cliente;
-    const esMayorista =
-      accesoCliente === false || accesoCliente === "false" || accesoCliente === 0 || accesoCliente === "0";
-    const pickPrecio = (price) => {
-      const detal = Number(price?.precio_usd_detal) || 0;
-      const mayor = Number(price?.precio_usd_mayor) || 0;
-      return esMayorista ? mayor || detal : detal || mayor;
-    };
-    const isInactive = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
     const carritoId = await getCurrentCarrito(idUsuarioSesion);
     if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
 
-    const { data: items, error: itemErr } = await supabaseAdmin
-      .from("carrito_items")
-      .select("id_precio, cantidad, meses, renovacion, id_venta")
-      .eq("id_carrito", carritoId);
-    if (itemErr) throw itemErr;
+    const context = await buildCheckoutContext({
+      idUsuarioVentas,
+      carritoId,
+      totalCliente,
+      tasa_bs,
+    });
+    const { items, priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs } = context;
     if (!items?.length) {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
-
-    const preciosIds = items.map((i) => i.id_precio);
-    const { data: precios, error: precioErr } = await supabaseAdmin
-      .from("precios")
-      .select("id_precio, precio_usd_detal, precio_usd_mayor, id_plataforma, completa, sub_cuenta")
-      .in("id_precio", preciosIds);
-    if (precioErr) throw precioErr;
-    const priceMap = (precios || []).reduce((acc, p) => {
-      acc[p.id_precio] = p;
-      return acc;
-    }, {});
-
-    const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
-    const { data: plataformas, error: platErr } = await supabaseAdmin
-      .from("plataformas")
-      .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre")
-      .in("id_plataforma", plataformaIds);
-    if (platErr) throw platErr;
-    const platInfoById = (plataformas || []).reduce((acc, p) => {
-      acc[p.id_plataforma] = p;
-      return acc;
-    }, {});
-    const platNameById = (plataformas || []).reduce((acc, p) => {
-      acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
-      return acc;
-    }, {});
-    const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true";
-
-    const totalCalc = items.reduce((sum, it) => {
-      const unit = pickPrecio(priceMap[it.id_precio]);
-      const mesesVal = it.meses || 1;
-      return sum + unit * (it.cantidad || 0) * mesesVal;
-    }, 0);
-    const total = Number.isFinite(Number(totalCliente)) ? Number(totalCliente) : totalCalc;
-    const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
     console.log("[checkout] carrito items", items);
     console.log("[checkout] precios usados", priceMap);
-
-    // Renovaciones (no asignan stock nuevo)
-    const renovaciones = (items || []).filter((it) => it.renovacion === true && it.id_venta);
-    const idsVentasRenovar = renovaciones.map((r) => r.id_venta).filter(Boolean);
-    const ventaMap = {};
-    if (idsVentasRenovar.length) {
-      const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
-        .from("ventas")
-        .select("id_venta, fecha_corte, id_cuenta, id_usuario")
-        .in("id_venta", idsVentasRenovar);
-      if (ventErr) throw ventErr;
-      (ventasExistentes || []).forEach((v) => {
-        ventaMap[v.id_venta] = v;
-      });
-    }
-    const isoHoy = todayInVenezuela();
-    const referenciaNum = Number.isFinite(Number(referencia)) ? Number(referencia) : null;
 
     const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
     const pad2 = (val) => String(val).padStart(2, "0");
     const hora_orden = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
       caracasNow.getSeconds()
     )}`;
-    const en_espera = Number(id_metodo_de_pago) === 1;
+    const referenciaTrim = String(referencia || "").trim();
+    const requiereVerificacion =
+      Number(id_metodo_de_pago) === 1 && referenciaTrim.toUpperCase() !== "SALDO";
+    const en_espera = requiereVerificacion;
+    const monto_bs =
+      Number.isFinite(total) && Number.isFinite(tasaBs)
+        ? Math.round(total * tasaBs * 100) / 100
+        : null;
 
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
@@ -1399,465 +1894,163 @@ app.post("/api/checkout", async (req, res) => {
         id_usuario: idUsuarioVentas,
         total,
         tasa_bs: tasaBs,
+        monto_bs,
         id_metodo_de_pago,
         referencia,
         comprobante: archivos,
         en_espera,
         hora_orden,
+        id_carrito: carritoId,
+        pago_verificado: false,
+        monto_completo: null,
       })
       .select("id_orden")
       .single();
     if (ordErr) throw ordErr;
-    const renovPromises = renovaciones.map((it) => {
-      const price = priceMap[it.id_precio] || {};
-      const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
-      const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
-      const base = pickPrecio(price) * cantidadVal * mesesVal;
-      const monto = Number(base.toFixed(2));
-      const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || isoHoy;
-      const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
-      return supabaseAdmin
-        .from("ventas")
-        .update({
-          fecha_pago: isoHoy,
-          fecha_corte,
-          monto,
-          id_orden: orden.id_orden,
-          renovacion: true,
-        })
-        .eq("id_venta", it.id_venta);
+
+    if (requiereVerificacion) {
+      try {
+        await supabaseAdmin
+          .from("carritos")
+          .insert({ id_usuario: idUsuarioSesion, fecha_creacion: new Date().toISOString() });
+      } catch (cartErr) {
+        console.error("[checkout] crear carrito nuevo error", cartErr);
+      }
+      return res.json({ ok: true, id_orden: orden.id_orden, total, ventas: 0, pendiente_verificacion: true });
+    }
+
+    const result = await processOrderFromItems({
+      ordenId: orden.id_orden,
+      idUsuarioSesion,
+      idUsuarioVentas,
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      referencia,
+      archivos,
+      id_metodo_de_pago,
+      carritoId,
     });
-    if (renovPromises.length) {
-      const renovRes = await Promise.all(renovPromises);
-      const renovErr = renovRes.find((r) => r?.error);
-      if (renovErr?.error) throw renovErr.error;
-    }
 
-    // Filtra items nuevos (no renovaciones) para asignación de stock
-    const itemsNuevos = (items || []).filter((it) => !it.id_venta);
+    await supabaseAdmin
+      .from("ordenes")
+      .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
+      .eq("id_orden", orden.id_orden);
 
-    // Verificación de stock y asignación de recursos
-    const asignaciones = [];
-    const pendientes = [];
-    const subCuentasAsignadas = [];
-    for (const it of itemsNuevos) {
-      const price = priceMap[it.id_precio];
-      if (!price) {
-        return res.status(400).json({ error: `Precio no encontrado para item ${it.id_precio}` });
-      }
-      const cantidad = it.cantidad || 0;
-      if (cantidad <= 0) continue;
-      const platId = Number(price.id_plataforma) || null;
-      const entregaInmediata = isTrue(platInfoById[platId]?.entrega_inmediata);
-      const cuentaMadrePlat = isTrue(platInfoById[platId]?.cuenta_madre);
-      const pendienteVenta = !entregaInmediata || cuentaMadrePlat;
-      const mesesItemRaw = it.meses || 1;
-      const mesesItem = Number.isFinite(Number(mesesItemRaw))
-        ? Math.max(1, Math.round(Number(mesesItemRaw)))
-        : 1;
-      console.log("[checkout] item", it, "mesesRaw", mesesItemRaw, "meses", mesesItem);
-
-      const priceId = Number(price.id_precio) || Number(it.id_precio) || null;
-      const isNetflixPlan2 = platId === 1 && [4, 5].includes(priceId);
-      console.log("[checkout] asignacion start", {
-        id_precio: price?.id_precio,
-        id_plataforma: platId,
-        completa: price?.completa,
-        isNetflixPlan2,
-        cantidad,
-      });
-
-      if (price.completa) {
-        const { data: cuentasLibres, error: ctaErr } = await supabaseAdmin
-          .from("cuentas")
-          .select("id_cuenta, id_plataforma, ocupado, inactiva")
-          .eq("id_plataforma", platId)
-          .eq("venta_perfil", false)
-          .eq("venta_miembro", false)
-          .eq("ocupado", false)
-          .or("inactiva.is.null,inactiva.eq.false")
-          .limit(cantidad);
-        if (ctaErr) throw ctaErr;
-        const disponibles = (cuentasLibres || []).filter((c) => !isInactive(c.inactiva));
-        const faltantes = Math.max(0, cantidad - disponibles.length);
-        disponibles.slice(0, cantidad).forEach((cta) => {
-          asignaciones.push({
-            id_precio: price.id_precio,
-            monto: pickPrecio(price),
-            id_cuenta: cta.id_cuenta,
-            id_perfil: null,
-            id_sub_cuenta: null,
-            meses: mesesItem,
-            pendiente: pendienteVenta,
-          });
-        });
-        if (faltantes > 0) {
-          if (!entregaInmediata) {
-            for (let i = 0; i < faltantes; i += 1) {
-              pendientes.push({
-                id_precio: price.id_precio,
-                monto: pickPrecio(price),
-                id_cuenta: null,
-                id_perfil: null,
-                id_sub_cuenta: null,
-                meses: mesesItem,
-                pendiente: true,
-              });
-            }
-          } else {
-            return res
-              .status(400)
-              .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
-          }
-        }
-      } else if (isNetflixPlan2) {
-        const usedPerfiles = [];
-        const { data: perfilesHogar, error: perfErr } = await supabaseAdmin
-          .from("perfiles")
-          .select(
-            "id_perfil, id_cuenta, ocupado, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil)",
-          )
-          .eq("perfil_hogar", true)
-          .eq("cuentas.id_plataforma", platId)
-          .eq("cuentas.venta_perfil", true)
-          .eq("ocupado", false)
-          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-          .limit(cantidad);
-        if (perfErr) throw perfErr;
-        const libresHogar = (perfilesHogar || []).filter(
-          (p) => !isInactive(p?.cuentas?.inactiva) && p.ocupado === false
-        );
-        const takeHogar = libresHogar.slice(0, cantidad);
-        takeHogar.forEach((p) => {
-          asignaciones.push({
-            id_precio: price.id_precio,
-            monto: pickPrecio(price),
-            id_cuenta: p.id_cuenta,
-            id_perfil: p.id_perfil,
-            id_sub_cuenta: null,
-            meses: mesesItem,
-            pendiente: pendienteVenta,
-          });
-          usedPerfiles.push(p.id_perfil);
-        });
-
-        const faltantesPerf = Math.max(0, cantidad - usedPerfiles.length);
-        if (faltantesPerf > 0) {
-          const { data: cuentasMiembro, error: ctaMiembroErr } = await supabaseAdmin
-            .from("cuentas")
-            .select("id_cuenta, ocupado, inactiva, venta_miembro, venta_perfil")
-            .eq("id_plataforma", platId)
-            .eq("venta_perfil", false)
-            .eq("venta_miembro", true)
-            .eq("ocupado", false)
-            .or("inactiva.is.null,inactiva.eq.false")
-            .limit(faltantesPerf);
-          if (ctaMiembroErr) throw ctaMiembroErr;
-          const cuentasLibres = (cuentasMiembro || []).filter(
-            (c) => c.inactiva === false && c.ocupado === false
-          );
-          const takeCtas = cuentasLibres.slice(0, faltantesPerf);
-          takeCtas.forEach((cta) => {
-            asignaciones.push({
-              id_precio: price.id_precio,
-              monto: pickPrecio(price),
-              id_cuenta: cta.id_cuenta,
-              id_perfil: null,
-              id_sub_cuenta: null,
-              meses: mesesItem,
-              pendiente: pendienteVenta,
-            });
-          });
-          const faltantesPerf2 = Math.max(0, faltantesPerf - takeCtas.length);
-          if (faltantesPerf2 > 0) {
-            if (!entregaInmediata) {
-              for (let i = 0; i < faltantesPerf2; i += 1) {
-                pendientes.push({
-                  id_precio: price.id_precio,
-                  monto: pickPrecio(price),
-                  id_cuenta: null,
-                  id_perfil: null,
-                  id_sub_cuenta: null,
-                  meses: mesesItem,
-                  pendiente: true,
-                });
-              }
-            } else {
-              return res
-                .status(400)
-                .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
-            }
-          }
-        }
-      } else {
-        const isSpotify = platId === 9;
-        let perfilesQuery = supabaseAdmin
-          .from("perfiles")
-          .select("id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil, cuenta_madre)")
-          .eq("cuentas.id_plataforma", platId)
-          .eq("cuentas.venta_perfil", isSpotify ? false : true)
-          .eq("perfil_hogar", false)
-          .eq("ocupado", false)
-          .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-          .limit(cantidad);
-        perfilesQuery = isSpotify
-          ? perfilesQuery.eq("cuentas.cuenta_madre", true)
-          : perfilesQuery.or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" });
-        const { data: perfilesLibres, error: perfErr } = await perfilesQuery;
-        if (perfErr) throw perfErr;
-        console.log("[checkout] perfiles libres raw", {
-          platId,
-          count: perfilesLibres?.length || 0,
-          first: perfilesLibres?.[0] || null,
-        });
-        if (platId === 1 || platId === 9) {
-          console.log("[checkout][netflix] filtros", {
-            platId,
-            venta_perfil: isSpotify ? false : true,
-            cuenta_madre: isSpotify ? true : false,
-            perfil_hogar: false,
-            ocupado: false,
-            inactiva: "null|false",
-          });
-          const rawSample = (perfilesLibres || []).slice(0, 5).map((p) => ({
-            id_perfil: p.id_perfil,
-            id_cuenta: p.id_cuenta,
-            perfil_hogar: p.perfil_hogar,
-            ocupado: p.ocupado,
-            cuenta_plat: p.cuentas?.id_plataforma,
-            cuenta_inactiva: p.cuentas?.inactiva,
-            cuenta_venta_perfil: p.cuentas?.venta_perfil,
-            cuenta_madre: p.cuentas?.cuenta_madre,
-          }));
-          console.log("[checkout][stock] raw sample", rawSample);
-        }
-        const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
-        console.log("[checkout] perfiles libres disponibles", {
-          platId,
-          count: disponibles.length,
-          first: disponibles[0] || null,
-        });
-        if (platId === 1 || platId === 9) {
-          const dispSample = disponibles.slice(0, 5).map((p) => ({
-            id_perfil: p.id_perfil,
-            id_cuenta: p.id_cuenta,
-            perfil_hogar: p.perfil_hogar,
-            ocupado: p.ocupado,
-            cuenta_inactiva: p.cuentas?.inactiva,
-          }));
-          console.log("[checkout][stock] disponibles sample", dispSample);
-        }
-        const faltantes = Math.max(0, cantidad - disponibles.length);
-        disponibles.slice(0, cantidad).forEach((p) => {
-          asignaciones.push({
-            id_precio: price.id_precio,
-            monto: pickPrecio(price),
-            id_cuenta: p.id_cuenta,
-            id_perfil: p.id_perfil,
-            id_sub_cuenta: null,
-            meses: mesesItem,
-            pendiente: pendienteVenta,
-          });
-        });
-        if (faltantes > 0) {
-          if (!entregaInmediata) {
-            for (let i = 0; i < faltantes; i += 1) {
-              pendientes.push({
-                id_precio: price.id_precio,
-                monto: pickPrecio(price),
-                id_cuenta: null,
-                id_perfil: null,
-                id_sub_cuenta: null,
-                meses: mesesItem,
-                pendiente: true,
-              });
-            }
-          } else {
-            return res
-              .status(400)
-              .json({ error: `Sin stock de ${platNameById[platId] || `plataforma ${platId}`}` });
-          }
-        }
-      }
-      console.log("[checkout] asignacion end", {
-        id_precio: price?.id_precio,
-        platId,
-        asignaciones: asignaciones.map((a) => ({
-          id_precio: a.id_precio,
-          id_cuenta: a.id_cuenta,
-          id_perfil: a.id_perfil,
-        })),
-      });
-    }
-
-    // Validación final: jamás usar cuentas inactivas
-    const assignedCuentaIds = Array.from(new Set(asignaciones.map((a) => a.id_cuenta).filter(Boolean)));
-    const assignedPerfilIds = Array.from(new Set(asignaciones.map((a) => a.id_perfil).filter(Boolean)));
-    if (assignedCuentaIds.length) {
-      const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
-        .from("cuentas")
-        .select("id_cuenta, id_plataforma, inactiva")
-        .in("id_cuenta", assignedCuentaIds);
-      if (ctaValErr) throw ctaValErr;
-      const bad = (cuentasAsignadas || []).find((c) => isInactive(c.inactiva));
-      if (bad) {
-        return res.status(400).json({ error: "Se intentó asignar una cuenta inactiva." });
-      }
-      const cuentaPlatMap = (cuentasAsignadas || []).reduce((acc, c) => {
-        acc[c.id_cuenta] = c.id_plataforma;
-        return acc;
-      }, {});
-      const badPlat = (asignaciones || []).find((a) => {
-        const platId = priceMap[a.id_precio]?.id_plataforma || null;
-        const cuentaPlat = cuentaPlatMap[a.id_cuenta];
-        return platId && cuentaPlat && Number(cuentaPlat) !== Number(platId);
-      });
-      if (badPlat) {
-        return res.status(400).json({ error: "Asignación con plataforma incorrecta." });
-      }
-    }
-    if (assignedPerfilIds.length) {
-      const { data: perfilesAsignados, error: perfValErr } = await supabaseAdmin
-        .from("perfiles")
-        .select("id_perfil, cuentas:cuentas!perfiles_id_cuenta_fkey(inactiva)")
-        .in("id_perfil", assignedPerfilIds);
-      if (perfValErr) throw perfValErr;
-      const bad = (perfilesAsignados || []).find((p) => isInactive(p?.cuentas?.inactiva));
-      if (bad) {
-        return res.status(400).json({ error: "Se intentó asignar una cuenta inactiva." });
-      }
-    }
-
-    const ventasToInsert = [...asignaciones, ...pendientes].map((a) => {
-      const mesesValRaw = a.meses || 1;
-      const mesesVal =
-        Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
-          ? Math.max(1, Math.round(Number(mesesValRaw)))
-          : 1;
-      const fechaCorte = a.pendiente
-        ? null
-        : addMonthsKeepDay(isoHoy, mesesVal);
-      return {
-        id_usuario: idUsuarioVentas,
-        id_precio: a.id_precio,
-        id_cuenta: a.id_cuenta,
-        id_perfil: a.id_perfil,
-        // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
-        id_orden: orden.id_orden,
-        monto: Number(a.monto) || 0,
-        pendiente: !!a.pendiente,
-        meses_contratados: mesesVal,
-        fecha_corte: fechaCorte,
-        fecha_pago: isoHoy,
-        renovacion: false,
-      };
+    res.json({
+      ok: true,
+      id_orden: orden.id_orden,
+      total,
+      ventas: result.ventasCount,
+      pendientes: result.pendientesCount,
     });
-    console.log("[checkout] asignaciones", asignaciones);
-    console.log("[checkout] pendientes", pendientes);
-    console.log("[checkout] ventasToInsert", ventasToInsert);
-
-    let insertedVentas = [];
-    if (ventasToInsert.length) {
-      const { data: ventasRes, error: ventaErr } = await supabaseAdmin
-        .from("ventas")
-        .insert(ventasToInsert)
-        .select("id_venta, id_cuenta, id_precio");
-      if (ventaErr) throw ventaErr;
-      insertedVentas = ventasRes || [];
-    }
-
-    // Historial de ventas (nuevas + renovaciones) con monto como float completo
-    const caracasNowPago = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
-    );
-    const pad2Pago = (val) => String(val).padStart(2, "0");
-    const horaPago = `${pad2Pago(caracasNowPago.getHours())}:${pad2Pago(
-      caracasNowPago.getMinutes()
-    )}:${pad2Pago(
-      caracasNowPago.getSeconds()
-    )}`;
-    const histRows = [];
-    // Nuevas (insertadas recién)
-    insertedVentas.forEach((v, idx) => {
-      const src = ventasToInsert[idx] || {};
-      const platId = priceMap[v.id_precio]?.id_plataforma || null;
-      histRows.push({
-        id_usuario_cliente: idUsuarioVentas,
-        id_proveedor: null,
-        monto: Number(src.monto) || 0,
-        fecha_pago: isoHoy,
-        venta_cliente: true,
-        renovacion: false,
-        id_venta: v.id_venta,
-        id_plataforma: platId,
-        id_cuenta: v.id_cuenta,
-        registrado_por: idUsuarioSesion,
-        id_metodo_de_pago,
-        referencia: referenciaNum,
-        comprobante: comprobanteHist,
-        hora_pago: horaPago,
-      });
-    });
-    // Renovaciones
-    renovaciones.forEach((it) => {
-      const platId = priceMap[it.id_precio]?.id_plataforma || null;
-      const ventaAnt = ventaMap[it.id_venta] || {};
-      const cuentaAnt = ventaAnt.id_cuenta || null;
-      const usuarioAnt = ventaAnt.id_usuario || idUsuarioVentas;
-      // monto ya calculado arriba como base (unit * cantidad * meses)
-      const price = priceMap[it.id_precio] || {};
-      const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
-      const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
-      const base = pickPrecio(price) * cantidadVal * mesesVal;
-      histRows.push({
-        id_usuario_cliente: usuarioAnt,
-        id_proveedor: null,
-        monto: Number(base) || 0,
-        fecha_pago: isoHoy,
-        venta_cliente: true,
-        renovacion: true,
-        id_venta: it.id_venta,
-        id_plataforma: platId,
-        id_cuenta: cuentaAnt,
-        registrado_por: idUsuarioSesion,
-        id_metodo_de_pago,
-        referencia: referenciaNum,
-        comprobante: comprobanteHist,
-        hora_pago: horaPago,
-      });
-    });
-    if (histRows.length) {
-      const { error: histErr } = await supabaseAdmin.from("historial_ventas").insert(histRows);
-      if (histErr) throw histErr;
-    }
-
-    // marca recursos como ocupados
-    const perfilesIds = asignaciones.map((a) => a.id_perfil).filter(Boolean);
-    const cuentasIds = asignaciones
-      .filter((a) => a.id_perfil === null && a.id_cuenta)
-      .map((a) => a.id_cuenta);
-    if (perfilesIds.length) {
-      const { error: updPerfErr } = await supabaseAdmin
-        .from("perfiles")
-        .update({ ocupado: true })
-        .in("id_perfil", perfilesIds);
-      if (updPerfErr) throw updPerfErr;
-    }
-    if (cuentasIds.length) {
-      const { error: updCtaErr } = await supabaseAdmin
-        .from("cuentas")
-        .update({ ocupado: true })
-        .in("id_cuenta", cuentasIds);
-      if (updCtaErr) throw updCtaErr;
-    }
-
-    // limpia carrito
-    await supabaseAdmin.from("carrito_items").delete().eq("id_carrito", carritoId);
-    await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
-
-    res.json({ ok: true, id_orden: orden.id_orden, total, ventas: ventasToInsert.length });
   } catch (err) {
     console.error("[checkout] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Procesar orden luego de verificación de pago
+app.post("/api/ordenes/procesar", async (req, res) => {
+  const idOrden = Number(req.body?.id_orden);
+  if (!Number.isFinite(idOrden)) {
+    return res.status(400).json({ error: "id_orden inválido" });
+  }
+
+  try {
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    const { data: orden, error: ordErr } = await supabaseAdmin
+      .from("ordenes")
+      .select(
+        "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, tasa_bs, pago_verificado, en_espera, orden_cancelada"
+      )
+      .eq("id_orden", idOrden)
+      .single();
+    if (ordErr) throw ordErr;
+
+    if (orden?.orden_cancelada === true) {
+      return res.status(400).json({ error: "Orden cancelada. No se pueden asignar servicios." });
+    }
+
+    const idUsuarioVentas = Number(orden?.id_usuario) || idUsuarioSesion;
+    if (idUsuarioSesion && orden?.id_usuario && Number(orden.id_usuario) !== Number(idUsuarioSesion)) {
+      return res.status(403).json({ error: "Orden no pertenece al usuario." });
+    }
+    if (!orden?.id_carrito) {
+      return res.status(400).json({ error: "Orden sin carrito asociado." });
+    }
+
+    const { data: ventasExist, error: ventasErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta")
+      .eq("id_orden", idOrden)
+      .limit(1);
+    if (ventasErr) throw ventasErr;
+    if (ventasExist?.length) {
+      if (!orden?.pago_verificado) {
+        const { data: pendRows, error: pendErr } = await supabaseAdmin
+          .from("ventas")
+          .select("id_venta")
+          .eq("id_orden", idOrden)
+          .eq("pendiente", true);
+        if (pendErr) throw pendErr;
+        await supabaseAdmin
+          .from("ordenes")
+          .update({ pago_verificado: true, en_espera: (pendRows || []).length > 0 })
+          .eq("id_orden", idOrden);
+      }
+      return res.json({
+        ok: true,
+        id_orden: idOrden,
+        already_processed: true,
+        ventas: ventasExist.length,
+      });
+    }
+
+    const context = await buildCheckoutContext({
+      idUsuarioVentas,
+      carritoId: orden.id_carrito,
+      totalCliente: orden.total,
+      tasa_bs: orden.tasa_bs,
+    });
+    if (!context.items?.length) {
+      return res.status(400).json({ error: "El carrito está vacío" });
+    }
+
+    const archivos = normalizeFilesArray(orden?.comprobante);
+    const result = await processOrderFromItems({
+      ordenId: idOrden,
+      idUsuarioSesion,
+      idUsuarioVentas,
+      items: context.items,
+      priceMap: context.priceMap,
+      platInfoById: context.platInfoById,
+      platNameById: context.platNameById,
+      pickPrecio: context.pickPrecio,
+      referencia: orden?.referencia,
+      archivos,
+      id_metodo_de_pago: orden?.id_metodo_de_pago,
+      carritoId: orden.id_carrito,
+    });
+
+    await supabaseAdmin
+      .from("ordenes")
+      .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
+      .eq("id_orden", idOrden);
+
+    res.json({
+      ok: true,
+      id_orden: idOrden,
+      ventas: result.ventasCount,
+      pendientes: result.pendientesCount,
+    });
+  } catch (err) {
+    console.error("[ordenes/procesar] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }

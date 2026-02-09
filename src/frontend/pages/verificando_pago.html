@@ -70,6 +70,12 @@
         flex: 1;
         min-width: 220px;
       }
+      .retry-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
     </style>
   </head>
   <body>
@@ -92,6 +98,10 @@
         <div class="detalle">
           <h3>Detalles del pago:</h3>
           <div class="ref-row">
+            <span class="ref-label">Monto:</span>
+            <span id="monto-display">-</span>
+          </div>
+          <div class="ref-row">
             <span class="ref-label">N. de referencia:</span>
             <span id="ref-display">-</span>
             <button type="button" class="ref-edit-btn" id="btn-edit-ref">✎</button>
@@ -108,6 +118,10 @@
         </div>
 
         <p id="verif-status" class="status"></p>
+        <div id="retry-actions" class="retry-actions hidden">
+          <button type="button" class="btn-primary" id="btn-retry">Reintentar</button>
+          <button type="button" class="btn-outline" id="btn-back-cart">Volver al carrito</button>
+        </div>
       </div>
     </main>
 

@@ -1,5 +1,5 @@
 import { requireSession, attachLogout, attachLogoHome } from "./session.js";
-import { clearServerSession, supabase, loadCurrentUser } from "./api.js";
+import { clearServerSession, supabase, loadCurrentUser, procesarOrden } from "./api.js";
 
 requireSession();
 attachLogoHome();
@@ -8,12 +8,16 @@ attachLogout(clearServerSession);
 const statusEl = document.querySelector("#verif-status");
 const processingBlock = document.querySelector("#processing-block");
 const refDisplay = document.querySelector("#ref-display");
+const montoDisplay = document.querySelector("#monto-display");
 const refEditWrap = document.querySelector("#ref-edit-wrap");
 const refInput = document.querySelector("#ref-input");
 const btnEditRef = document.querySelector("#btn-edit-ref");
 const btnSaveRef = document.querySelector("#btn-save-ref");
 const progressBar = document.querySelector("#progress-bar");
 const countdownEl = document.querySelector("#countdown");
+const retryActions = document.querySelector("#retry-actions");
+const btnRetry = document.querySelector("#btn-retry");
+const btnBackCart = document.querySelector("#btn-back-cart");
 
 const params = new URLSearchParams(window.location.search);
 const idOrden = Number(params.get("id_orden"));
@@ -23,9 +27,18 @@ let verifyTimer = null;
 let countdownTimer = null;
 let currentUserId = null;
 let expired = false;
+let processingOrder = false;
+let orderProcessed = false;
+let cartMontoBs = null;
+let cartTasaBs = null;
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
+};
+
+const toggleRetryActions = (show) => {
+  if (!retryActions) return;
+  retryActions.classList.toggle("hidden", !show);
 };
 
 const formatCountdown = (msLeft) => {
@@ -37,9 +50,24 @@ const formatCountdown = (msLeft) => {
 
 const parseCaracasDate = (fechaStr, horaStr) => {
   if (!fechaStr || !horaStr) return null;
-  const iso = `${fechaStr}T${horaStr}-04:00`;
+  const fechaMatch = String(fechaStr).match(/\d{4}-\d{2}-\d{2}/);
+  const horaMatch = String(horaStr).match(/\d{2}:\d{2}:\d{2}/);
+  if (!fechaMatch || !horaMatch) return null;
+  const iso = `${fechaMatch[0]}T${horaMatch[0]}-04:00`;
   const dt = new Date(iso);
   return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const getCaracasParts = () => {
+  const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+  const pad2 = (val) => String(val).padStart(2, "0");
+  const fecha = `${caracasNow.getFullYear()}-${pad2(caracasNow.getMonth() + 1)}-${pad2(
+    caracasNow.getDate()
+  )}`;
+  const hora = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
+    caracasNow.getSeconds()
+  )}`;
+  return { fecha, hora };
 };
 
 const updateCountdown = () => {
@@ -63,6 +91,7 @@ const updateCountdown = () => {
     if (progressBar) progressBar.style.width = "0%";
     if (countdownEl) countdownEl.textContent = "0min 0seg";
     setStatus("Pago no encontrado");
+    toggleRetryActions(true);
     if (verifyTimer) {
       clearInterval(verifyTimer);
       verifyTimer = null;
@@ -82,6 +111,27 @@ const startCountdown = () => {
 const renderRef = () => {
   const ref = orden?.referencia || "";
   if (refDisplay) refDisplay.textContent = ref ? ref : "-";
+};
+
+const renderMonto = () => {
+  if (!montoDisplay || !orden) return;
+  let montoBs = null;
+  if (Number.isFinite(Number(orden.monto_bs))) {
+    montoBs = Number(orden.monto_bs);
+  } else if (Number.isFinite(cartMontoBs)) {
+    montoBs = cartMontoBs;
+  } else {
+    const totalUsd = Number(orden.total);
+    const tasaBs = Number(orden.tasa_bs);
+    if (Number.isFinite(totalUsd) && Number.isFinite(tasaBs)) {
+      montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
+    }
+  }
+  if (!Number.isFinite(montoBs)) {
+    montoDisplay.textContent = "Bs. -";
+    return;
+  }
+  montoDisplay.textContent = `Bs. ${Number(montoBs).toFixed(2)}`;
 };
 
 const extractRefMatches = (text) => {
@@ -104,6 +154,22 @@ const montoNum = (val) => {
 
 const verifyPago = async () => {
   if (!orden) return;
+  if (expired || processingOrder || orderProcessed) return;
+  toggleRetryActions(false);
+  if (orden?.orden_cancelada) {
+    orderProcessed = true;
+    setStatus("Orden cancelada.");
+    if (processingBlock) processingBlock.classList.add("hidden");
+    toggleRetryActions(false);
+    return;
+  }
+  if (orden?.pago_verificado) {
+    orderProcessed = true;
+    setStatus("Pago verificado. Redirigiendo...");
+    toggleRetryActions(false);
+    window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(orden.id_orden)}`;
+    return;
+  }
   const refStr = String(orden.referencia || "").trim();
   if (!refStr || refStr.length < 4) {
     setStatus("Ingresa los últimos 4 dígitos de referencia.");
@@ -117,7 +183,12 @@ const verifyPago = async () => {
     return;
   }
 
-  const montoBsOrden = Math.round(totalUsd * tasaBs * 100) / 100;
+  const ordenMontoBsRaw = Number(orden.monto_bs);
+  const montoBsOrden = Number.isFinite(ordenMontoBsRaw)
+    ? ordenMontoBsRaw
+    : Math.round(totalUsd * tasaBs * 100) / 100;
+  const montoBaseBs = Number.isFinite(montoBsOrden) ? montoBsOrden : null;
+  const tasaBase = Number.isFinite(tasaBs) ? tasaBs : cartTasaBs;
 
   const resp = await supabase
     .from("pagomoviles")
@@ -160,10 +231,44 @@ const verifyPago = async () => {
     await supabase.from("pagomoviles").update(updates).eq("id", match.id);
   }
 
-  const diff = Number((pagoMonto - montoBsOrden).toFixed(2));
-  if (diff !== 0) {
-    if (diff > 0 && Number.isFinite(tasaBs) && tasaBs) {
-      const saldoUsd = Number(((pagoMonto - montoBsOrden) / tasaBs).toFixed(2));
+  if (!Number.isFinite(montoBaseBs)) {
+    setStatus("No se pudo obtener el monto de la orden.");
+    return;
+  }
+  const diffReal = Number((pagoMonto - montoBaseBs).toFixed(2));
+  if (diffReal < 0) {
+    const saldoUsd =
+      Number.isFinite(montoBaseBs) && Number.isFinite(tasaBase) && tasaBase
+        ? Number((montoBaseBs / tasaBase).toFixed(2))
+        : null;
+    if (Number.isFinite(saldoUsd) && sessionUserId) {
+      const { data: userSaldo, error: saldoErr } = await supabase
+        .from("usuarios")
+        .select("saldo")
+        .eq("id_usuario", sessionUserId)
+        .maybeSingle();
+      if (!saldoErr) {
+        const saldoActual = Number(userSaldo?.saldo) || 0;
+        const nuevoSaldo = Math.round((saldoActual + saldoUsd) * 100) / 100;
+        await supabase.from("usuarios").update({ saldo: nuevoSaldo }).eq("id_usuario", sessionUserId);
+      }
+    }
+    await supabase
+      .from("ordenes")
+      .update({ pago_verificado: true, orden_cancelada: true, monto_completo: null, en_espera: false })
+      .eq("id_orden", orden.id_orden);
+    orden.pago_verificado = true;
+    orden.orden_cancelada = true;
+    orderProcessed = true;
+    if (processingBlock) processingBlock.classList.add("hidden");
+    toggleRetryActions(false);
+    setStatus("Pago insuficiente. Orden cancelada.");
+    return;
+  }
+
+  if (diffReal >= 0 && Number.isFinite(tasaBase) && tasaBase) {
+    if (diffReal > 0) {
+      const saldoUsd = Number(((pagoMonto - montoBaseBs) / tasaBase).toFixed(2));
       if (Number.isFinite(saldoUsd) && sessionUserId) {
         const { data: userSaldo, error: saldoErr } = await supabase
           .from("usuarios")
@@ -176,25 +281,23 @@ const verifyPago = async () => {
           await supabase.from("usuarios").update({ saldo: nuevoSaldo }).eq("id_usuario", sessionUserId);
         }
       }
-      await supabase
-        .from("ordenes")
-        .update({ en_espera: false })
-        .eq("id_orden", orden.id_orden);
-      orden.en_espera = false;
-      setStatus("Pago verificado. Redirigiendo...");
-      window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(orden.id_orden)}`;
-      return;
-    } else {
-      setStatus("Pago verificado menor al del carrito. Saldo acreditado a su perfil.");
-      return;
     }
+    await supabase
+      .from("ordenes")
+      .update({ pago_verificado: true, monto_completo: true, orden_cancelada: false })
+      .eq("id_orden", orden.id_orden);
   }
 
-  await supabase
-    .from("ordenes")
-    .update({ en_espera: false })
-    .eq("id_orden", orden.id_orden);
+  processingOrder = true;
+  const procResp = await procesarOrden(orden.id_orden);
+  if (procResp?.error) {
+    processingOrder = false;
+    setStatus("No se pudo procesar la orden.");
+    return;
+  }
   orden.en_espera = false;
+  orden.pago_verificado = true;
+  orderProcessed = true;
 
   setStatus("Pago verificado. Redirigiendo...");
   window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(orden.id_orden)}`;
@@ -241,6 +344,48 @@ const bindEdit = () => {
   });
 };
 
+const bindRetryActions = () => {
+  btnRetry?.addEventListener("click", async () => {
+    if (!orden) return;
+    try {
+      const { fecha, hora } = getCaracasParts();
+      const { error } = await supabase
+        .from("ordenes")
+        .update({ hora_orden: hora, fecha, en_espera: true })
+        .eq("id_orden", orden.id_orden);
+      if (error) throw error;
+      orden.hora_orden = hora;
+      orden.fecha = fecha;
+      orden.en_espera = true;
+      expired = false;
+      if (processingBlock) processingBlock.classList.remove("hidden");
+      toggleRetryActions(false);
+      setStatus("Reintentando...");
+      startCountdown();
+      startVerifyLoop();
+    } catch (err) {
+      console.error("reintentar orden error", err);
+      setStatus("No se pudo reintentar.");
+    }
+  });
+  btnBackCart?.addEventListener("click", () => {
+    (async () => {
+      if (orden?.id_orden) {
+        try {
+          await supabase
+            .from("ordenes")
+            .update({ orden_cancelada: true })
+            .eq("id_orden", orden.id_orden);
+          orden.orden_cancelada = true;
+        } catch (err) {
+          console.error("cancelar orden error", err);
+        }
+      }
+      window.location.href = "cart.html";
+    })();
+  });
+};
+
 async function init() {
   try {
     if (!idOrden) {
@@ -251,13 +396,30 @@ async function init() {
     currentUserId = user?.id_usuario || null;
     const { data, error } = await supabase
       .from("ordenes")
-      .select("id_orden, referencia, total, tasa_bs, en_espera, hora_orden, fecha, id_metodo_de_pago")
+      .select(
+        "id_orden, id_carrito, referencia, total, tasa_bs, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada"
+      )
       .eq("id_orden", idOrden)
       .single();
     if (error) throw error;
     orden = data;
+    if (orden?.id_carrito) {
+      const { data: cartData, error: cartErr } = await supabase
+        .from("carritos")
+        .select("monto_bs, tasa_bs")
+        .eq("id_carrito", orden.id_carrito)
+        .single();
+      if (!cartErr) {
+        const mb = Number(cartData?.monto_bs);
+        const tb = Number(cartData?.tasa_bs);
+        cartMontoBs = Number.isFinite(mb) ? mb : null;
+        cartTasaBs = Number.isFinite(tb) ? tb : null;
+      }
+    }
     renderRef();
+    renderMonto();
     bindEdit();
+    bindRetryActions();
     startCountdown();
     verifyPago().catch((err) => {
       console.error("verificar pago inicial error", err);

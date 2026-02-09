@@ -135,6 +135,27 @@ export async function submitCheckout(payload) {
   }
 }
 
+export async function procesarOrden(id_orden) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/ordenes/procesar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id_orden }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("ordenes/procesar response", res.status, text);
+      return { error: text || "No se pudo procesar la orden" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("procesarOrden error", err);
+    return { error: err.message };
+  }
+}
+
 export async function updateCartMontos(monto_usd, tasa_bs) {
   await ensureServerSession();
   try {
