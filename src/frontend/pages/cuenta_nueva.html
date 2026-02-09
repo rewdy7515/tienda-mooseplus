@@ -218,6 +218,7 @@
       let sugsCounter = 0;
       let suppressBlur = false;
       let adminId = null;
+      let isSuperAdmin = false;
       let clienteSeleccionadoId = null;
       const toTitleCase = (str) =>
         (str || "").replace(/(\S+)/g, (w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ""));
@@ -474,6 +475,7 @@
           adminId = user?.id_usuario || null;
           const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
           const isSuper = isTrue(user?.permiso_superadmin);
+          isSuperAdmin = isSuper;
           if (!isSuper) {
             alert("Acceso denegado.");
             window.location.href = "index.html";
@@ -491,6 +493,19 @@
           alert("Selecciona un cliente válido (ID no encontrado).");
           return;
         }
+        if (!isSuperAdmin) {
+          try {
+            const user = await loadCurrentUser();
+            const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+            isSuperAdmin = isTrue(user?.permiso_superadmin);
+          } catch (err) {
+            console.error("verificar superadmin error", err);
+          }
+          if (!isSuperAdmin) {
+            alert("Acceso denegado.");
+            return;
+          }
+        }
         const referencia = (document.querySelector("#cn-ref")?.value || "").trim() || "N/A";
         try {
           const payload = {
@@ -500,7 +515,15 @@
             total: null,
             tasa_bs: 400,
             id_usuario_override: idCliente,
+            bypass_verificacion: isSuperAdmin === true,
+            id_admin: adminId,
           };
+          console.log("[cuenta_nueva] payload checkout", {
+            idCliente,
+            adminId,
+            isSuperAdmin,
+            payload,
+          });
           // Determinar monto según acceso_cliente
           let totalOverride = null;
           try {
@@ -555,11 +578,20 @@
           if (totalOverride !== null) {
             payload.total = totalOverride;
           }
-          const { submitCheckout } = await import("../scripts/api.js");
+          const { submitCheckout, procesarOrden } = await import("../scripts/api.js");
           const resp = await submitCheckout(payload);
+          console.log("[cuenta_nueva] checkout resp", resp);
           if (resp?.error) {
             alert(`Error al procesar: ${resp.error}`);
             return;
+          }
+          if (resp?.id_orden && isSuperAdmin && (resp?.pendiente_verificacion || resp?.ventas === 0)) {
+            const procResp = await procesarOrden(resp.id_orden);
+            console.log("[cuenta_nueva] procesarOrden resp", procResp);
+            if (procResp?.error) {
+              alert(`No se pudo asignar la orden: ${procResp.error}`);
+              return;
+            }
           }
           // Marca el admin que procesó la venta en ventas via id_orden
           if (adminId && resp?.id_orden) {
@@ -578,21 +610,22 @@
             const { data: ventasOrden, error: ventasOrdErr } = await supabase
               .from("ventas")
               .select(
-                "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuentas:cuentas!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+                "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuenta_base:cuentas!ventas_id_cuenta_fkey(correo, id_plataforma, plataformas:plataformas(nombre)), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
               )
               .eq("id_orden", resp.id_orden);
             if (ventasOrdErr) throw ventasOrdErr;
             const rowsNotif = [];
             (ventasOrden || []).forEach((v) => {
+              const cuentaInfo = v.cuenta_base || v.cuenta_miembro || {};
               const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: v.id_usuario });
               if (!userIds.length) return;
-              const platName = v.cuentas?.plataformas?.nombre || "Plataforma";
+              const platName = cuentaInfo?.plataformas?.nombre || "Plataforma";
               const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
               const notif = buildNotificationPayload(
                 "nuevo_servicio",
                 {
                   plataforma: platName,
-                  correoCuenta: v.cuentas?.correo || "",
+                  correoCuenta: cuentaInfo?.correo || "",
                   perfil: perfilTxt,
                   fechaCorte: v.fecha_corte || "",
                   idOrden: resp.id_orden,

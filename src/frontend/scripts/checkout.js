@@ -841,11 +841,12 @@ btnSendPayment?.addEventListener("click", async () => {
     }
 
     alert("Pago enviado correctamente.");
+    const pendienteVerificacion = resp?.pendiente_verificacion === true;
     const nextUrl = resp?.id_orden
-      ? isMetodoBs
+      ? pendienteVerificacion
         ? `verificando_pago.html?id_orden=${encodeURIComponent(resp.id_orden)}`
         : `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
-      : isMetodoBs
+      : pendienteVerificacion
       ? "verificando_pago.html"
       : "entregar_servicios.html";
     window.location.href = nextUrl;

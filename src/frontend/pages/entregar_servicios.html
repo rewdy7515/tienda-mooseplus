@@ -55,6 +55,7 @@
       const idOrdenParam = params.get("id_orden");
       let ventasById = {};
       let platById = {};
+      console.log("entregar_servicios init", { idOrdenParam });
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -224,6 +225,7 @@
             const resp = await fetchVentasOrden(idOrdenParam);
             if (resp?.error) throw new Error(resp.error);
             ventas = resp?.ventas || [];
+            console.log("entregar_servicios ventas por orden", { idOrdenParam, total: ventas.length });
           } else {
             if (!userId) {
               setStatus("Usuario no autenticado.");
@@ -236,6 +238,7 @@
               .eq("id_usuario", userId);
             if (error) throw error;
             ventas = data || [];
+            console.log("entregar_servicios ventas por usuario", { userId, total: ventas.length });
           }
 
           const platIds = Array.from(
@@ -285,6 +288,11 @@
           const onlyNuevas = (filteredVentas || []).filter(
             (v) => !v.pendiente && !v.renovacion
           );
+          console.log("entregar_servicios resumen", {
+            total: filteredVentas.length,
+            pendientes: onlyPendientes.length,
+            nuevas: onlyNuevas.length,
+          });
 
           (onlyPendientes || []).forEach((v) => {
             const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;

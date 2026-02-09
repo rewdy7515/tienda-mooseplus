@@ -266,6 +266,7 @@ export async function fetchInventario() {
 export async function fetchVentasOrden(idOrden) {
   await ensureServerSession();
   try {
+    console.log("fetchVentasOrden request", { idOrden });
     const res = await fetch(
       `${API_BASE}/api/ventas/orden?id_orden=${encodeURIComponent(idOrden)}`,
       {
@@ -277,7 +278,9 @@ export async function fetchVentasOrden(idOrden) {
       console.error("ventas/orden response", res.status, text);
       return { error: text || "No se pudo cargar ventas por orden" };
     }
-    return res.json();
+    const json = await res.json();
+    console.log("fetchVentasOrden result", { idOrden, ventas: json?.ventas?.length || 0 });
+    return json;
   } catch (err) {
     console.error("fetchVentasOrden error", err);
     return { error: err.message };

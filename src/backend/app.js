@@ -230,6 +230,13 @@ const processOrderFromItems = async ({
   id_metodo_de_pago,
   carritoId,
 }) => {
+  console.log("[checkout] processOrderFromItems start", {
+    ordenId,
+    idUsuarioSesion,
+    idUsuarioVentas,
+    itemsCount: items?.length || 0,
+    carritoId,
+  });
   const isoHoy = todayInVenezuela();
   const referenciaNum = Number.isFinite(Number(referencia)) ? Number(referencia) : null;
   const archivosArr = Array.isArray(archivos) ? archivos : [];
@@ -277,6 +284,12 @@ const processOrderFromItems = async ({
 
   // Filtra items nuevos (no renovaciones) para asignación de stock
   const itemsNuevos = (items || []).filter((it) => !it.id_venta);
+  if (!itemsNuevos.length) {
+    console.log("[checkout] processOrderFromItems sin items nuevos", {
+      ordenId,
+      renovaciones: renovaciones.length,
+    });
+  }
 
   // Verificación de stock y asignación de recursos
   const asignaciones = [];
@@ -676,6 +689,11 @@ const processOrderFromItems = async ({
   await supabaseAdmin.from("carrito_items").delete().eq("id_carrito", carritoId);
   await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
 
+  console.log("[checkout] processOrderFromItems end", {
+    ordenId,
+    ventasCount: ventasToInsert.length,
+    pendientesCount: pendientes.length,
+  });
   return { ventasCount: ventasToInsert.length, pendientesCount: pendientes.length };
 };
 
@@ -1374,6 +1392,7 @@ app.get("/api/ventas/orden", async (req, res) => {
     if (!Number.isFinite(idOrden)) {
       return res.status(400).json({ error: "id_orden inválido" });
     }
+    console.log("[ventas/orden] request", { id_orden: idOrden });
     const { data, error } = await supabaseAdmin
       .from("ventas")
       .select(
@@ -1394,6 +1413,7 @@ app.get("/api/ventas/orden", async (req, res) => {
       .eq("id_orden", idOrden)
       .order("id_venta", { ascending: false });
     if (error) throw error;
+    console.log("[ventas/orden] result", { id_orden: idOrden, ventas: data?.length || 0 });
     res.json({ ventas: data || [] });
   } catch (err) {
     console.error("[ventas/orden] error", err);
@@ -1844,6 +1864,8 @@ app.post("/api/checkout", async (req, res) => {
     total: totalCliente,
     tasa_bs,
     id_usuario_override,
+    bypass_verificacion,
+    id_admin,
   } = req.body || {};
   const archivos = Array.isArray(comprobantes) ? comprobantes : Array.isArray(comprobante) ? comprobante : [];
   if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
@@ -1854,12 +1876,48 @@ app.post("/api/checkout", async (req, res) => {
 
   try {
     const idUsuarioSesion = await getOrCreateUsuario(req);
+    const sessionUserId = parseSessionUserId(req) || idUsuarioSesion;
+    const adminFromBody = Number.isFinite(Number(id_admin)) ? Number(id_admin) : null;
+    const adminCandidate = sessionUserId || adminFromBody;
+    const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+    let sessionIsSuper = false;
+    if (adminCandidate) {
+      const { data: permRow, error: permErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("permiso_superadmin")
+        .eq("id_usuario", adminCandidate)
+        .maybeSingle();
+      if (permErr) throw permErr;
+      sessionIsSuper = isTrue(permRow?.permiso_superadmin);
+    }
+    const bypassRequested = isTrue(bypass_verificacion);
+    const hasOverride =
+      id_usuario_override && Number.isFinite(Number(id_usuario_override));
+    if (hasOverride && !sessionIsSuper) {
+      return res.status(403).json({ error: "Solo superadmin puede crear órdenes para otros usuarios" });
+    }
+    if (bypassRequested && !sessionIsSuper) {
+      return res.status(403).json({ error: "No autorizado para omitir verificación" });
+    }
+    const bypassVerificacion = sessionIsSuper || bypassRequested;
     const idUsuarioVentas =
-      id_usuario_override && Number.isFinite(Number(id_usuario_override))
-        ? Number(id_usuario_override)
+      hasOverride ? Number(id_usuario_override)
         : idUsuarioSesion;
     const carritoId = await getCurrentCarrito(idUsuarioSesion);
     if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
+    console.log("[checkout] session", {
+      idUsuarioSesion,
+      sessionUserId,
+      adminFromBody,
+      adminCandidate,
+      sessionIsSuper,
+      bypassRequested,
+      bypassVerificacion,
+      idUsuarioVentas,
+      id_metodo_de_pago,
+      referencia,
+      carritoId,
+    });
 
     const context = await buildCheckoutContext({
       idUsuarioVentas,
@@ -1881,12 +1939,20 @@ app.post("/api/checkout", async (req, res) => {
     )}`;
     const referenciaTrim = String(referencia || "").trim();
     const requiereVerificacion =
-      Number(id_metodo_de_pago) === 1 && referenciaTrim.toUpperCase() !== "SALDO";
+      !bypassVerificacion && Number(id_metodo_de_pago) === 1 && referenciaTrim.toUpperCase() !== "SALDO";
     const en_espera = requiereVerificacion;
     const monto_bs =
       Number.isFinite(total) && Number.isFinite(tasaBs)
         ? Math.round(total * tasaBs * 100) / 100
         : null;
+    console.log("[checkout] contexto", {
+      itemsCount: items?.length || 0,
+      total,
+      tasaBs,
+      monto_bs,
+      requiereVerificacion,
+      en_espera,
+    });
 
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
@@ -1901,12 +1967,19 @@ app.post("/api/checkout", async (req, res) => {
         en_espera,
         hora_orden,
         id_carrito: carritoId,
-        pago_verificado: false,
+        pago_verificado: bypassVerificacion ? true : false,
         monto_completo: null,
+        id_admin: sessionUserId || (sessionIsSuper ? adminFromBody : null),
       })
       .select("id_orden")
       .single();
     if (ordErr) throw ordErr;
+    console.log("[checkout] orden creada", {
+      id_orden: orden.id_orden,
+      en_espera,
+      pago_verificado: bypassVerificacion ? true : false,
+      id_admin: sessionUserId || null,
+    });
 
     if (requiereVerificacion) {
       try {
@@ -1932,6 +2005,11 @@ app.post("/api/checkout", async (req, res) => {
       archivos,
       id_metodo_de_pago,
       carritoId,
+    });
+    console.log("[checkout] procesado", {
+      id_orden: orden.id_orden,
+      ventas: result.ventasCount,
+      pendientes: result.pendientesCount,
     });
 
     await supabaseAdmin
@@ -1964,21 +2042,49 @@ app.post("/api/ordenes/procesar", async (req, res) => {
 
   try {
     const idUsuarioSesion = await getOrCreateUsuario(req);
+    console.log("[ordenes/procesar] request", { idOrden, idUsuarioSesion });
+    let sessionIsSuper = false;
+    if (idUsuarioSesion) {
+      const { data: permRow, error: permErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("permiso_superadmin")
+        .eq("id_usuario", idUsuarioSesion)
+        .maybeSingle();
+      if (permErr) throw permErr;
+      sessionIsSuper = permRow?.permiso_superadmin === true || permRow?.permiso_superadmin === "true" || permRow?.permiso_superadmin === "1" || permRow?.permiso_superadmin === 1 || permRow?.permiso_superadmin === "t";
+    }
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, tasa_bs, pago_verificado, en_espera, orden_cancelada"
+        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, tasa_bs, pago_verificado, en_espera, orden_cancelada"
       )
       .eq("id_orden", idOrden)
       .single();
     if (ordErr) throw ordErr;
+    console.log("[ordenes/procesar] orden", {
+      id_orden: orden?.id_orden,
+      id_usuario: orden?.id_usuario,
+      id_admin: orden?.id_admin,
+      id_carrito: orden?.id_carrito,
+      pago_verificado: orden?.pago_verificado,
+      en_espera: orden?.en_espera,
+      orden_cancelada: orden?.orden_cancelada,
+    });
 
     if (orden?.orden_cancelada === true) {
       return res.status(400).json({ error: "Orden cancelada. No se pueden asignar servicios." });
     }
 
     const idUsuarioVentas = Number(orden?.id_usuario) || idUsuarioSesion;
-    if (idUsuarioSesion && orden?.id_usuario && Number(orden.id_usuario) !== Number(idUsuarioSesion)) {
+    const isOrderAdmin =
+      idUsuarioSesion && orden?.id_admin && Number(orden.id_admin) === Number(idUsuarioSesion);
+    if (
+      idUsuarioSesion &&
+      orden?.id_usuario &&
+      Number(orden.id_usuario) !== Number(idUsuarioSesion) &&
+      !sessionIsSuper &&
+      !isOrderAdmin
+    ) {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
     if (!orden?.id_carrito) {
@@ -2004,6 +2110,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
           .update({ pago_verificado: true, en_espera: (pendRows || []).length > 0 })
           .eq("id_orden", idOrden);
       }
+      console.log("[ordenes/procesar] ya procesada", { id_orden: idOrden, ventas: ventasExist.length });
       return res.json({
         ok: true,
         id_orden: idOrden,
@@ -2019,8 +2126,15 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       tasa_bs: orden.tasa_bs,
     });
     if (!context.items?.length) {
+      console.log("[ordenes/procesar] carrito vacío", { id_orden: idOrden, carritoId: orden?.id_carrito });
       return res.status(400).json({ error: "El carrito está vacío" });
     }
+    console.log("[ordenes/procesar] contexto", {
+      id_orden: idOrden,
+      itemsCount: context.items?.length || 0,
+      total: context.total,
+      tasaBs: context.tasaBs,
+    });
 
     const archivos = normalizeFilesArray(orden?.comprobante);
     const result = await processOrderFromItems({
@@ -2036,6 +2150,11 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       archivos,
       id_metodo_de_pago: orden?.id_metodo_de_pago,
       carritoId: orden.id_carrito,
+    });
+    console.log("[ordenes/procesar] procesado", {
+      id_orden: idOrden,
+      ventas: result.ventasCount,
+      pendientes: result.pendientesCount,
     });
 
     await supabaseAdmin
