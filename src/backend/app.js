@@ -1878,10 +1878,17 @@ app.post("/api/checkout", async (req, res) => {
     const idUsuarioSesion = await getOrCreateUsuario(req);
     const sessionUserId = parseSessionUserId(req) || idUsuarioSesion;
     const adminFromBody = Number.isFinite(Number(id_admin)) ? Number(id_admin) : null;
-    const adminCandidate = sessionUserId || adminFromBody;
     const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+    const bypassRequested = isTrue(bypass_verificacion);
+    const hasOverride =
+      id_usuario_override && Number.isFinite(Number(id_usuario_override));
+    const needsAdminCheck = Boolean(bypassRequested || hasOverride || adminFromBody);
     let sessionIsSuper = false;
-    if (adminCandidate) {
+    let adminCandidate = sessionUserId || adminFromBody;
+    if (needsAdminCheck) {
+      if (!adminCandidate) {
+        return res.status(403).json({ error: "Acceso denegado" });
+      }
       const { data: permRow, error: permErr } = await supabaseAdmin
         .from("usuarios")
         .select("permiso_superadmin")
@@ -1890,9 +1897,6 @@ app.post("/api/checkout", async (req, res) => {
       if (permErr) throw permErr;
       sessionIsSuper = isTrue(permRow?.permiso_superadmin);
     }
-    const bypassRequested = isTrue(bypass_verificacion);
-    const hasOverride =
-      id_usuario_override && Number.isFinite(Number(id_usuario_override));
     if (hasOverride && !sessionIsSuper) {
       return res.status(403).json({ error: "Solo superadmin puede crear órdenes para otros usuarios" });
     }

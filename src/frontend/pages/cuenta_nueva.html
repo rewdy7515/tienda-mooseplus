@@ -494,17 +494,8 @@
           return;
         }
         if (!isSuperAdmin) {
-          try {
-            const user = await loadCurrentUser();
-            const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
-            isSuperAdmin = isTrue(user?.permiso_superadmin);
-          } catch (err) {
-            console.error("verificar superadmin error", err);
-          }
-          if (!isSuperAdmin) {
-            alert("Acceso denegado.");
-            return;
-          }
+          alert("Acceso denegado.");
+          return;
         }
         const referencia = (document.querySelector("#cn-ref")?.value || "").trim() || "N/A";
         try {
@@ -524,74 +515,12 @@
             isSuperAdmin,
             payload,
           });
-          // Determinar monto según acceso_cliente
-          let totalOverride = null;
-          try {
-            const sessionUserId = requireSession();
-            // usa carrito del usuario actual (admin/logueado), la venta se asigna al cliente seleccionado
-            const { data: userAcc, error: userErr } = await supabase
-              .from("usuarios")
-              .select("acceso_cliente")
-              .eq("id_usuario", idCliente)
-              .maybeSingle();
-            if (userErr) throw userErr;
-            const acceso = userAcc?.acceso_cliente;
-            const { data: carritoRow } = await supabase
-              .from("carritos")
-              .select("id_carrito")
-              .eq("id_usuario", sessionUserId)
-              .maybeSingle();
-            const carritoId = carritoRow?.id_carrito || null;
-            if (!carritoId) {
-              totalOverride = null;
-            } else {
-              const { data: cartData, error: cartErr } = await supabase
-                .from("carrito_items")
-                .select("id_precio, cantidad, meses")
-                .eq("id_carrito", carritoId);
-              if (cartErr) throw cartErr;
-              const precioIds = (cartData || []).map((c) => c.id_precio);
-              let priceMap = {};
-              if (precioIds.length) {
-                const { data: precios, error: pErr } = await supabase
-                .from("precios")
-                .select("id_precio, precio_usd_detal, precio_usd_mayor")
-                .in("id_precio", precioIds);
-              if (pErr) throw pErr;
-              priceMap = (precios || []).reduce((acc, p) => {
-                acc[p.id_precio] = p;
-                return acc;
-              }, {});
-              }
-              const useMayor = acceso === false ? true : false;
-              totalOverride = (cartData || []).reduce((sum, it) => {
-                const price = priceMap[it.id_precio] || {};
-                const unit = useMayor ? price.precio_usd_mayor || price.precio_usd_detal || 0 : price.precio_usd_detal || 0;
-                const qty = it.cantidad || 0;
-                const meses = it.meses || 1;
-                return sum + unit * qty * meses;
-              }, 0);
-            }
-          } catch (calcErr) {
-            console.error("calc total override error", calcErr);
-          }
-          if (totalOverride !== null) {
-            payload.total = totalOverride;
-          }
-          const { submitCheckout, procesarOrden } = await import("../scripts/api.js");
+          const { submitCheckout } = await import("../scripts/api.js");
           const resp = await submitCheckout(payload);
           console.log("[cuenta_nueva] checkout resp", resp);
           if (resp?.error) {
             alert(`Error al procesar: ${resp.error}`);
             return;
-          }
-          if (resp?.id_orden && isSuperAdmin && (resp?.pendiente_verificacion || resp?.ventas === 0)) {
-            const procResp = await procesarOrden(resp.id_orden);
-            console.log("[cuenta_nueva] procesarOrden resp", procResp);
-            if (procResp?.error) {
-              alert(`No se pudo asignar la orden: ${procResp.error}`);
-              return;
-            }
           }
           // Marca el admin que procesó la venta en ventas via id_orden
           if (adminId && resp?.id_orden) {
