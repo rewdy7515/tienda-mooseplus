@@ -147,6 +147,11 @@
         const start = new Date(now.getFullYear(), now.getMonth(), 1);
         return start.toISOString().slice(0, 10);
       };
+      const getNextMonthStart = () => {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        return start.toISOString().slice(0, 10);
+      };
 
       const formatDDMMYYYY = (val) => {
         if (!val) return "-";
@@ -174,6 +179,7 @@
         try {
           const today = new Date().toISOString().slice(0, 10);
           const monthStart = getMonthStart();
+          const nextMonthStart = getNextMonthStart();
           const [{ count: repCount }, { count: cortesCount }, { count: pedidosCount }] = await Promise.all([
             supabase
               .from("reportes")
@@ -195,16 +201,31 @@
           if (countPedidosEl) countPedidosEl.textContent = pedidosCount ?? 0;
 
           if (pinesPorComprarEl) {
-            const { count: netflixCount, error: nfErr } = await supabase
-              .from("ventas")
-              .select("id_venta, precios:precios!ventas_id_precio_fkey(id_plataforma)", {
-                count: "exact",
-                head: true,
-              })
-              .gte("fecha_pago", monthStart)
-              .eq("precios.id_plataforma", 1);
+            const [
+              { count: netflixCount, error: nfErr },
+              { count: giftCount, error: giftErr },
+            ] = await Promise.all([
+              supabase
+                .from("ventas")
+                .select("id_venta, precios:precios!ventas_id_precio_fkey(id_plataforma)", {
+                  count: "exact",
+                  head: true,
+                })
+                .gte("fecha_pago", monthStart)
+                .eq("precios.id_plataforma", 1),
+              supabase
+                .from("tarjetas_de_regalo")
+                .select("id_tarjeta_de_regalo", { count: "exact", head: true })
+                .eq("id_plataforma", 21)
+                .eq("para_venta", false)
+                .gte("fecha_compra", monthStart)
+                .lt("fecha_compra", nextMonthStart),
+            ]);
             if (nfErr) throw nfErr;
-            const pines = Math.floor((netflixCount ?? 0) / 7);
+            if (giftErr) throw giftErr;
+            const basePines = Math.floor((netflixCount ?? 0) / 7);
+            const usados = giftCount ?? 0;
+            const pines = Math.max(0, basePines - usados);
             pinesPorComprarEl.textContent = `Pines por comprar: ${pines}`;
           }
         } catch (err) {

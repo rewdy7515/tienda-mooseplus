@@ -81,7 +81,7 @@
       }
       .precio-cell {
         position: relative;
-        padding-right: 42px;
+        padding-right: 78px;
       }
       .inline-edit {
         display: flex;
@@ -112,17 +112,27 @@
         box-sizing: border-box;
         font-size: 14px;
       }
-      .precio-edit {
+      .precio-actions {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .precio-edit,
+      .precio-delete {
         background: #111;
         color: #fff;
         border: none;
         border-radius: 8px;
         padding: 6px 8px;
         cursor: pointer;
-        position: absolute;
-        right: 8px;
-        top: 50%;
-        transform: translateY(-50%);
+        line-height: 1;
+      }
+      .precio-delete {
+        background: #dc2626;
       }
       .qty-popover {
         position: absolute;
@@ -231,6 +241,18 @@
         return `${cantidad}`;
       };
 
+      const renderActions = ({ editLabel, showDelete = false, deleteLabel }) => {
+        const deleteBtn = showDelete
+          ? `<button type="button" class="precio-delete" aria-label="${deleteLabel || "Eliminar"}">🗑️</button>`
+          : "";
+        return `
+          <span class="precio-actions">
+            <button type="button" class="precio-edit" aria-label="${editLabel}">✏️</button>
+            ${deleteBtn}
+          </span>
+        `;
+      };
+
       const renderTabla = (titulo, precios, platFlags = {}, platMeta = {}, planKey = null, planOptions = []) => {
         const esGift = !!platMeta.tarjeta_de_regalo;
         const planOpts = (planOptions || []).filter(Boolean);
@@ -252,23 +274,35 @@
               <tr>
                 <td data-id="${p.id_precio || ""}" data-field="cantidad" class="precio-cell" data-completa="${p.completa ? "true" : "false"}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-cantidad="${p.cantidad ?? ""}">
                   <span class="precio-text">${p.cantidad != null ? formatCantidad(p.cantidad, platFlags, p.completa) : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                  ${renderActions({ editLabel: "Editar cantidad" })}
                 </td>
                 <td data-id="${p.id_precio || ""}" data-field="valor_tarjeta_de_regalo" class="precio-cell" data-valor="${p.valor_tarjeta_de_regalo ?? ""}" data-moneda="${p.moneda || ""}">
                   <span class="precio-text">${p.valor_tarjeta_de_regalo != null ? `${p.valor_tarjeta_de_regalo} ${p.moneda || ""}` : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar valor">✏️</button>
+                  ${renderActions({
+                    editLabel: "Editar valor",
+                    showDelete: p.valor_tarjeta_de_regalo != null,
+                    deleteLabel: "Eliminar valor",
+                  })}
                 </td>
                 <td data-id="${p.id_precio || ""}" data-field="region" class="precio-cell" data-region="${p.region || ""}">
                   <span class="precio-text">${p.region || "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar región">✏️</button>
+                  ${renderActions({ editLabel: "Editar región" })}
                 </td>
                 <td data-id="${p.id_precio || ""}" data-field="precio_usd_detal" class="precio-cell">
                   <span class="precio-text">${p.precio_usd_detal != null ? `$${p.precio_usd_detal}` : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                  ${renderActions({
+                    editLabel: "Editar precio detal",
+                    showDelete: p.precio_usd_detal != null,
+                    deleteLabel: "Eliminar precio detal",
+                  })}
                 </td>
                 <td data-id="${p.id_precio || ""}" data-field="precio_usd_mayor" class="precio-cell">
                   <span class="precio-text">${p.precio_usd_mayor != null ? `$${p.precio_usd_mayor}` : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                  ${renderActions({
+                    editLabel: "Editar precio mayor",
+                    showDelete: p.precio_usd_mayor != null,
+                    deleteLabel: "Eliminar precio mayor",
+                  })}
                 </td>
               </tr>
             `;
@@ -302,20 +336,28 @@
               <tr>
                 <td data-id="${p.id_precio || ""}" data-field="cantidad" class="precio-cell" data-completa="${p.completa ? "true" : "false"}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-cantidad="${p.cantidad ?? ""}">
                   <span class="precio-text">${p.cantidad != null ? formatCantidad(p.cantidad, platFlags, p.completa) : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                  ${renderActions({ editLabel: "Editar cantidad" })}
                 </td>
                 ${planCell}
                 <td data-id="${p.id_precio || ""}" data-field="duracion" class="precio-cell">
                   <span class="precio-text">${p.duracion != null ? `${p.duracion} mes${p.duracion === 1 ? "" : "es"}` : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar duración">✏️</button>
+                  ${renderActions({ editLabel: "Editar duración" })}
                 </td>
                 <td data-id="${p.id_precio || ""}" data-field="precio_usd_detal" class="precio-cell">
                   <span class="precio-text">${p.precio_usd_detal != null ? `$${p.precio_usd_detal}` : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                  ${renderActions({
+                    editLabel: "Editar precio detal",
+                    showDelete: p.precio_usd_detal != null,
+                    deleteLabel: "Eliminar precio detal",
+                  })}
                 </td>
                 <td data-id="${p.id_precio || ""}" data-field="precio_usd_mayor" class="precio-cell">
                   <span class="precio-text">${p.precio_usd_mayor != null ? `$${p.precio_usd_mayor}` : "-"}</span>
-                  <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                  ${renderActions({
+                    editLabel: "Editar precio mayor",
+                    showDelete: p.precio_usd_mayor != null,
+                    deleteLabel: "Eliminar precio mayor",
+                  })}
                 </td>
               </tr>
             `;
@@ -411,7 +453,7 @@
       };
 
       const attachPrecioEditors = () => {
-        wrapper?.addEventListener("click", (e) => {
+        wrapper?.addEventListener("click", async (e) => {
           const planEditBtn = e.target.closest(".plan-edit");
           if (planEditBtn) {
             const editor = planEditBtn.closest(".plan-editor");
@@ -509,42 +551,42 @@
                   tr.innerHTML = `
                     <td data-id="${data.id_precio}" data-field="cantidad" class="precio-cell" data-completa="${data.completa ? "true" : "false"}" data-porpantalla="${por_pantalla}" data-poracceso="${por_acceso}" data-cantidad="${data.cantidad ?? ""}">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                      ${renderActions({ editLabel: "Editar cantidad" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="valor_tarjeta_de_regalo" class="precio-cell" data-valor="${data.valor_tarjeta_de_regalo ?? ""}" data-moneda="${data.moneda || ""}">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar valor">✏️</button>
+                      ${renderActions({ editLabel: "Editar valor" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="region" class="precio-cell" data-region="${data.region || ""}">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar región">✏️</button>
+                      ${renderActions({ editLabel: "Editar región" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="precio_usd_detal" class="precio-cell">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                      ${renderActions({ editLabel: "Editar precio detal" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="precio_usd_mayor" class="precio-cell">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                      ${renderActions({ editLabel: "Editar precio mayor" })}
                     </td>
                   `;
                 } else {
                   tr.innerHTML = `
                     <td data-id="${data.id_precio}" data-field="cantidad" class="precio-cell" data-completa="${data.completa ? "true" : "false"}" data-porpantalla="${por_pantalla}" data-poracceso="${por_acceso}" data-cantidad="${data.cantidad ?? ""}">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar cantidad">✏️</button>
+                      ${renderActions({ editLabel: "Editar cantidad" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="duracion" class="precio-cell">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar duración">✏️</button>
+                      ${renderActions({ editLabel: "Editar duración" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="precio_usd_detal" class="precio-cell">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar precio detal">✏️</button>
+                      ${renderActions({ editLabel: "Editar precio detal" })}
                     </td>
                     <td data-id="${data.id_precio}" data-field="precio_usd_mayor" class="precio-cell">
                       <span class="precio-text">-</span>
-                      <button type="button" class="precio-edit" aria-label="Editar precio mayor">✏️</button>
+                      ${renderActions({ editLabel: "Editar precio mayor" })}
                     </td>
                   `;
                 }
@@ -554,6 +596,36 @@
                 alert("No se pudo crear la fila.");
               }
             })();
+            return;
+          }
+
+          const deleteBtn = e.target.closest(".precio-delete");
+          if (deleteBtn) {
+            const cell = deleteBtn.closest(".precio-cell");
+            if (!cell) return;
+            const precioId = cell.dataset.id;
+            const field = cell.dataset.field;
+            if (!precioId || !field) return;
+            try {
+              const updatePayload = { [field]: null };
+              if (field === "valor_tarjeta_de_regalo") updatePayload.moneda = null;
+              const { error } = await supabase
+                .from("precios")
+                .update(updatePayload)
+                .eq("id_precio", precioId);
+              if (error) throw error;
+              if (field === "valor_tarjeta_de_regalo") {
+                cell.dataset.valor = "";
+                cell.dataset.moneda = "";
+              }
+              const span = cell.querySelector(".precio-text");
+              if (span) span.textContent = "-";
+              deleteBtn.remove();
+              setEstado("Valor eliminado.");
+            } catch (err) {
+              console.error("delete precio error", err);
+              alert("No se pudo eliminar el valor.");
+            }
             return;
           }
 

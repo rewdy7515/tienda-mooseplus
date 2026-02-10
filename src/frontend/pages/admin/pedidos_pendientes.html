@@ -101,16 +101,10 @@
         return d;
       };
 
-      const render = (grouped) => {
-        if (!tablasEl) return;
+      const renderSection = (title, grouped) => {
         const entries = Object.entries(grouped);
-        if (!entries.length) {
-          setStatus("No hay pedidos pendientes.");
-          tablasEl.innerHTML = "";
-          return;
-        }
-        setStatus("");
-        tablasEl.innerHTML = entries
+        if (!entries.length) return "";
+        const content = entries
           .map(([_, payload]) => {
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
@@ -119,7 +113,8 @@
               .map((group) => {
                 const rows = group.rows || [];
                 const madre = group.cuenta_info || {};
-                const madreBlock = payload.cuenta_madre
+                const usesMother = payload.cuenta_madre && !!group.cuenta_info;
+                const madreBlock = usesMother
                   ? `
                     <div class="madre-bar">
                       ${madre.region ? `<p class="madre-region">${madre.region}</p>` : ""}
@@ -161,7 +156,7 @@
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -176,7 +171,7 @@
                 return `
                   ${madreBlock}
                   ${
-                    payload.cuenta_madre
+                    usesMother
                       ? `<p class="status madre-stock-msg hidden" data-plat="${payload.id_plataforma || ""}">Sin stock de cuentas madres</p>`
                       : ""
                   }
@@ -216,6 +211,55 @@
             `;
           })
           .join("");
+        return `
+          <div class="proximas-bloque">
+            <h3 class="proximas-title">${title}</h3>
+            ${content}
+          </div>
+        `;
+      };
+
+      const render = (grouped) => {
+        if (!tablasEl) return;
+        const entries = Object.entries(grouped);
+        if (!entries.length) {
+          setStatus("No hay pedidos pendientes.");
+          tablasEl.innerHTML = "";
+          return;
+        }
+        setStatus("");
+        const groupedCompletas = {};
+        const groupedIndividuales = {};
+        entries.forEach(([platId, payload]) => {
+          const groupsEntries = Object.entries(payload.groups || {});
+          if (!groupsEntries.length) return;
+          let hasCompletas = false;
+          let hasIndividuales = false;
+          const groupsCompletas = {};
+          const groupsIndividuales = {};
+          groupsEntries.forEach(([key, group]) => {
+            const rows = group.rows || [];
+            const rowsCompletas = rows.filter((r) => r.completa);
+            const rowsInd = rows.filter((r) => !r.completa);
+            if (rowsCompletas.length) {
+              hasCompletas = true;
+              groupsCompletas[key] = { ...group, rows: rowsCompletas };
+            }
+            if (rowsInd.length) {
+              hasIndividuales = true;
+              groupsIndividuales[key] = { ...group, rows: rowsInd };
+            }
+          });
+          if (hasCompletas) {
+            groupedCompletas[platId] = { ...payload, groups: groupsCompletas };
+          }
+          if (hasIndividuales) {
+            groupedIndividuales[platId] = { ...payload, groups: groupsIndividuales };
+          }
+        });
+        const sectionCompletas = renderSection("Cuentas completas", groupedCompletas);
+        const sectionIndividuales = renderSection("Cuentas individuales", groupedIndividuales);
+        tablasEl.innerHTML = [sectionCompletas, sectionIndividuales].filter(Boolean).join("");
       };
 
       const loadPendientes = async () => {
@@ -228,7 +272,7 @@
           const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-                "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+                "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -298,6 +342,8 @@
               platInfo.nombre || `Plataforma ${platId || "-"}`;
             const cliente = userMap[v.id_usuario] || "-";
             const servicio = precio.plan ? `${platName} - ${precio.plan}` : platName;
+            const isCompleta =
+              v.completa === true || v.completa === "true" || v.completa === 1 || v.completa === "1";
             if (!grouped[platId])
               grouped[platId] = {
                 nombre: platName,
@@ -327,10 +373,10 @@
                   platInfo.usa_pines === "1",
                 groups: {},
               };
-            const motherId = v.id_cuenta || "sin-madre";
+            const motherId = isCompleta ? "sin-madre" : v.id_cuenta || "sin-madre";
             if (!grouped[platId].groups[motherId]) {
               grouped[platId].groups[motherId] = {
-                cuenta_info: v.cuentas
+                cuenta_info: !isCompleta && v.cuentas
                   ? {
                       correo: v.cuentas?.correo || "",
                       clave: v.cuentas?.clave || "",
@@ -355,7 +401,8 @@
               perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
               n_perfil: v.perfiles?.n_perfil || null,
               id_plataforma: platId,
-              cuenta_madre: grouped[platId].cuenta_madre,
+              cuenta_madre: grouped[platId].cuenta_madre && !isCompleta,
+              completa: isCompleta,
               por_acceso: grouped[platId].por_acceso,
               usa_pines: grouped[platId].usa_pines,
               meses_contratados: v.meses_contratados || 1,
@@ -447,7 +494,8 @@
         const usaPines = btn.dataset.usapines === "true";
         const existingMadreId = btn.dataset.idCuenta || "";
         const existingPerfilId = btn.dataset.idPerfil || "";
-        const cuentaMadreFlag = btn.dataset.cuentaMadre === "true";
+        const isCompleta = btn.dataset.completa === "true";
+        const cuentaMadreFlag = btn.dataset.cuentaMadre === "true" && !isCompleta;
         const mesesContratados = Number(btn.dataset.meses || 1);
         if (!idVenta) return;
         try {

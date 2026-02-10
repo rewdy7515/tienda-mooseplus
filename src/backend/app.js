@@ -193,7 +193,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
   const { data: plataformas, error: platErr } = await supabaseAdmin
     .from("plataformas")
-    .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre")
+    .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre, correo_cliente")
     .in("id_plataforma", plataformaIds);
   if (platErr) throw platErr;
   const platInfoById = (plataformas || []).reduce((acc, p) => {
@@ -323,15 +323,18 @@ const processOrderFromItems = async ({
     });
 
     if (price.completa) {
-      const { data: cuentasLibres, error: ctaErr } = await supabaseAdmin
+      let cuentasQuery = supabaseAdmin
         .from("cuentas")
         .select("id_cuenta, id_plataforma, ocupado, inactiva")
         .eq("id_plataforma", platId)
         .eq("venta_perfil", false)
         .eq("venta_miembro", false)
         .eq("ocupado", false)
-        .or("inactiva.is.null,inactiva.eq.false")
-        .limit(cantidad);
+        .or("inactiva.is.null,inactiva.eq.false");
+      if (entregaInmediata) {
+        cuentasQuery = cuentasQuery.or("venta_dominio.is.null,venta_dominio.eq.false");
+      }
+      const { data: cuentasLibres, error: ctaErr } = await cuentasQuery.limit(cantidad);
       if (ctaErr) throw ctaErr;
       const disponibles = (cuentasLibres || []).filter((c) => !isInactive(c.inactiva));
       const faltantes = Math.max(0, cantidad - disponibles.length);
@@ -574,6 +577,19 @@ const processOrderFromItems = async ({
         ? Math.max(1, Math.round(Number(mesesValRaw)))
         : 1;
     const fechaCorte = a.pendiente ? null : addMonthsKeepDay(isoHoy, mesesVal);
+    const priceInfo = priceMap[a.id_precio] || {};
+    const platId = priceInfo.id_plataforma || null;
+    const platInfo = platInfoById[platId] || {};
+    const isCompleta =
+      priceInfo.completa === true ||
+      priceInfo.completa === "true" ||
+      priceInfo.completa === 1 ||
+      priceInfo.completa === "1";
+    const isCorreoCliente =
+      platInfo.correo_cliente === true ||
+      platInfo.correo_cliente === "true" ||
+      platInfo.correo_cliente === 1 ||
+      platInfo.correo_cliente === "1";
     return {
       id_usuario: idUsuarioVentas,
       id_precio: a.id_precio,
@@ -587,6 +603,7 @@ const processOrderFromItems = async ({
       fecha_corte: fechaCorte,
       fecha_pago: isoHoy,
       renovacion: false,
+      completa: isCompleta && isCorreoCliente ? true : null,
     };
   });
   console.log("[checkout] asignaciones", asignaciones);
@@ -1407,7 +1424,7 @@ app.get("/api/ventas/orden", async (req, res) => {
         clave_miembro,
         cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro),
         perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
-        precios:precios(id_precio, id_plataforma)
+        precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)
       `
       )
       .eq("id_orden", idOrden)

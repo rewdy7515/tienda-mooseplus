@@ -36,6 +36,9 @@ if (!window.__headerActionsInit) {
     }
   };
 
+  const headerEl = document.querySelector(".header");
+  const adminHeaderBtn = document.querySelector("#btn-admin-header");
+
   const normalizeHeaderLinks = () => {
     const headerEl = document.querySelector(".header");
     if (!headerEl) return;
@@ -142,6 +145,7 @@ if (!window.__headerActionsInit) {
         saldoEl.textContent = `Saldo: $${saldoNum.toFixed(2)}`;
       }
       const adminLink = document.querySelector(".admin-link");
+      const historialLink = document.querySelector(".historial-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const isSuper =
         isTrue(roles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
@@ -149,6 +153,8 @@ if (!window.__headerActionsInit) {
         isTrue(roles?.permiso_admin) ||
         isSuper ||
         isTrue(user?.permiso_admin);
+      const isSuperHist =
+        isTrue(roles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
 
       // Bloqueo de acceso a páginas admin si no tiene permisos
       const isAdminPath = window.location.pathname.includes("/pages/admin/");
@@ -161,9 +167,16 @@ if (!window.__headerActionsInit) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
       }
+      if (historialLink) {
+        historialLink.classList.toggle("hidden", !isSuperHist);
+        historialLink.style.display = isSuperHist ? "block" : "none";
+      }
       if (adminHeaderBtn) {
         adminHeaderBtn.classList.toggle("hidden", !isAdmin);
         adminHeaderBtn.style.display = isAdmin ? "inline-flex" : "none";
+      }
+      if (headerEl) {
+        headerEl.classList.toggle("has-admin-btn", !!isAdmin);
       }
       // Punto verde en Notificaciones según notificacion_inventario
       const notifLink = Array.from(document.querySelectorAll("a")).find(
@@ -206,7 +219,6 @@ if (!window.__headerActionsInit) {
     window.location.href = toAbs("cart.html", basePagesUrl);
   });
 
-  const adminHeaderBtn = document.querySelector("#btn-admin-header");
   adminHeaderBtn?.addEventListener("click", () => {
     window.location.href = toAbs("admin/admin_cuentas.html", basePagesUrl);
   });

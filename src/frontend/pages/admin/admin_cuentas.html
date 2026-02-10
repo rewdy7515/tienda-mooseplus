@@ -698,6 +698,18 @@
         }
         return { label: "Activo", className: "activo" };
       };
+      const renderFechaEditCell = (fechaCorte, ventaId) => {
+        const fechaValue = fechaCorte || "";
+        const fechaFmt = formatDDMMYYYY(fechaValue) || "";
+        const ventaAttr = ventaId ? `data-venta="${ventaId}"` : "";
+        return `<div class="fecha-wrap">
+            <span class="fecha-text">${fechaFmt}</span>
+            <button type="button" class="btn-edit-fecha" ${ventaAttr}>✏️</button>
+            <input type="date" class="fecha-input hidden" ${ventaAttr} value="${fechaValue}" />
+            <button type="button" class="btn-save-edit hidden" ${ventaAttr} data-type="fecha">💾</button>
+            <button type="button" class="btn-cancel-edit hidden" data-type="fecha">✖</button>
+          </div>`;
+      };
       const decorateCopyColumns = (root) => {
         if (!root) return;
         root.querySelectorAll("table").forEach((table) => {
@@ -1267,7 +1279,7 @@
         const term = inputCuenta?.value || "";
         setSearchMsg(cuentaSearchMsg, "");
         buscarCuentas(term, false).then((results) => {
-          if (!results?.length) {
+          if (Array.isArray(results) && results.length === 0) {
             setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
           }
         });
@@ -1288,7 +1300,7 @@
           const results = await buscarCuentas(term, true);
           loadCuentaDetalleByCorreo(term);
           renderSugerencias([], true);
-          if (!results?.length) {
+          if (Array.isArray(results) && results.length === 0) {
             setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
           }
         }
@@ -1301,7 +1313,7 @@
           const term = inputCuenta?.value || "";
           setSearchMsg(cuentaSearchMsg, "");
           buscarCuentas(term, true).then((results) => {
-            if (!results?.length) {
+            if (Array.isArray(results) && results.length === 0) {
               setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
             }
           });
@@ -1413,7 +1425,7 @@
             <td>${usuarioNombre || "Vacío"}</td>
             <td>${perfil || ""}</td>
             <td>${pin || ""}</td>
-            <td>${formatDDMMYYYY(fecha_corte) || ""}</td>
+            <td>${renderFechaEditCell(fecha_corte, id_venta)}</td>
             <td><button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${ventaData.id_cuenta || ""}">Ver cuenta</button></td>
           </tr>
         `;
@@ -1556,7 +1568,7 @@
                   <td>${userInfo.correo || ""}</td>
                   <td>${p.n_perfil ? `M${p.n_perfil}` : ""}${p.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
                   <td>${p.pin || ""}</td>
-                  <td>${formatDDMMYYYY(venta?.fecha_corte) || ""}</td>
+                  <td>${renderFechaEditCell(venta?.fecha_corte, venta?.id_venta)}</td>
                 </tr>
               `);
             });
@@ -1568,7 +1580,7 @@
                   <td>${cta.correo || ""}</td>
                   <td>${cta.clave || ""}</td>
                   <td></td>
-                  <td>${formatDDMMYYYY(v.fecha_corte) || ""}</td>
+                  <td>${renderFechaEditCell(v.fecha_corte, v.id_venta)}</td>
                 </tr>
               `);
             });
@@ -2013,7 +2025,7 @@
                 </td>
                 <td>${r.clave || ""}</td>
                 <td>${r.n_perfil ?? ""}${r.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
-                <td>${r.fecha_corte || ""}</td>
+                <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap;">
                   <button class="btn-primary btn-reemplazar-row"
                     data-cuenta="${r.id_cuenta ?? ""}"
@@ -2077,7 +2089,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio",
+              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro",
             )
             .eq("id_usuario", idUsuario);
           if (error) throw error;
@@ -2092,7 +2104,7 @@
             const { data: cuentas } = await supabase
               .from("cuentas")
               .select(
-                "id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro",
+                "id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro, cuenta_madre",
               )
               .in("id_cuenta", cuentasIds);
             cuentaMap =
@@ -2168,15 +2180,22 @@
             const platName = platInfo.nombre || `Plataforma ${platId}`;
             if (!grouped[platName]) grouped[platName] = [];
             const perfilInfo = perfilMap[v.id_perfil] || {};
+            const isCuentaMadre = cuenta.cuenta_madre === true;
+            const correoVenta = isCuentaMadre
+              ? v.correo_miembro || ""
+              : cuenta.correo || "";
+            const claveVenta = isCuentaMadre
+              ? v.clave_miembro || ""
+              : cuenta.clave || "";
             grouped[platName].push({
               id_venta: v.id_venta,
               id_cuenta: v.id_cuenta,
               id_perfil: v.id_perfil,
-              correo: cuenta.correo || "",
-              clave: cuenta.clave || "",
+              correo: correoVenta,
+              clave: claveVenta,
               n_perfil: perfilInfo.n_perfil ?? "",
               pin: perfilInfo.pin ?? "",
-              fecha_corte: formatDDMMYYYY(v.fecha_corte) || "",
+              fecha_corte: v.fecha_corte || "",
               id_plataforma: platId,
               perfil_hogar: perfilInfo.perfil_hogar,
               es_subcuenta: false,
@@ -2402,7 +2421,7 @@
                 <td>${perfilInfo.n_perfil || ""}</td>
                 <td>${cliente}</td>
                 <td>${v.correo_miembro || "-"}</td>
-                <td>${formatDDMMYYYY(v.fecha_corte) || "-"}</td>
+                <td>${renderFechaEditCell(v.fecha_corte, v.id_venta)}</td>
                 <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
@@ -2584,7 +2603,7 @@
                 : "";
               const fechaCell = canInlineAssign
                 ? `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
-                : formatDDMMYYYY(fecha) || "";
+                : renderFechaEditCell(fecha, p.id_venta);
               const estadoRow = getEstado({
                 suspendido: p.suspendido === true,
                 fecha_corte: fecha,
@@ -2872,7 +2891,7 @@
               <td>${r.correo || "-"}</td>
               <td>${r.clave || "-"}</td>
               <td>${r.usuario || "-"}</td>
-              <td>${r.fecha_corte || "-"}</td>
+              <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
               <td>${r.estado || "-"}</td>
             </tr>`,
             )
@@ -3362,7 +3381,7 @@
           if (isPlat9) {
             const { data: ventas9, error: vent9Err } = await supabase
               .from("ventas")
-              .select("id_usuario, fecha_corte, pendiente")
+              .select("id_venta, id_usuario, fecha_corte, pendiente")
               .eq("id_cuenta", idCuenta);
             if (vent9Err) throw vent9Err;
             const userIds9 = Array.from(
@@ -3383,11 +3402,12 @@
               }, {});
             }
             plat9Rows = (ventas9 || []).map((v) => ({
+              id_venta: v.id_venta || null,
               cliente: userNames9[v.id_usuario] || "-",
               correo: cuenta.correo || "-",
               clave: cuenta.clave || "-",
               usuario: v.id_usuario ? `#${v.id_usuario}` : "-",
-              fecha_corte: v.fecha_corte || "-",
+              fecha_corte: v.fecha_corte || "",
               fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
               estado: v.pendiente ? "Pendiente" : "Activo",
             }));

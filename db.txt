@@ -147,9 +147,16 @@ CREATE TABLE public.ordenes (
   tasa_bs double precision,
   num_telefono text,
   monto_bs double precision,
+  hora_orden time without time zone,
+  en_espera boolean,
+  pago_verificado boolean,
+  monto_completo boolean,
+  orden_cancelada boolean,
+  id_admin bigint,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
-  CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito)
+  CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
+  CONSTRAINT ordenes_id_admin_fkey FOREIGN KEY (id_admin) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.pagomoviles (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -339,6 +346,7 @@ CREATE TABLE public.ventas (
   aviso_corte boolean,
   id_cuenta_miembro bigint,
   renovacion boolean,
+  completa boolean,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT ventas_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),

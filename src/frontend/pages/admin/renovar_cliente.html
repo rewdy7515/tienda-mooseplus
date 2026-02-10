@@ -257,6 +257,7 @@
               "<th>Correo</th>",
               showPerfilCol ? "<th>Perfil</th>" : "",
               showHogarCol ? "<th>Perfil hogar</th>" : "",
+              "<th>Estado</th>",
               "<th>Fecha de corte</th>",
               "<th>Seleccionar</th>",
             ].join("");
@@ -271,12 +272,14 @@
                     ? "Desactivado"
                     : "-"
                   : "";
+                const estadoLabel = resolveEstadoLabel(it.fecha_corte_raw, it.suspendido);
                 return `
                   <tr>
                     <td>#${String(it.id_venta ?? "").padStart(4, "0")}</td>
                     <td>${it.correo || ""}</td>
                     ${showPerfilCol ? `<td>${perfilLabel}</td>` : ""}
                     ${showHogarCol ? `<td>${hogarLabel}</td>` : ""}
+                    <td>${estadoLabel}</td>
                     <td>${it.fecha_corte || "-"}</td>
                     <td>
                       <label class="proximas-check">
@@ -307,7 +310,7 @@
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${plat}</h3>
                 <div class="proximas-table-wrap">
-                  <table class="proximas-table">
+                  <table class="proximas-table table-base">
                     <thead>
                       <tr>${head}</tr>
                     </thead>
@@ -344,6 +347,7 @@
           "<th>Cliente</th>",
           showPerfil ? "<th>Perfil</th>" : "",
           showHogar ? "<th>Perfil hogar</th>" : "",
+          "<th>Estado</th>",
           "<th>Fecha corte</th>",
           "<th>Acción</th>",
         ].join("");
@@ -356,6 +360,7 @@
               <td>${r.cliente || "-"}</td>
               ${showPerfil ? `<td>${r.perfil || "-"}</td>` : ""}
               ${showHogar ? `<td>${r.hogarText || "-"}</td>` : ""}
+              <td>${resolveEstadoLabel(r.fecha_corte_raw, r.suspendido)}</td>
               <td>${r.fecha_corte || "-"}</td>
               <td>
                 <button
@@ -387,7 +392,7 @@
           .join("");
         resultadoEl.innerHTML = `
           <div class="proximas-table-wrap">
-            <table class="proximas-table">
+            <table class="proximas-table table-base">
               <thead><tr>${headCols}</tr></thead>
               <tbody>${body}</tbody>
             </table>
@@ -787,6 +792,27 @@
         return formatDDMMYYYY(dateStr) || "-";
       };
 
+      const parseFechaCorte = (fechaRaw) => {
+        const match = String(fechaRaw || "").match(/^\d{4}-\d{2}-\d{2}$/);
+        if (!match) return null;
+        const dt = new Date(`${match[0]}T00:00:00-04:00`);
+        return Number.isNaN(dt.getTime()) ? null : dt;
+      };
+
+      const todayCaracas = () => {
+        const now = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+        now.setHours(0, 0, 0, 0);
+        return now;
+      };
+
+      const resolveEstadoLabel = (fechaRaw, suspendido) => {
+        if (isTrue(suspendido)) return "suspendido";
+        const corte = parseFechaCorte(fechaRaw);
+        if (!corte) return "activo";
+        const hoy = todayCaracas();
+        return corte < hoy ? "vencido" : "activo";
+      };
+
       inputBuscar?.addEventListener("input", (e) => {
         if (inputCuenta) inputCuenta.value = "";
         limpiarSugsCuentas();
@@ -906,7 +932,7 @@
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${plat}</h3>
                 <div class="proximas-table-wrap">
-                  <table class="proximas-table">
+                  <table class="proximas-table table-base">
                     <thead>
                       <tr>
                         <th>Correo</th>

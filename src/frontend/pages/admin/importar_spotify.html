@@ -23,6 +23,11 @@
         </div>
         <p class="status">Columnas requeridas: fecha_pago, fecha_corte, usuario, correo, clave</p>
         <button type="button" class="btn-primary" id="btn-importar-spotify">Importar</button>
+        <div class="field">
+          <label for="spotify-csv-2">Archivo CSV (2)</label>
+          <input type="file" id="spotify-csv-2" accept=".csv,text/csv" />
+        </div>
+        <button type="button" class="btn-primary" id="btn-importar-spotify-2">Importar</button>
         <p id="import-status" class="status"></p>
       </div>
     </main>
@@ -40,6 +45,8 @@
       const inputCuentaMadre = document.querySelector("#spotify-text");
       const inputCsv = document.querySelector("#spotify-csv");
       const btnImportar = document.querySelector("#btn-importar-spotify");
+      const inputCsvAlt = document.querySelector("#spotify-csv-2");
+      const btnImportarAlt = document.querySelector("#btn-importar-spotify-2");
       const statusEl = document.querySelector("#import-status");
 
       const parseCsv = (text) => {
@@ -195,14 +202,35 @@
         return data?.id_cuenta || null;
       };
 
-      async function importar() {
+      const createCuentaCompleta = async (correo, clave, idUsuario) => {
+        const { data, error } = await supabase
+          .from("cuentas")
+          .insert({
+            id_plataforma: 9,
+            correo,
+            clave,
+            inactiva: false,
+            ocupado: false,
+            venta_dominio: true,
+            dominio_de: idUsuario,
+            venta_perfil: false,
+            venta_miembro: false,
+            cuenta_madre: false,
+          })
+          .select("id_cuenta")
+          .single();
+        if (error) throw error;
+        return data?.id_cuenta || null;
+      };
+
+      async function importar(fileInput) {
         if (statusEl) statusEl.textContent = "";
         const correoMadre = (inputCuentaMadre?.value || "").trim();
         if (!correoMadre) {
           statusEl.textContent = "Ingresa el correo de la cuenta madre.";
           return;
         }
-        const file = inputCsv?.files?.[0];
+        const file = fileInput?.files?.[0];
         if (!file) {
           statusEl.textContent = "Selecciona un archivo CSV primero.";
           return;
@@ -275,6 +303,65 @@
         }
       }
 
+      async function importarVentasCompletas(fileInput) {
+        if (statusEl) statusEl.textContent = "";
+        const file = fileInput?.files?.[0];
+        if (!file) {
+          statusEl.textContent = "Selecciona un archivo CSV primero.";
+          return;
+        }
+        const text = await file.text();
+        const parsed = parseCsv(text);
+        if (!parsed.length) {
+          statusEl.textContent = "No se encontraron filas válidas.";
+          return;
+        }
+        statusEl.textContent = "Importando...";
+        try {
+          let inserted = 0;
+          let skipped = 0;
+          for (const row of parsed) {
+            const fechaPago = normalizeDate(row.fecha_pago);
+            const fechaCorte = normalizeDate(row.fecha_corte);
+            const usuario = (row.usuario || "").trim();
+            const correo = (row.correo || "").trim();
+            const clave = (row.clave || "").trim();
+            if (!fechaPago || !fechaCorte || !usuario || !correo || !clave) {
+              skipped += 1;
+              continue;
+            }
+            const idUsuario = await getOrCreateUsuario(usuario);
+            if (!idUsuario) {
+              skipped += 1;
+              continue;
+            }
+            const idCuenta = await createCuentaCompleta(correo, clave, idUsuario);
+            if (!idCuenta) {
+              skipped += 1;
+              continue;
+            }
+            const meses = diffMonths(fechaPago, fechaCorte);
+            const { error: ventaErr } = await supabase.from("ventas").insert({
+              id_usuario: idUsuario,
+              id_cuenta: idCuenta,
+              fecha_pago: fechaPago,
+              fecha_corte: fechaCorte,
+              meses_contratados: meses,
+              pendiente: false,
+              correo_miembro: correo,
+              clave_miembro: clave,
+              completa: true,
+            });
+            if (ventaErr) throw ventaErr;
+            inserted += 1;
+          }
+          statusEl.textContent = `Importación completada. Ventas insertadas: ${inserted}. Omitidas: ${skipped}.`;
+        } catch (err) {
+          console.error("importar ventas completas error", err);
+          statusEl.textContent = "No se pudo importar.";
+        }
+      }
+
       async function init() {
         try {
           const user = await loadCurrentUser();
@@ -296,7 +383,8 @@
       attachLogout(clearServerSession);
       attachLogoHome();
 
-      btnImportar?.addEventListener("click", importar);
+      btnImportar?.addEventListener("click", () => importar(inputCsv));
+      btnImportarAlt?.addEventListener("click", () => importarVentasCompletas(inputCsvAlt));
     </script>
   </body>
 </html>

@@ -100,6 +100,24 @@ const buildCartDetalle = (opcion, flags, cantidad) => {
   return `${qty} ${baseUnit}${plural} $${opcion.precio_usd_detal}`;
 };
 
+const updateModalTotal = () => {
+  const totalEl = modalEls.modalTotal;
+  if (!totalEl) return;
+  if (!selectedPrecio) {
+    totalEl.textContent = "Total: $0.00";
+    return;
+  }
+  const basePrice = Number(selectedPrecio.precio_usd_detal) || 0;
+  const useItems = currentFlags.por_pantalla || currentFlags.por_acceso;
+  const discount = useItems
+    ? getDiscountPercent(currentPlatform, currentQty, "items")
+    : getDiscountPercent(currentPlatform, currentMonths, "months");
+  const factor = useItems ? (currentQty || 1) : (currentMonths || 1);
+  const subtotal = basePrice * factor;
+  const final = discount > 0 ? subtotal * (1 - discount / 100) : subtotal;
+  totalEl.textContent = `Total: $${final.toFixed(2)}`;
+};
+
 const renderPrecios = (plataformaId, flags) => {
   const {
     modalPrecios,
@@ -119,6 +137,7 @@ const renderPrecios = (plataformaId, flags) => {
   selectedPrecio = null;
   currentQty = 1;
   currentMonths = 1;
+  updateModalTotal();
   qtyValue.textContent = currentQty;
   qtyMonthsValue.textContent = currentMonths;
   btnMinus.disabled = true;
@@ -130,8 +149,8 @@ const renderPrecios = (plataformaId, flags) => {
   modalQtyItems?.classList.add("modal-qty-disabled");
   if (monthsDiscount) monthsDiscount.classList.add("hidden");
   if (itemsDiscount) itemsDiscount.classList.add("hidden");
-  // Mostrar/ocultar control de meses según flags (solo si no es por pantalla/acceso)
-  const hideMonths = !flags.por_pantalla && !flags.por_acceso;
+  // Mostrar/ocultar control de meses: solo ocultar en tarjetas de regalo
+  const hideMonths = flags.tarjeta_de_regalo === true;
   if (hideMonths) {
     modalQtyMonths?.classList.add("hidden");
   } else {
@@ -221,17 +240,21 @@ const renderPrecios = (plataformaId, flags) => {
       ms === "0" ||
       ms === "false"
     );
-    const completasKey = `${plataformaId}_completas`;
-    const completasCount = stockByPlatform[completasKey] ?? 0;
-    let planTitle = plan || "";
+    const isComplete = (op) =>
+      op?.completa === true ||
+      op?.completa === "true" ||
+      op?.completa === 1 ||
+      op?.completa === "1";
+    const onlyComplete = items.length > 0 && items.every(isComplete);
+    let planTitle = onlyComplete ? "Cuenta completa" : plan || "";
     if (showStock) {
-      const stockLines = ["Stock:", `- Perfiles: ${stockPlan}`];
-      if (!(Number(plataformaId) === 1 && isPlan2)) {
-        stockLines.push(`- Cuentas completas: ${completasCount}`);
-      }
-      planTitle = plan
-        ? `${plan}<br>${stockLines.join("<br>")}`
-        : stockLines.join("<br>");
+      const stockLabel = onlyComplete
+        ? "Disponibles"
+        : flags.por_acceso
+        ? "Accesos disponibles"
+        : "Perfiles disponibles";
+      const stockLine = `<span class="stock-line">${stockLabel}: ${stockPlan}</span>`;
+      planTitle = planTitle ? `${planTitle}<br>${stockLine}` : stockLine;
     }
     const planLabel = `<p class="plan-titulo">${planTitle}</p>`;
     wrapper.innerHTML = planLabel;
@@ -274,6 +297,7 @@ const renderPrecios = (plataformaId, flags) => {
           btnAdd.disabled = true;
           modalQtyMonths?.classList.add("modal-qty-disabled");
           modalQtyItems?.classList.add("modal-qty-disabled");
+          updateModalTotal();
           return;
         }
         btn.classList.add("selected");
@@ -284,6 +308,7 @@ const renderPrecios = (plataformaId, flags) => {
         // Mantén el valor de meses seleccionado por el usuario (inicia en 1)
         qtyValue.textContent = currentQty;
         qtyMonthsValue.textContent = currentMonths;
+        updateModalTotal();
       btnMinus.disabled = false;
       btnPlus.disabled = false;
       btnAdd.disabled = false;
@@ -331,6 +356,7 @@ const updateQtyItems = (delta) => {
   const { qtyValue, monthsDiscount, itemsDiscount } = modalEls;
   currentQty = Math.max(1, currentQty + delta);
   qtyValue.textContent = currentQty;
+  updateModalTotal();
   const pct = getDiscountPercent(currentPlatform, currentQty, "items");
   const pctLabel = `-${pct}%`;
   if (itemsDiscount) {
@@ -360,6 +386,7 @@ const updateQtyMonths = (delta) => {
   const { qtyMonthsValue, monthsDiscount, itemsDiscount } = modalEls;
   currentMonths = Math.max(1, Math.round(currentMonths + delta));
   qtyMonthsValue.textContent = currentMonths;
+  updateModalTotal();
   const pct = getDiscountPercent(currentPlatform, currentMonths, "months");
   const pctLabel = `-${pct}%`;
   console.log("[discount] update months", { currentMonths, pct });

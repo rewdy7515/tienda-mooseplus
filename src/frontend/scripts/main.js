@@ -52,6 +52,7 @@ const modalEls = {
   modalQtyItems: document.querySelectorAll(".modal-qty")[1],
   monthsDiscount: document.querySelector("#months-discount"),
   itemsDiscount: document.querySelector("#items-discount"),
+  modalTotal: document.querySelector("#modal-total"),
   qtyMonthsValue: document.querySelector("#qty-months-value"),
   modalQty: document.querySelector(".modal-qty"),
   qtyValue: document.querySelector("#qty-value"),

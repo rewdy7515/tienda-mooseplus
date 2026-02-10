@@ -9,7 +9,9 @@ body {
 
 /* HEADER */
 .header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "logo search user cart";
   align-items: center;
   padding: 12px 16px;
   background: #111;
@@ -17,17 +19,16 @@ body {
   gap: 15px;
   width: 100%;
   box-sizing: border-box;
-  flex-wrap: wrap;
 }
 
 .logo {
   width: 150px;
   height: 25px;
   object-fit: contain;
+  grid-area: logo;
 }
 
 .search {
-  flex: 1 1 auto;
   border-radius: 6px;
   border: none;
   width: 100%;
@@ -37,8 +38,8 @@ body {
 
 .search-box {
   position: relative;
-  flex: 1 1 auto;
   min-width: 0;
+  grid-area: search;
 }
 
 .search-results {
@@ -89,45 +90,53 @@ body {
   object-fit: contain;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .header {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      "logo user"
-      "search cart";
-    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     padding: 8px;
     align-items: center;
   }
+  .header::after {
+    content: "";
+    flex-basis: 100%;
+    height: 0;
+    order: 3;
+  }
+  .header.has-admin-btn::before {
+    content: "";
+    flex-basis: 100%;
+    height: 0;
+    order: 5;
+  }
   .logo {
-    grid-area: logo;
+    order: 1;
     justify-self: start;
   }
-  .header-user {
-    grid-area: user;
-    justify-self: end;
-    margin-left: 0;
+  .header .header-user {
+    display: contents;
+  }
+  .header .user-info {
+    order: 2;
+    margin: 0;
+    margin-left: auto;
     gap: 6px;
   }
-  #btn-admin-header {
+  .header #btn-admin-header {
+    order: 4;
     margin: 0;
-  }
-  .user-info {
-    margin: 0;
-    gap: 6px;
-  }
-  .search-box {
-    grid-area: search;
     width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    margin: 0;
-    box-sizing: border-box;
+    flex: 1 0 100%;
+    justify-content: center;
   }
-  .carrito {
-    grid-area: cart;
-    justify-self: end;
+  .header .search-box {
+    order: 6;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .header .carrito {
+    order: 7;
     width: 26px;
     margin: 0;
     padding: 0;
@@ -150,7 +159,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-left: auto;
+  margin-left: 0;
+  grid-area: user;
 }
 
 .user-menu {
@@ -291,6 +301,9 @@ body {
 .carrito {
   width: 30px;
   cursor: pointer;
+  margin-left: 0;
+  grid-area: cart;
+  justify-self: end;
 }
 
 .metodos-pago {
@@ -1136,6 +1149,12 @@ input[type="number"].input-inline {
   font-weight: 700;
   font-size: 14px;
 }
+.plan-titulo .stock-line {
+  font-weight: 400;
+}
+.plan-titulo .stock-subtitle {
+  font-weight: 700;
+}
 
 .plan-opciones {
   display: flex;
@@ -1223,6 +1242,13 @@ input[type="number"].input-inline {
   min-width: 20px;
   text-align: center;
   font-weight: 700;
+}
+
+.modal-total {
+  margin: 4px 0 6px;
+  font-weight: 700;
+  font-size: 14px;
+  color: #111;
 }
 
 /* Próximas a vencer */
@@ -1790,11 +1816,6 @@ input[type="number"].input-inline {
 }
 
 @media (max-width: 700px) {
-  .header {
-    flex-direction: row;
-    align-items: center;
-  }
-
   /* Quitar cajas de categorías en móvil */
   .categoria-card {
     background: transparent;

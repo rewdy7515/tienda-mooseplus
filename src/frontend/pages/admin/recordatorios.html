@@ -136,6 +136,33 @@
         });
       };
 
+      const buildMessagesFromGrouped = (grouped) =>
+        Object.values(grouped || {}).map((g) => {
+          const bloques = g.bloques.join("\n\n");
+          const plain = `¡Hola ${g.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+          const html = `<pre>${plain}</pre>`;
+          return { html, plain };
+        });
+
+      const mergeGrouped = (groups) => {
+        const merged = {};
+        (groups || []).forEach((g) => {
+          Object.entries(g || {}).forEach(([key, val]) => {
+            if (!merged[key]) {
+              merged[key] = { cliente: val.cliente, bloques: [] };
+            }
+            const seen = new Set(merged[key].bloques);
+            (val.bloques || []).forEach((b) => {
+              if (!seen.has(b)) {
+                merged[key].bloques.push(b);
+                seen.add(b);
+              }
+            });
+          });
+        });
+        return merged;
+      };
+
       const fetchMessagesByDate = async (targetDate) => {
         const fecha = fmtDate(targetDate);
         const { data: ventas, error: ventErr } = await supabase
@@ -240,20 +267,15 @@ ${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
           return acc;
         }, {});
 
-        const messages = Object.values(grouped).map((g) => {
-          const bloques = g.bloques.join("\n\n");
-          const plain = `¡Hola ${g.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-          const html = `<pre>${plain}</pre>`;
-          return { html, plain };
-        });
-        return messages;
+        const messages = buildMessagesFromGrouped(grouped);
+        return { messages, grouped };
       };
 
       const loadFechas = async (targetDate, label) => {
         setStatus(`Cargando fechas de ${label}...`);
         resultsEl.innerHTML = "";
         try {
-          const messages = await fetchMessagesByDate(targetDate);
+          const { messages } = await fetchMessagesByDate(targetDate);
           renderCards(messages);
           setStatus(messages.length ? "" : `Sin resultados para ${label}.`);
         } catch (err) {
@@ -283,11 +305,12 @@ ${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
           const hoy = new Date();
           const manana = new Date();
           manana.setDate(manana.getDate() + 1);
-          const [msgHoy, msgManana] = await Promise.all([
+          const [dataHoy, dataManana] = await Promise.all([
             fetchMessagesByDate(hoy),
             fetchMessagesByDate(manana),
           ]);
-          const messages = [...(msgHoy || []), ...(msgManana || [])];
+          const merged = mergeGrouped([dataHoy?.grouped, dataManana?.grouped]);
+          const messages = buildMessagesFromGrouped(merged);
           renderCards(messages);
           setStatus(messages.length ? "" : "Sin resultados para hoy y mañana.");
         } catch (err) {

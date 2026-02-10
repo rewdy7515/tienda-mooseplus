@@ -61,6 +61,8 @@
         if (statusEl) statusEl.textContent = msg || "";
       };
 
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
       const copyToClipboard = async (text, anchor) => {
         if (!text) return;
         try {
@@ -101,6 +103,24 @@
           lines.push("*Próxima fecha de pago:*", `_${formatFechaCorte(fechaCorte)}_`);
         }
         return lines.join("\n");
+      };
+
+      const normalizePlan = (plan) => String(plan || "").trim();
+
+      const resolvePlanLabel = (venta, platInfo = {}) => {
+        const planRaw = normalizePlan(venta?.precios?.plan);
+        if (planRaw) return planRaw;
+        const platId = venta?.id_plataforma || venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
+        const porAcceso = isTrue(platInfo?.por_acceso);
+        const ventaPerfil = isTrue(venta?.cuentas?.venta_perfil);
+        const ventaMiembro = isTrue(venta?.cuentas?.venta_miembro);
+        const isNetflix = Number(platId) === 1;
+        const isHogar = isNetflix && (isTrue(venta?.perfiles?.perfil_hogar) || isTrue(venta?.precios?.sub_cuenta));
+        if (isHogar) return "Hogar";
+        if (porAcceso) return "Acceso";
+        if (ventaPerfil) return "Perfil";
+        if (ventaMiembro) return "Miembro";
+        return "Completa";
       };
 
       const renderTablas = (plataformas, { title = "", isRenovacion = false } = {}) => {
@@ -219,7 +239,7 @@
           const user = await loadCurrentUser();
           const userId = user?.id_usuario;
           const baseSelect =
-            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma)";
+            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)";
           let ventas = [];
           if (idOrdenParam) {
             const resp = await fetchVentasOrden(idOrdenParam);
@@ -299,15 +319,17 @@
             if (!platId) return;
             const plat = platMap[platId] || {};
             const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
-            if (!grouped[platId])
-              grouped[platId] = {
-                nombre: platName,
+            const planLabel = resolvePlanLabel(v, plat);
+            const groupKey = `${platId}::${planLabel}`;
+            if (!grouped[groupKey])
+              grouped[groupKey] = {
+                nombre: planLabel ? `${platName} · ${planLabel}` : platName,
                 color_1: plat.color_1 || null,
                 rows: [],
-                entrega_inmediata: plat.entrega_inmediata === true || plat.entrega_inmediata === "true" || plat.entrega_inmediata === "1",
-                correo_cliente: plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1",
-                clave_cliente: plat.clave_cliente === true || plat.clave_cliente === "true" || plat.clave_cliente === "1",
-                cuenta_madre: plat.cuenta_madre === true || plat.cuenta_madre === "true" || plat.cuenta_madre === "1",
+                entrega_inmediata: isTrue(plat.entrega_inmediata),
+                correo_cliente: isTrue(plat.correo_cliente),
+                clave_cliente: isTrue(plat.clave_cliente),
+                cuenta_madre: isTrue(plat.cuenta_madre),
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -319,7 +341,7 @@
               ? `M${v.perfiles.n_perfil}`
               : "";
             const correoCuenta = Number(platId) === 12 ? v.correo_miembro || "" : v.cuentas?.correo || "";
-            grouped[platId].rows.push({
+            grouped[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
               clave: v.cuentas?.clave || "",
@@ -344,15 +366,17 @@
             if (!platId) return;
             const plat = platMap[platId] || {};
             const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
-            if (!groupedNuevas[platId])
-              groupedNuevas[platId] = {
-                nombre: platName,
+            const planLabel = resolvePlanLabel(v, plat);
+            const groupKey = `${platId}::${planLabel}`;
+            if (!groupedNuevas[groupKey])
+              groupedNuevas[groupKey] = {
+                nombre: planLabel ? `${platName} · ${planLabel}` : platName,
                 color_1: plat.color_1 || null,
                 rows: [],
-                entrega_inmediata: plat.entrega_inmediata === true || plat.entrega_inmediata === "true" || plat.entrega_inmediata === "1",
-                correo_cliente: plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1",
-                clave_cliente: plat.clave_cliente === true || plat.clave_cliente === "true" || plat.clave_cliente === "1",
-                cuenta_madre: plat.cuenta_madre === true || plat.cuenta_madre === "true" || plat.cuenta_madre === "1",
+                entrega_inmediata: isTrue(plat.entrega_inmediata),
+                correo_cliente: isTrue(plat.correo_cliente),
+                clave_cliente: isTrue(plat.clave_cliente),
+                cuenta_madre: isTrue(plat.cuenta_madre),
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -364,7 +388,7 @@
               ? `M${v.perfiles.n_perfil}`
               : "";
             const correoCuenta = Number(platId) === 12 ? v.correo_miembro || "" : v.cuentas?.correo || "";
-            groupedNuevas[platId].rows.push({
+            groupedNuevas[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
               clave: v.cuentas?.clave || "",
@@ -413,6 +437,7 @@
                     plataforma: platName,
                     id_plataforma: platId,
                     color_1: plat.color_1 || null,
+                    plan_label: resolvePlanLabel(venta, plat),
                   };
                 })
                 .filter(Boolean);
@@ -421,10 +446,10 @@
           const groupedPend = Object.values(grouped);
           const groupedNew = Object.values(groupedNuevas);
           const groupedRenov = renovacionesRows.reduce((acc, r) => {
-            const key = r.id_plataforma || "x";
+            const key = `${r.id_plataforma || "x"}::${r.plan_label || ""}`;
             if (!acc[key]) {
               acc[key] = {
-                nombre: r.plataforma,
+                nombre: r.plan_label ? `${r.plataforma} · ${r.plan_label}` : r.plataforma,
                 color_1: r.color_1 || null,
                 rows: [],
               };
