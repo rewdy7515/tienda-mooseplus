@@ -38,6 +38,31 @@ if (!window.__headerActionsInit) {
 
   const headerEl = document.querySelector(".header");
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
+  const initHeaderAutoHide = () => {
+    if (!headerEl) return;
+    let lastY = window.scrollY || 0;
+    let ticking = false;
+    const threshold = 6;
+    const onScroll = () => {
+      const y = window.scrollY || 0;
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const delta = y - lastY;
+          if (y <= 0) {
+            headerEl.classList.remove("header-hidden");
+          } else if (delta > threshold) {
+            headerEl.classList.add("header-hidden");
+          } else if (delta < -threshold) {
+            headerEl.classList.remove("header-hidden");
+          }
+          lastY = y;
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+  };
 
   const normalizeHeaderLinks = () => {
     const headerEl = document.querySelector(".header");
@@ -146,6 +171,7 @@ if (!window.__headerActionsInit) {
       }
       const adminLink = document.querySelector(".admin-link");
       const historialLink = document.querySelector(".historial-link");
+      const reportesLink = document.querySelector(".reportes-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const isSuper =
         isTrue(roles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
@@ -170,6 +196,10 @@ if (!window.__headerActionsInit) {
       if (historialLink) {
         historialLink.classList.toggle("hidden", !isSuperHist);
         historialLink.style.display = isSuperHist ? "block" : "none";
+      }
+      if (reportesLink) {
+        reportesLink.classList.toggle("hidden", !isSuper);
+        reportesLink.style.display = isSuper ? "block" : "none";
       }
       if (adminHeaderBtn) {
         adminHeaderBtn.classList.toggle("hidden", !isAdmin);
@@ -212,6 +242,7 @@ if (!window.__headerActionsInit) {
 
   attachLogoHome();
   normalizeHeaderLinks();
+  initHeaderAutoHide();
 
   // Botones de carrito / checkout / stock
   const btnViewCart = document.querySelector("#btn-view-cart");
