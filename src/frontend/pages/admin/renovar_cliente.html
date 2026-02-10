@@ -1295,12 +1295,22 @@
               const uids = pickNotificationUserIds("servicio_renovado", {
                 ventaUserId: res?.id_usuario_cliente ? Number(res.id_usuario_cliente) : null,
               });
+              const perfilTxt = res?.perfil || (res?.n_perfil ? `M${res.n_perfil}` : "");
+              const correoTxt = res?.correo_miembro || res?.correo || "";
+              const claveTxt = res?.clave_miembro || res?.clave || "";
               const payload = buildNotificationPayload(
                 "servicio_renovado",
                 {
-                  plataforma: res.plataforma || res.plataforma_nombre || "",
-                  correoCuenta: res.correo || "",
-                  fechaCorte: res.fecha_corte || "",
+                  items: [
+                    {
+                      plataforma: res.plataforma || res.plataforma_nombre || "",
+                      correoCuenta: correoTxt,
+                      clave: claveTxt,
+                      perfil: perfilTxt,
+                      fechaCorte: res.fecha_corte || "",
+                      idVenta: res.id_venta || null,
+                    },
+                  ],
                 },
                 { idCuenta: res.id_cuenta ? Number(res.id_cuenta) : null }
               );
@@ -1508,12 +1518,23 @@
             const uids = pickNotificationUserIds("servicio_renovado", {
               ventaUserId: modalRowContext.id_usuario_cliente ? Number(modalRowContext.id_usuario_cliente) : null,
             });
+            const perfilTxt =
+              modalRowContext.perfil || (modalRowContext.n_perfil ? `M${modalRowContext.n_perfil}` : "");
+            const correoTxt = modalRowContext.correo_miembro || modalRowContext.correo || "";
+            const claveTxt = modalRowContext.clave_miembro || modalRowContext.clave || "";
             const payload = buildNotificationPayload(
               "servicio_renovado",
               {
-                plataforma: modalRowContext.plataforma_nombre || "",
-                correoCuenta: modalRowContext.correo || "",
-                fechaCorte: nuevaFecha || "",
+                items: [
+                  {
+                    plataforma: modalRowContext.plataforma_nombre || "",
+                    correoCuenta: correoTxt,
+                    clave: claveTxt,
+                    perfil: perfilTxt,
+                    fechaCorte: nuevaFecha || "",
+                    idVenta: modalRowContext.id_venta || null,
+                  },
+                ],
               },
               { idCuenta: modalRowContext.id_cuenta ? Number(modalRowContext.id_cuenta) : null }
             );

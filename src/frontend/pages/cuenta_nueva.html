@@ -539,29 +539,39 @@
             const { data: ventasOrden, error: ventasOrdErr } = await supabase
               .from("ventas")
               .select(
-                "id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, cuenta_base:cuentas!ventas_id_cuenta_fkey(correo, id_plataforma, plataformas:plataformas(nombre)), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+                "id_venta, id_usuario, fecha_corte, id_cuenta, id_perfil, id_orden, correo_miembro, clave_miembro, cuenta_base:cuentas!ventas_id_cuenta_fkey(correo, clave, id_plataforma, plataformas:plataformas(nombre)), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
               )
               .eq("id_orden", resp.id_orden);
             if (ventasOrdErr) throw ventasOrdErr;
             const rowsNotif = [];
+            const nuevosServiciosPorUsuario = new Map();
             (ventasOrden || []).forEach((v) => {
-              const cuentaInfo = v.cuenta_base || v.cuenta_miembro || {};
-              const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: v.id_usuario });
-              if (!userIds.length) return;
+              const cuentaInfo = v.cuenta_miembro || v.cuenta_base || {};
+              const ventaUserId = v.id_usuario;
+              if (!ventaUserId) return;
               const platName = cuentaInfo?.plataformas?.nombre || "Plataforma";
               const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
-              const notif = buildNotificationPayload(
-                "nuevo_servicio",
-                {
-                  plataforma: platName,
-                  correoCuenta: cuentaInfo?.correo || "",
-                  perfil: perfilTxt,
-                  fechaCorte: v.fecha_corte || "",
-                  idOrden: resp.id_orden,
-                },
-                { idCuenta: v.id_cuenta }
-              );
-              userIds.forEach((uid) => rowsNotif.push({ ...notif, id_usuario: uid }));
+              const correoTxt = v.correo_miembro || cuentaInfo?.correo || "";
+              const claveTxt = v.clave_miembro || cuentaInfo?.clave || "";
+              if (!correoTxt) return;
+              const items = nuevosServiciosPorUsuario.get(ventaUserId) || [];
+              items.push({
+                plataforma: platName,
+                correoCuenta: correoTxt,
+                clave: claveTxt,
+                perfil: perfilTxt,
+                fechaCorte: v.fecha_corte || "",
+                idVenta: v.id_venta || null,
+              });
+              nuevosServiciosPorUsuario.set(ventaUserId, items);
+            });
+
+            nuevosServiciosPorUsuario.forEach((items, uid) => {
+              if (!items.length) return;
+              const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: uid });
+              if (!userIds.length) return;
+              const notif = buildNotificationPayload("nuevo_servicio", { items });
+              userIds.forEach((id) => rowsNotif.push({ ...notif, id_usuario: id }));
             });
             if (rowsNotif.length) {
               const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);

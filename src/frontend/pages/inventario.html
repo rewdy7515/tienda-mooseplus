@@ -106,12 +106,59 @@
       .inventario-plan {
         margin-top: 0;
       }
+      .inventario-plan + .inventario-plan {
+        margin-top: 12px;
+      }
+      .inventario-plan-title {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 8px 12px;
+        font-weight: 700;
+        background: #f3f4f6;
+        color: #111;
+        border: 1px solid #d1d5db;
+        border-bottom: 0;
+        border-radius: 0;
+      }
       /* Quitar borde curvo superior de tablas en inventario */
       .inventario-plan .table-base {
-        border-radius: 0 0 8px 8px;
+        border-radius: 0;
+        border-top: 0;
       }
       .inventario-item.open .inventario-btn {
         border-radius: 8px 8px 0 0;
+      }
+      .cuentas-busqueda,
+      .cuentas-busqueda .input-wrap {
+        width: 100%;
+        max-width: 100%;
+      }
+      #inv-search {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #e5e7eb;
+        background: #fff;
+        font-size: 15px;
+        color: #111827;
+        outline: none;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      #inv-search::placeholder {
+        color: #9ca3af;
+      }
+      #inv-search:focus {
+        border-color: #111;
+        box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.12);
+      }
+      .proximas-filter {
+        width: 100%;
+      }
+      .proximas-select {
+        width: 100%;
+        max-width: 100%;
       }
     </style>
   </head>
@@ -189,6 +236,9 @@
         ".modal-proximas-close"
       );
       const proximasContent = document.querySelector("#proximas-content");
+      const proximasPlatformSelect = document.querySelector(
+        "#proximas-platform-select"
+      );
       const btnProximasAdd = document.querySelector("#btn-proximas-add");
       let ultimasPlataformas = [];
       let proximasSeleccionadas = new Set();
@@ -202,6 +252,43 @@
         p?.id ??
         null;
       const getColor2 = (p) => p?.color_2 ?? p?.color2 ?? null;
+      const getColor3 = (p) => p?.color_3 ?? p?.color3 ?? null;
+      const getPlatFlags = (p) => {
+        const showPin = isTrue(p?.usa_pines);
+        const showPerfil = isTrue(p?.por_pantalla);
+        const showClave = !(isTrue(p?.plat_correo_cliente) && !isTrue(p?.plat_clave_cliente));
+        return { showPin, showPerfil, showClave };
+      };
+      const getPlanHeaderTitle = (planObj) => {
+        const raw = (planObj?.plan || "").trim();
+        return (
+          isTrue(planObj?.completa) ||
+          /cuentas?\s*completas?|completa/i.test(raw)
+        )
+          ? "Cuenta completa"
+          : raw || "";
+      };
+      const parseFechaMs = (val) => {
+        if (!val) return null;
+        const d = new Date(val);
+        const ms = d.valueOf();
+        return Number.isNaN(ms) ? null : ms;
+      };
+      const sortVentasByFechaCorte = (ventas = []) => {
+        const now = Date.now();
+        return [...ventas].sort((a, b) => {
+          const da = parseFechaMs(a?.fecha_corte);
+          const db = parseFechaMs(b?.fecha_corte);
+          if (da == null && db == null) return 0;
+          if (da == null) return 1;
+          if (db == null) return -1;
+          const diffA = Math.abs(da - now);
+          const diffB = Math.abs(db - now);
+          if (diffA !== diffB) return diffA - diffB;
+          return da - db;
+        });
+      };
+      const formatPerfilLabel = (val) => (val ? `M${val}` : "");
       const buildVentasIndex = () => {
         const rows = [];
         (ultimasPlataformas || []).forEach((p) => {
@@ -221,8 +308,9 @@
           (p.planes || []).forEach((planObj) => {
             const planNombre = planObj.plan || "";
             (planObj.ventas || []).forEach((v) => {
-              const rowCorreo =
-                Number(platId) === 12 ? v.correo_cliente || "" : v.correo || "";
+              const rowCorreo = isTrue(p?.plat_correo_cliente)
+                ? v.correo_cliente || ""
+                : v.correo || "";
               rows.push({
                 id_venta: v.id_venta ?? "",
                 correo: rowCorreo,
@@ -234,6 +322,11 @@
                 plan: planNombre,
                 id_plataforma: platId,
                 color_2: color2,
+                usa_pines: p?.usa_pines,
+                por_pantalla: p?.por_pantalla,
+                plat_correo_cliente: p?.plat_correo_cliente,
+                plat_clave_cliente: p?.plat_clave_cliente,
+                correo_cliente: v.correo_cliente || "",
               });
             });
           });
@@ -304,51 +397,70 @@
             : "";
           return;
         }
-        const rows = items
-          .map(
-            (it) => `
+        const grouped = items.reduce((acc, it) => {
+          const key = it.id_plataforma ?? "unknown";
+          if (!acc[key]) {
+            acc[key] = {
+              platform: it.plataforma || "",
+              rows: [],
+              headerColor: it.color_2 || it.color2 || "",
+              flags: getPlatFlags(it),
+            };
+          }
+          acc[key].rows.push(it);
+          return acc;
+        }, {});
+        const tables = Object.values(grouped).map((group) => {
+          const { showPin, showPerfil, showClave } = group.flags;
+          const headerStyle = group.headerColor
+            ? `style="--table-header-bg:${group.headerColor};"`
+            : "";
+          const orderedRows = sortVentasByFechaCorte(group.rows);
+          const rows = orderedRows
+            .map((it) => {
+              const correoVal = isTrue(it?.plat_correo_cliente)
+                ? it.correo_cliente || ""
+                : it.correo || "";
+              const perfilVal = showPerfil
+                ? formatPerfilLabel(it.n_perfil ?? "")
+                : "";
+              const copyParts = [`Correo: ${correoVal}`];
+              if (showClave) copyParts.push(`Clave: ${it.clave || ""}`);
+              if (showPin) copyParts.push(`PIN: ${it.pin || ""}`);
+              return `
             <tr>
               <td>${it.id_venta}</td>
-              <td class="copyable" data-label="Correo">${it.correo}</td>
-              <td class="copyable" data-label="Clave">${it.clave}</td>
-              <td>${it.n_perfil ? `M${it.n_perfil}` : ""}</td>
-              <td class="copyable" data-label="PIN">${it.pin || ""}</td>
+              <td class="copyable" data-label="Correo">${correoVal}</td>
+              ${showClave ? `<td class="copyable" data-label="Clave">${it.clave || ""}</td>` : ""}
+              ${showPerfil ? `<td>${perfilVal}</td>` : ""}
+              ${showPin ? `<td class="copyable" data-label="PIN">${it.pin || ""}</td>` : ""}
               <td>${formatDate(it.fecha_corte)}</td>
               <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
               <td>
                 <div class="actions-inline">
                   <button class="btn-small btn-renovar" style="background-color:#22c55e;color:white;">🔄</button>
                   <button class="btn-small btn-red-report" style="background-color:#ef4444;color:white;">❕</button>
-                  <button class="btn-small btn-copy-row" data-copy="Correo: ${
-                    it.correo
-                  }\nClave: ${it.clave}\nPIN: ${
-              it.pin || ""
-            }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
+                  <button class="btn-small btn-copy-row" data-copy="${copyParts.join(
+                    "\n"
+                  )}" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
                     <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:14px;height:14px;filter:invert(1);" />
                   </button>
                 </div>
               </td>
             </tr>
-          `
-          )
-          .join("");
-        const headerColor = items[0]?.color_2 || items[0]?.color2 || "";
-        if (Number(items[0]?.id_plataforma) === 1) {
-          console.log("[inventario] search header color_2 plat1:", headerColor);
-        }
-        const headerStyle = headerColor
-          ? `style="--table-header-bg:${headerColor};"`
-          : "";
-        searchResults.innerHTML = `
+          `;
+            })
+            .join("");
+          return `
           <div class="cuenta-table-wrap">
             <table class="table-base" ${headerStyle}>
               <thead>
                 <tr>
                   <th>ID Venta</th>
                   <th>Correo</th>
-                  <th>Clave</th>
-                  <th>Perfil</th>
-                  <th>PIN</th>
+                  ${showClave ? "<th>Clave</th>" : ""}
+                  ${showPerfil ? "<th>Perfil</th>" : ""}
+                  ${showPin ? "<th>PIN</th>" : ""}
                   <th>Fecha corte</th>
                   <th>Plataforma / Plan</th>
                   <th>Acciones</th>
@@ -358,6 +470,8 @@
             </table>
           </div>
         `;
+        });
+        searchResults.innerHTML = tables.join("");
       };
 
       const showSuggestions = (items) => {
@@ -465,19 +579,20 @@
 
         const bloques = [];
         plataformas.forEach((p) => {
+          const { showPerfil } = getPlatFlags(p);
           const items = [];
           (p.planes || []).forEach((planObj) => {
             (planObj.ventas || []).forEach((v) => {
               const dias = diffDias(v.fecha_corte);
               if (dias === null) return;
+              const correoVal = isTrue(p?.plat_correo_cliente)
+                ? v.correo_cliente || ""
+                : v.correo || "";
               items.push({
                 id_venta: v.id_venta,
                 id_precio: v.id_precio,
-                correo:
-                  Number(p.id_plataforma) === 12
-                    ? v.correo_cliente || ""
-                    : v.correo || "",
-                perfil: v.n_perfil ?? "",
+                correo: correoVal,
+                perfil: formatPerfilLabel(v.n_perfil ?? ""),
                 dias,
               });
             });
@@ -496,16 +611,26 @@
                         <span>${it.correo}</span>
                       </label>
                     </td>
-                    <td>${it.perfil}</td>
+                    ${showPerfil ? `<td>${it.perfil}</td>` : ""}
                     <td>${it.dias} días</td>
                   </tr>
                 `
               )
               .join("");
+            const headers = `
+              <thead>
+                <tr>
+                  <th>Correo</th>
+                  ${showPerfil ? "<th>Perfil</th>" : ""}
+                  <th>Vence en</th>
+                </tr>
+              </thead>
+            `;
             bloques.push(`
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${p.nombre || "Plataforma"}</h3>
                 <table class="table-base">
+                  ${headers}
                   <tbody>
                     ${rows}
                   </tbody>
@@ -527,6 +652,30 @@
         `;
       };
 
+      const buildProximasSelect = (plataformas) => {
+        if (!proximasPlatformSelect) return;
+        const options = ['<option value="all">Todas las plataformas</option>'];
+        const seen = new Set();
+        (plataformas || []).forEach((p) => {
+          const id = getPlatId(p);
+          if (!id || seen.has(String(id))) return;
+          seen.add(String(id));
+          options.push(
+            `<option value="${id}">${p.nombre || `Plataforma ${id}`}</option>`
+          );
+        });
+        proximasPlatformSelect.innerHTML = options.join("");
+        proximasPlatformSelect.value = "all";
+      };
+
+      const getProximasFiltradas = () => {
+        const value = proximasPlatformSelect?.value || "all";
+        if (value === "all") return ultimasPlataformas;
+        return (ultimasPlataformas || []).filter(
+          (p) => String(getPlatId(p)) === String(value)
+        );
+      };
+
       const renderPlataformas = (plataformas) => {
         if (!listEl || !statusEl) return;
         listEl.innerHTML = "";
@@ -542,10 +691,12 @@
           btn.type = "button";
           btn.className = "btn-outline inventario-btn";
           btn.textContent = p.nombre || `Plataforma ${idx + 1}`;
+          const { showPin, showPerfil, showClave } = getPlatFlags(p);
           if (p.color_1) {
             btn.style.setProperty("--btn-plat-bg", p.color_1);
           }
           const headerColor = getColor2(p) || "";
+          const planHeaderColor = getColor3(p) || "";
           if (Number(p.id_plataforma) === 1) {
             console.log("[inventario] headerColor tabla plat1:", headerColor);
           }
@@ -557,6 +708,19 @@
             const planWrapper = document.createElement("div");
             planWrapper.className = "inventario-plan";
             const planName = (planObj.plan || "").trim();
+            const planHeaderText = getPlanHeaderTitle(planObj);
+            let planTitle = null;
+            if (planHeaderText) {
+              planTitle = document.createElement("div");
+              planTitle.className = "inventario-plan-title";
+              planTitle.textContent = planHeaderText;
+              const titleColor = planHeaderColor || headerColor || "";
+              if (titleColor) {
+                planTitle.style.background = titleColor;
+                planTitle.style.color = "#fff";
+                planTitle.style.borderColor = titleColor;
+              }
+            }
 
             const table = document.createElement("table");
             table.className = "table-base";
@@ -570,34 +734,38 @@
                 );
               }
             }
-            table.innerHTML = `
+            const tableHeaders = `
               <thead>
                 <tr>
                   <th>ID Venta</th>
                   <th>Correo</th>
-                  <th>Clave</th>
-                  <th>Perfil</th>
-                  <th>PIN</th>
+                  ${showClave ? "<th>Clave</th>" : ""}
+                  ${showPerfil ? "<th>Perfil</th>" : ""}
+                  ${showPin ? "<th>PIN</th>" : ""}
                   <th>Fecha de Corte</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
-              <tbody>
-                ${(planObj.ventas || [])
-                  .map(
-                    (v) => `
+            `;
+            const orderedVentas = sortVentasByFechaCorte(planObj.ventas || []);
+            const tableRows = orderedVentas
+              .map((v) => {
+                const correoVal = isTrue(p?.plat_correo_cliente)
+                  ? v.correo_cliente || ""
+                  : v.correo || "";
+                const perfilVal = showPerfil
+                  ? formatPerfilLabel(v.n_perfil ?? "")
+                  : "";
+                const copyParts = [`Correo: ${correoVal}`];
+                if (showClave) copyParts.push(`Clave: ${v.clave || ""}`);
+                if (showPin) copyParts.push(`PIN: ${v.pin || ""}`);
+                return `
                     <tr>
                       <td>${v.id_venta ?? ""}</td>
-                      <td class="copyable" data-label="Correo">${
-                        Number(v.id_plataforma) === 12
-                          ? v.correo_cliente || ""
-                          : v.correo || ""
-                      }</td>
-                      <td class="copyable" data-label="Clave">${
-                        v.clave || ""
-                      }</td>
-                      <td>${v.n_perfil ? `M${v.n_perfil}` : ""}</td>
-                      <td class="copyable" data-label="PIN">${v.pin ?? ""}</td>
+                      <td class="copyable" data-label="Correo">${correoVal}</td>
+                      ${showClave ? `<td class="copyable" data-label="Clave">${v.clave || ""}</td>` : ""}
+                      ${showPerfil ? `<td>${perfilVal}</td>` : ""}
+                      ${showPin ? `<td class="copyable" data-label="PIN">${v.pin ?? ""}</td>` : ""}
                       <td>${formatDate(v.fecha_corte)}</td>
                       <td>
                         <div class="actions-inline">
@@ -611,34 +779,28 @@
                       v.perfil_hogar ?? ""
                     }" data-cuenta="${
                       v.id_cuenta ?? ""
-                    }" data-perfil="${v.id_perfil ?? ""}" data-correo="${
-                      Number(v.id_plataforma) === 12
-                        ? v.correo_cliente || ""
-                        : v.correo || ""
-                    }" data-correo-cliente="${
+                    }" data-perfil="${v.id_perfil ?? ""}" data-correo="${correoVal}" data-correo-cliente="${
                       v.correo_cliente || ""
-                    }" data-nperfil="${
-                      v.n_perfil ?? ""
-                    }" style="background-color:#22c55e;color:white;">🔄</button>
+                    }" data-nperfil="${v.n_perfil ?? ""}" style="background-color:#22c55e;color:white;">🔄</button>
                           <button class="btn-small btn-red-report" data-plataforma="${
                             v.id_plataforma ?? ""
                           }" data-cuenta="${v.id_cuenta ?? ""}" data-perfil="${
                       v.id_perfil ?? ""
                     }" style="background-color:#ef4444;color:white;">❕</button>
-                          <button class="btn-small btn-copy-row" data-copy="Correo: ${
-                            Number(v.id_plataforma) === 12
-                              ? v.correo_cliente || ""
-                              : v.correo || ""
-                          }\nClave: ${v.clave || ""}\nPIN: ${
-                      v.pin || ""
-                    }" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
+                          <button class="btn-small btn-copy-row" data-copy="${copyParts.join(
+                            "\n"
+                          )}" style="background-color:#111;color:white;display:flex;align-items:center;justify-content:center;">
                             <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" style="width:14px;height:14px;filter:invert(1);" />
                           </button>
                         </div>
                       </td>
-                    </tr>`
-                  )
-                  .join("")}
+                    </tr>`;
+              })
+              .join("");
+            table.innerHTML = `
+              ${tableHeaders}
+              <tbody>
+                ${tableRows}
               </tbody>
             `;
 
@@ -647,6 +809,9 @@
             tableWrap.style.width = "100%";
             tableWrap.appendChild(table);
 
+            if (planTitle) {
+              planWrapper.appendChild(planTitle);
+            }
             planWrapper.appendChild(tableWrap);
             planList.appendChild(planWrapper);
           });
@@ -757,7 +922,8 @@
       });
 
       btnProximas?.addEventListener("click", () => {
-        renderProximas(ultimasPlataformas);
+        buildProximasSelect(ultimasPlataformas);
+        renderProximas(getProximasFiltradas());
         modalProximas?.classList.remove("hidden");
       });
 
@@ -774,6 +940,10 @@
         }
       });
       modalProximasClose?.addEventListener("click", closeProximas);
+
+      proximasPlatformSelect?.addEventListener("change", () => {
+        renderProximas(getProximasFiltradas());
+      });
 
       listEl?.addEventListener("click", (e) => {
         const copyCell = e.target.closest(".copyable");
@@ -1045,6 +1215,11 @@
           <h3 class="proximas-header modal-proximas-title">
             Cuentas próximas a vencerse:
           </h3>
+          <div class="proximas-filter">
+            <select id="proximas-platform-select" class="form-select proximas-select">
+              <option value="all">Todas las plataformas</option>
+            </select>
+          </div>
           <div id="proximas-content" class="proximas-panel"></div>
           <div class="proximas-actions">
             <button type="button" class="btn-primary" id="btn-proximas-add">

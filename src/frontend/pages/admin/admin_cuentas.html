@@ -539,7 +539,7 @@
           <span class="rec-label">Clave</span>
           <span class="rec-copy" id="rec-pass">-</span>
         </div>
-        <div class="rec-row">
+        <div class="rec-row" id="rec-pin-row">
           <span class="rec-label">PIN</span>
           <span class="rec-copy" id="rec-pin">Buscando...</span>
         </div>
@@ -647,6 +647,46 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) =>
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const formatPerfilLabel = (value) => {
+        if (value === null || value === undefined || value === "") return "";
+        const raw = String(value).trim();
+        if (!raw) return "";
+        if (raw.toUpperCase().startsWith("M")) return raw;
+        return `M${raw}`;
+      };
+      const getPlatFlags = (plat = {}, options = {}) => {
+        const usaPines = isTrue(plat.usa_pines);
+        const porPantalla = isTrue(plat.por_pantalla);
+        const porAcceso = isTrue(plat.por_acceso);
+        const correoCliente = isTrue(plat.correo_cliente);
+        const claveCliente = isTrue(plat.clave_cliente);
+        let showPin = usaPines;
+        let showPerfil = porPantalla || porAcceso;
+        let showClave = !(correoCliente && !claveCliente);
+        if (options.fallbackAll && (!plat || Object.keys(plat).length === 0)) {
+          showPin = true;
+          showPerfil = true;
+          showClave = true;
+        }
+        return {
+          usaPines,
+          porPantalla,
+          porAcceso,
+          correoCliente,
+          claveCliente,
+          showPin,
+          showPerfil,
+          showClave,
+        };
+      };
+      const getPerfilHeaderLabel = (flags = {}) =>
+        flags.porAcceso && !flags.porPantalla ? "Acceso" : "Perfil";
+      const getPerfilCellLabel = (flags = {}, value, perfilHogar = false) => {
+        if (!flags.showPerfil) return "";
+        if (flags.porAcceso && !flags.porPantalla) return "1 dispositivo";
+        const label = formatPerfilLabel(value ?? "");
+        return `${label}${perfilHogar ? '<span class="perfil-dot"></span>' : ""}`;
+      };
       const parseDateValue = (value) => {
         if (!value) return null;
         const str = String(value).trim();
@@ -708,6 +748,15 @@
             <input type="date" class="fecha-input hidden" ${ventaAttr} value="${fechaValue}" />
             <button type="button" class="btn-save-edit hidden" ${ventaAttr} data-type="fecha">💾</button>
             <button type="button" class="btn-cancel-edit hidden" data-type="fecha">✖</button>
+          </div>`;
+      };
+      const renderFechaInlineCell = (fechaCorte, dataAttrs = "") => {
+        const fechaValue = fechaCorte || "";
+        const fechaFmt = formatDDMMYYYY(fechaValue) || "-";
+        return `<div class="fecha-wrap">
+            <span class="fecha-text">${fechaFmt}</span>
+            <button type="button" class="btn-edit-fecha">✏️</button>
+            <input type="date" class="fecha-input hidden" ${dataAttrs} value="${fechaValue}" />
           </div>`;
       };
       const decorateCopyColumns = (root) => {
@@ -774,6 +823,7 @@
       const recCorreo = document.querySelector("#rec-mail");
       const recClave = document.querySelector("#rec-pass");
       const recPin = document.querySelector("#rec-pin");
+      const recPinRow = document.querySelector("#rec-pin-row");
       const recCorte = document.querySelector("#rec-corte");
       const btnCerrarRecargar = document.querySelector("#rec-close");
       const btnDoRecarga = document.querySelector("#rec-do");
@@ -892,7 +942,14 @@
         fechaCorte,
         userId,
         cuentaId,
+        idPerfil,
+        nPerfil,
+        perfilHogar,
       }) => {
+        const flags =
+          currentCanvaFlags || getPlatFlags({}, { fallbackAll: true });
+        const showPerfil = flags.showPerfil ?? true;
+        const showPerfilId = flags.porPantalla === true;
         const estadoInfo = getEstadoVenta({ fecha_corte: fechaCorte });
         const correoCell = isSuperadmin
           ? `<div class="fecha-wrap">
@@ -925,9 +982,13 @@
           isSuperadmin && idVenta
           ? `<button type="button" class="btn-delete-venta" data-id-venta="${idVenta}">Eliminar</button>`
           : "";
+        const perfilIdCell = showPerfilId ? `<td>${idPerfil || ""}</td>` : "";
+        const perfilLabel = getPerfilCellLabel(flags, nPerfil, perfilHogar);
+        const perfilCell = showPerfil ? `<td>${perfilLabel}</td>` : "";
         return `
           <tr data-id-venta="${idVenta || ""}">
-            <td>${idVenta ? `#${idVenta}` : ""}</td>
+            ${perfilIdCell}
+            ${perfilCell}
             <td>${clienteCell}</td>
             <td>${correoCell}</td>
             <td>${fechaCell}</td>
@@ -1101,6 +1162,7 @@
         max: null,
         correo: "",
         nPerfil: null,
+        plataforma: "",
       };
       let isSuperadmin = false;
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
@@ -1117,6 +1179,7 @@
       let deleteTargetRow = null;
       const modalReemplazoMsg = document.querySelector("#modal-reemplazo-msg");
       let currentCanvaCuenta = null;
+      let currentCanvaFlags = null;
 
       (async () => {
         try {
@@ -1419,12 +1482,27 @@
             : "";
           return;
         }
-        const { usuarioNombre, perfil, pin, fecha_corte, id_venta } = ventaData;
+        const {
+          usuarioNombre,
+          perfil,
+          pin,
+          fecha_corte,
+          id_venta,
+          platFlags = {},
+          showPerfil = true,
+          showPin = true,
+        } = ventaData;
+        const flags = platFlags || { showPerfil, showPin };
+        const finalShowPerfil = flags.showPerfil ?? showPerfil;
+        const finalShowPin = flags.showPin ?? showPin;
+        const perfilLabel = finalShowPerfil ? getPerfilCellLabel(flags, perfil) : "";
+        const pinCell = finalShowPin ? `<td>${pin || ""}</td>` : "";
+        const perfilCellFinal = finalShowPerfil ? `<td>${perfilLabel}</td>` : "";
         const rows = `
           <tr>
             <td>${usuarioNombre || "Vacío"}</td>
-            <td>${perfil || ""}</td>
-            <td>${pin || ""}</td>
+            ${perfilCellFinal}
+            ${pinCell}
             <td>${renderFechaEditCell(fecha_corte, id_venta)}</td>
             <td><button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${ventaData.id_cuenta || ""}">Ver cuenta</button></td>
           </tr>
@@ -1435,8 +1513,8 @@
               <thead>
                 <tr>
                   <th>Ocupado por</th>
-                  <th>Perfil</th>
-                  <th>PIN</th>
+                  ${finalShowPerfil ? `<th>${getPerfilHeaderLabel(flags)}</th>` : ""}
+                  ${finalShowPin ? "<th>PIN</th>" : ""}
                   <th>Fecha de corte</th>
                   <th>Acción</th>
                 </tr>
@@ -1469,6 +1547,24 @@
           if (!venta) {
             renderVentaResultado(null, true);
             return false;
+          }
+          let platFlags = { showPerfil: true, showPin: true };
+          if (venta.id_cuenta) {
+            const { data: cuentaRow, error: cuentaErr } = await supabase
+              .from("cuentas")
+              .select("id_plataforma")
+              .eq("id_cuenta", venta.id_cuenta)
+              .maybeSingle();
+            if (cuentaErr) throw cuentaErr;
+            if (cuentaRow?.id_plataforma) {
+              const { data: platRow, error: platErr } = await supabase
+                .from("plataformas")
+                .select("usa_pines, por_pantalla, por_acceso, correo_cliente, clave_cliente")
+                .eq("id_plataforma", cuentaRow.id_plataforma)
+                .maybeSingle();
+              if (platErr) throw platErr;
+              platFlags = getPlatFlags(platRow || {});
+            }
           }
           let usuarioNombre = "Vacío";
           if (venta.id_usuario) {
@@ -1503,6 +1599,7 @@
             fecha_corte: venta.fecha_corte || "",
             id_cuenta: venta.id_cuenta,
             id_venta: venta.id_venta,
+            platFlags,
           });
           return true;
         } catch (err) {
@@ -1528,6 +1625,11 @@
           plataformaResultadosEl.classList.remove("hidden");
           return;
         }
+        const platFlags = getPlatFlags(opts.platFlags || {});
+        const showPin = platFlags.showPin;
+        const showPerfil = platFlags.showPerfil;
+        const showClave = platFlags.showClave;
+        const perfilHeader = getPerfilHeaderLabel(platFlags);
         const html = cuentas
           .map((cta) => {
             const ventasCta = (ventas || []).filter(
@@ -1551,8 +1653,8 @@
                   <tr>
                     <td>Sub-cuenta #${s.id_sub_cuenta}</td>
                     <td>${s.correo || ""}</td>
-                    <td>${s.clave || ""}</td>
-                    <td>${s.pin || ""}</td>
+                    ${showClave ? `<td>${s.clave || ""}</td>` : ""}
+                    ${showPin ? `<td>${s.pin || ""}</td>` : ""}
                   </tr>
                 `,
                 )
@@ -1561,32 +1663,46 @@
             perfilesCuenta.forEach((p) => {
               const venta = ventasCta.find((v) => v.id_perfil === p.id_perfil);
               const userInfo = venta ? usersMap[venta.id_usuario] || {} : {};
+              const perfilCell = showPerfil
+                ? `<td>${getPerfilCellLabel(platFlags, p.n_perfil, p.perfil_hogar)}</td>`
+                : "";
+              const pinCell = showPin ? `<td>${p.pin || ""}</td>` : "";
               rowsArr.push(`
                 <tr>
                   <td>${venta ? `#${venta.id_venta ?? ""}` : ""}</td>
                   <td>${userInfo.nombre || ""}</td>
                   <td>${userInfo.correo || ""}</td>
-                  <td>${p.n_perfil ? `M${p.n_perfil}` : ""}${p.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
-                  <td>${p.pin || ""}</td>
+                  ${perfilCell}
+                  ${pinCell}
                   <td>${renderFechaEditCell(venta?.fecha_corte, venta?.id_venta)}</td>
+                  <td></td>
                 </tr>
               `);
             });
             ventasSinPerfil.forEach((v) => {
+              const perfilValue =
+                platFlags.porAcceso && !platFlags.porPantalla
+                  ? "1 dispositivo"
+                  : cta.clave || "";
+              const perfilCell = showPerfil ? `<td>${perfilValue}</td>` : "";
+              const pinCell = showPin ? "<td></td>" : "";
               rowsArr.push(`
                 <tr>
                   <td>${v.id_venta ? `#${v.id_venta}` : ""}</td>
                   <td>${v.ocupadoPor || ""}</td>
                   <td>${cta.correo || ""}</td>
-                  <td>${cta.clave || ""}</td>
-                  <td></td>
+                  ${perfilCell}
+                  ${pinCell}
                   <td>${renderFechaEditCell(v.fecha_corte, v.id_venta)}</td>
+                  <td></td>
                 </tr>
               `);
             });
+            const colCount =
+              5 + (showPerfil ? 1 : 0) + (showPin ? 1 : 0);
             const rows =
               rowsArr.join("") ||
-              `<tr><td colspan="7">Sin ventas asignadas.</td></tr>`;
+              `<tr><td colspan="${colCount}">Sin ventas asignadas.</td></tr>`;
             let addRow = "";
             if (opts.masPerfiles) {
               const maxPerfiles =
@@ -1594,7 +1710,7 @@
               const nextPerfil = (maxPerfilCuenta % maxPerfiles || 0) + 1;
               addRow = `
                 <tr>
-                  <td colspan="6" style="text-align:center;">
+                  <td colspan="${colCount}" style="text-align:center;">
                     <button type="button" class="btn-add-perfil" data-cuenta="${cta.id_cuenta}" data-next="${nextPerfil}" data-max="${maxPerfiles}" style="width:100%;">+</button>
                   </td>
                 </tr>
@@ -1611,8 +1727,8 @@
                         <th>ID Venta</th>
                         <th>Cliente</th>
                         <th>Correo</th>
-                        <th>Perfil</th>
-                        <th>PIN</th>
+                        ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
+                        ${showPin ? "<th>PIN</th>" : ""}
                         <th>Fecha corte</th>
                         <th>Acción</th>
                       </tr>
@@ -1629,8 +1745,8 @@
                       <tr>
                         <th>Sub-cuenta</th>
                         <th>Correo</th>
-                        <th>Clave</th>
-                        <th>PIN</th>
+                        ${showClave ? "<th>Clave</th>" : ""}
+                        ${showPin ? "<th>PIN</th>" : ""}
                       </tr>
                     </thead>
                     <tbody>${subRows}</tbody>
@@ -1672,7 +1788,7 @@
             supabase
               .from("plataformas")
               .select(
-                "nombre, mas_perfiles, num_max_dispositivos, por_acceso, usa_pines, max_dig_pin",
+                "nombre, mas_perfiles, num_max_dispositivos, por_acceso, por_pantalla, usa_pines, max_dig_pin, correo_cliente, clave_cliente",
               )
               .eq("id_plataforma", platIdNum)
               .maybeSingle(),
@@ -1758,6 +1874,7 @@
               numMax: platInfo?.num_max_dispositivos || null,
               perfilesAll,
               ventasSinPerfil,
+              platFlags: platInfo || {},
             },
           );
         } catch (err) {
@@ -2005,7 +2122,16 @@
           clienteVentasEl.innerHTML = "";
           return;
         }
-        const blocks = Object.entries(grouped).map(([platName, rows]) => {
+        const blocks = Object.entries(grouped).map(([platName, groupVal]) => {
+          const rows = Array.isArray(groupVal)
+            ? groupVal
+            : groupVal?.rows || [];
+          const flags = Array.isArray(groupVal)
+            ? getPlatFlags(rows[0]?.platFlags || {}, { fallbackAll: true })
+            : groupVal?.flags || getPlatFlags({}, { fallbackAll: true });
+          const showPerfil = flags.showPerfil ?? true;
+          const showClave = flags.showClave ?? true;
+          const perfilHeader = getPerfilHeaderLabel(flags);
           const trs = rows
             .map((r) => {
               const correo = r.correo || "";
@@ -2016,6 +2142,11 @@
               const alertBtn = correo
                 ? `<button type="button" class="cliente-alert" data-correo="${correoSafe}" title="Ver cuenta">!</button>`
                 : "";
+              const perfilLabel = showPerfil
+                ? getPerfilCellLabel(flags, r.n_perfil, r.perfil_hogar)
+                : "";
+              const perfilCell = showPerfil ? `<td>${perfilLabel}</td>` : "";
+              const claveCell = showClave ? `<td>${r.clave || ""}</td>` : "";
               return `
               <tr>
                 <td>${r.id_venta ?? ""}</td>
@@ -2023,8 +2154,8 @@
                   ${correoCell}
                   ${alertBtn}
                 </td>
-                <td>${r.clave || ""}</td>
-                <td>${r.n_perfil ?? ""}${r.perfil_hogar ? '<span class="perfil-dot"></span>' : ""}</td>
+                ${claveCell}
+                ${perfilCell}
                 <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
                 <td style="display:flex; gap:6px; flex-wrap:wrap;">
                   <button class="btn-primary btn-reemplazar-row"
@@ -2065,8 +2196,8 @@
                     <tr>
                       <th>ID de Venta</th>
                       <th>Correo</th>
-                      <th>Clave</th>
-                      <th>Perfil</th>
+                      ${showClave ? "<th>Clave</th>" : ""}
+                      ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
                       <th>Fecha de Corte</th>
                       <th>Acción</th>
                     </tr>
@@ -2159,7 +2290,9 @@
           if (platIds.length) {
             const { data: plats } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, por_acceso, usa_pines")
+              .select(
+                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, correo_cliente, clave_cliente",
+              )
               .in("id_plataforma", platIds);
             plataformaMap =
               (plats || []).reduce((acc, p) => {
@@ -2167,6 +2300,9 @@
                   nombre: p.nombre || `Plataforma ${p.id_plataforma}`,
                   por_acceso: p.por_acceso,
                   usa_pines: p.usa_pines,
+                  por_pantalla: p.por_pantalla,
+                  correo_cliente: p.correo_cliente,
+                  clave_cliente: p.clave_cliente,
                 };
                 return acc;
               }, {}) || {};
@@ -2178,7 +2314,12 @@
               cuenta.id_plataforma || precioMap[v.id_precio] || "desconocida";
             const platInfo = plataformaMap[platId] || {};
             const platName = platInfo.nombre || `Plataforma ${platId}`;
-            if (!grouped[platName]) grouped[platName] = [];
+            if (!grouped[platName]) {
+              grouped[platName] = {
+                rows: [],
+                flags: getPlatFlags(platInfo || {}, { fallbackAll: true }),
+              };
+            }
             const perfilInfo = perfilMap[v.id_perfil] || {};
             const isCuentaMadre = cuenta.cuenta_madre === true;
             const correoVenta = isCuentaMadre
@@ -2187,7 +2328,7 @@
             const claveVenta = isCuentaMadre
               ? v.clave_miembro || ""
               : cuenta.clave || "";
-            grouped[platName].push({
+            grouped[platName].rows.push({
               id_venta: v.id_venta,
               id_cuenta: v.id_cuenta,
               id_perfil: v.id_perfil,
@@ -2203,6 +2344,7 @@
               usa_pines: !!platInfo.usa_pines,
               venta_perfil: cuenta.venta_perfil,
               venta_miembro: cuenta.venta_miembro,
+              platFlags: platInfo || {},
             });
           });
           renderVentasCliente(grouped);
@@ -2354,7 +2496,7 @@
           const { data: cuenta, error: cErr } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, fecha_corte, inactiva",
+              "id_cuenta, correo, clave, fecha_corte, inactiva, id_plataforma",
             )
             .eq("id_cuenta", 688)
             .maybeSingle();
@@ -2364,7 +2506,18 @@
               '<p class="status">No hay cuenta registrada para Canva.</p>';
             return;
           }
+          let canvaFlags = { showPerfil: true, showClave: true, showPin: true };
+          if (cuenta.id_plataforma) {
+            const { data: platInfo, error: platErr } = await supabase
+              .from("plataformas")
+              .select("usa_pines, por_pantalla, por_acceso, correo_cliente, clave_cliente")
+              .eq("id_plataforma", cuenta.id_plataforma)
+              .maybeSingle();
+            if (platErr) throw platErr;
+            canvaFlags = getPlatFlags(platInfo || {}, { fallbackAll: true });
+          }
           currentCanvaCuenta = cuenta;
+          currentCanvaFlags = canvaFlags;
           const { data: ventas, error: vErr } = await supabase
             .from("ventas")
             .select("id_venta, id_usuario, id_perfil, fecha_corte, suspendido, correo_miembro")
@@ -2415,10 +2568,17 @@
             const perfilInfo = perfilesMap[v.id_perfil] || {};
             const cliente = usersMap[v.id_usuario] || "-";
             const copyText = `Correo: ${v.correo_miembro || ""}`;
+            const showPerfilId = canvaFlags.porPantalla === true;
+            const perfilIdCell = showPerfilId
+              ? `<td>${v.id_perfil || ""}</td>`
+              : "";
+            const perfilCell = canvaFlags.showPerfil
+              ? `<td>${getPerfilCellLabel(canvaFlags, perfilInfo.n_perfil)}</td>`
+              : "";
             return `
               <tr data-id-venta="${v.id_venta || ""}">
-                <td>${v.id_perfil || ""}</td>
-                <td>${perfilInfo.n_perfil || ""}</td>
+                ${perfilIdCell}
+                ${perfilCell}
                 <td>${cliente}</td>
                 <td>${v.correo_miembro || "-"}</td>
                 <td>${renderFechaEditCell(v.fecha_corte, v.id_venta)}</td>
@@ -2434,9 +2594,11 @@
               </tr>
             `;
           });
+          const colCountCanva =
+            5 + (canvaFlags.showPerfil ? 1 : 0) + (canvaFlags.porPantalla ? 1 : 0);
           const body = rows.length
             ? rows.join("")
-            : `<tr><td colspan="7" class="status">Sin perfiles registrados.</td></tr>`;
+            : `<tr><td colspan="${colCountCanva}" class="status">Sin perfiles registrados.</td></tr>`;
 
           detalleEl.innerHTML = `
             <h3 class="cuenta-title">Cuenta Canva</h3>
@@ -2449,8 +2611,8 @@
               <table class="table-base">
                 <thead>
                   <tr>
-                    <th>ID Perfil</th>
-                    <th>Perfil</th>
+                    ${canvaFlags.porPantalla ? "<th>ID Perfil</th>" : ""}
+                    ${canvaFlags.showPerfil ? `<th>${getPerfilHeaderLabel(canvaFlags)}</th>` : ""}
                     <th>Cliente</th>
                     <th>Correo</th>
                     <th>Fecha de corte</th>
@@ -2486,13 +2648,17 @@
         const colMode = info.colMode || "ocupado";
         const showHogar = info.showHogar;
         const isCuentaMadre = info.cuenta_madre === true;
-        const showClaveCliente = info.clave_cliente === true;
+        const flags = getPlatFlags(info);
+        const showPin = flags.showPin;
+        const showPerfil = flags.showPerfil;
+        const showClaveCliente = flags.showClave;
+        const perfilHeader = getPerfilHeaderLabel(flags);
 
         let thead = "";
         if (isCuentaMadre) {
           thead = `<tr>
             <th>ID Venta</th>
-            <th>Acceso</th>
+            ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
             <th>Cliente</th>
             <th>Correo</th>
             ${showClaveCliente ? "<th>Clave</th>" : ""}
@@ -2503,8 +2669,8 @@
         } else if (colMode === "perfil") {
           thead = `<tr>
             <th>ID Venta</th>
-            <th>Perfil</th>
-            <th>PIN</th>
+            ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
+            ${showPin ? "<th>PIN</th>" : ""}
             ${showHogar ? "<th>Perfil hogar</th>" : ""}
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
@@ -2514,7 +2680,7 @@
         } else if (colMode === "miembro") {
           thead = `<tr>
             <th>ID Venta</th>
-            <th>PIN</th>
+            ${showPin ? "<th>PIN</th>" : ""}
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
@@ -2601,8 +2767,11 @@
                   ? '<input type="text" class="clave-input" placeholder="Clave" />'
                   : clave || "-"
                 : "";
+              const accesoCell = showPerfil
+                ? `<td>${getPerfilCellLabel(flags, p.n_raw, p.hogar)}</td>`
+                : "";
               const fechaCell = canInlineAssign
-                ? `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
+                ? renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
                 : renderFechaEditCell(fecha, p.id_venta);
               const estadoRow = getEstado({
                 suspendido: p.suspendido === true,
@@ -2643,7 +2812,7 @@
                 `;
               return `<tr>
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-                <td>${p.n_raw ?? ""}${p.hogar ? '<span class="perfil-dot"></span>' : ""}</td>
+                ${accesoCell}
                 <td>${clienteCell}</td>
                 <td>${correoCell}</td>
                 ${showClaveCliente ? `<td>${claveCell}</td>` : ""}
@@ -2678,30 +2847,27 @@
                 perfilHogar: p.hogar,
                 isSubCuenta: false,
               });
+              const perfilLabel = showPerfil
+                ? getPerfilCellLabel(flags, p.n_raw, p.hogar)
+                : "";
+              const perfilCell = showPerfil ? `<td>${perfilLabel}</td>` : "";
+              const pinCell = showPin
+                ? `<td class="pin-cell">
+                  <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
+                  <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}" data-plat="${info.plataformaNombre || ""}">✏️</button>
+                </td>`
+                : "";
               return `<tr>
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-                <td>${p.perfil}${p.hogar ? '<span class="perfil-dot"></span>' : ""}</td>
-                <td class="pin-cell">
-                  <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
-                  <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
-                </td>
+                ${perfilCell}
+                ${pinCell}
                 ${showHogar ? `<td>${toggleHtml}</td>` : ""}
                 <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupadoCell}</td>
                 <td>
                   ${
                     p.id_venta
-                      ? p.fecha_corte
-                        ? `<div class="fecha-wrap">
-                            <span class="fecha-text">${p.fecha_corte_fmt || formatDDMMYYYY(p.fecha_corte) || ""}</span>
-                            <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
-                            <input type="date" class="fecha-input" data-venta="${p.id_venta}" value="${p.fecha_corte}" />
-                          </div>`
-                        : `<div class="fecha-wrap">
-                            <span class="fecha-text"></span>
-                            <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
-                            <input type="date" class="fecha-input" data-venta="${p.id_venta}" />
-                          </div>`
-                      : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
+                      ? renderFechaEditCell(p.fecha_corte, p.id_venta)
+                      : renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
@@ -2745,28 +2911,21 @@
                 perfilHogar: p.hogar,
                 isSubCuenta: false,
               });
+              const pinCell = showPin
+                ? `<td class="pin-cell">
+                  <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
+                  <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}" data-plat="${info.plataformaNombre || ""}">✏️</button>
+                </td>`
+                : "";
               return `<tr>
                 <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-                <td class="pin-cell">
-                  <span class="pin-copy" data-clipboard="${p.pin ?? ""}">${p.pin ?? ""}</span>
-                  <button type="button" class="btn-pin" data-perfil="${p.id_perfil}" data-pin="${p.pin ?? ""}" data-max="${info.max_dig_pin || ""}" data-nperfil="${p.n_raw ?? ""}" data-correo="${info.correo || ""}">✏️</button>
-                </td>
+                ${pinCell}
                 <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupadoCell}</td>
                 <td>
                   ${
                     p.id_venta
-                      ? p.fecha_corte
-                        ? `<div class="fecha-wrap">
-                            <span class="fecha-text">${p.fecha_corte_fmt || formatDDMMYYYY(p.fecha_corte) || ""}</span>
-                            <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
-                            <input type="date" class="fecha-input" data-venta="${p.id_venta}" value="${p.fecha_corte}" />
-                          </div>`
-                        : `<div class="fecha-wrap">
-                            <span class="fecha-text"></span>
-                            <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
-                            <input type="date" class="fecha-input" data-venta="${p.id_venta}" />
-                          </div>`
-                      : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
+                      ? renderFechaEditCell(p.fecha_corte, p.id_venta)
+                      : renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
@@ -2815,18 +2974,8 @@
               <td>
                 ${
                   p.id_venta
-                    ? p.fecha_corte
-                      ? `<div class="fecha-wrap">
-                          <span class="fecha-text">${p.fecha_corte_fmt || formatDDMMYYYY(p.fecha_corte) || ""}</span>
-                          <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
-                          <input type="date" class="fecha-input" data-venta="${p.id_venta}" value="${p.fecha_corte}" />
-                        </div>`
-                      : `<div class="fecha-wrap">
-                          <span class="fecha-text"></span>
-                          <button type="button" class="btn-edit-fecha" data-venta="${p.id_venta}">✏️</button>
-                          <input type="date" class="fecha-input" data-venta="${p.id_venta}" />
-                        </div>`
-                    : `<input type="date" class="fecha-input" data-perfil="${p.id_perfil || ""}" />`
+                    ? renderFechaEditCell(p.fecha_corte, p.id_venta)
+                    : renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
                 }
               </td>
               <td class="estado-cell ${estado.className}">${estado.label}</td>
@@ -2856,7 +3005,22 @@
           .join("");
 
         let addPerfilRow = "";
-        const colCountPerfil = showHogar ? 8 : 7;
+        const colCountPerfil =
+          5 +
+          (showPerfil ? 1 : 0) +
+          (showPin ? 1 : 0) +
+          (showHogar ? 1 : 0);
+        const colCountMiembro = 5 + (showPin ? 1 : 0);
+        const colCountOcupado = 5;
+        const colCountMadre =
+          6 + (showPerfil ? 1 : 0) + (showClaveCliente ? 1 : 0);
+        const colCountTable = isCuentaMadre
+          ? colCountMadre
+          : colMode === "perfil"
+            ? colCountPerfil
+            : colMode === "miembro"
+              ? colCountMiembro
+              : colCountOcupado;
         if (colMode === "perfil" && info.mas_perfiles) {
           const maxPerfiles =
             Number(info.num_max_dispositivos) || rows.length || 1;
@@ -2868,10 +3032,9 @@
           </tr>`;
         }
 
-        const colCountMadre = 7 + (showClaveCliente ? 1 : 0);
         const emptyRow =
           rows.length === 0
-            ? `<tr><td colspan="${isCuentaMadre ? colCountMadre : colCountPerfil}" style="text-align:center;">Sin registros.</td></tr>`
+            ? `<tr><td colspan="${colCountTable}" style="text-align:center;">Sin registros.</td></tr>`
             : "";
         const table = `<div class="cuenta-table-wrap">
                 <table class="table-base">
@@ -2884,12 +3047,13 @@
         if (info.isPlat9) {
           const filas = info.plat9Rows || [];
           const needsPlus = filas.length < 5;
+          const plat9ColCount = 5 + (showClaveCliente ? 1 : 0);
           const bodyRows = filas
             .map(
               (r) => `<tr>
               <td>${r.cliente || "-"}</td>
               <td>${r.correo || "-"}</td>
-              <td>${r.clave || "-"}</td>
+              ${showClaveCliente ? `<td>${r.clave || "-"}</td>` : ""}
               <td>${r.usuario || "-"}</td>
               <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
               <td>${r.estado || "-"}</td>
@@ -2897,7 +3061,7 @@
             )
             .join("");
           const plus = needsPlus
-            ? `<tr class="row-add-miembro plat9-plus-row"><td colspan="6">+</td></tr>`
+            ? `<tr class="row-add-miembro plat9-plus-row"><td colspan="${plat9ColCount}">+</td></tr>`
             : "";
           plat9Table = `
             <h4>Clientes</h4>
@@ -2907,7 +3071,7 @@
                   <tr>
                     <th>Cliente</th>
                     <th>Correo</th>
-                    <th>Clave</th>
+                    ${showClaveCliente ? "<th>Clave</th>" : ""}
                     <th>Usuario</th>
                     <th>Fecha de corte</th>
                     <th>Estado</th>
@@ -3004,7 +3168,7 @@
             </label>
           </div>
           <div class="cuenta-toggle">
-            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}" data-plat="${info.id_plataforma || ""}">${recargarLabel}</button>
+            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}" data-plat="${info.id_plataforma || ""}" data-usa-pins="${info.usa_pines ? "1" : "0"}">${recargarLabel}</button>
             <div class="cuenta-tipo-label">${tipoServicio}</div>
           </div>
           ${
@@ -3039,11 +3203,11 @@
               ? `
           <h4>Miembros extras</h4>
           <div class="cuenta-table-wrap">
-            <table class="table-base">
+                <table class="table-base">
               <thead>
                 <tr>
                   <th>Correo</th>
-                  <th>Clave</th>
+                  ${showClaveCliente ? "<th>Clave</th>" : ""}
                   <th>Ocupado por</th>
                   <th>Fecha de corte</th>
                   <th>Acción</th>
@@ -3071,17 +3235,13 @@
                       return `
                         <tr>
                           <td><span class="correo-copy" data-clipboard="${m.correo || ""}">${m.correo || "-"}</span></td>
-                          <td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>
+                          ${showClaveCliente ? `<td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>` : ""}
                           <td>${hasVenta ? m.ocupado || "-" : `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />`}</td>
                           <td>
                             ${
                               hasVenta
-                                ? `<div class="fecha-wrap">
-                                    <span class="fecha-text">${m.fecha_corte_fmt || formatDDMMYYYY(m.fecha_corte) || ""}</span>
-                                    <button type="button" class="btn-edit-fecha" data-venta="${m.id_venta}">✏️</button>
-                                    <input type="date" class="fecha-input" data-venta="${m.id_venta}" value="${m.fecha_corte || ""}" />
-                                  </div>`
-                                : `<input type="date" class="fecha-input" data-cuenta="${m.id_cuenta || ""}" />`
+                                ? renderFechaEditCell(m.fecha_corte, m.id_venta)
+                                : renderFechaInlineCell("", `data-cuenta="${m.id_cuenta || ""}"`)
                             }
                           </td>
                           <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -3106,8 +3266,9 @@
                     if (Number.isFinite(maxMiembros) && maxMiembros > 0 && actuales >= maxMiembros) {
                       return "";
                     }
+                    const colSpan = 4 + (showClaveCliente ? 1 : 0);
                     return `<tr class="row-add-miembro">
-                      <td colspan="5" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
+                      <td colspan="${colSpan}" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
                     </tr>`;
                   })()
                 }
@@ -3190,7 +3351,7 @@
               ? supabase
                   .from("plataformas")
                   .select(
-                    "nombre, usa_pines, max_dig_pin, por_acceso, mas_perfiles, num_max_dispositivos, max_miembros, clave_cliente",
+                    "nombre, usa_pines, max_dig_pin, por_acceso, por_pantalla, mas_perfiles, num_max_dispositivos, max_miembros, correo_cliente, clave_cliente",
                   )
                   .eq("id_plataforma", platId)
                   .maybeSingle()
@@ -3517,10 +3678,12 @@
             hasVentasCuenta,
         ultimosCorreosPlat1,
             por_acceso: plat?.por_acceso || false,
+            por_pantalla: plat?.por_pantalla || false,
             usa_pines: plat?.usa_pines || false,
             mas_perfiles: isTrue(plat?.mas_perfiles),
             num_max_dispositivos: plat?.num_max_dispositivos || null,
             max_miembros: plat?.max_miembros ?? null,
+            correo_cliente: plat?.correo_cliente === true,
             clave_cliente: plat?.clave_cliente === true,
             ventasCuenta,
             usuariosCuenta,
@@ -4257,19 +4420,22 @@
               const claveVal = (claveInput?.value || "").trim();
               const fechaFmt = formatDDMMYYYY(fechaVal) || fechaVal || "";
               const estadoInfo = getEstadoVenta({ fecha_corte: fechaVal });
-              const showClaveCliente =
-                currentCuentaDetalle?.clave_cliente === true;
+              const currentFlags = getPlatFlags(currentCuentaDetalle || {});
+              const showClaveCliente = currentFlags.showClave;
+              const showPerfil = currentFlags.showPerfil;
 
               const cells = Array.from(row.children);
-              const accesoCell = cells[1];
-              const clienteCell = cells[2];
-              const correoCell = cells[3];
-              const claveCell = cells[4];
-              const fechaCell = cells[showClaveCliente ? 5 : 4];
-              const estadoCell = cells[showClaveCliente ? 6 : 5];
-              const accionCell = cells[showClaveCliente ? 7 : 6];
+              let idx = 0;
+              const idCell = cells[idx++] || null;
+              const accesoCell = showPerfil ? cells[idx++] || null : null;
+              const clienteCell = cells[idx++] || null;
+              const correoCell = cells[idx++] || null;
+              const claveCell = showClaveCliente ? cells[idx++] || null : null;
+              const fechaCell = cells[idx++] || null;
+              const estadoCell = cells[idx++] || null;
+              const accionCell = cells[idx++] || null;
 
-              if (cells[0]) cells[0].textContent = newVentaId ? `#${newVentaId}` : "";
+              if (idCell) idCell.textContent = newVentaId ? `#${newVentaId}` : "";
               if (clienteCell) clienteCell.textContent = nombreVal || "-";
               if (correoCell) correoCell.textContent = correoVal || "-";
               if (showClaveCliente && claveCell) claveCell.textContent = claveVal || "-";
@@ -4329,7 +4495,9 @@
 
         const btnRec = e.target.closest(".btn-recargar-cuenta");
         if (!btnRec) return;
-        const platId = Number(btnRec.dataset.plat || 0);
+          const platId = Number(btnRec.dataset.plat || 0);
+          const usaPins = isTrue(btnRec.dataset.usaPins);
+          if (recPinRow) recPinRow.style.display = usaPins ? "" : "none";
         renewPlatId = platId || null;
         if (platId === 1) {
           recCorreo.textContent = btnRec.dataset.correo || "-";
@@ -4342,16 +4510,23 @@
             );
             recCorte.value = plus30.toISOString().slice(0, 10);
           }
-          recPin.textContent = "Buscando...";
-          recPin.dataset.tid = "";
-          showModalRecargar();
-          const pinObj = await fetchPinRecarga();
-          if (pinObj?.pin) {
-            recPin.textContent = pinObj.pin;
-            recPin.dataset.tid = pinObj.id || "";
-          } else {
-            recPin.textContent = "Sin stock";
+          if (usaPins) {
+            recPin.textContent = "Buscando...";
             recPin.dataset.tid = "";
+          } else {
+            recPin.textContent = "";
+            recPin.dataset.tid = "";
+          }
+          showModalRecargar();
+          if (usaPins) {
+            const pinObj = await fetchPinRecarga();
+            if (pinObj?.pin) {
+              recPin.textContent = pinObj.pin;
+              recPin.dataset.tid = pinObj.id || "";
+            } else {
+              recPin.textContent = "Sin stock";
+              recPin.dataset.tid = "";
+            }
           }
         } else {
           renewMeses = 1;
@@ -4851,11 +5026,18 @@
         if (!cuentaId) return;
         const newRow = document.createElement("tr");
         newRow.className = "canva-input-row";
+        const showPerfil = currentCanvaFlags?.showPerfil ?? true;
+        const showPerfilId = currentCanvaFlags?.porPantalla === true;
+        const perfilCells = showPerfil
+          ? showPerfilId
+            ? "<td></td><td></td>"
+            : "<td></td>"
+          : "";
         newRow.innerHTML = `
-          <td></td>
+          ${perfilCells}
           <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" /></td>
           <td><input type="text" class="correo-input" placeholder="Correo" /></td>
-          <td><input type="date" class="fecha-input" /></td>
+          <td>${renderFechaInlineCell("", "")}</td>
           <td>-</td>
           <td>
             <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${cuentaId}">
@@ -4980,7 +5162,7 @@
               <td>${correo}</td>
               <td>${clave || "-"}</td>
               <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" /></td>
-              <td><input type="date" class="fecha-input" data-cuenta="${data.id_cuenta || ""}" /></td>
+              <td>${renderFechaInlineCell("", `data-cuenta="${data.id_cuenta || ""}"`)}</td>
               <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                 <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${data.id_cuenta || ""}">Reemplazar</button>
                 <button type="button" class="btn-outline btn-copy-row" data-copy="" disabled>Copiar</button>
@@ -5150,6 +5332,7 @@
               const notif = buildNotificationPayload(
                 "servicio_reemplazado",
                 {
+                  plataforma: currentCuentaDetalle.plataformaNombre || "",
                   correoViejo: currentCuentaDetalle.correo || "",
                   perfilViejo:
                     rowPerfil?.perfil ||
@@ -5158,11 +5341,7 @@
                   perfilNuevo: dataDestino.n_perfil
                     ? `M${dataDestino.n_perfil}`
                     : "",
-                  fechaCorte:
-                    ventaInfo?.fecha_corte ||
-                    rowPerfil?.fecha_corte ||
-                    currentCuentaDetalle.fecha_corte ||
-                    "",
+                  claveNuevo: dataDestino.clave || "",
                 },
                 { idCuenta: nuevoCuenta || null },
               );
@@ -5255,12 +5434,14 @@
           const max = Number(btnPin.dataset.max) || null;
           const nPerfil = btnPin.dataset.nperfil || "";
           const correoVal = btnPin.dataset.correo || "";
+          const platVal = btnPin.dataset.plat || "";
           modalState = {
             type: "pin",
             targetId: idPerfil,
             max,
             nPerfil,
             correo: correoVal,
+            plataforma: platVal,
           };
           if (modalPinTitle) modalPinTitle.textContent = "Cambiar PIN";
           if (modalPinInput) {
@@ -5442,6 +5623,7 @@
               const notif = buildNotificationPayload(
                 "pin_actualizado",
                 {
+                  plataforma: modalState.plataforma || "",
                   correoCuenta: modalState.correo || "",
                   perfil: modalState.nPerfil ? `M${modalState.nPerfil}` : "",
                   pin: newPin || "",
@@ -5489,7 +5671,11 @@
             if (userIds.length) {
               const notif = buildNotificationPayload(
                 "clave_actualizada",
-                { correoCuenta: modalState.correo || "", clave: newPin || "" },
+                {
+                  plataforma: modalState.plataforma || "",
+                  correoCuenta: modalState.correo || "",
+                  clave: newPin || "",
+                },
                 { idCuenta: modalState.targetId },
               );
               const rows = userIds.map((uid) => ({

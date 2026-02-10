@@ -392,6 +392,9 @@ async function init() {
     setCachedCart(cartData);
     const [catalog, stockMap] = await Promise.all([loadCatalog(), loadStockSummary(!!currentUser)]);
     const { categorias, plataformas, precios, descuentos } = catalog;
+    const plataformasDisponibles = (plataformas || []).filter(
+      (plat) => !isTrue(plat?.no_disponible),
+    );
     // Si no hay sesión, mostrar precios detal por defecto.
     const esCliente =
       !currentUser ||
@@ -409,9 +412,9 @@ async function init() {
     const preciosMap = buildPreciosMap(preciosVisibles);
     setPrecios(preciosMap);
     setDescuentos(descuentos || []);
-    updateSearchData(plataformas);
+    updateSearchData(plataformasDisponibles);
 
-    const plataformasPorCategoria = (plataformas || []).reduce((acc, plat) => {
+    const plataformasPorCategoria = (plataformasDisponibles || []).reduce((acc, plat) => {
       if (!acc[plat.id_categoria]) acc[plat.id_categoria] = [];
       acc[plat.id_categoria].push(plat);
       return acc;
@@ -450,7 +453,7 @@ async function init() {
     initSearch({
       input: searchInput,
       results: searchResults,
-      data: plataformas,
+      data: plataformasDisponibles,
       onSelectItem: (plataforma) => {
         openModal({
           ...plataforma,

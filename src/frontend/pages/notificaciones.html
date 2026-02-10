@@ -6,26 +6,87 @@
     <title>Notificaciones</title>
     <link rel="stylesheet" href="../styles/styles.css" />
     <style>
+      body {
+        background: #f7f7fb;
+      }
+      main.categorias-dinamicas {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 18px 16px 28px;
+      }
+      main.categorias-dinamicas h2 {
+        margin: 4px 0 12px;
+        font-size: 22px;
+        font-weight: 800;
+        color: #111827;
+      }
       .notif-list {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 14px;
         margin-top: 12px;
       }
       .notif-item {
+        position: relative;
         border: 1px solid #e5e7eb;
-        border-radius: 10px;
-        padding: 10px 12px;
-        background: #f9fafb;
+        border-radius: 14px;
+        padding: 14px 16px;
+        background: #fff;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+        overflow: hidden;
+      }
+      .notif-item::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 6px;
+        height: 100%;
+        background: linear-gradient(180deg, #111, #444);
+        opacity: 0.85;
       }
       .notif-item h4 {
-        margin: 0 0 6px;
+        margin: 0 0 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        font-size: 13px;
+        font-weight: 800;
+        color: #111827;
       }
       .notif-item p {
         margin: 0;
+        line-height: 1.5;
+        color: #1f2937;
+        font-size: 14px;
+      }
+      .notif-item p a {
+        font-weight: 700;
+        text-decoration: underline;
+      }
+      .notif-item .notif-line {
+        display: block;
+      }
+      .notif-item .notif-id-venta {
+        display: inline-block;
+        font-weight: 700;
+        font-size: 12px;
+        color: #111827;
+        background: #eef2ff;
+        border: 1px solid #c7d2fe;
+        border-radius: 999px;
+        padding: 2px 8px;
+        white-space: nowrap;
+        margin-left: 6px;
       }
       .notif-item small {
-        color: #555;
+        display: inline-block;
+        margin-top: 8px;
+        color: #6b7280;
+        font-size: 12px;
+      }
+      #notif-status {
+        color: #6b7280;
+        font-weight: 600;
       }
     </style>
   </head>
@@ -44,12 +105,14 @@
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
+      import { buildNotificationPayload } from "../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
 
       const statusEl = document.querySelector("#notif-status");
       const tbody = document.querySelector("#notif-body");
+      const TEST_USER_ID = 23;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -63,17 +126,223 @@
           return;
         }
         setStatus("");
+        const linkifyEmails = (html = "") => {
+          const wrap = document.createElement("div");
+          wrap.innerHTML = html;
+          const walker = document.createTreeWalker(
+            wrap,
+            NodeFilter.SHOW_TEXT,
+            {
+              acceptNode: (node) => {
+                if (!node.nodeValue?.includes("@")) return NodeFilter.FILTER_REJECT;
+                if (node.parentElement?.closest("a")) return NodeFilter.FILTER_REJECT;
+                if (node.parentElement?.closest(".no-linkify"))
+                  return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              },
+            }
+          );
+          const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+          const nodes = [];
+          while (walker.nextNode()) nodes.push(walker.currentNode);
+          nodes.forEach((node) => {
+            const text = node.nodeValue || "";
+            if (!emailRegex.test(text)) return;
+            const frag = document.createDocumentFragment();
+            let lastIndex = 0;
+            text.replace(emailRegex, (match, offset) => {
+              if (offset > lastIndex) {
+                frag.appendChild(
+                  document.createTextNode(text.slice(lastIndex, offset))
+                );
+              }
+              const link = document.createElement("a");
+              link.href = `inventario.html?correo=${encodeURIComponent(match)}`;
+              link.textContent = match;
+              link.className = "link-inline";
+              frag.appendChild(link);
+              lastIndex = offset + match.length;
+              return match;
+            });
+            if (lastIndex < text.length) {
+              frag.appendChild(
+                document.createTextNode(text.slice(lastIndex))
+              );
+            }
+            node.parentNode?.replaceChild(frag, node);
+          });
+          return wrap.innerHTML;
+        };
+        const shouldShowDate = (title = "") =>
+          title.toLowerCase().includes("pronto vence tu servicio");
         tbody.innerHTML = items
-          .map(
-            (n) => `
+          .map((n) => {
+            const title = n.titulo || "-";
+            const showDate = shouldShowDate(title);
+            return `
           <div class="notif-item">
-            <h4>${n.titulo || "-"}</h4>
-            <p>${n.mensaje || "-"}</p>
-            <small>${n.fecha || ""}</small>
+            <h4>${title}</h4>
+            <p>${linkifyEmails(n.mensaje || "-")}</p>
+            ${showDate ? `<small>${n.fecha || ""}</small>` : ""}
           </div>
-        `
-          )
+        `;
+          })
           .join("");
+      };
+
+      const pickRandom = (arr = []) =>
+        arr.length ? arr[Math.floor(Math.random() * arr.length)] : null;
+      const getCorreo = (v) => v?.correo_miembro || v?.cuentas?.correo || "";
+      const getClave = (v) => v?.cuentas?.clave || "";
+      const getPerfil = (v) =>
+        v?.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
+      const getPin = (v) => v?.perfiles?.pin || "";
+      const getPlataforma = (v) => v?.cuentas?.plataformas?.nombre || "Plataforma";
+      const getIdCuenta = (v) => v?.id_cuenta || v?.cuentas?.id_cuenta || null;
+
+      const seedTestNotifications = async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        try {
+          await supabase
+            .from("notificaciones")
+            .delete()
+            .eq("id_usuario", TEST_USER_ID)
+            .ilike("titulo", "TEST -%");
+
+          const { data: ventas } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, fecha_corte, id_cuenta, id_perfil, id_orden, correo_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas(nombre)), perfiles:perfiles(id_perfil, n_perfil, pin)"
+            )
+            .limit(50);
+
+          const v1 = pickRandom(ventas) || {};
+          const v2 = pickRandom(ventas) || v1 || {};
+
+          const data1 = {
+            correoCuenta: getCorreo(v1) || "test@demo.com",
+            clave: getClave(v1) || "1234",
+            perfil: getPerfil(v1) || "M1",
+            pin: getPin(v1) || "0000",
+            plataforma: getPlataforma(v1),
+            fechaCorte: v1?.fecha_corte || today,
+            idOrden: v1?.id_orden || null,
+            idCuenta: getIdCuenta(v1),
+          };
+          const data2 = {
+            correoCuenta: getCorreo(v2) || "test2@demo.com",
+            clave: getClave(v2) || "5678",
+            perfil: getPerfil(v2) || "M2",
+            pin: getPin(v2) || "1111",
+            plataforma: getPlataforma(v2),
+            fechaCorte: v2?.fecha_corte || today,
+            idOrden: v2?.id_orden || null,
+            idCuenta: getIdCuenta(v2),
+          };
+
+          const rows = [
+            buildNotificationPayload(
+              "pin_actualizado",
+              {
+                plataforma: data1.plataforma,
+                correoCuenta: data1.correoCuenta,
+                perfil: data1.perfil,
+                pin: data1.pin,
+              },
+              { idCuenta: data1.idCuenta }
+            ),
+            buildNotificationPayload(
+              "clave_actualizada",
+              {
+                plataforma: data1.plataforma,
+                correoCuenta: data1.correoCuenta,
+                clave: data1.clave,
+              },
+              { idCuenta: data1.idCuenta }
+            ),
+            buildNotificationPayload(
+              "servicio_reemplazado",
+              {
+                plataforma: data1.plataforma,
+                correoViejo: data1.correoCuenta,
+                perfilViejo: data1.perfil,
+                correoNuevo: data2.correoCuenta,
+                perfilNuevo: data2.perfil,
+                claveNuevo: data2.clave,
+              },
+              { idCuenta: data2.idCuenta }
+            ),
+            buildNotificationPayload(
+              "servicio_renovado",
+              {
+                items: [
+                  {
+                    plataforma: data1.plataforma,
+                    correoCuenta: data1.correoCuenta,
+                    clave: data1.clave,
+                    perfil: data1.perfil,
+                    fechaCorte: data1.fechaCorte,
+                    idVenta: v1?.id_venta || null,
+                  },
+                  {
+                    plataforma: data2.plataforma,
+                    correoCuenta: data2.correoCuenta,
+                    clave: data2.clave,
+                    perfil: data2.perfil,
+                    fechaCorte: data2.fechaCorte,
+                    idVenta: v2?.id_venta || null,
+                  },
+                ],
+              },
+              { idCuenta: data1.idCuenta }
+            ),
+            buildNotificationPayload(
+              "nuevo_servicio",
+              {
+                items: [
+                  {
+                    plataforma: data1.plataforma,
+                    correoCuenta: data1.correoCuenta,
+                    clave: data1.clave,
+                    perfil: data1.perfil,
+                    fechaCorte: data1.fechaCorte,
+                    idVenta: v1?.id_venta || null,
+                  },
+                  {
+                    plataforma: data2.plataforma,
+                    correoCuenta: data2.correoCuenta,
+                    clave: data2.clave,
+                    perfil: data2.perfil,
+                    fechaCorte: data2.fechaCorte,
+                    idVenta: v2?.id_venta || null,
+                  },
+                ],
+              },
+              { idCuenta: data1.idCuenta }
+            ),
+            buildNotificationPayload(
+              "recordatorio_corte",
+              {
+                plataforma: data1.plataforma,
+                correoCuenta: data1.correoCuenta,
+                perfil: data1.perfil,
+                fechaCorte: data1.fechaCorte,
+              },
+              { idCuenta: data1.idCuenta }
+            ),
+          ].map((row) => ({
+            ...row,
+            id_usuario: TEST_USER_ID,
+            titulo: `TEST - ${row.titulo}`,
+          }));
+
+          if (rows.length) {
+            const { error } = await supabase.from("notificaciones").insert(rows);
+            if (error) throw error;
+          }
+        } catch (err) {
+          console.error("seed notificaciones test error", err);
+        }
       };
 
       (async () => {
@@ -82,6 +351,9 @@
           if (!user?.id_usuario) {
             setStatus("No autenticado.");
             return;
+          }
+          if (Number(user.id_usuario) === TEST_USER_ID) {
+            await seedTestNotifications();
           }
           const { data, error } = await supabase
             .from("notificaciones")

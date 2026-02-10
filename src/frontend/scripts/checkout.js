@@ -802,42 +802,82 @@ btnSendPayment?.addEventListener("click", async () => {
       console.error("update notificacion_inventario error", flagErr);
     }
 
-    // Notificaciones de nuevo servicio al usuario en sesión por cada venta de la orden
+    // Notificaciones de nuevo servicio y renovaciones para el usuario en sesión por cada venta de la orden
     try {
       if (resp?.id_orden) {
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
-            "id_usuario, fecha_corte, id_cuenta_miembro, id_perfil, id_orden, cuentas:cuentas!ventas_id_cuenta_miembro_fkey!inner(correo, id_plataforma, plataformas:plataformas(nombre)), perfiles:perfiles(n_perfil)"
+            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente)), perfiles:perfiles(n_perfil)"
           )
           .eq("id_orden", resp.id_orden);
         if (ventasOrdErr) throw ventasOrdErr;
-        const rowsNotif = [];
+        const nuevosServiciosPorUsuario = new Map();
+        const renovacionesPorUsuario = new Map();
         (ventasOrden || []).forEach((v) => {
-          const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: userId || v.id_usuario });
-          if (!userIds.length) return;
-          const platName = v.cuentas?.plataformas?.nombre || "Plataforma";
+          const cuentaRow = v.cuentas_miembro || v.cuentas || null;
+          const platName = cuentaRow?.plataformas?.nombre || "Plataforma";
           const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
-          const notif = buildNotificationPayload(
-            "nuevo_servicio",
-            {
+          const correoTxt = v.correo_miembro || cuentaRow?.correo || "";
+          const claveTxt = v.clave_miembro || cuentaRow?.clave || "";
+          const ventaUserId = userId || v.id_usuario;
+
+          if (v.renovacion) {
+            if (!ventaUserId) return;
+            const items = renovacionesPorUsuario.get(ventaUserId) || [];
+            items.push({
               plataforma: platName,
-              correoCuenta: v.cuentas?.correo || "",
+              correoCuenta: correoTxt,
+              clave: claveTxt,
               perfil: perfilTxt,
               fechaCorte: v.fecha_corte || "",
-              idOrden: resp.id_orden,
-            },
-            { idCuenta: v.id_cuenta_miembro }
-          );
-          userIds.forEach((uid) => rowsNotif.push({ ...notif, id_usuario: uid }));
+              idVenta: v.id_venta || null,
+            });
+            renovacionesPorUsuario.set(ventaUserId, items);
+            return;
+          }
+
+          if (!ventaUserId || !correoTxt) return;
+          const items = nuevosServiciosPorUsuario.get(ventaUserId) || [];
+          items.push({
+            plataforma: platName,
+            correoCuenta: correoTxt,
+            clave: claveTxt,
+            perfil: perfilTxt,
+            fechaCorte: v.fecha_corte || "",
+            idVenta: v.id_venta || null,
+          });
+          nuevosServiciosPorUsuario.set(ventaUserId, items);
+        });
+
+        const rowsNotif = [];
+        nuevosServiciosPorUsuario.forEach((items, uid) => {
+          if (!items.length) return;
+          const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: uid });
+          if (!userIds.length) return;
+          const payload = buildNotificationPayload("nuevo_servicio", { items });
+          userIds.forEach((id) => rowsNotif.push({ ...payload, id_usuario: id }));
         });
         if (rowsNotif.length) {
           const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);
           if (notifErr) throw notifErr;
         }
+
+        const renovacionRows = [];
+        renovacionesPorUsuario.forEach((items, uid) => {
+          if (!items.length) return;
+          const userIds = pickNotificationUserIds("servicio_renovado", { ventaUserId: uid });
+          if (!userIds.length) return;
+          const payload = buildNotificationPayload("servicio_renovado", { items });
+          userIds.forEach((id) => renovacionRows.push({ ...payload, id_usuario: id }));
+        });
+        if (renovacionRows.length) {
+          const { error: renovErr } = await supabase.from("notificaciones").insert(renovacionRows);
+          if (renovErr) throw renovErr;
+        }
       }
     } catch (nErr) {
-      console.error("nuevo_servicio notif checkout error", nErr);
+      console.error("notificaciones checkout error", nErr);
     }
 
     alert("Pago enviado correctamente.");

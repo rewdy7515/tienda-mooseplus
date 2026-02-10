@@ -1305,7 +1305,7 @@ app.get("/api/inventario", async (req, res) => {
           clave,
           venta_perfil,
           venta_miembro,
-          plataformas(nombre, color_1, color_2)
+          plataformas(nombre, color_1, color_2, color_3, usa_pines, por_pantalla, correo_cliente, clave_cliente)
         ),
         perfiles:perfiles(
           id_perfil,
@@ -1344,6 +1344,11 @@ app.get("/api/inventario", async (req, res) => {
       const plataforma = row.cuentas?.plataformas?.nombre || "Sin plataforma";
       const color_1 = row.cuentas?.plataformas?.color_1 || null;
       const color_2 = row.cuentas?.plataformas?.color_2 || null;
+      const color_3 = row.cuentas?.plataformas?.color_3 || null;
+      const usa_pines = row.cuentas?.plataformas?.usa_pines ?? null;
+      const por_pantalla = row.cuentas?.plataformas?.por_pantalla ?? null;
+      const correo_cliente_flag = row.cuentas?.plataformas?.correo_cliente ?? null;
+      const clave_cliente_flag = row.cuentas?.plataformas?.clave_cliente ?? null;
       const plan = row.precios?.plan || "Sin plan";
       const memberId = row.perfiles?.id_cuenta_miembro || null;
       const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
@@ -1351,6 +1356,11 @@ app.get("/api/inventario", async (req, res) => {
         plataforma,
         color_1,
         color_2,
+        color_3,
+        usa_pines,
+        por_pantalla,
+        plat_correo_cliente: correo_cliente_flag,
+        plat_clave_cliente: clave_cliente_flag,
         plan,
         id_venta: row.id_venta,
         id_precio: row.id_precio || null,
@@ -1376,6 +1386,11 @@ app.get("/api/inventario", async (req, res) => {
           color_1: item.color_1,
           color_2: item.color_2,
           id_plataforma: item.id_plataforma,
+          usa_pines: item.usa_pines,
+          por_pantalla: item.por_pantalla,
+          plat_correo_cliente: item.plat_correo_cliente,
+          plat_clave_cliente: item.plat_clave_cliente,
+          color_3: item.color_3,
           planes: {},
         };
       }
@@ -1388,7 +1403,12 @@ app.get("/api/inventario", async (req, res) => {
       nombre,
       color_1: payload.color_1 || null,
       color_2: payload.color_2 || null,
+      color_3: payload.color_3 || null,
       id_plataforma: payload.id_plataforma || null,
+      usa_pines: payload.usa_pines ?? null,
+      por_pantalla: payload.por_pantalla ?? null,
+      plat_correo_cliente: payload.plat_correo_cliente ?? null,
+      plat_clave_cliente: payload.plat_clave_cliente ?? null,
       planes: Object.entries(payload.planes).map(([plan, ventas]) => ({ plan, ventas })),
     }));
 
