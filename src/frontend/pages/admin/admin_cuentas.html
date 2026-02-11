@@ -2801,6 +2801,11 @@
                 `
                 : `
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
+                  ${
+                    info.isPlat9 && p.id_venta
+                      ? `<button type="button" class="btn-outline btn-cambiar-madre" data-idventa="${p.id_venta || ""}" data-perfil="${p.id_perfil || ""}" data-cuenta="${info.id_cuenta || ""}">Cambiar cuenta madre</button>`
+                      : ""
+                  }
                   <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
                   >Registrar servicio</button>
@@ -3115,6 +3120,10 @@
                     <input type="text" class="input-inline" value="" placeholder="-" data-field="link_codigo" />
                     <button type="button" class="codigo-save-btn" data-field="link_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar link">💾</button>
                   </span>`;
+              const direccionVal = info.direccion || "";
+              const direccionHtml = direccionVal
+                ? `<p><strong>Dirección:</strong> <span class="cred-copy cuenta-direccion" data-clipboard="${direccionVal}">${direccionVal}</span></p>`
+                : "";
               const correoHtml = correoVal
                 ? correoVal
                 : `<span class="codigo-input-wrap">
@@ -3153,6 +3162,7 @@
               <p><strong>Acceso a códigos</strong></p>
               <p>Instaddr: ${info.instaddr ? "Disponible" : "No disponible"}</p>
               <p>Link: ${linkHtml}</p>
+              ${direccionHtml}
               <p>Correo: ${correoHtml}</p>
               <p>Clave: ${claveHtml}</p>
             </div>
@@ -3322,7 +3332,7 @@
           const { data: cuenta, error } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_madre, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre",
+              "id_cuenta, correo, clave, fecha_corte, id_plataforma, id_proveedor, region, direccion, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_madre, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre",
             )
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
@@ -3652,6 +3662,7 @@
             region: cuenta.region || "",
             correo: cuenta.correo || "",
             clave: cuenta.clave || "",
+            direccion: cuenta.direccion || "",
             fecha_corte: cuenta.fecha_corte || "",
             fecha_corte_fmt: formatDDMMYYYY(cuenta.fecha_corte) || "",
             estadoCuenta: cuentaEstado.label,
@@ -5461,6 +5472,11 @@
           await handleReemplazoClick(btnRepl);
           return;
         }
+        const btnCambiarMadre = e.target.closest(".btn-cambiar-madre");
+        if (btnCambiarMadre) {
+          await handleCambiarCuentaMadre(btnCambiarMadre);
+          return;
+        }
       });
 
       // Modal clave (cuenta)
@@ -5576,6 +5592,89 @@
         const { data, error } = await query;
         if (error) return { error };
         return { data: data?.[0] || null };
+      };
+
+      const findPerfilLibreCuentaMadre = async (plataformaId, excludeCuenta) => {
+        let query = supabase
+          .from("perfiles")
+          .select(
+            "id_perfil, id_cuenta, n_perfil, ocupado, cuentas!perfiles_id_cuenta_fkey!inner(id_cuenta, id_plataforma, cuenta_madre, inactiva)",
+          )
+          .eq("cuentas.id_plataforma", plataformaId)
+          .eq("cuentas.cuenta_madre", true)
+          .eq("ocupado", false)
+          .order("id_perfil", { ascending: true })
+          .limit(1);
+        query = query.or("inactiva.is.null,inactiva.eq.false", {
+          foreignTable: "cuentas",
+        });
+        if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+        const { data, error } = await query;
+        if (error) return { error };
+        return { data: data?.[0] || null };
+      };
+
+      const handleCambiarCuentaMadre = async (btn) => {
+        try {
+          if (!currentCuentaDetalle?.isPlat9) return;
+          const ventaId = btn.dataset.idventa || "";
+          if (!ventaId) {
+            alert("No se encontró la venta asociada.");
+            return;
+          }
+          const oldPerfilId = btn.dataset.perfil || null;
+          const oldCuentaId =
+            btn.dataset.cuenta || currentCuentaDetalle?.id_cuenta || null;
+          const { data: ventaInfo, error: ventaErr } = await supabase
+            .from("ventas")
+            .select("id_venta, id_cuenta, id_perfil, id_cuenta_miembro")
+            .eq("id_venta", ventaId)
+            .maybeSingle();
+          if (ventaErr) throw ventaErr;
+          const { data: perfilDestino, error: perfilErr } =
+            await findPerfilLibreCuentaMadre(9, oldCuentaId);
+          if (perfilErr) throw perfilErr;
+          if (!perfilDestino) {
+            alert("Sin stock de cuentas madre.");
+            return;
+          }
+          const nuevoCuenta = perfilDestino.id_cuenta;
+          const nuevoPerfil = perfilDestino.id_perfil;
+          const { error: updVentaErr } = await supabase
+            .from("ventas")
+            .update({
+              id_cuenta: nuevoCuenta,
+              id_perfil: nuevoPerfil,
+              pendiente: true,
+              reportado: true,
+            })
+            .eq("id_venta", ventaId);
+          if (updVentaErr) throw updVentaErr;
+          if (ventaInfo?.id_cuenta_miembro) {
+            await supabase
+              .from("cuentas")
+              .update({ id_cuenta_madre: nuevoCuenta })
+              .eq("id_cuenta", ventaInfo.id_cuenta_miembro);
+          }
+          const perfilPrev = ventaInfo?.id_perfil || oldPerfilId;
+          if (perfilPrev) {
+            await supabase
+              .from("perfiles")
+              .update({ ocupado: false })
+              .eq("id_perfil", perfilPrev);
+          }
+          await supabase
+            .from("perfiles")
+            .update({ ocupado: true })
+            .eq("id_perfil", nuevoPerfil);
+          alert("Cuenta madre cambiada.");
+          if (currentCuentaDetalle?.id_cuenta) {
+            loadCuentaDetalle(currentCuentaDetalle.id_cuenta);
+          }
+        } catch (err) {
+          console.error("cambiar cuenta madre error", err);
+          alert("No se pudo cambiar la cuenta madre.");
+        }
       };
 
       const obtenerVentaPerfil = (perfilId) => {

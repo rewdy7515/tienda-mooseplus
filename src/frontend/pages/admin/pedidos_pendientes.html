@@ -156,7 +156,7 @@
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -269,10 +269,10 @@
             setStatus("Usuario no autenticado.");
             return;
           }
-          const { data: ventas, error } = await supabase
+            const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-                "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+                "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -408,6 +408,7 @@
               meses_contratados: v.meses_contratados || 1,
               id_cuenta: v.id_cuenta || null,
               id_perfil: v.id_perfil || null,
+              reportado: v.reportado === true,
             });
           });
 
@@ -497,6 +498,7 @@
         const isCompleta = btn.dataset.completa === "true";
         const cuentaMadreFlag = btn.dataset.cuentaMadre === "true" && !isCompleta;
         const mesesContratados = Number(btn.dataset.meses || 1);
+        const isReportado = btn.dataset.reportado === "true";
         if (!idVenta) return;
         try {
           if (!correoCuenta) {
@@ -574,15 +576,18 @@
           const base = new Date();
           const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
           const nextIso = next.toISOString().slice(0, 10);
+          const updateVenta = {
+            pendiente: false,
+            id_cuenta: cuentaMadreId || null,
+            id_cuenta_miembro: nuevaCuentaId,
+            id_perfil: perfilId || null,
+          };
+          if (!isReportado) {
+            updateVenta.fecha_corte = nextIso;
+          }
           const { error: updErr } = await supabase
             .from("ventas")
-            .update({
-              pendiente: false,
-              id_cuenta: cuentaMadreId || null,
-              id_cuenta_miembro: nuevaCuentaId,
-              id_perfil: perfilId || null,
-              fecha_corte: nextIso,
-            })
+            .update(updateVenta)
             .eq("id_venta", idVenta);
           if (updErr) throw updErr;
           if (idUsuario) {
