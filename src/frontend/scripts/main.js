@@ -7,6 +7,7 @@ import {
   fetchEntregadas,
   fetchTestingFlag,
   updateTestingFlag,
+  fetchP2PRate,
 } from "./api.js";
 import { initCart } from "./cart.js";
 import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
@@ -25,6 +26,7 @@ import {
   setDeliverySeen,
   requireSession,
 } from "./session.js";
+import { TASA_MARKUP } from "./rate-config.js";
 
 const contenedor = document.querySelector("#categorias-container");
 const estado = document.querySelector("#categorias-status");
@@ -40,6 +42,7 @@ const logo = document.querySelector(".logo");
 const testingBtn = document.querySelector("#btn-testing-toggle");
 const missingDataWrap = document.querySelector("#missing-data-wrap");
 const missingDataBtn = document.querySelector("#missing-data-btn");
+const tasaActualEl = document.querySelector("#tasa-actual");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -141,12 +144,14 @@ const attachPlatformClicks = (onClick) => {
         nombre: card.dataset.nombre,
         categoria: card.dataset.categoria,
         imagen: card.dataset.imagen,
+        banner: card.dataset.banner,
         por_pantalla: card.dataset.porPantalla,
         por_acceso: card.dataset.porAcceso,
         tarjeta_de_regalo: card.dataset.tarjetaDeRegalo,
         entrega_inmediata: card.dataset.entregaInmediata,
         descuento_meses: isTrue(card.dataset.descuentoMeses),
         mostrar_stock: card.dataset.mostrarStock,
+        num_max_dispositivos: card.dataset.numMaxDispositivos,
         id_descuento: null,
       })
     );
@@ -363,6 +368,29 @@ async function init() {
     }
     setSessionRoles(currentUser || {});
     const sessionRoles = getSessionRoles();
+    const isClienteRate =
+      isTrue(sessionRoles?.acceso_cliente) || isTrue(currentUser?.acceso_cliente);
+    if (tasaActualEl) {
+      if (isClienteRate) {
+        tasaActualEl.classList.add("hidden");
+      } else {
+        fetchP2PRate()
+          .then((rate) => {
+            const tasaVal = rate
+              ? Math.round(rate * TASA_MARKUP * 100) / 100
+              : null;
+            if (!Number.isFinite(tasaVal)) {
+              tasaActualEl.classList.add("hidden");
+              return;
+            }
+            tasaActualEl.textContent = `Tasa actual: Bs. ${tasaVal.toFixed(2)}`;
+            tasaActualEl.classList.remove("hidden");
+          })
+          .catch(() => {
+            tasaActualEl.classList.add("hidden");
+          });
+      }
+    }
     const isAdmin =
       isTrue(sessionRoles?.permiso_admin) ||
       isTrue(sessionRoles?.permiso_superadmin) ||

@@ -11,14 +11,21 @@
     <script src="../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas">
-      <h2>Carrito</h2>
+      <div class="cart-title-row">
+        <h2>Carrito</h2>
+        <p id="cart-saldo" class="cart-saldo">Saldo: $0.00</p>
+      </div>
       <p id="cart-status" class="status"></p>
       <div class="cart-table-wrap">
         <div id="cart-page-items" class="cart-items page-cart"></div>
-      </div>
-      <p id="cart-saldo" class="cart-saldo">Saldo: $0.00</p>
-      <div class="page-actions">
-        <button id="btn-page-pay" class="btn-primary">Finalizar compra</button>
+        <div class="page-actions">
+          <div class="cart-pay-stack">
+            <button id="btn-page-pay" class="btn-primary">Finalizar compra</button>
+            <p id="cart-refresh-note" class="status hidden">
+              Actualiza el carrito para continuar.
+            </p>
+          </div>
+        </div>
       </div>
     </main>
 

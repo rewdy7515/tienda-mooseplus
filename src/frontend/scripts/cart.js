@@ -75,8 +75,13 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
 
 const toggleCart = (open) => {
   if (!drawer) return;
-  if (open) drawer.classList.add("open");
-  else drawer.classList.remove("open");
+  if (open) {
+    drawer.classList.add("open");
+    document.body.classList.add("cart-drawer-open");
+  } else {
+    drawer.classList.remove("open");
+    document.body.classList.remove("cart-drawer-open");
+  }
 };
 
 const toggleActions = (hasItems) => {
@@ -115,17 +120,6 @@ const renderCart = () => {
           }
         </div>
       <div class="cart-controls">
-        ${
-          item.renovacion
-            ? ""
-            : `
-        <div class="cart-qty-inline" data-index="${idx}">
-          <button class="cart-minus" aria-label="Disminuir">-</button>
-          <span>${item.cantidad}</span>
-          <button class="cart-plus" aria-label="Aumentar">+</button>
-          </div>
-        `
-        }
         <button class="cart-remove" data-index="${idx}" data-id-item="${item.id_item || ""}" aria-label="Eliminar">×</button>
       </div>
       </div>`
@@ -187,19 +181,17 @@ export function initCart({
 
   itemsEl?.addEventListener("click", (e) => {
     const btn = e.target.closest(".cart-remove");
-    const minus = e.target.closest(".cart-minus");
-    const plus = e.target.closest(".cart-plus");
     if (btn) {
       const idx = Number(btn.dataset.index);
       if (Number.isNaN(idx)) return;
       const item = cartItems[idx];
-      const key = item.id_precio || item.id_plataforma;
-      const qtyToRemove = item?.cantidad || 0;
+      const key = item?.id_precio || null;
+      const qtyToRemove = Math.max(1, Number(item?.cantidad) || 1);
       const meses = item?.meses || null;
       const idVenta = item?.id_venta || null;
-      const idItem = btn.dataset.idItem || null;
+      const idItem = item?.id_item || btn.dataset.idItem || null;
       cartItems.splice(idx, 1);
-      if (key && qtyToRemove > 0)
+      if (key)
         sendCartDelta(key, -qtyToRemove, meses, {
           id_venta: idVenta,
           id_item: idItem,
@@ -211,32 +203,6 @@ export function initCart({
         );
       renderCart();
       return;
-    }
-    if (minus || plus) {
-      const wrapper = e.target.closest(".cart-qty-inline");
-      const idx = Number(wrapper?.dataset.index);
-      if (Number.isNaN(idx)) return;
-      const delta = minus ? -1 : 1;
-      const item = cartItems[idx];
-      if (!item) return;
-      if (item.renovacion) return;
-      const key = item.id_precio || item.id_plataforma;
-      const newQty = (item.cantidad || 0) + delta;
-      if (newQty <= 0) {
-        cartItems.splice(idx, 1);
-      } else {
-        item.cantidad = newQty;
-      }
-      if (key)
-        sendCartDelta(key, delta, null, {
-          id_venta: item?.id_venta || null,
-          renovacion: item?.renovacion,
-          id_cuenta: item?.id_cuenta || null,
-          id_perfil: item?.id_perfil || null,
-        }).finally(() => {
-          if (refreshFromServerFn) refreshFromServerFn();
-        });
-      renderCart();
     }
   });
 

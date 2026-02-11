@@ -1,1 +1,1 @@
-export const TASA_MARKUP = 1.01;
+export const TASA_MARKUP = 1.005;

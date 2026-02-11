@@ -35,13 +35,13 @@ export async function loadCatalog() {
     supabase
       .from("plataformas")
       .select(
-        "id_plataforma, id_categoria, nombre, imagen, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible"
+        "id_plataforma, id_categoria, nombre, imagen, banner, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos"
       )
       .order("nombre"),
     supabase
       .from("precios")
       .select(
-        "id_precio, id_plataforma, cantidad, precio_usd_detal, precio_usd_mayor, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta"
+        "id_precio, id_plataforma, cantidad, precio_usd_detal, precio_usd_mayor, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta, descripcion_plan"
       )
       .order("id_precio"),
     supabase.from("descuentos").select("id_descuento, meses, descuento_1, descuento_2"),

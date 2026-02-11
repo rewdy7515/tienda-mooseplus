@@ -10,6 +10,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
             id,
             nombre: nomPlat,
             imagen,
+            banner,
             por_pantalla,
             por_acceso,
             tarjeta_de_regalo,
@@ -17,6 +18,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
             descuento_meses,
             id_descuento,
             mostrar_stock,
+            num_max_dispositivos,
           }) => {
             const platId = id_plataforma || id;
             const minPrecio = Number(preciosMinByPlat?.[String(platId)] ?? preciosMinByPlat?.[platId]);
@@ -29,6 +31,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
             <div class="plataforma-card"
               data-nombre="${nomPlat}"
               data-imagen="${imagen || ""}"
+              data-banner="${banner || ""}"
               data-categoria="${nombre}"
               data-id-plataforma="${platId || ""}"
               data-por-pantalla="${por_pantalla}"
@@ -37,6 +40,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
               data-entrega-inmediata="${entrega_inmediata}"
               data-descuento-meses="${descuento_meses}"
               data-mostrar-stock="${mostrar_stock}"
+              data-num-max-dispositivos="${num_max_dispositivos ?? ""}"
             data-id-descuento="">
               <div class="plataforma-thumb">
                 <img src="${imagen || ""}" alt="${nomPlat}" loading="lazy" />

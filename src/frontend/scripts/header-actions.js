@@ -38,23 +38,37 @@ if (!window.__headerActionsInit) {
 
   const headerEl = document.querySelector(".header");
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
+  let headerHeight = 0;
+  let hideOffset = 0;
+  const applyHeaderOffset = () => {
+    const visible = Math.max(0, headerHeight - hideOffset);
+    document.documentElement.style.setProperty("--header-offset", `${visible}px`);
+  };
+  const syncHeaderHeight = () => {
+    if (!headerEl) return;
+    headerHeight = headerEl.offsetHeight || 0;
+    document.documentElement.style.setProperty("--header-height", `${headerHeight}px`);
+    hideOffset = Math.min(hideOffset, headerHeight);
+    headerEl.style.transform = `translateY(${-hideOffset}px)`;
+    applyHeaderOffset();
+  };
+
   const initHeaderAutoHide = () => {
     if (!headerEl) return;
     let lastY = window.scrollY || 0;
     let ticking = false;
-    const threshold = 6;
     const onScroll = () => {
       const y = window.scrollY || 0;
       if (!ticking) {
         window.requestAnimationFrame(() => {
           const delta = y - lastY;
           if (y <= 0) {
-            headerEl.classList.remove("header-hidden");
-          } else if (delta > threshold) {
-            headerEl.classList.add("header-hidden");
-          } else if (delta < -threshold) {
-            headerEl.classList.remove("header-hidden");
+            hideOffset = 0;
+          } else {
+            hideOffset = Math.min(Math.max(hideOffset + delta, 0), headerHeight);
           }
+          headerEl.style.transform = `translateY(${-hideOffset}px)`;
+          applyHeaderOffset();
           lastY = y;
           ticking = false;
         });
@@ -63,6 +77,16 @@ if (!window.__headerActionsInit) {
     };
     window.addEventListener("scroll", onScroll, { passive: true });
   };
+
+  if (headerEl) {
+    syncHeaderHeight();
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => syncHeaderHeight());
+      ro.observe(headerEl);
+    }
+    window.addEventListener("resize", syncHeaderHeight, { passive: true });
+    initHeaderAutoHide();
+  }
 
   const normalizeHeaderLinks = () => {
     const headerEl = document.querySelector(".header");
@@ -242,7 +266,6 @@ if (!window.__headerActionsInit) {
 
   attachLogoHome();
   normalizeHeaderLinks();
-  initHeaderAutoHide();
 
   // Botones de carrito / checkout / stock
   const btnViewCart = document.querySelector("#btn-view-cart");

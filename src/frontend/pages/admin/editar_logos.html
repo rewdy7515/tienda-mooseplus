@@ -35,6 +35,9 @@
       .logo-editor.no-logo .logo-current {
         display: none;
       }
+      .logo-editor.no-banner .banner-current {
+        display: none;
+      }
       .logo-current {
         flex: 1;
         background: #fff;
@@ -56,10 +59,27 @@
         overflow: hidden;
         background: #fafafa;
       }
+      .banner-frame {
+        width: 100%;
+        aspect-ratio: 3 / 1;
+        min-height: 120px;
+        border: 1px dashed #d1d5db;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #fafafa;
+      }
       .logo-frame img {
         max-width: 100%;
         max-height: 100%;
         object-fit: contain;
+      }
+      .banner-frame img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
       }
       .logo-upload {
         flex: 1;
@@ -119,6 +139,23 @@
             <p id="logo-status" class="status logo-status"></p>
           </div>
         </div>
+
+        <div id="banner-editor" class="logo-editor hidden">
+          <div class="logo-current banner-current" id="banner-current">
+            <p class="logo-label">Banner actual</p>
+            <div class="banner-frame">
+              <img id="banner-preview" src="" alt="Banner actual" />
+            </div>
+          </div>
+          <div class="logo-upload">
+            <p class="logo-label">Nuevo banner</p>
+            <input type="file" id="banner-file" accept="image/*" />
+            <button type="button" class="btn-primary" id="btn-banner-update">
+              Actualizar banner
+            </button>
+            <p id="banner-status" class="status logo-status"></p>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -138,11 +175,17 @@
 
       const selectPlataforma = document.querySelector("#logo-plataforma");
       const editor = document.querySelector("#logo-editor");
+      const bannerEditor = document.querySelector("#banner-editor");
       const currentWrap = document.querySelector("#logo-current");
       const previewImg = document.querySelector("#logo-preview");
       const fileInput = document.querySelector("#logo-file");
       const btnUpdate = document.querySelector("#btn-logo-update");
       const statusEl = document.querySelector("#logo-status");
+      const bannerCurrentWrap = document.querySelector("#banner-current");
+      const bannerPreview = document.querySelector("#banner-preview");
+      const bannerInput = document.querySelector("#banner-file");
+      const btnBannerUpdate = document.querySelector("#btn-banner-update");
+      const bannerStatusEl = document.querySelector("#banner-status");
 
       let plataformasMap = {};
       let selectedId = null;
@@ -152,6 +195,13 @@
         statusEl.textContent = msg || "";
         statusEl.classList.toggle("is-error", isError);
         statusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+
+      const setBannerStatus = (msg, isError = false) => {
+        if (!bannerStatusEl) return;
+        bannerStatusEl.textContent = msg || "";
+        bannerStatusEl.classList.toggle("is-error", isError);
+        bannerStatusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
       // Exporta a 3x para mejor nitidez en el display 148x185
@@ -228,10 +278,71 @@
         });
       };
 
+      // Banner 3x para 275x138 aprox (825x414)
+      const resizeBannerIfNeeded = (file, targetW = 825, targetH = 414, maxBytes = 220000) => {
+        return new Promise((resolve) => {
+          if (!file || !file.type?.startsWith("image/")) return resolve(file);
+          const shouldResize = file.size > maxBytes;
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const { width, height } = img;
+            if (!shouldResize && width === targetW && height === targetH) {
+              resolve(file);
+              return;
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              resolve(file);
+              return;
+            }
+            const scale = Math.max(targetW / width, targetH / height);
+            const drawW = Math.max(1, Math.round(width * scale));
+            const drawH = Math.max(1, Math.round(height * scale));
+            const offsetX = Math.round((targetW - drawW) / 2);
+            const offsetY = Math.round((targetH - drawH) / 2);
+            ctx.clearRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+            const tryWebp = true;
+            const mime = tryWebp ? "image/webp" : "image/jpeg";
+            const makeBlob = (type, quality) =>
+              new Promise((res) => {
+                canvas.toBlob((blob) => res(blob), type, quality);
+              });
+            (async () => {
+              let quality = 0.92;
+              let blob = await makeBlob(mime, quality);
+              while (blob && blob.size > maxBytes && quality > 0.7) {
+                quality = Math.max(0.7, quality - 0.05);
+                blob = await makeBlob(mime, quality);
+              }
+              if (blob) {
+                const baseName = file.name.replace(/\.[^.]+$/, "");
+                const ext = blob.type === "image/webp" ? "webp" : "jpg";
+                const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type });
+                resolve(resized);
+                return;
+              }
+              resolve(file);
+            })().catch(() => resolve(file));
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(file);
+          };
+          img.src = url;
+        });
+      };
+
       const renderEditor = (plat) => {
         if (!editor) return;
         if (!plat) {
           editor.classList.add("hidden");
+          bannerEditor?.classList.add("hidden");
           return;
         }
         editor.classList.remove("hidden");
@@ -239,13 +350,21 @@
         editor.classList.toggle("no-logo", !hasLogo);
         if (currentWrap) currentWrap.style.display = hasLogo ? "flex" : "none";
         if (previewImg) previewImg.src = hasLogo ? plat.imagen : "";
+
+        if (bannerEditor) {
+          bannerEditor.classList.remove("hidden");
+          const hasBanner = !!plat.banner;
+          bannerEditor.classList.toggle("no-banner", !hasBanner);
+          if (bannerCurrentWrap) bannerCurrentWrap.style.display = hasBanner ? "flex" : "none";
+          if (bannerPreview) bannerPreview.src = hasBanner ? plat.banner : "";
+        }
       };
 
       const loadPlataformas = async () => {
         try {
           const { data, error } = await supabase
             .from("plataformas")
-            .select("id_plataforma, nombre, imagen")
+            .select("id_plataforma, nombre, imagen, banner")
             .order("nombre", { ascending: true });
           if (error) throw error;
           plataformasMap = (data || []).reduce((acc, p) => {
@@ -269,7 +388,9 @@
         const val = selectPlataforma.value;
         selectedId = val ? Number(val) : null;
         setStatus("");
+        setBannerStatus("");
         if (fileInput) fileInput.value = "";
+        if (bannerInput) bannerInput.value = "";
         const plat = selectedId ? plataformasMap[selectedId] : null;
         renderEditor(plat);
       });
@@ -317,6 +438,52 @@
         } catch (err) {
           console.error("actualizar logo error", err);
           setStatus("No se pudo actualizar el logo.", true);
+        }
+      });
+
+      btnBannerUpdate?.addEventListener("click", async () => {
+        if (!selectedId) {
+          setBannerStatus("Selecciona una plataforma.", true);
+          return;
+        }
+        let file = bannerInput?.files?.[0];
+        if (!file) {
+          setBannerStatus("Selecciona una imagen.", true);
+          return;
+        }
+        if (!file.type?.startsWith("image/")) {
+          setBannerStatus("Solo se permiten archivos de imagen.", true);
+          return;
+        }
+        try {
+          console.log("[editar_logos] banner selectedId", selectedId);
+          console.log("[editar_logos] banner file", { name: file.name, type: file.type, size: file.size });
+          setBannerStatus("Optimizando imagen...");
+          file = await resizeBannerIfNeeded(file);
+          console.log("[editar_logos] optimized banner file", { name: file.name, type: file.type, size: file.size });
+          setBannerStatus("Subiendo banner...");
+          const { urls, error: uploadErr } = await uploadPlatformLogos([file]);
+          console.log("[editar_logos] banner upload response", { urls, uploadErr });
+          if (uploadErr) throw uploadErr;
+          const url = urls?.[0];
+          if (!url) throw new Error("No se obtuvo URL del banner.");
+          console.log("[editar_logos] updating plataforma banner", { id_plataforma: selectedId, url });
+          const { error: updErr } = await supabase
+            .from("plataformas")
+            .update({ banner: url })
+            .eq("id_plataforma", selectedId);
+          console.log("[editar_logos] banner update response", { updErr });
+          if (updErr) throw updErr;
+          plataformasMap[selectedId] = {
+            ...plataformasMap[selectedId],
+            banner: url,
+          };
+          renderEditor(plataformasMap[selectedId]);
+          setBannerStatus("Banner actualizado correctamente.");
+          if (bannerInput) bannerInput.value = "";
+        } catch (err) {
+          console.error("actualizar banner error", err);
+          setBannerStatus("No se pudo actualizar el banner.", true);
         }
       });
 

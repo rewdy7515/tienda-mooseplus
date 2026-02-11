@@ -2,7 +2,13 @@
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 120;
+  z-index: 3000;
+}
+
+body.cart-drawer-open {
+  overflow: hidden;
+  height: 100%;
+  touch-action: none;
 }
 
 .cart-drawer.open {
@@ -79,14 +85,21 @@
 
 /* Contenedor de tabla en página de carrito */
 .cart-items.page-cart {
-  max-height: 70vh;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   padding: 0;
+}
+
+.cart-title-row {
+  position: static !important;
+  top: auto !important;
 }
 
 @media (max-width: 640px) {
   .cart-items.page-cart {
-    max-height: 60vh;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
   }
 }
 
@@ -256,4 +269,259 @@
 
 .cart-page-table .modal-qty {
   margin: 0 auto;
+}
+
+.cart-price-line {
+  display: none;
+}
+
+.cart-items-cards {
+  display: none;
+}
+
+.cart-item-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cart-item-top {
+  display: grid;
+  grid-template-columns: 60px 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.cart-item-logo {
+  width: 60px;
+  height: 60px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.cart-item-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.cart-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cart-item-bottom {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cart-item-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.cart-item-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.cart-subtotal {
+  font-weight: 700;
+}
+
+.cart-item-subtotal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .cart-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .cart-price-line {
+    display: block;
+  }
+
+  .cart-items-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cart-table-scroll {
+    display: none;
+  }
+
+  .cart-item-card {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .cart-item-top {
+    grid-template-columns: 140px 1fr auto;
+  }
+
+  .cart-item-logo {
+    width: 140px;
+    height: 140px;
+  }
+
+  .cart-item-top .cart-remove {
+    align-self: flex-start;
+  }
+
+  .cart-item-bottom {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cart-item-cell {
+    align-items: center;
+    text-align: center;
+  }
+
+  .cart-item-subtotal {
+    align-items: center;
+    text-align: center;
+  }
+
+  .cart-left .cart-page-table thead {
+    display: none;
+  }
+
+  .cart-left .cart-page-table,
+  .cart-left .cart-page-table tbody,
+  .cart-left .cart-page-table tr,
+  .cart-left .cart-page-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .cart-left .cart-page-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "top top top"
+      "months qty subtotal";
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    height: auto;
+    min-height: 0;
+  }
+
+  .cart-left .cart-page-table td {
+    padding: 0;
+    border: none;
+    text-align: left;
+    min-width: 0;
+  }
+
+  .cart-left .cart-page-table td:nth-child(1) {
+    grid-area: top;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .cart-left .cart-page-table td:nth-child(2) {
+    grid-area: months;
+    text-align: center;
+  }
+
+  .cart-left .cart-page-table td:nth-child(4) {
+    grid-area: qty;
+    text-align: center;
+  }
+
+  .cart-left .cart-page-table td:nth-child(5) {
+    grid-area: subtotal;
+    text-align: center;
+  }
+
+  .cart-left .cart-page-table td:nth-child(3) {
+    display: none;
+  }
+
+  .cart-left .cart-page-table td:nth-child(2)::before,
+  .cart-left .cart-page-table td:nth-child(4)::before,
+  .cart-left .cart-page-table td:nth-child(5)::before {
+    display: block;
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 6px;
+  }
+
+  .cart-left .cart-page-table td:nth-child(2)::before {
+    content: "Meses";
+  }
+
+  .cart-left .cart-page-table td:nth-child(4)::before {
+    content: "Cantidad";
+  }
+
+  .cart-left .cart-page-table td:nth-child(5)::before {
+    content: "Subtotal";
+  }
+
+  .cart-left .cart-page-table .modal-qty {
+    margin: 0;
+    justify-content: center;
+  }
+
+  .cart-left .cart-page-table .cart-product {
+    align-items: flex-start;
+  }
+
+  /* En móvil, quitar estilo table-base solo en la tabla izquierda */
+  .cart-left .table-base {
+    border: none;
+    border-radius: 0;
+  }
+
+  .cart-left .table-base th,
+  .cart-left .table-base td {
+    border: none;
+  }
+
+  .cart-left .table-base th {
+    background: transparent;
+    color: inherit;
+  }
+
+  .cart-right {
+    align-items: stretch !important;
+  }
+
+  .cart-right .cart-summary-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 auto;
+    display: table;
+    table-layout: fixed;
+  }
+
+  .cart-summary-table th,
+  .cart-summary-table td {
+    padding: 6px 8px;
+    white-space: normal;
+    overflow: visible;
+  }
 }

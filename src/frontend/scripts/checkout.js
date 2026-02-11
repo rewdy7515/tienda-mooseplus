@@ -218,8 +218,10 @@ const renderDetalle = () => {
     return;
   }
   const m = metodos[seleccionado];
+  const isMetodoBs = Number(m.id_metodo_de_pago ?? m.id) === 1;
+  const nombreLabel = isMetodoBs ? "Banco" : "Nombre";
   const campos = [
-    { label: "Nombre", valor: m.nombre, copy: false },
+    { label: nombreLabel, valor: m.nombre, copy: false },
     { label: "Correo", valor: m.correo, copy: true },
     { label: "ID", valor: m.id, copy: true },
     { label: "Cédula", valor: m.cedula, copy: false },
@@ -236,7 +238,6 @@ const renderDetalle = () => {
     })
     .join("");
 
-  const isMetodoBs = Number(m.id_metodo_de_pago ?? m.id) === 1;
   if (pagoMovilNote) {
     pagoMovilNote.classList.toggle("hidden", !isMetodoBs);
   }
@@ -751,6 +752,21 @@ const uploadFiles = async () => {
   return resp?.urls || [];
 };
 
+const updateOrdenConReferencia = async (idOrden, updatePayload) => {
+  if (!idOrden) return false;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { data, error } = await supabase
+      .from("ordenes")
+      .update(updatePayload)
+      .eq("id_orden", idOrden)
+      .select("id_orden");
+    if (error) throw error;
+    if (Array.isArray(data) && data.length > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+  return false;
+};
+
 btnSendPayment?.addEventListener("click", async () => {
   // Toma montos guardados en BD, sin recálculo en frontend
   try {
@@ -830,6 +846,7 @@ btnSendPayment?.addEventListener("click", async () => {
   }
   try {
     const comprobantes = isMetodoBs ? [] : await uploadFiles();
+    const { fecha, hora } = getCaracasNow();
     if (isSaldoCheckout) {
       const montoBs = Number.isFinite(tasaBs) ? round2(totalUsd * tasaBs) : null;
       const { error: ordErr } = await supabase
@@ -846,6 +863,9 @@ btnSendPayment?.addEventListener("click", async () => {
           pago_verificado: false,
           monto_completo: null,
           orden_cancelada: null,
+          fecha,
+          hora_orden: hora,
+          hora_confirmacion: hora,
         })
         .eq("id_orden", saldoOrderId);
       if (ordErr) throw ordErr;
@@ -865,6 +885,22 @@ btnSendPayment?.addEventListener("click", async () => {
     if (resp?.error) {
       alert(`Error en checkout: ${resp.error}`);
       return;
+    }
+    if (resp?.id_orden) {
+      try {
+        const updated = await updateOrdenConReferencia(resp.id_orden, {
+          fecha,
+          hora_orden: hora,
+          hora_confirmacion: hora,
+          referencia: refInput.value.trim(),
+          comprobante: comprobantes,
+        });
+        if (!updated) {
+          console.warn("Orden no encontrada para actualizar referencia", resp.id_orden);
+        }
+      } catch (horaErr) {
+        console.warn("No se pudo actualizar orden en checkout", horaErr);
+      }
     }
     const userId = requireSession();
     // Marcar notificación de inventario para el usuario en sesión

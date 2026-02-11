@@ -24,6 +24,7 @@
           </button>
         </div>
         <section class="categorias-dinamicas">
+          <p id="tasa-actual" class="status tasa-actual hidden"></p>
           <p id="categorias-status" class="status"></p>
           <div id="categorias-container" class="categorias-grid"></div>
         </section>
@@ -36,56 +37,75 @@
       <div class="modal-card">
         <button class="modal-close" aria-label="Cerrar">×</button>
         <div class="modal-body">
-          <div class="modal-media">
-            <img id="modal-image" src="" alt="Plataforma" />
-          </div>
-          <div class="modal-info">
-            <div class="modal-scroll">
-              <div class="modal-header">
-                <div class="modal-title">
-                  <h3 id="modal-name"></h3>
-                  <p id="modal-category" class="modal-category"></p>
+          <div class="modal-top">
+            <div class="modal-mobile-header">
+              <h3 id="modal-name-mobile" class="modal-name-mobile"></h3>
+              <p id="modal-category-mobile" class="modal-category modal-category-mobile"></p>
+            </div>
+            <div class="modal-media-wrap">
+              <div class="modal-media">
+                <img id="modal-image" src="" alt="Plataforma" />
+              </div>
+              <div class="modal-banner-meta">
+                <p
+                  id="modal-badge-mobile"
+                  class="modal-badge modal-badge-mobile"
+                ></p>
+              </div>
+            </div>
+            <div class="modal-info">
+              <div class="modal-scroll">
+                <div class="modal-header">
+                  <div class="modal-title">
+                    <h3 id="modal-name"></h3>
+                    <p id="modal-category" class="modal-category"></p>
+                  </div>
+                  <p id="modal-badge" class="modal-badge"></p>
                 </div>
-                <p id="modal-badge" class="modal-badge"></p>
+                <p id="modal-title-mobile" class="modal-title-mobile"></p>
+                <p class="modal-plan-hint">Selecciona un plan</p>
+                <div id="modal-precios" class="modal-precios"></div>
               </div>
-              <div id="modal-precios" class="modal-precios"></div>
             </div>
-            <div class="modal-actions-fixed">
-              <div class="modal-qty modal-qty-disabled">
-                <span class="modal-duration-label">Duración:</span>
-                <button
-                  type="button"
-                  id="qty-months-minus"
-                  aria-label="Disminuir meses"
-                >
-                  -
-                </button>
-                <span id="qty-months-value">1</span>
-                <button
-                  type="button"
-                  id="qty-months-plus"
-                  aria-label="Aumentar meses"
-                >
-                  +
-                </button>
-                <span class="modal-duration-suffix">meses</span>
-                <span id="months-discount" class="discount-badge hidden"></span>
-              </div>
-              <div class="modal-qty modal-qty-disabled">
-                <span class="modal-duration-label">Cantidad:</span>
-                <button type="button" id="qty-minus" aria-label="Disminuir">
-                  -
-                </button>
-                <span id="qty-value">1</span>
-                <button type="button" id="qty-plus" aria-label="Aumentar">
-                  +
-                </button>
-                <span class="modal-duration-suffix">items</span>
-                <span id="items-discount" class="discount-badge hidden"></span>
-              </div>
-              <p id="modal-total" class="modal-total">Total: $0.00</p>
-              <button id="add-cart" class="btn-add">Añadir al carrito</button>
+            <div id="modal-scroll-hint" class="modal-scroll-hint">
+              Desliza hacia abajo
             </div>
+          </div>
+          <div class="modal-bottom">
+            <div class="modal-qty modal-qty-disabled">
+              <span class="modal-duration-label">Duración:</span>
+              <button
+                type="button"
+                id="qty-months-minus"
+                aria-label="Disminuir meses"
+              >
+                -
+              </button>
+              <span id="qty-months-value">1</span>
+              <button
+                type="button"
+                id="qty-months-plus"
+                aria-label="Aumentar meses"
+              >
+                +
+              </button>
+              <span class="modal-duration-suffix">meses</span>
+              <span id="months-discount" class="discount-badge hidden"></span>
+            </div>
+            <div class="modal-qty modal-qty-disabled">
+              <span class="modal-duration-label">Cantidad:</span>
+              <button type="button" id="qty-minus" aria-label="Disminuir">
+                -
+              </button>
+              <span id="qty-value">1</span>
+              <button type="button" id="qty-plus" aria-label="Aumentar">
+                +
+              </button>
+              <span class="modal-duration-suffix">items</span>
+              <span id="items-discount" class="discount-badge hidden"></span>
+            </div>
+            <p id="modal-total" class="modal-total">Total: $0.00</p>
+            <button id="add-cart" class="btn-add">Añadir al carrito</button>
           </div>
         </div>
       </div>

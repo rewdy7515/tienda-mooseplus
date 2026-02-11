@@ -152,6 +152,24 @@ const montoNum = (val) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+const creditSaldo = async (amountUsd) => {
+  const targetUserId = currentUserId || orden?.id_usuario || null;
+  if (!targetUserId) return;
+  const monto = Number(amountUsd);
+  if (!Number.isFinite(monto) || monto <= 0) return;
+  const { data: userSaldo, error: saldoErr } = await supabase
+    .from("usuarios")
+    .select("saldo")
+    .eq("id_usuario", targetUserId)
+    .maybeSingle();
+  if (saldoErr) return;
+  const saldoActual = Number(userSaldo?.saldo) || 0;
+  const nuevoSaldo = round2(saldoActual + monto);
+  await supabase.from("usuarios").update({ saldo: nuevoSaldo }).eq("id_usuario", targetUserId);
+};
+
 const verifyPago = async () => {
   if (!orden) return;
   if (expired || processingOrder || orderProcessed) return;
@@ -237,6 +255,19 @@ const verifyPago = async () => {
   }
   const diffReal = Number((pagoMonto - montoBaseBs).toFixed(2));
   if (diffReal < 0) {
+    if (orden?.recargar_saldo) {
+      await supabase
+        .from("ordenes")
+        .update({ pago_verificado: true, orden_cancelada: true, monto_completo: null, en_espera: false })
+        .eq("id_orden", orden.id_orden);
+      orden.pago_verificado = true;
+      orden.orden_cancelada = true;
+      orderProcessed = true;
+      if (processingBlock) processingBlock.classList.add("hidden");
+      toggleRetryActions(false);
+      setStatus("Pago insuficiente. Orden cancelada.");
+      return;
+    }
     const saldoUsd =
       Number.isFinite(montoBaseBs) && Number.isFinite(tasaBase) && tasaBase
         ? Number((montoBaseBs / tasaBase).toFixed(2))
@@ -286,6 +317,21 @@ const verifyPago = async () => {
       .from("ordenes")
       .update({ pago_verificado: true, monto_completo: true, orden_cancelada: false })
       .eq("id_orden", orden.id_orden);
+  }
+
+  if (orden?.recargar_saldo) {
+    const baseUsd = Number(orden.total) || 0;
+    const extraUsd =
+      diffReal > 0 && Number.isFinite(tasaBase) && tasaBase
+        ? Number(((pagoMonto - montoBaseBs) / tasaBase).toFixed(2))
+        : 0;
+    await creditSaldo(round2(baseUsd + extraUsd));
+    orden.en_espera = false;
+    orden.pago_verificado = true;
+    orderProcessed = true;
+    setStatus("Saldo recargado. Redirigiendo...");
+    window.location.href = "saldo.html";
+    return;
   }
 
   processingOrder = true;
@@ -397,7 +443,7 @@ async function init() {
     const { data, error } = await supabase
       .from("ordenes")
       .select(
-        "id_orden, id_carrito, referencia, total, tasa_bs, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada"
+        "id_orden, id_carrito, id_usuario, referencia, total, tasa_bs, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo"
       )
       .eq("id_orden", idOrden)
       .single();

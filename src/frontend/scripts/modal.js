@@ -12,15 +12,78 @@ let currentQty = 1; // items
 let currentMonths = 1;
 let stockByPlatform = {};
 let selectedButtonEl = null;
+let modalImageListenerBound = false;
+let modalTopEl = null;
+let modalScrollHintEl = null;
+let scrollHintBound = false;
+let tooltipDismissBound = false;
 
-const getClosestDiscountRow = (value) => {
+const updateScrollHint = () => {
+  if (!modalTopEl || !modalScrollHintEl) return;
+  if (!isBannerViewport()) {
+    modalScrollHintEl.classList.remove("is-visible");
+    return;
+  }
+  const hasOverflow = modalTopEl.scrollHeight - modalTopEl.clientHeight > 8;
+  if (!hasOverflow) {
+    modalScrollHintEl.classList.remove("is-visible");
+    return;
+  }
+  const atTop = modalTopEl.scrollTop <= 2;
+  let shouldShow = false;
+  if (atTop) {
+    const plans = modalTopEl.querySelectorAll(".plan-bloque");
+    if (plans.length) {
+      const lastPlan = plans[plans.length - 1];
+      const topRect = modalTopEl.getBoundingClientRect();
+      const lastRect = lastPlan.getBoundingClientRect();
+      // Mostrar solo si el último plan no se ve ni un poco.
+      shouldShow = lastRect.top >= topRect.bottom - 2;
+    } else {
+      shouldShow = true;
+    }
+  }
+  modalScrollHintEl.classList.toggle("is-visible", shouldShow);
+};
+
+const isBannerViewport = () => {
+  try {
+    return window.matchMedia("(max-width: 700px)").matches;
+  } catch (_) {
+    return false;
+  }
+};
+
+const resolveModalImage = (platform) => {
+  const banner = platform?.banner;
+  const imagen = platform?.imagen;
+  if (isBannerViewport()) {
+    return banner || "";
+  }
+  return imagen || banner || "";
+};
+
+const updateModalImage = () => {
+  if (!modalEls?.modalImg || !currentPlatform) return;
+  const src = resolveModalImage(currentPlatform);
+  modalEls.modalImg.src = src || "";
+  modalEls.modalImg.alt = currentPlatform.nombre || "";
+};
+
+const getClosestDiscountRow = (value, column) => {
   const key = Number(value) || 0;
   const exact = descuentosPorMes[key];
-  if (exact) return exact;
+  const exactVal = exact?.[column];
+  if (exactVal !== null && exactVal !== undefined && exactVal !== "") return exact;
   const nearest = Object.keys(descuentosPorMes)
     .map((k) => Number(k))
     .filter((n) => Number.isFinite(n) && n <= key)
-    .sort((a, b) => b - a)[0];
+    .sort((a, b) => b - a)
+    .find((n) => {
+      const row = descuentosPorMes[n];
+      const val = row?.[column];
+      return val !== null && val !== undefined && val !== "";
+    });
   if (!Number.isFinite(nearest)) return null;
   return descuentosPorMes[nearest] || null;
 };
@@ -32,26 +95,46 @@ const getDiscountPercent = (platform, value, mode = "months") => {
     platform?.descuento_meses === "1";
   if (!usa) return 0;
   const key = Number(value) || 0;
-  const row = getClosestDiscountRow(key) || {};
-  const pct =
-    mode === "items"
-      ? Number(row.descuento_2) || 0
-      : Number(row.descuento_1) || 0;
+  const col = mode === "items" ? "descuento_2" : "descuento_1";
+  const row = getClosestDiscountRow(key, col) || {};
+  const pct = Number(row[col]) || 0;
   console.log("[discount] plataforma", platform?.nombre, mode, key, "pct", pct, "map", descuentosPorMes);
   return pct;
 };
 
-const buildButtonLabel = (opcion, flags, months, platform, qty = 1) => {
+const calculateFinalPrice = (basePrice, platform, flags, months, qty) => {
+  const items =
+    flags?.por_pantalla || flags?.por_acceso ? Number(qty) || 1 : 1;
+  const monthFactor = flags?.tarjeta_de_regalo ? 1 : Number(months) || 1;
+  const itemsDiscount =
+    flags?.por_pantalla || flags?.por_acceso
+      ? getDiscountPercent(platform, items, "items")
+      : 0;
+  const monthsDiscount = flags?.tarjeta_de_regalo
+    ? 0
+    : getDiscountPercent(platform, monthFactor, "months");
+  const subtotal = (Number(basePrice) || 0) * items * monthFactor;
+  const final =
+    subtotal *
+    (1 - Math.max(0, itemsDiscount) / 100) *
+    (1 - Math.max(0, monthsDiscount) / 100);
+  return { subtotal, final, itemsDiscount, monthsDiscount };
+};
+
+const setDiscountBadge = (el, pct) => {
+  if (!el) return;
+  const value = Number(pct) || 0;
+  el.textContent = `-${value}%`;
+  el.classList.remove("hidden");
+  el.classList.toggle("is-zero", value <= 0);
+};
+
+const buildButtonLabel = (opcion, flags, _months, platform, _qty = 1) => {
   const isNetflixPlan2 =
     Number(platform?.id_plataforma) === 1 &&
     [4, 5].includes(Number(opcion.id_precio));
   const basePrice = Number(opcion.precio_usd_detal) || 0;
-  const discount = flags.por_pantalla || flags.por_acceso
-    ? getDiscountPercent(platform, qty, "items")
-    : getDiscountPercent(platform, months, "months");
-  const mesesFactor = months || 1;
-  const precioMeses = basePrice * mesesFactor;
-  const finalPrecio = discount > 0 ? precioMeses * (1 - discount / 100) : precioMeses;
+  const final = basePrice;
 
   if (
     !isNetflixPlan2 &&
@@ -60,12 +143,12 @@ const buildButtonLabel = (opcion, flags, months, platform, qty = 1) => {
       opcion.completa === 1 ||
       opcion.completa === "1")
   ) {
-    return { text: `cuenta completa $${finalPrecio.toFixed(2)}` };
+    return { text: `cuenta completa $${final.toFixed(2)}` };
   }
   if (flags.tarjeta_de_regalo) {
     return {
       region: opcion.region || "-",
-      text: `${opcion.valor_tarjeta_de_regalo || ""} ${opcion.moneda || ""} $${finalPrecio.toFixed(2)}`,
+      text: `${opcion.valor_tarjeta_de_regalo || ""} ${opcion.moneda || ""} $${final.toFixed(2)}`,
     };
   }
   const baseUnit = flags.por_pantalla
@@ -78,7 +161,7 @@ const buildButtonLabel = (opcion, flags, months, platform, qty = 1) => {
       ? Number(opcion.duracion) || 1
       : opcion.cantidad || 1;
   const plural = cantidad === 1 ? "" : baseUnit === "mes" ? "es" : "s";
-  return { text: `${cantidad} ${baseUnit}${plural} $${finalPrecio.toFixed(2)}` };
+  return { text: `${cantidad} ${baseUnit}${plural} $${final.toFixed(2)}` };
 };
 
 const buildCartDetalle = (opcion, flags, cantidad) => {
@@ -108,13 +191,13 @@ const updateModalTotal = () => {
     return;
   }
   const basePrice = Number(selectedPrecio.precio_usd_detal) || 0;
-  const useItems = currentFlags.por_pantalla || currentFlags.por_acceso;
-  const discount = useItems
-    ? getDiscountPercent(currentPlatform, currentQty, "items")
-    : getDiscountPercent(currentPlatform, currentMonths, "months");
-  const factor = useItems ? (currentQty || 1) : (currentMonths || 1);
-  const subtotal = basePrice * factor;
-  const final = discount > 0 ? subtotal * (1 - discount / 100) : subtotal;
+  const { final } = calculateFinalPrice(
+    basePrice,
+    currentPlatform,
+    currentFlags,
+    currentMonths,
+    currentQty
+  );
   totalEl.textContent = `Total: $${final.toFixed(2)}`;
 };
 
@@ -147,15 +230,61 @@ const renderPrecios = (plataformaId, flags) => {
   btnAdd.disabled = true;
   modalQtyMonths?.classList.add("modal-qty-disabled");
   modalQtyItems?.classList.add("modal-qty-disabled");
-  if (monthsDiscount) monthsDiscount.classList.add("hidden");
-  if (itemsDiscount) itemsDiscount.classList.add("hidden");
+  if (itemsDiscount) {
+    const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
+    setDiscountBadge(itemsDiscount, pctItems);
+  }
+  if (monthsDiscount) {
+    const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
+    setDiscountBadge(monthsDiscount, pctMonths);
+  }
   // Mostrar/ocultar control de meses: solo ocultar en tarjetas de regalo
   const hideMonths = flags.tarjeta_de_regalo === true;
   if (hideMonths) {
     modalQtyMonths?.classList.add("hidden");
+    monthsDiscount?.classList.add("hidden");
   } else {
     modalQtyMonths?.classList.remove("hidden");
+    monthsDiscount?.classList.remove("hidden");
   }
+  const createPlanInfo = (planName, planDesc) => {
+    if (!planDesc) return null;
+    const wrap = document.createElement("span");
+    wrap.className = "plan-info-wrap";
+    const infoBtn = document.createElement("button");
+    infoBtn.type = "button";
+    infoBtn.className = "plan-info-icon";
+    infoBtn.textContent = "?";
+    infoBtn.setAttribute("aria-label", `Detalle del plan ${planName || ""}`.trim());
+      const tooltip = document.createElement("div");
+      tooltip.className = "plan-tooltip";
+    tooltip.textContent = planDesc;
+    wrap.appendChild(infoBtn);
+    wrap.appendChild(tooltip);
+      infoBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        modalPrecios
+          ?.querySelectorAll(".plan-tooltip.is-visible")
+          .forEach((el) => {
+            if (el !== tooltip) el.classList.remove("is-visible");
+          });
+        tooltip.classList.toggle("is-visible");
+        if (!tooltip.classList.contains("is-visible")) return;
+        requestAnimationFrame(() => {
+          const plan = wrap.closest(".plan-bloque");
+          if (!plan) return;
+          const planRect = plan.getBoundingClientRect();
+          const iconRect = infoBtn.getBoundingClientRect();
+          const top = iconRect.bottom - planRect.top + 2;
+          tooltip.style.top = `${top}px`;
+          tooltip.style.left = "50%";
+          tooltip.style.transform = "translateX(-50%)";
+          tooltip.style.right = "auto";
+          tooltip.style.bottom = "auto";
+        });
+      });
+    return wrap;
+  };
   const opciones = [...(preciosPorPlataforma[plataformaId] || [])]
     .filter((p) => p.precio_usd_detal !== null && p.precio_usd_detal !== undefined)
     .sort((a, b) => (a.id_precio || 0) - (b.id_precio || 0));
@@ -167,18 +296,13 @@ const renderPrecios = (plataformaId, flags) => {
 
   const buildSimpleLabel = (opcion) => {
     const basePrice = Number(opcion.precio_usd_detal) || 0;
-    const discount = flags.por_pantalla || flags.por_acceso
-      ? getDiscountPercent(currentPlatform, currentQty, "items")
-      : getDiscountPercent(currentPlatform, currentMonths, "months");
-    const mesesFactor = currentMonths || 1;
-    const precioMeses = basePrice * mesesFactor;
-    const finalPrecio = discount > 0 ? precioMeses * (1 - discount / 100) : precioMeses;
+    const final = basePrice;
     if (opcion.completa === true || opcion.completa === "true" || opcion.completa === 1) {
-      return `cuenta completa $${finalPrecio.toFixed(2)}`;
+      return `cuenta completa $${final.toFixed(2)}`;
     }
     const tipo =
       flags.por_pantalla ? "pantalla" : flags.por_acceso ? "acceso" : "cuenta";
-    return `${tipo} $${finalPrecio.toFixed(2)}`;
+    return `${tipo} $${final.toFixed(2)}`;
   };
 
   const opcionesPorPlan = opciones.reduce((acc, opcion) => {
@@ -189,37 +313,38 @@ const renderPrecios = (plataformaId, flags) => {
   }, {});
 
   let agrupados = {};
+  const isComplete = (op) =>
+    op?.completa === true ||
+    op?.completa === "true" ||
+    op?.completa === 1 ||
+    op?.completa === "1";
   if (flags.tarjeta_de_regalo) {
     agrupados = opcionesPorPlan;
   } else {
     agrupados = Object.entries(opcionesPorPlan).reduce((acc, [plan, items]) => {
-      const nonComplete = items.find(
-        (p) =>
-          !(
-            p.completa === true ||
-            p.completa === "true" ||
-            p.completa === 1 ||
-            p.completa === "1"
-          )
-      );
-      const complete = items.find(
-        (p) =>
-          p.completa === true ||
-          p.completa === "true" ||
-          p.completa === 1 ||
-          p.completa === "1"
-      );
-      const reduced = [];
-      if (nonComplete) reduced.push(nonComplete);
-      if (complete) reduced.push(complete);
-      if (reduced.length) acc[plan] = reduced;
+      const nonComplete = items.find((p) => !isComplete(p));
+      if (nonComplete) acc[plan] = [nonComplete];
       return acc;
     }, {});
+  }
+
+  if (!flags.tarjeta_de_regalo) {
+    const completasMap = new Map();
+    opciones.filter(isComplete).forEach((op) => {
+      const key = Number(op.id_precio) || op.id_precio;
+      if (!completasMap.has(key)) completasMap.set(key, op);
+    });
+    const completas = Array.from(completasMap.values());
+    if (completas.length) {
+      agrupados["Cuenta completa"] = completas;
+    }
   }
 
   Object.entries(agrupados).forEach(([plan, items]) => {
     const wrapper = document.createElement("div");
     wrapper.className = "plan-bloque";
+    wrapper.setAttribute("role", "button");
+    wrapper.tabIndex = 0;
     let stockPlan = stockByPlatform[plataformaId] ?? 0;
     let isPlan2 = false;
     if (Number(plataformaId) === 1) {
@@ -240,75 +365,117 @@ const renderPrecios = (plataformaId, flags) => {
       ms === "0" ||
       ms === "false"
     );
-    const isComplete = (op) =>
-      op?.completa === true ||
-      op?.completa === "true" ||
-      op?.completa === 1 ||
-      op?.completa === "1";
     const onlyComplete = items.length > 0 && items.every(isComplete);
-    let planTitle = onlyComplete ? "Cuenta completa" : plan || "";
+    if (onlyComplete) {
+      const completasStock = stockByPlatform[`${plataformaId}_completas`];
+      if (typeof completasStock !== "undefined") {
+        stockPlan = completasStock;
+      }
+    }
+    const planFallback = flags.por_acceso ? "Acceso" : "Perfil";
+    const planName = onlyComplete
+      ? "Cuenta completa"
+      : plan || planFallback;
+    let planDesc = items
+      .map((op) => (op?.descripcion_plan || "").trim())
+      .find((txt) => txt);
+    if (onlyComplete) {
+      const maxDevices = Number(currentPlatform?.num_max_dispositivos);
+      if (Number.isFinite(maxDevices)) {
+        const unit = flags.por_acceso ? "accesos" : "perfiles";
+        planDesc = `- Incluyen ${maxDevices} ${unit}`;
+      }
+    }
+    const opcionBase = items[0];
+    const priceValue = Number(opcionBase?.precio_usd_detal) || 0;
+    const appendPriceAndStock = (titleEl, stockLineText) => {
+      const priceEl = document.createElement("span");
+      priceEl.className = "plan-price-line";
+      priceEl.textContent = `$${priceValue.toFixed(2)}`;
+      titleEl.appendChild(priceEl);
+      if (stockLineText) {
+        const stockEl = document.createElement("span");
+        stockEl.className = "stock-line";
+        stockEl.textContent = stockLineText;
+        titleEl.appendChild(stockEl);
+      }
+    };
+
     if (showStock) {
       const stockLabel = onlyComplete
         ? "Disponibles"
         : flags.por_acceso
         ? "Accesos disponibles"
         : "Perfiles disponibles";
-      const stockLine = `<span class="stock-line">${stockLabel}: ${stockPlan}</span>`;
-      planTitle = planTitle ? `${planTitle}<br>${stockLine}` : stockLine;
-    }
-    const planLabel = `<p class="plan-titulo">${planTitle}</p>`;
-    wrapper.innerHTML = planLabel;
-
-    const list = document.createElement("div");
-    list.className = "plan-opciones";
-
-    items.forEach((opcion) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "precio-opcion";
-      const label = flags.tarjeta_de_regalo
-        ? buildButtonLabel(opcion, flags, currentMonths, currentPlatform)
-        : { text: buildSimpleLabel(opcion) };
-      if (label.region) {
-        const regionEl = document.createElement("p");
-        regionEl.className = "precio-region";
-        regionEl.textContent = `Región: ${label.region}`;
-        list.appendChild(regionEl);
+      const stockLine = `${stockLabel}: ${stockPlan}`;
+      const titleEl = document.createElement("p");
+      titleEl.className = "plan-titulo";
+      if (planName) {
+        const nameEl = document.createElement("span");
+        nameEl.className = "plan-name";
+        nameEl.textContent = planName;
+        titleEl.appendChild(nameEl);
+        const infoWrap = createPlanInfo(planName, planDesc);
+        if (infoWrap) titleEl.appendChild(infoWrap);
+        titleEl.appendChild(document.createElement("br"));
       }
-      btn.textContent = label.text;
-      btn.dataset.qty = opcion.cantidad;
-      btn.dataset.idPrecio = opcion.id_precio;
-      btn.addEventListener("click", () => {
-        const isSelected = btn.classList.contains("selected");
-        modalPrecios
-          .querySelectorAll(".precio-opcion")
-          .forEach((b) => b.classList.remove("selected"));
-        if (isSelected) {
-          selectedPrecio = null;
-          selectedButtonEl = null;
-          currentQty = 1;
-          currentMonths = 1;
-          qtyValue.textContent = currentQty;
-          qtyMonthsValue.textContent = currentMonths;
-          btnMinus.disabled = true;
-          btnPlus.disabled = true;
-          btnMonthsMinus.disabled = true;
-          btnMonthsPlus.disabled = true;
-          btnAdd.disabled = true;
-          modalQtyMonths?.classList.add("modal-qty-disabled");
-          modalQtyItems?.classList.add("modal-qty-disabled");
-          updateModalTotal();
-          return;
-        }
-        btn.classList.add("selected");
-        selectedPrecio = opcion;
-        selectedButtonEl = btn;
-        const isMesUnit = !flags.por_pantalla && !flags.por_acceso;
-        currentQty = isMesUnit ? 1 : opcion.cantidad || 1;
-        // Mantén el valor de meses seleccionado por el usuario (inicia en 1)
+      appendPriceAndStock(titleEl, stockLine);
+      wrapper.appendChild(titleEl);
+    } else if (planName) {
+      const titleEl = document.createElement("p");
+      titleEl.className = "plan-titulo";
+      const nameEl = document.createElement("span");
+      nameEl.className = "plan-name";
+      nameEl.textContent = planName;
+      titleEl.appendChild(nameEl);
+      const infoWrap = createPlanInfo(planName, planDesc);
+      if (infoWrap) titleEl.appendChild(infoWrap);
+      appendPriceAndStock(titleEl, null);
+      wrapper.appendChild(titleEl);
+    }
+    if (!wrapper.querySelector(".plan-titulo")) {
+      const titleEl = document.createElement("p");
+      titleEl.className = "plan-titulo";
+      const nameEl = document.createElement("span");
+      nameEl.className = "plan-name";
+      nameEl.textContent = planName || "";
+      titleEl.appendChild(nameEl);
+      const infoWrap = createPlanInfo(planName, planDesc);
+      if (infoWrap) titleEl.appendChild(infoWrap);
+      appendPriceAndStock(titleEl, null);
+      wrapper.appendChild(titleEl);
+    }
+
+    const handleSelect = () => {
+      const isSelected = wrapper.classList.contains("selected");
+      modalPrecios
+        .querySelectorAll(".plan-bloque.selected")
+        .forEach((b) => b.classList.remove("selected"));
+      if (isSelected) {
+        selectedPrecio = null;
+        selectedButtonEl = null;
+        currentQty = 1;
+        currentMonths = 1;
         qtyValue.textContent = currentQty;
         qtyMonthsValue.textContent = currentMonths;
+        btnMinus.disabled = true;
+        btnPlus.disabled = true;
+        btnMonthsMinus.disabled = true;
+        btnMonthsPlus.disabled = true;
+        btnAdd.disabled = true;
+        modalQtyMonths?.classList.add("modal-qty-disabled");
+        modalQtyItems?.classList.add("modal-qty-disabled");
         updateModalTotal();
+        return;
+      }
+      wrapper.classList.add("selected");
+      selectedPrecio = opcionBase;
+      selectedButtonEl = wrapper;
+      const isMesUnit = !flags.por_pantalla && !flags.por_acceso;
+      currentQty = isMesUnit ? 1 : opcionBase?.cantidad || 1;
+      qtyValue.textContent = currentQty;
+      qtyMonthsValue.textContent = currentMonths;
+      updateModalTotal();
       btnMinus.disabled = false;
       btnPlus.disabled = false;
       btnAdd.disabled = false;
@@ -317,36 +484,33 @@ const renderPrecios = (plataformaId, flags) => {
         btnMonthsMinus.disabled = false;
         btnMonthsPlus.disabled = false;
         modalQtyMonths?.classList.remove("modal-qty-disabled");
-          const pct = flags.por_pantalla || flags.por_acceso
-            ? getDiscountPercent(currentPlatform, currentQty, "items")
-            : getDiscountPercent(currentPlatform, currentMonths, "months");
-          if (flags.por_pantalla || flags.por_acceso) {
-            if (pct > 0 && itemsDiscount) {
-              itemsDiscount.textContent = `-${pct}%`;
-              itemsDiscount.classList.remove("hidden");
-            } else {
-              itemsDiscount?.classList.add("hidden");
-            }
-          } else {
-            if (pct > 0 && monthsDiscount) {
-              monthsDiscount.textContent = `-${pct}%`;
-              monthsDiscount.classList.remove("hidden");
-            } else {
-              monthsDiscount?.classList.add("hidden");
-            }
-          }
-        } else {
-          btnMonthsMinus.disabled = true;
-          btnMonthsPlus.disabled = true;
-          modalQtyMonths?.classList.add("modal-qty-disabled");
-          monthsDiscount?.classList.add("hidden");
-          itemsDiscount?.classList.add("hidden");
-        }
-      });
-      list.appendChild(btn);
-    });
+        const pctItems = getDiscountPercent(
+          currentPlatform,
+          currentQty,
+          "items"
+        );
+        const pctMonths = getDiscountPercent(
+          currentPlatform,
+          currentMonths,
+          "months"
+        );
+        setDiscountBadge(itemsDiscount, pctItems);
+        setDiscountBadge(monthsDiscount, pctMonths);
+      } else {
+        btnMonthsMinus.disabled = true;
+        btnMonthsPlus.disabled = true;
+        modalQtyMonths?.classList.add("modal-qty-disabled");
+        monthsDiscount?.classList.add("hidden");
+      }
+    };
 
-    wrapper.appendChild(list);
+    wrapper.addEventListener("click", handleSelect);
+    wrapper.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        handleSelect();
+      }
+    });
     modalPrecios.appendChild(wrapper);
   });
 };
@@ -357,28 +521,14 @@ const updateQtyItems = (delta) => {
   currentQty = Math.max(1, currentQty + delta);
   qtyValue.textContent = currentQty;
   updateModalTotal();
-  const pct = getDiscountPercent(currentPlatform, currentQty, "items");
-  const pctLabel = `-${pct}%`;
-  if (itemsDiscount) {
-    if (pct > 0) {
-      itemsDiscount.textContent = pctLabel;
-      itemsDiscount.classList.remove("hidden");
-    } else {
-      itemsDiscount.classList.add("hidden");
-    }
+  const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
+  const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
+  setDiscountBadge(itemsDiscount, pctItems);
+  setDiscountBadge(monthsDiscount, pctMonths);
+  if (modalEls.modalQtyMonths?.classList.contains("hidden")) {
+    monthsDiscount?.classList.add("hidden");
   }
-  const opciones = preciosPorPlataforma[currentPlatform?.id_plataforma] || [];
-  const buttons = modalEls.modalPrecios?.querySelectorAll(".precio-opcion");
-  if (buttons) {
-    buttons.forEach((btn) => {
-      const idPrecio = Number(btn.dataset.idPrecio);
-      const opt = opciones.find((o) => o.id_precio === idPrecio);
-      if (opt) {
-        const label = buildButtonLabel(opt, currentFlags, currentMonths, currentPlatform, currentQty);
-        btn.textContent = label.text;
-      }
-    });
-  }
+  // No actualizar labels de botones con cambios de qty
 };
 
 const updateQtyMonths = (delta) => {
@@ -387,33 +537,22 @@ const updateQtyMonths = (delta) => {
   currentMonths = Math.max(1, Math.round(currentMonths + delta));
   qtyMonthsValue.textContent = currentMonths;
   updateModalTotal();
-  const pct = getDiscountPercent(currentPlatform, currentMonths, "months");
-  const pctLabel = `-${pct}%`;
-  console.log("[discount] update months", { currentMonths, pct });
-  if (monthsDiscount) {
-    if (pct > 0) {
-      monthsDiscount.textContent = pctLabel;
-      monthsDiscount.classList.remove("hidden");
-    } else {
-      monthsDiscount.classList.add("hidden");
-    }
+  const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
+  const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
+  console.log("[discount] update months", { currentMonths, pctMonths });
+  setDiscountBadge(itemsDiscount, pctItems);
+  setDiscountBadge(monthsDiscount, pctMonths);
+  if (modalEls.modalQtyMonths?.classList.contains("hidden")) {
+    monthsDiscount?.classList.add("hidden");
   }
   // refresca labels de precios
-  const opciones = preciosPorPlataforma[currentPlatform?.id_plataforma] || [];
-  const buttons = modalEls.modalPrecios?.querySelectorAll(".precio-opcion");
-  if (buttons) {
-    buttons.forEach((btn) => {
-      const idPrecio = Number(btn.dataset.idPrecio);
-      const opt = opciones.find((o) => o.id_precio === idPrecio);
-      if (opt) {
-        const label = buildButtonLabel(opt, currentFlags, currentMonths, currentPlatform, currentQty);
-        btn.textContent = label.text;
-      }
-    });
-  }
+  // No actualizar labels de botones con cambios de meses
 };
 
-const closeModal = () => modalEls.modal.classList.add("hidden");
+const closeModal = () => {
+  if (modalTopEl) modalTopEl.scrollTop = 0;
+  modalEls.modal.classList.add("hidden");
+};
 
 const animateAddToCart = () => {
   if (!selectedButtonEl) return;
@@ -465,6 +604,25 @@ export const setStockData = (map) => {
 
 export const initModal = (elements) => {
   modalEls = elements;
+  modalTopEl = document.querySelector("#platform-modal .modal-top");
+  modalScrollHintEl = document.querySelector("#modal-scroll-hint");
+  if (modalTopEl && modalScrollHintEl && !scrollHintBound) {
+    scrollHintBound = true;
+    modalTopEl.addEventListener("scroll", updateScrollHint, { passive: true });
+    window.addEventListener("resize", updateScrollHint, { passive: true });
+  }
+  if (!tooltipDismissBound) {
+    tooltipDismissBound = true;
+    document.addEventListener("click", (ev) => {
+      const target = ev.target;
+      if (target?.closest(".plan-info-icon") || target?.closest(".plan-tooltip")) {
+        return;
+      }
+      document
+        .querySelectorAll(".plan-tooltip.is-visible")
+        .forEach((el) => el.classList.remove("is-visible"));
+    });
+  }
   const { btnMinus, btnPlus, btnMonthsMinus, btnMonthsPlus, closeBtn, backdrop, btnAdd } = modalEls;
   btnMinus?.addEventListener("click", () => updateQtyItems(-1));
   btnPlus?.addEventListener("click", () => updateQtyItems(1));
@@ -506,11 +664,16 @@ export const openModal = (platform) => {
     modalCategory,
     modalBadge,
   } = modalEls;
+  const modalNameMobile = document.querySelector("#modal-name-mobile");
+  const modalCategoryMobile = document.querySelector("#modal-category-mobile");
+  const modalBadgeMobile = document.querySelector("#modal-badge-mobile");
+  const modalTitleMobile = document.querySelector("#modal-title-mobile");
   const {
     id_plataforma,
     nombre,
     categoria,
     imagen,
+    banner,
     por_pantalla,
     por_acceso,
     tarjeta_de_regalo,
@@ -518,12 +681,18 @@ export const openModal = (platform) => {
     descuento_meses,
     id_descuento,
     mostrar_stock,
+    num_max_dispositivos,
   } = platform;
 
-  modalImg.src = imagen || "";
-  modalImg.alt = nombre;
   modalName.textContent = nombre;
+  if (modalNameMobile) modalNameMobile.textContent = nombre;
   modalCategory.textContent = categoria || "";
+  if (modalCategoryMobile) modalCategoryMobile.textContent = categoria || "";
+  if (modalTitleMobile) {
+    modalTitleMobile.textContent = categoria
+      ? `${nombre} · ${categoria}`
+      : nombre || "";
+  }
   if (modalBadge) {
     const showStock = !(
       mostrar_stock === false ||
@@ -545,6 +714,10 @@ export const openModal = (platform) => {
       modalBadge.textContent = "Por encargo";
       modalBadge.className = "modal-badge badge-gray";
     }
+    if (modalBadgeMobile) {
+      modalBadgeMobile.textContent = modalBadge.textContent || "";
+      modalBadgeMobile.className = modalBadge.className || "modal-badge";
+    }
   }
   currentFlags = {
     por_pantalla:
@@ -564,6 +737,8 @@ export const openModal = (platform) => {
     id_plataforma,
     nombre,
     imagen,
+    banner,
+    num_max_dispositivos,
     descuento_meses:
       descuento_meses === true ||
       descuento_meses === "true" ||
@@ -571,9 +746,18 @@ export const openModal = (platform) => {
     id_descuento: null,
     mostrar_stock,
   };
+  updateModalImage();
+  if (!modalImageListenerBound) {
+    modalImageListenerBound = true;
+    window.addEventListener("resize", updateModalImage, { passive: true });
+  }
   if (descuento_meses !== undefined) {
     currentPlatform.descuento_meses = descuento_meses;
   }
   renderPrecios(id_plataforma, currentFlags);
   modal.classList.remove("hidden");
+  if (modalTopEl) modalTopEl.scrollTop = 0;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(updateScrollHint);
+  });
 };

@@ -13,17 +13,20 @@
     <main class="categorias-dinamicas saldo-page">
       <h2 id="saldo-display" class="saldo-display">Saldo: $0.00</h2>
       <p class="saldo-subtitle">Recarga saldo para realizar compras</p>
-      <div class="checkout-form" style="max-width: 360px;">
+      <div class="checkout-form saldo-form" style="max-width: 360px;">
         <label class="form-label" for="saldo-input">Monto</label>
-        <input
-          type="number"
-          id="saldo-input"
-          class="form-input"
-          step="0.01"
-          min="0"
-          placeholder="0.00"
-        />
-        <button id="saldo-checkout" class="btn-primary">Ir a pagar</button>
+        <div class="saldo-input-wrap">
+          <span class="saldo-currency" aria-hidden="true">$</span>
+          <input
+            type="number"
+            id="saldo-input"
+            class="form-input"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+          />
+        </div>
+        <button id="saldo-checkout" class="btn-primary">Recargar</button>
       </div>
     </main>
 

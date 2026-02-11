@@ -30,6 +30,7 @@ const itemsEl = document.querySelector("#cart-page-items");
 const btnContinue = document.querySelector("#btn-page-continue");
 const btnPay = document.querySelector("#btn-page-pay");
 const cartSaldoEl = document.querySelector("#cart-saldo");
+const refreshNoteEl = document.querySelector("#cart-refresh-note");
 let cartItems = [];
 let precios = [];
 let plataformas = [];
@@ -39,6 +40,7 @@ let currentUser = null;
 let cartMontoUsd = null;
 let cartDescuento = null;
 let cartNeedsSync = false;
+let dbCartSnapshot = new Map();
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) =>
@@ -49,11 +51,16 @@ const getClosestDiscountPct = (rows, value, column) => {
   const key = Number(value) || 0;
   if (!Array.isArray(rows) || key <= 0) return 0;
   const exact = rows.find((d) => Number(d.meses) === key);
-  if (exact) return Number(exact?.[column]) || 0;
+  const exactVal = exact?.[column];
+  if (exactVal !== null && exactVal !== undefined && exactVal !== "") {
+    return Number(exactVal) || 0;
+  }
   let best = null;
   for (const d of rows) {
     const n = Number(d?.meses);
     if (!Number.isFinite(n) || n > key) continue;
+    const raw = d?.[column];
+    if (raw === null || raw === undefined || raw === "") continue;
     if (!best || n > Number(best.meses)) best = d;
   }
   return Number(best?.[column]) || 0;
@@ -109,8 +116,55 @@ const placePayButton = () => {
 const updateRefreshButtonState = () => {
   const refreshBtn = itemsEl?.querySelector('[data-cart-action="refresh"]');
   if (!refreshBtn) return;
-  refreshBtn.disabled = !cartNeedsSync;
-  refreshBtn.classList.toggle("btn-disabled-soft", !cartNeedsSync);
+  const needsSync = !!cartNeedsSync;
+  refreshBtn.disabled = !needsSync;
+  refreshBtn.classList.toggle("btn-disabled-soft", !needsSync);
+  if (btnPay) {
+    btnPay.disabled = needsSync;
+    btnPay.classList.toggle("btn-disabled-soft", needsSync);
+  }
+  refreshNoteEl?.classList.toggle("hidden", !needsSync);
+};
+
+const buildCartSnapshot = (items) => {
+  const map = new Map();
+  (items || []).forEach((item, idx) => {
+    const key = item?.id_item ?? `p:${item?.id_precio ?? "x"}:${idx}`;
+    map.set(key, {
+      cantidad: Number(item?.cantidad) || 1,
+      meses: Number(item?.meses) || Number(item?.duracion) || 1,
+    });
+  });
+  return map;
+};
+
+const updateCartNeedsSync = () => {
+  if (!dbCartSnapshot || dbCartSnapshot.size === 0) {
+    cartNeedsSync = false;
+    updateRefreshButtonState();
+    return;
+  }
+  const current = buildCartSnapshot(cartItems);
+  if (current.size !== dbCartSnapshot.size) {
+    cartNeedsSync = true;
+    updateRefreshButtonState();
+    return;
+  }
+  for (const [key, val] of current.entries()) {
+    const base = dbCartSnapshot.get(key);
+    if (!base) {
+      cartNeedsSync = true;
+      updateRefreshButtonState();
+      return;
+    }
+    if (Number(base.cantidad) !== Number(val.cantidad) || Number(base.meses) !== Number(val.meses)) {
+      cartNeedsSync = true;
+      updateRefreshButtonState();
+      return;
+    }
+  }
+  cartNeedsSync = false;
+  updateRefreshButtonState();
 };
 
 const collectUiCartValues = () => {
@@ -167,8 +221,7 @@ const renderCart = () => {
   let total = 0; // total con descuentos
   let totalDescuento = 0;
   let subtotalBruto = 0;
-  const rows = cartItems
-    .map((item, idx) => {
+  const renderedItems = cartItems.map((item, idx) => {
       const price = priceById[item.id_precio] || {};
       const platform = platformById[price.id_plataforma] || {};
       const unit = price.precio_usd_detal || 0;
@@ -198,7 +251,7 @@ const renderCart = () => {
         (platform.tarjeta_de_regalo ? `Región: ${price.region || "-"}` : "");
       const tipo = item.renovacion ? "Renovación" : "Nuevo";
       subtotalBruto = round2(subtotalBruto + baseSubtotal);
-      return `
+      const rowHtml = `
         <tr data-cart-row="1" data-index="${idx}">
           <td>
             <div class="cart-info tight">
@@ -211,6 +264,7 @@ const renderCart = () => {
                   <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
                   <p class="cart-detail">${detalle || ""}</p>
                   <p class="cart-detail">Tipo: ${tipo}</p>
+                  <p class="cart-detail cart-price-line">Precio: $${round2(unit).toFixed(2)}</p>
                 </div>
               </div>
             </div>
@@ -237,7 +291,7 @@ const renderCart = () => {
             }
           </td>
           <td class="cart-cell-center">
-            $${baseSubtotal.toFixed(2)}
+            $${subtotal.toFixed(2)}
             <div class="cart-discount-line">
               ${
                 descuentoMesesVal > 0
@@ -253,8 +307,66 @@ const renderCart = () => {
           </td>
         </tr>
       `;
-    })
-    .join("");
+      const qtyControl = item.renovacion
+        ? `<span class="cart-cantidad-value">${qtyVal}</span>`
+        : `
+          <div class="modal-qty">
+            <button type="button" class="cart-minus" data-index="${idx}" aria-label="Disminuir">-</button>
+            <span class="cart-cantidad-value">${qtyVal}</span>
+            <button type="button" class="cart-plus" data-index="${idx}" aria-label="Aumentar">+</button>
+          </div>
+        `;
+      const cardHtml = `
+        <section class="cart-item-card" data-index="${idx}">
+          <div class="cart-item-top">
+            <div class="cart-item-logo">
+              <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" />
+            </div>
+            <div class="cart-item-info">
+              <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
+              <p class="cart-detail">${detalle || ""}</p>
+              <p class="cart-detail">Tipo: ${tipo}</p>
+              <p class="cart-detail">Precio: $${round2(unit).toFixed(2)}</p>
+            </div>
+            <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">🗑️</button>
+          </div>
+          <div class="cart-item-bottom">
+            <div class="cart-item-cell">
+              <span class="cart-item-label">Meses</span>
+              <div class="modal-qty">
+                <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
+                <span class="cart-meses-value">${mesesVal}</span>
+                <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
+              </div>
+            </div>
+            <div class="cart-item-cell">
+              <span class="cart-item-label">Cantidad</span>
+              ${qtyControl}
+            </div>
+          </div>
+          <div class="cart-item-subtotal">
+            <span class="cart-item-label">Subtotal</span>
+            <div class="cart-subtotal">$${subtotal.toFixed(2)}</div>
+            <div class="cart-discount-line">
+              ${
+                descuentoMesesVal > 0
+                  ? `<span class="discount-badge">-${(rateMeses * 100).toFixed(2)}% mes</span>`
+                  : ""
+              }
+              ${
+                descuentoCantidadVal > 0
+                  ? `<span class="discount-badge">-${(rateQty * 100).toFixed(2)}% cant.</span>`
+                  : ""
+              }
+            </div>
+          </div>
+        </section>
+      `;
+      return { rowHtml, cardHtml };
+    });
+
+  const rows = renderedItems.map((r) => r.rowHtml).join("");
+  const cards = renderedItems.map((r) => r.cardHtml).join("");
 
   const descuentoMostrar = round2(totalDescuento);
   const subtotalMostrar = round2(subtotalBruto);
@@ -271,6 +383,9 @@ const renderCart = () => {
   itemsEl.innerHTML = `
     <div class="cart-layout">
       <div class="cart-left">
+        <div class="cart-items-cards">
+          ${cards}
+        </div>
         <div class="cart-table-scroll">
           <table class="table-base cart-page-table">
             <thead>
@@ -300,7 +415,7 @@ const renderCart = () => {
               <td class="cart-cell-center">$${subtotalMostrar.toFixed(2)}</td>
             </tr>
             <tr class="cart-total-row cart-total-discount">
-              <td class="cart-cell-center">Descuentos</td>
+              <td class="cart-cell-center">Descuentos aplicados</td>
               <td class="cart-cell-center">-$${descuentoMostrar.toFixed(2)}</td>
             </tr>
             <tr class="cart-total-row cart-total-final">
@@ -313,7 +428,7 @@ const renderCart = () => {
     </div>
   `;
   placePayButton();
-  updateRefreshButtonState();
+  updateCartNeedsSync();
 };
 
 const handleCartClick = async (e) => {
@@ -327,8 +442,9 @@ const handleCartClick = async (e) => {
     if (action === "refresh") {
       try {
         await syncCartValuesBeforeCheckout();
+        dbCartSnapshot = buildCartSnapshot(cartItems);
         cartNeedsSync = false;
-        updateRefreshButtonState();
+        updateCartNeedsSync();
         // No sobreescribir UI con datos de BD aquí.
         // Este botón debe empujar HTML -> BD.
         alert("Carrito actualizado.");
@@ -428,6 +544,7 @@ async function init() {
       loadCatalog(),
       fetchP2PRate(),
     ]);
+    dbCartSnapshot = buildCartSnapshot(cartData?.items || []);
     cartMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
       ? Number(cartData.monto_usd)
       : null;
@@ -528,6 +645,10 @@ btnContinue?.addEventListener("click", () => {
 btnPay?.addEventListener("click", () => {
   (async () => {
     try {
+      if (cartNeedsSync) {
+        alert("Actualiza el carrito para continuar.");
+        return;
+      }
       await syncCartValuesBeforeCheckout();
       const freshCart = await fetchCart();
       cartItems = freshCart.items || cartItems;
