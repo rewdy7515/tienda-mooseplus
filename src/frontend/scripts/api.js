@@ -408,4 +408,4 @@ export async function loadCurrentUser() {
   return data;
 }
 
-export { supabase };
+export { supabase, API_BASE };

@@ -12,6 +12,10 @@ body.modal-open {
   overflow: hidden;
 }
 
+body.checkout-page {
+  background: #f6f7f9;
+}
+
 main {
   background: #f6f7f9;
 }
@@ -607,6 +611,18 @@ main {
   background: #eef2f6;
   border-radius: 10px;
   padding: 10px 12px;
+}
+
+body.checkout-page .metodo-detalle,
+body.checkout-page .checkout-total {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+body.checkout-page .checkout-total {
+  width: 350px;
 }
 
 .checkout-countdown {
@@ -2346,6 +2362,10 @@ input[type="number"].input-inline {
     border-radius: 0;
     padding: 0;
     box-shadow: none;
+  }
+
+  .categorias-dinamicas .plataforma-nombre {
+    font-size: 20px !important;
   }
 
   .categorias-dinamicas > .categoria-card + .categoria-card {

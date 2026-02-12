@@ -5,6 +5,10 @@
   z-index: 3000;
 }
 
+body.cart-page {
+  background: #f6f7f9;
+}
+
 body.cart-drawer-open {
   overflow: hidden;
   height: 100%;

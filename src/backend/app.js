@@ -1947,6 +1947,115 @@ app.post("/api/admin/import-pines", async (req, res) => {
   }
 });
 
+// Admin: importar contactos (usuario, telefono)
+app.post("/api/admin/import-contactos", async (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: "rows es requerido" });
+  }
+
+  const makeNameKey = (nombre, apellido) =>
+    `${(nombre || "").trim().toLowerCase()}|${(apellido || "").trim().toLowerCase()}`;
+
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    if (!idUsuario) throw new Error("Usuario no autenticado");
+
+    const normalized = rows
+      .map((r) => {
+        const rawUser = (r.usuario || "").toString().trim();
+        const telefono = (r.telefono || "").toString().trim();
+        if (!rawUser || !telefono) return null;
+        const cleaned = rawUser
+          .replace(/\s*Cliente Moose\+\s*$/i, "")
+          .replace(/\s*Cliente\s*$/i, "")
+          .trim();
+        if (!cleaned) return null;
+        const parts = cleaned.split(/\s+/);
+        const nombre = parts.shift() || "";
+        const apellido = parts.join(" ").trim() || null;
+        return {
+          nombre,
+          apellido,
+          telefono,
+          name_key: makeNameKey(nombre, apellido),
+        };
+      })
+      .filter(Boolean);
+
+    if (!normalized.length) {
+      return res.status(400).json({ error: "No hay filas válidas para importar" });
+    }
+
+    const { data: usuariosExist, error: usrErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, nombre, apellido");
+    if (usrErr) throw usrErr;
+    const usuarioByName = (usuariosExist || []).reduce((acc, u) => {
+      const key = makeNameKey(u.nombre, u.apellido);
+      if (key && key !== "|") acc[key] = u.id_usuario;
+      return acc;
+    }, {});
+
+    const updatesById = new Map();
+    let faltantes = 0;
+    normalized.forEach((r) => {
+      const id = usuarioByName[r.name_key];
+      if (!id) {
+        faltantes += 1;
+        return;
+      }
+      updatesById.set(id, r.telefono);
+    });
+
+    const updates = Array.from(updatesById.entries()).map(([id_usuario, telefono]) => ({
+      id_usuario,
+      telefono,
+    }));
+
+    if (!updates.length) {
+      return res.json({
+        ok: true,
+        filas: rows.length,
+        actualizados: 0,
+        faltantes,
+      });
+    }
+
+    let actualizados = 0;
+    const chunkSize = 50;
+    for (let i = 0; i < updates.length; i += chunkSize) {
+      const batch = updates.slice(i, i + chunkSize);
+      const results = await Promise.all(
+        batch.map(({ id_usuario, telefono }) =>
+          supabaseAdmin
+            .from("usuarios")
+            .update({ telefono })
+            .eq("id_usuario", id_usuario)
+            .select("id_usuario")
+        )
+      );
+      results.forEach((r) => {
+        if (r.error) throw r.error;
+        actualizados += (r.data || []).length;
+      });
+    }
+
+    res.json({
+      ok: true,
+      filas: rows.length,
+      actualizados,
+      faltantes,
+    });
+  } catch (err) {
+    console.error("[admin:import-contactos] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Checkout: crea orden (y procesa ventas si ya está verificado)
 app.post("/api/checkout", async (req, res) => {
   const {
