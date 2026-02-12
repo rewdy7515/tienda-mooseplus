@@ -371,7 +371,7 @@ async function init() {
     const isClienteRate =
       isTrue(sessionRoles?.acceso_cliente) || isTrue(currentUser?.acceso_cliente);
     if (tasaActualEl) {
-      if (isClienteRate) {
+      if (!currentUser || isClienteRate) {
         tasaActualEl.classList.add("hidden");
       } else {
         fetchP2PRate()

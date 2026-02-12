@@ -5635,7 +5635,11 @@
             await findPerfilLibreCuentaMadre(9, oldCuentaId);
           if (perfilErr) throw perfilErr;
           if (!perfilDestino) {
-            alert("Sin stock de cuentas madre.");
+            await supabase
+              .from("ventas")
+              .update({ pendiente: true, reportado: true })
+              .eq("id_venta", ventaId);
+            alert("Sin stock de cuentas madre. Solicitud enviada.");
             return;
           }
           const nuevoCuenta = perfilDestino.id_cuenta;

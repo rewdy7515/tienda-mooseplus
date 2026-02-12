@@ -38,6 +38,9 @@
       .logo-editor.no-banner .banner-current {
         display: none;
       }
+      .logo-editor.no-preview .preview-current {
+        display: none;
+      }
       .logo-current {
         flex: 1;
         background: #fff;
@@ -102,6 +105,12 @@
       .logo-status {
         margin: 0;
       }
+      .preview-section {
+        margin-top: 10px;
+      }
+      .preview-toggle {
+        width: 100%;
+      }
       @media (max-width: 720px) {
         .logo-editor {
           flex-direction: column;
@@ -156,6 +165,28 @@
             <p id="banner-status" class="status logo-status"></p>
           </div>
         </div>
+
+        <div class="preview-section">
+          <button type="button" class="btn-outline preview-toggle" id="btn-preview-toggle">
+            Editar preview
+          </button>
+          <div id="preview-editor" class="logo-editor hidden">
+            <div class="logo-current preview-current" id="preview-current">
+              <p class="logo-label">Preview actual</p>
+              <div class="banner-frame">
+                <img id="preview-image" src="" alt="Preview actual" />
+              </div>
+            </div>
+            <div class="logo-upload">
+              <p class="logo-label">Nuevo preview</p>
+              <input type="file" id="preview-file" accept="image/*" />
+              <button type="button" class="btn-primary" id="btn-preview-update">
+                Subir preview
+              </button>
+              <p id="preview-status" class="status logo-status"></p>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -186,9 +217,17 @@
       const bannerInput = document.querySelector("#banner-file");
       const btnBannerUpdate = document.querySelector("#btn-banner-update");
       const bannerStatusEl = document.querySelector("#banner-status");
+      const previewToggleBtn = document.querySelector("#btn-preview-toggle");
+      const previewEditor = document.querySelector("#preview-editor");
+      const previewCurrentWrap = document.querySelector("#preview-current");
+      const previewPageImg = document.querySelector("#preview-image");
+      const previewInput = document.querySelector("#preview-file");
+      const btnPreviewUpdate = document.querySelector("#btn-preview-update");
+      const previewStatusEl = document.querySelector("#preview-status");
 
       let plataformasMap = {};
       let selectedId = null;
+      let paginaPreview = null;
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
@@ -202,6 +241,13 @@
         bannerStatusEl.textContent = msg || "";
         bannerStatusEl.classList.toggle("is-error", isError);
         bannerStatusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+
+      const setPreviewStatus = (msg, isError = false) => {
+        if (!previewStatusEl) return;
+        previewStatusEl.textContent = msg || "";
+        previewStatusEl.classList.toggle("is-error", isError);
+        previewStatusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
       // Exporta a 3x para mejor nitidez en el display 148x185
@@ -338,6 +384,62 @@
         });
       };
 
+      const resizePreviewIfNeeded = (file, targetW = 1200, targetH = 630, maxBytes = 280000) => {
+        return new Promise((resolve) => {
+          if (!file || !file.type?.startsWith("image/")) return resolve(file);
+          const shouldResize = file.size > maxBytes;
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const { width, height } = img;
+            if (!shouldResize && width === targetW && height === targetH) {
+              resolve(file);
+              return;
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              resolve(file);
+              return;
+            }
+            const scale = Math.max(targetW / width, targetH / height);
+            const drawW = Math.max(1, Math.round(width * scale));
+            const drawH = Math.max(1, Math.round(height * scale));
+            const offsetX = Math.round((targetW - drawW) / 2);
+            const offsetY = Math.round((targetH - drawH) / 2);
+            ctx.clearRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
+            const makeBlob = (type, quality) =>
+              new Promise((res) => {
+                canvas.toBlob((blob) => res(blob), type, quality);
+              });
+            (async () => {
+              let quality = 0.92;
+              let blob = await makeBlob("image/jpeg", quality);
+              while (blob && blob.size > maxBytes && quality > 0.7) {
+                quality = Math.max(0.7, quality - 0.05);
+                blob = await makeBlob("image/jpeg", quality);
+              }
+              if (!blob) {
+                resolve(file);
+                return;
+              }
+              const baseName = file.name.replace(/\.[^.]+$/, "");
+              const resized = new File([blob], `${baseName}.jpg`, { type: blob.type });
+              resolve(resized);
+            })().catch(() => resolve(file));
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(file);
+          };
+          img.src = url;
+        });
+      };
+
       const renderEditor = (plat) => {
         if (!editor) return;
         if (!plat) {
@@ -357,6 +459,30 @@
           bannerEditor.classList.toggle("no-banner", !hasBanner);
           if (bannerCurrentWrap) bannerCurrentWrap.style.display = hasBanner ? "flex" : "none";
           if (bannerPreview) bannerPreview.src = hasBanner ? plat.banner : "";
+        }
+      };
+
+      const renderPreview = () => {
+        if (!previewEditor) return;
+        const hasPreview = !!paginaPreview?.preview;
+        previewEditor.classList.toggle("no-preview", !hasPreview);
+        if (previewCurrentWrap) previewCurrentWrap.style.display = hasPreview ? "flex" : "none";
+        if (previewPageImg) previewPageImg.src = hasPreview ? paginaPreview.preview : "";
+      };
+
+      const loadPreview = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("pagina")
+            .select("*")
+            .limit(1)
+            .maybeSingle();
+          if (error) throw error;
+          paginaPreview = data || null;
+          renderPreview();
+        } catch (err) {
+          console.error("load preview error", err);
+          setPreviewStatus("No se pudo cargar el preview.", true);
         }
       };
 
@@ -389,10 +515,16 @@
         selectedId = val ? Number(val) : null;
         setStatus("");
         setBannerStatus("");
+        setPreviewStatus("");
         if (fileInput) fileInput.value = "";
         if (bannerInput) bannerInput.value = "";
         const plat = selectedId ? plataformasMap[selectedId] : null;
         renderEditor(plat);
+      });
+
+      previewToggleBtn?.addEventListener("click", () => {
+        if (!previewEditor) return;
+        previewEditor.classList.toggle("hidden");
       });
 
       btnUpdate?.addEventListener("click", async () => {
@@ -487,6 +619,59 @@
         }
       });
 
+      btnPreviewUpdate?.addEventListener("click", async () => {
+        let file = previewInput?.files?.[0];
+        if (!file) {
+          setPreviewStatus("Selecciona una imagen.", true);
+          return;
+        }
+        if (!file.type?.startsWith("image/")) {
+          setPreviewStatus("Solo se permiten archivos de imagen.", true);
+          return;
+        }
+        try {
+          setPreviewStatus("Optimizando imagen...");
+          file = await resizePreviewIfNeeded(file);
+          setPreviewStatus("Subiendo preview...");
+          const { urls, error: uploadErr } = await uploadPlatformLogos([file]);
+          if (uploadErr) throw uploadErr;
+          const url = urls?.[0];
+          if (!url) throw new Error("No se obtuvo URL del preview.");
+          const fallbackLogo =
+            document.querySelector(".logo")?.src ||
+            "https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png";
+          const row =
+            paginaPreview ||
+            (await supabase.from("pagina").select("*").limit(1).maybeSingle()).data;
+          if (!row) {
+            const { error: insErr } = await supabase
+              .from("pagina")
+              .insert({ preview: url, logo: fallbackLogo });
+            if (insErr) throw insErr;
+          } else {
+            let query = supabase.from("pagina").update({ preview: url });
+            const idKey = Object.keys(row).find(
+              (k) => k === "id" || k.startsWith("id_"),
+            );
+            if (idKey && row[idKey] != null) {
+              query = query.eq(idKey, row[idKey]);
+            } else {
+              // Fallback para tablas sin PK: aplica WHERE para evitar error 21000
+              query = query.or("preview.is.null,preview.not.is.null");
+            }
+            const { error: updErr } = await query;
+            if (updErr) throw updErr;
+          }
+          paginaPreview = { ...(row || {}), preview: url };
+          renderPreview();
+          setPreviewStatus("Preview actualizado correctamente.");
+          if (previewInput) previewInput.value = "";
+        } catch (err) {
+          console.error("actualizar preview error", err);
+          setPreviewStatus("No se pudo actualizar el preview.", true);
+        }
+      });
+
       async function init() {
         try {
           if (sessionId) {
@@ -513,6 +698,7 @@
 
       init();
       loadPlataformas();
+      loadPreview();
       attachLogout(clearServerSession);
     </script>
   </body>
