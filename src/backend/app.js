@@ -930,6 +930,9 @@ app.post("/api/cart/item", async (req, res) => {
         .eq("id_carrito", idCarrito)
         .eq("id_precio", id_precio)
         .eq("renovacion", renovacion === true);
+      if (mesesVal != null) {
+        selQuery = selQuery.eq("meses", mesesVal);
+      }
       selQuery =
         id_venta === undefined || id_venta === null
           ? selQuery.is("id_venta", null)
@@ -951,6 +954,8 @@ app.post("/api/cart/item", async (req, res) => {
       id_venta === undefined || id_venta === null
         ? existing?.id_venta === null || existing?.id_venta === undefined
         : existing?.id_venta === id_venta;
+    const matchesMeses =
+      mesesVal == null ? true : Number(existing?.meses) === Number(mesesVal);
     const matchesCuenta =
       id_cuenta === undefined || id_cuenta === null
         ? existing?.id_cuenta === null || existing?.id_cuenta === undefined
@@ -962,7 +967,7 @@ app.post("/api/cart/item", async (req, res) => {
     // Si llega id_item, siempre tratamos ese registro como el existente (aunque cambien meses).
     const matchExisting =
       existing &&
-      (bodyIdItem ? true : matchesVenta && matchesCuenta && matchesPerfil);
+      (bodyIdItem ? true : matchesVenta && matchesCuenta && matchesPerfil && matchesMeses);
     
     const newQty = (matchExisting ? existing.cantidad : 0) + parsedDelta;
 

@@ -1,6 +1,6 @@
 import { sendCartDelta } from "./api.js";
 import { requireSession } from "./session.js";
-import { addToCart } from "./cart.js";
+import { addToCart, refreshCartFromServer } from "./cart.js";
 
 let modalEls = {};
 let preciosPorPlataforma = {};
@@ -228,6 +228,7 @@ const renderPrecios = (plataformaId, flags) => {
   btnMonthsMinus.disabled = true;
   btnMonthsPlus.disabled = true;
   btnAdd.disabled = true;
+  btnAdd.classList.add("btn-disabled-soft");
   modalQtyMonths?.classList.add("modal-qty-disabled");
   modalQtyItems?.classList.add("modal-qty-disabled");
   if (itemsDiscount) {
@@ -463,6 +464,7 @@ const renderPrecios = (plataformaId, flags) => {
         btnMonthsMinus.disabled = true;
         btnMonthsPlus.disabled = true;
         btnAdd.disabled = true;
+        btnAdd.classList.add("btn-disabled-soft");
         modalQtyMonths?.classList.add("modal-qty-disabled");
         modalQtyItems?.classList.add("modal-qty-disabled");
         updateModalTotal();
@@ -479,6 +481,7 @@ const renderPrecios = (plataformaId, flags) => {
       btnMinus.disabled = false;
       btnPlus.disabled = false;
       btnAdd.disabled = false;
+      btnAdd.classList.remove("btn-disabled-soft");
       modalQtyItems?.classList.remove("modal-qty-disabled");
       if (!hideMonths) {
         btnMonthsMinus.disabled = false;
@@ -552,6 +555,7 @@ const updateQtyMonths = (delta) => {
 const closeModal = () => {
   if (modalTopEl) modalTopEl.scrollTop = 0;
   modalEls.modal.classList.add("hidden");
+  document.body.classList.remove("modal-open");
 };
 
 const animateAddToCart = () => {
@@ -646,11 +650,52 @@ export const initModal = (elements) => {
       !currentFlags.por_pantalla && !currentFlags.por_acceso
         ? Number(selectedPrecio.duracion) || 1
         : currentMonths;
+    const unitPrice =
+      Number(selectedPrecio.precio_usd_detal) ||
+      Number(selectedPrecio.precio_usd_mayor) ||
+      0;
+    const detail = (() => {
+      if (currentFlags.tarjeta_de_regalo) {
+        const region = selectedPrecio.region || "-";
+        const monto = `${selectedPrecio.valor_tarjeta_de_regalo || ""} ${selectedPrecio.moneda || ""} $${unitPrice}`;
+        return `Región: ${region} · Monto: ${monto}`;
+      }
+      const qty = currentQty || 1;
+      const meses = monthsToSend || 1;
+      const baseUnit = currentFlags.por_pantalla
+        ? "pantalla"
+        : currentFlags.por_acceso
+          ? "dispositivo"
+          : "mes";
+      const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
+      const mesesTxt = baseUnit === "mes" ? ` · ${meses} mes${meses === 1 ? "" : "es"}` : "";
+      return `${qty} ${baseUnit}${plural}${mesesTxt} $${unitPrice}`;
+    })();
+
+    addToCart({
+      open: false,
+      refresh: false,
+      optimisticItem: {
+        id_precio: selectedPrecio.id_precio,
+        cantidad: currentQty,
+        meses: monthsToSend,
+        renovacion: false,
+        id_venta: null,
+        id_cuenta: null,
+        id_perfil: null,
+        // detalle visual inmediato
+        detalle: detail,
+        nombre: currentPlatform.nombre,
+        imagen: currentPlatform.imagen,
+        plan: selectedPrecio.plan,
+      },
+    });
+
     sendCartDelta(selectedPrecio.id_precio, currentQty, monthsToSend, {
       renovacion: false,
       id_venta: null,
     }).finally(() => {
-      addToCart();
+      refreshCartFromServer();
     });
     closeModal();
   });
@@ -756,6 +801,7 @@ export const openModal = (platform) => {
   }
   renderPrecios(id_plataforma, currentFlags);
   modal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
   if (modalTopEl) modalTopEl.scrollTop = 0;
   requestAnimationFrame(() => {
     requestAnimationFrame(updateScrollHint);

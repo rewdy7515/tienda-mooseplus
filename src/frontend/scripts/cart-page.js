@@ -258,7 +258,7 @@ const renderCart = () => {
               <div class="cart-product">
                 <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">🗑️</button>
                 <div class="cart-thumb-sm">
-                  <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" />
+                  <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
                 </div>
                 <div class="cart-product-text">
                   <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
@@ -320,7 +320,7 @@ const renderCart = () => {
         <section class="cart-item-card" data-index="${idx}">
           <div class="cart-item-top">
             <div class="cart-item-logo">
-              <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" />
+              <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
             </div>
             <div class="cart-item-info">
               <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>

@@ -69,7 +69,9 @@ if (!window.__cartWidgetInit) {
           closeEl,
           iconEl,
           itemsContainer,
+          catalog,
           initialItems: mapped,
+          initialRawItems: items,
         });
       }
     } catch (err) {

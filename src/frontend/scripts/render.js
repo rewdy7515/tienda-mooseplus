@@ -43,7 +43,13 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
               data-num-max-dispositivos="${num_max_dispositivos ?? ""}"
             data-id-descuento="">
               <div class="plataforma-thumb">
-                <img src="${imagen || ""}" alt="${nomPlat}" loading="lazy" />
+                <img
+                  src="${imagen || ""}"
+                  alt="${nomPlat}"
+                  loading="lazy"
+                  decoding="async"
+                  fetchpriority="low"
+                />
               </div>
               <div class="plataforma-nombre">${nomPlat}</div>
               <div class="plataforma-precio">${precioTxt}</div>

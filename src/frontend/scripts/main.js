@@ -476,7 +476,9 @@ async function init() {
       closeEl: cartClose,
       iconEl: cartIcon,
       itemsContainer: cartItemsEl,
+      catalog,
       initialItems: mapCartItems(cartData.items || [], preciosVisibles, plataformas),
+      initialRawItems: cartData.items || [],
     });
     initSearch({
       input: searchInput,

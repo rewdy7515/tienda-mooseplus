@@ -12,7 +12,9 @@ let btnViewCart;
 let btnAssign;
 let catalogCache = null;
 let userAcceso = null;
+let cartRawItems = [];
 let refreshFromServerFn = null;
+let cartBound = false;
 
 const mapCartItems = (items = [], catalog = {}, acceso = null) => {
   const precios = catalog.precios || [];
@@ -73,6 +75,51 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
   });
 };
 
+const normalizeRawItem = (item = {}) => ({
+  id_item: item.id_item ?? null,
+  id_precio: item.id_precio ?? null,
+  cantidad: Number(item.cantidad) || 1,
+  meses: item.meses ?? null,
+  renovacion: item.renovacion === true,
+  id_venta: item.id_venta ?? null,
+  id_cuenta: item.id_cuenta ?? null,
+  id_perfil: item.id_perfil ?? null,
+});
+
+const isSameCartLine = (a, b) => {
+  if (!a || !b) return false;
+  const mesesA = Number(a.meses || 0);
+  const mesesB = Number(b.meses || 0);
+  return (
+    a.id_precio === b.id_precio &&
+    a.renovacion === b.renovacion &&
+    (a.id_venta ?? null) === (b.id_venta ?? null) &&
+    (a.id_cuenta ?? null) === (b.id_cuenta ?? null) &&
+    (a.id_perfil ?? null) === (b.id_perfil ?? null) &&
+    mesesA === mesesB
+  );
+};
+
+const applyOptimisticItem = (rawItem) => {
+  const normalized = normalizeRawItem(rawItem);
+  if (!normalized.id_precio) return;
+  const idx = cartRawItems.findIndex((it) => isSameCartLine(it, normalized));
+  if (idx >= 0) {
+    const currentQty = Number(cartRawItems[idx]?.cantidad) || 0;
+    cartRawItems[idx] = {
+      ...cartRawItems[idx],
+      cantidad: currentQty + normalized.cantidad,
+      meses: normalized.meses ?? cartRawItems[idx].meses,
+    };
+  } else {
+    cartRawItems.push(normalized);
+  }
+  if (catalogCache) {
+    cartItems = mapCartItems(cartRawItems, catalogCache, userAcceso);
+  }
+  renderCart();
+};
+
 const toggleCart = (open) => {
   if (!drawer) return;
   if (open) {
@@ -103,7 +150,7 @@ const renderCart = () => {
     .map(
       (item, idx) => `
       <div class="cart-item">
-        <div class="cart-thumb"><img src="${item.imagen || ""}" alt="${item.nombre}" /></div>
+        <div class="cart-thumb"><img src="${item.imagen || ""}" alt="${item.nombre}" loading="lazy" decoding="async" /></div>
         <div class="cart-info">
           <p class="cart-name">${item.nombre}</p>
           <p class="cart-detail">${item.plan || ""} · ${item.detalle}</p>
@@ -134,6 +181,8 @@ export function initCart({
   iconEl,
   itemsContainer,
   initialItems = [],
+  initialRawItems = [],
+  catalog = null,
 }) {
   drawer = drawerEl;
   backdrop = backdropEl;
@@ -145,10 +194,13 @@ export function initCart({
   btnViewCart = drawerEl?.querySelector("#btn-view-cart") || null;
   btnAssign = drawerEl?.querySelector("#btn-assign-client") || null;
 
-  if (btnAssign) {
-    btnAssign.style.display = "block";
-    btnAssign.classList.remove("hidden");
+  if (catalog) {
+    catalogCache = catalog;
   }
+
+  cartItems = initialItems;
+  cartRawItems = (initialRawItems || []).map((it) => normalizeRawItem(it));
+  renderCart();
 
   const refreshFromServer = async () => {
     try {
@@ -164,13 +216,25 @@ export function initCart({
       if (!catalogCache) catalogCache = await loadCatalog();
       const cartResp = await fetchCart();
       const items = cartResp?.items || [];
-      cartItems = mapCartItems(items, catalogCache, userAcceso);
+      cartRawItems = items;
+      cartItems = mapCartItems(cartRawItems, catalogCache, userAcceso);
       renderCart();
     } catch (err) {
       console.error("refresh cart error", err);
     }
   };
   refreshFromServerFn = refreshFromServer;
+
+  if (cartBound) {
+    refreshFromServer();
+    return;
+  }
+  cartBound = true;
+
+  if (btnAssign) {
+    btnAssign.style.display = "block";
+    btnAssign.classList.remove("hidden");
+  }
 
   iconBtn?.addEventListener("click", async () => {
     await refreshFromServer();
@@ -212,10 +276,24 @@ export function initCart({
   refreshFromServer();
 }
 
-export function addToCart() {
+export function addToCart(options = {}) {
+  const shouldOpen = options?.open !== false;
+  const shouldRefresh = options?.refresh !== false;
+  if (options?.optimisticItem) {
+    applyOptimisticItem(options.optimisticItem);
+  }
+  if (!shouldRefresh) {
+    if (shouldOpen) openCart();
+    return;
+  }
   // Forzamos sincronizar con el servidor; no añadimos items optimistas
-  if (refreshFromServerFn) refreshFromServerFn().then(() => openCart());
-  else openCart();
+  if (refreshFromServerFn) {
+    refreshFromServerFn().then(() => {
+      if (shouldOpen) openCart();
+    });
+    return;
+  }
+  if (shouldOpen) openCart();
 }
 
 export function openCart() {

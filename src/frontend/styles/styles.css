@@ -8,6 +8,14 @@ body {
   padding-top: var(--header-offset, 0px);
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
+main {
+  background: #f6f7f9;
+}
+
 /* HEADER */
 .header {
   display: grid;
@@ -1357,8 +1365,20 @@ input[type="number"].input-inline {
   color: #f8fafc;
 }
 
+#platform-modal .modal-bottom #add-cart.btn-disabled-soft,
+#platform-modal .modal-bottom #add-cart:disabled {
+  background: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
 #platform-modal .modal-bottom #add-cart:hover {
   background: #111827;
+}
+
+#platform-modal .modal-bottom #add-cart.btn-disabled-soft:hover,
+#platform-modal .modal-bottom #add-cart:disabled:hover {
+  background: #d1d5db;
 }
 
 /* Mueve el scrollbar al borde del modal (evita scrollbar interno en modal-body) */
@@ -1971,6 +1991,14 @@ input[type="number"].input-inline {
   background: #333;
 }
 
+.btn-add.btn-disabled-soft,
+.btn-add:disabled {
+  background: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 /* CATEGORÍAS */
 .categorias-dinamicas {
   margin: 0 20px 20px;
@@ -2055,14 +2083,22 @@ input[type="number"].input-inline {
 .plataformas-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
+  gap: 12px 16px;
 }
 
 .plataforma-card {
-  background: #f8f8f8;
+  background: #fff;
   border-radius: 10px;
   padding: 10px;
   text-align: left;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+.plataforma-card:hover {
+  transform: scale(1.03);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
 }
 
 .plataforma-thumb {
