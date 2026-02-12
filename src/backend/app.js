@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const path = require("path");
+const fs = require("fs/promises");
 const { supabaseAdmin } = require("../database/db");
 const { port } = require("../../config/config");
 
@@ -90,6 +92,55 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
 });
 
 app.use(jsonParser);
+
+const INDEX_HTML_PATH = path.join(__dirname, "..", "frontend", "pages", "index.html");
+const DEFAULT_LOGO_URL =
+  "https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png";
+
+app.get("/", async (req, res) => {
+  try {
+    const html = await fs.readFile(INDEX_HTML_PATH, "utf8");
+    let previewUrl = null;
+    try {
+      const { data: pageRow } = await supabaseAdmin
+        .from("pagina")
+        .select("preview, logo")
+        .limit(1)
+        .maybeSingle();
+      previewUrl = pageRow?.preview || pageRow?.logo || null;
+    } catch (err) {
+      console.error("preview meta load error", err);
+    }
+
+    const hasOgImage = /property=["']og:image["']/i.test(html);
+    if (!previewUrl || hasOgImage) {
+      res.set("Content-Type", "text/html; charset=utf-8");
+      return res.send(html);
+    }
+
+    const metaTags = [
+      `<meta property="og:image" content="${previewUrl || DEFAULT_LOGO_URL}">`,
+      `<meta property="og:type" content="website">`,
+      `<meta property="og:title" content="Moose+">`,
+      `<meta property="og:description" content="Tienda Moose+">`,
+      `<meta property="og:url" content="https://mooseplus.com/">`,
+      `<meta property="og:image:width" content="1200">`,
+      `<meta property="og:image:height" content="630">`,
+      `<meta property="og:image:type" content="image/jpeg">`,
+      `<meta name="twitter:card" content="summary_large_image">`,
+      `<meta name="twitter:title" content="Moose+">`,
+      `<meta name="twitter:description" content="Tienda Moose+">`,
+      `<meta name="twitter:image" content="${previewUrl || DEFAULT_LOGO_URL}">`,
+    ].join("\n");
+
+    const output = html.replace("</head>", `${metaTags}\n</head>`);
+    res.set("Content-Type", "text/html; charset=utf-8");
+    return res.send(output);
+  } catch (err) {
+    console.error("index html render error", err);
+    return res.status(500).send("Error cargando la página");
+  }
+});
 
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
