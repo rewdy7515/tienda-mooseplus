@@ -488,6 +488,13 @@ main {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.checkout-form > * {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .form-label {
@@ -512,6 +519,20 @@ main {
 #input-ref {
   width: 350px;
   max-width: 350px;
+}
+
+.checkout-form .form-select,
+.checkout-form .form-input,
+.checkout-form #input-ref,
+.checkout-form .metodo-detalle,
+.checkout-form .checkout-total,
+.checkout-form .dropzone {
+  width: 100%;
+  max-width: 100%;
+}
+
+.checkout-form .page-pay-btn {
+  width: 100%;
 }
 
 #phone-wrap {

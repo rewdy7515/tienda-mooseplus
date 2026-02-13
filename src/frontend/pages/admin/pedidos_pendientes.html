@@ -60,6 +60,19 @@
       .correo-edit-wrap input {
         min-width: 180px;
       }
+      .tipo-cell {
+        text-align: center;
+        font-weight: 700;
+        padding: 6px 10px;
+      }
+      .tipo-nueva {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .tipo-existe {
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
     </style>
   </head>
   <body>
@@ -108,6 +121,7 @@
           .map(([_, payload]) => {
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
+            const showTipo = String(payload.id_plataforma || "") === "9";
             const groups = Object.values(payload.groups || {});
             const tablesHtml = groups
               .map((group) => {
@@ -132,6 +146,19 @@
                 const body = rows
                   .map((r) => {
                     const isSpotify = String(r.id_plataforma || "") === "9";
+                    const cuentaNuevaRaw = r.cuenta_nueva;
+                    const cuentaNueva =
+                      cuentaNuevaRaw === true ||
+                      cuentaNuevaRaw === "true" ||
+                      cuentaNuevaRaw === 1 ||
+                      cuentaNuevaRaw === "1";
+                    const tipoCell = showTipo
+                      ? cuentaNuevaRaw == null
+                        ? `<td></td>`
+                        : `<td class="tipo-cell ${cuentaNueva ? "tipo-nueva" : "tipo-existe"}">${
+                            cuentaNueva ? "Cuenta Nueva" : "Ya existe"
+                          }</td>`
+                      : "";
                     const correoText = r.correo || "-";
                     const correoCell = isSpotify
                       ? `
@@ -150,10 +177,11 @@
                       isEntregaInmediata
                         ? `<td>${r.fecha_pago || "-"}</td>`
                         : `<td>${r.servicio || "-"}</td>
+                           ${tipoCell}
                            ${correoCell}
                            ${showClave ? `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>` : ""}`
                     }
-                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>` : ""}
+                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
                       <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}">📤</button>
@@ -185,11 +213,13 @@
                                  <th>Cliente</th>
                                  <th>Fecha de pago</th>
                                  <th>Servicio solicitado</th>
+                                 ${showTipo ? "<th>Tipo</th>" : ""}
                                  <th>Fecha de pedido</th>
                                  <th>Acción</th>`
                               : `<th>ID venta</th>
                                  <th>Cliente</th>
                                  <th>Servicio solicitado</th>
+                                 ${showTipo ? "<th>Tipo</th>" : ""}
                                  <th>Correo</th>
                                  ${showClave ? "<th>Clave</th>" : ""}
                                  <th>Fecha de pedido</th>
@@ -272,7 +302,7 @@
             const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-                "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, cuenta_nueva, correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -346,6 +376,7 @@
               v.completa === true || v.completa === "true" || v.completa === 1 || v.completa === "1";
             if (!grouped[platId])
               grouped[platId] = {
+                id_plataforma: platId,
                 nombre: platName,
                 entrega_inmediata:
                   platInfo.entrega_inmediata === true ||
@@ -394,6 +425,7 @@
               id_usuario: v.id_usuario,
               fecha_pago: v.fecha_pago || "-",
               servicio,
+              cuenta_nueva: v.cuenta_nueva,
               correo: v.correo_miembro || "-",
               clave: v.clave_miembro || "-",
               plataforma: platName,
@@ -505,21 +537,49 @@
             alert("Falta el correo del cliente.");
             return;
           }
-          const { data: cuentaNueva, error: cuentaErr } = await supabase
+          let nuevaCuentaId = null;
+          const { data: cuentaExist, error: existErr } = await supabase
             .from("cuentas")
-            .insert({
-              correo: correoCuenta,
-              clave: claveCuenta || null,
+            .select("id_cuenta, clave")
+            .eq("correo", correoCuenta)
+            .order("id_cuenta", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          if (existErr) throw existErr;
+          if (cuentaExist?.id_cuenta) {
+            const updateCuenta = {
               inactiva: false,
               ocupado: false,
               venta_dominio: true,
               dominio_de: idUsuario ? Number(idUsuario) : null,
               id_plataforma: idPlataforma ? Number(idPlataforma) : null,
-            })
-            .select("id_cuenta")
-            .single();
-          if (cuentaErr) throw cuentaErr;
-          const nuevaCuentaId = cuentaNueva?.id_cuenta;
+            };
+            if (claveCuenta && claveCuenta !== (cuentaExist.clave || "")) {
+              updateCuenta.clave = claveCuenta;
+            }
+            const { error: updCuentaErr } = await supabase
+              .from("cuentas")
+              .update(updateCuenta)
+              .eq("id_cuenta", cuentaExist.id_cuenta);
+            if (updCuentaErr) throw updCuentaErr;
+            nuevaCuentaId = cuentaExist.id_cuenta;
+          } else {
+            const { data: cuentaNueva, error: cuentaErr } = await supabase
+              .from("cuentas")
+              .insert({
+                correo: correoCuenta,
+                clave: claveCuenta || null,
+                inactiva: false,
+                ocupado: false,
+                venta_dominio: true,
+                dominio_de: idUsuario ? Number(idUsuario) : null,
+                id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+              })
+              .select("id_cuenta")
+              .single();
+            if (cuentaErr) throw cuentaErr;
+            nuevaCuentaId = cuentaNueva?.id_cuenta || null;
+          }
           if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
 
           let cuentaMadreId = null;
@@ -581,6 +641,7 @@
             id_cuenta: cuentaMadreId || null,
             id_cuenta_miembro: nuevaCuentaId,
             id_perfil: perfilId || null,
+            cuenta_nueva: false,
           };
           if (!isReportado) {
             updateVenta.fecha_corte = nextIso;

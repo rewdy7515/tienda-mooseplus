@@ -6,12 +6,17 @@
     <title>Entregar servicios</title>
     <link rel="stylesheet" href="../styles/styles.css" />
     <style>
+      .fecha-wrap {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
       .input-inline {
         display: inline-flex;
         align-items: center;
         gap: 6px;
         width: 100%;
-        max-width: 100%;
+        max-width: 220px;
       }
       .input-inline .form-input {
         flex: 1;
@@ -19,10 +24,60 @@
         width: 100%;
         box-sizing: border-box;
       }
+      .input-inline .input-tipo {
+        appearance: none;
+        background: #f5f6f8;
+        border: 1px solid #d7dce3;
+        border-radius: 10px;
+        padding: 8px 34px 8px 12px;
+        font-weight: 600;
+        color: #2f3238;
+        background-image: linear-gradient(45deg, transparent 50%, #5a606b 50%),
+          linear-gradient(135deg, #5a606b 50%, transparent 50%),
+          linear-gradient(to right, #e7ebf0, #e7ebf0);
+        background-position: calc(100% - 18px) 55%, calc(100% - 12px) 55%, 100% 0;
+        background-size: 6px 6px, 6px 6px, 2.5rem 100%;
+        background-repeat: no-repeat;
+      }
+      .input-inline .input-tipo:focus {
+        outline: none;
+        border-color: #9aa3ad;
+        box-shadow: 0 0 0 3px rgba(154, 163, 173, 0.2);
+      }
+      .input-inline .input-tipo option {
+        color: #2f3238;
+        background: #ffffff;
+        font-weight: 500;
+      }
       .input-inline .btn-check {
         flex: 0 0 auto;
         padding: 6px 10px;
         line-height: 1;
+      }
+      .copyable {
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 80px;
+        right: 18px;
+        background: #000;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        z-index: 999;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
       }
     </style>
   </head>
@@ -35,6 +90,7 @@
       <div id="entregar-status" class="status">Cargando servicios...</div>
       <div id="entregar-tablas"></div>
     </main>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
@@ -49,6 +105,8 @@
 
       const statusEl = document.querySelector("#entregar-status");
       const tablasEl = document.querySelector("#entregar-tablas");
+      const copyToast = document.querySelector("#copy-toast");
+      let copyToastTimer = null;
       const FORCE_CLIENT_INPUTS = true;
 
       const params = new URLSearchParams(window.location.search);
@@ -80,6 +138,42 @@
           setTimeout(() => (anchor.textContent = "Copiar"), 1200);
         }
       };
+
+      const showCopyToast = () => {
+        if (!copyToast) return;
+        copyToast.classList.add("show");
+        if (copyToastTimer) clearTimeout(copyToastTimer);
+        copyToastTimer = setTimeout(() => copyToast.classList.remove("show"), 2000);
+      };
+
+      const copyTextNotify = async (text) => {
+        if (!text) return;
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        } catch (_) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            copied = true;
+          } catch (err) {
+            console.error("copy error", err);
+          }
+        }
+        if (copied) showCopyToast();
+      };
+
+      const escapeHtml = (val) =>
+        String(val || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
 
       const formatFechaCorte = (value) => {
         if (!value) return "";
@@ -141,6 +235,11 @@
               FORCE_CLIENT_INPUTS ||
               (platObj.entrega_inmediata === false && platObj.correo_cliente === true);
             const showClaveInput = showClientInputs && platObj.clave_cliente === true;
+            const showPinColumn = !isRenovacion && isTrue(platObj.usa_pines);
+            const showPerfilColumn = !!(platObj.por_acceso || platObj.por_pantalla);
+            const perfilHeader = platObj.por_acceso ? "Acceso" : "Perfil";
+            const platId = Number(rows?.[0]?.id_plataforma || "");
+            const showTipoColumn = !isRenovacion && platId === 9;
             const body = rows
               .map((r) => {
                 const perfilTxt = r.perfil || "";
@@ -176,7 +275,11 @@
                                 <input type="text" class="form-input input-correo" placeholder="Correo" value="" />
                               </div>
                             </div>`
-                          : r.correo || ""
+                          : r.correo
+                            ? `<span class="copyable correo-copy" data-clipboard="${escapeHtml(
+                                r.correo
+                              )}">${escapeHtml(r.correo)}</span>`
+                            : ""
                       }
                     </td>
                     ${isRenovacion ? "" : `<td>${
@@ -186,9 +289,33 @@
                               <input type="text" class="form-input input-clave" placeholder="Clave" value="" />
                             </div>
                           </div>`
-                        : r.clave || ""
+                        : r.clave
+                          ? `<span class="copyable clave-copy" data-clipboard="${escapeHtml(
+                              r.clave
+                            )}">${escapeHtml(r.clave)}</span>`
+                          : ""
                     }</td>`}
-                    ${isRenovacion ? "" : `<td>${perfilTxt}</td>`}
+                    ${showTipoColumn ? `<td>${
+                      showClientInputs && isPendiente
+                        ? `<div class="fecha-wrap">
+                            <div class="input-inline">
+                              <select class="form-input input-tipo" required>
+                                <option value="" disabled selected>Selecciona tipo</option>
+                                <option value="existente">Cuenta existente</option>
+                                <option value="nueva">Cuenta Nueva</option>
+                              </select>
+                            </div>
+                          </div>`
+                        : ""
+                    }</td>` : ""}
+                    ${isRenovacion ? "" : showPerfilColumn ? `<td>${perfilTxt ? `<div>${escapeHtml(perfilTxt)}</div>` : ""}</td>` : ""}
+                    ${showPinColumn ? `<td>${
+                      r.pin
+                        ? `<span class="copyable pin-copy" data-clipboard="${escapeHtml(
+                            r.pin
+                          )}">${escapeHtml(r.pin)}</span>`
+                        : ""
+                    }</td>` : ""}
                     <td>${r.fecha_corte ? formatDDMMYYYY(r.fecha_corte) : isPendiente ? "Pendiente" : ""}</td>
                     <td>
                       ${
@@ -216,7 +343,9 @@
                         <th>ID Venta</th>
                         <th>Correo</th>
                         ${isRenovacion ? "" : "<th>Clave</th>"}
-                        ${isRenovacion ? "" : "<th>Perfil / Acceso</th>"}
+                        ${showTipoColumn ? "<th>Tipo</th>" : ""}
+                        ${isRenovacion ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
+                        ${showPinColumn ? "<th>PIN</th>" : ""}
                         <th>Fecha de corte</th>
                         <th>Acción</th>
                      </tr>
@@ -271,7 +400,7 @@
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
               .select(
-                "id_plataforma, nombre, por_acceso, usa_pines, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
+                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
               )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
@@ -330,6 +459,9 @@
                 correo_cliente: isTrue(plat.correo_cliente),
                 clave_cliente: isTrue(plat.clave_cliente),
                 cuenta_madre: isTrue(plat.cuenta_madre),
+                por_acceso: isTrue(plat.por_acceso),
+                por_pantalla: isTrue(plat.por_pantalla),
+                usa_pines: isTrue(plat.usa_pines),
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -377,6 +509,9 @@
                 correo_cliente: isTrue(plat.correo_cliente),
                 clave_cliente: isTrue(plat.clave_cliente),
                 cuenta_madre: isTrue(plat.cuenta_madre),
+                por_acceso: isTrue(plat.por_acceso),
+                por_pantalla: isTrue(plat.por_pantalla),
+                usa_pines: isTrue(plat.usa_pines),
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -474,6 +609,12 @@
       };
 
       tablasEl?.addEventListener("click", (e) => {
+        const copyEl = e.target.closest(".copyable");
+        if (copyEl) {
+          const text = copyEl.dataset.clipboard || copyEl.textContent || "";
+          copyTextNotify(text.trim());
+          return;
+        }
         const btn = e.target.closest(".btn-copy");
         if (!btn) return;
         const text = decodeURIComponent(btn.dataset.copy || "");
@@ -493,28 +634,41 @@
         if (!ventaId) return;
         const correoVal = row?.querySelector(".input-correo")?.value?.trim() || "";
         const claveVal = row?.querySelector(".input-clave")?.value?.trim() || "";
+        const tipoVal = row?.querySelector(".input-tipo")?.value?.trim() || "";
         if (!correoVal) {
           alert("Ingresa el correo.");
+          return;
+        }
+        if (!claveVal) {
+          alert("Ingresa la clave.");
           return;
         }
         try {
           const venta = ventasById[ventaId] || {};
           const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
           const platInfo = platById[platId] || {};
+          if (Number(platId) === 9 && !tipoVal) {
+            alert("Selecciona el tipo de cuenta.");
+            return;
+          }
           const needsMadre = platInfo.cuenta_madre === true;
           let assignCuenta = null;
           let assignPerfil = null;
           let clientCuentaId = null;
+          let cuentaExist = null;
+
+          const { data: cuentasFound, error: cErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, id_cuenta_madre, clave")
+            .eq("correo", correoVal)
+            .order("id_cuenta", { ascending: true })
+            .limit(1);
+          if (cErr) throw cErr;
+          cuentaExist = cuentasFound?.[0] || null;
 
           if (needsMadre) {
-            const { data: cuentaCliente, error: cErr } = await supabase
-              .from("cuentas")
-              .select("id_cuenta, id_cuenta_madre")
-              .eq("correo", correoVal)
-              .maybeSingle();
-            if (cErr) throw cErr;
-            clientCuentaId = cuentaCliente?.id_cuenta || null;
-            const motherFromClient = cuentaCliente?.id_cuenta_madre || null;
+            clientCuentaId = cuentaExist?.id_cuenta || null;
+            const motherFromClient = cuentaExist?.id_cuenta_madre || null;
 
             if (motherFromClient) {
               const { data: perfPref, error: pErr } = await supabase
@@ -566,10 +720,19 @@
             if (linkErr) throw linkErr;
           }
 
+          if (cuentaExist?.id_cuenta && claveVal && claveVal !== (cuentaExist.clave || "")) {
+            const { error: claveErr } = await supabase
+              .from("cuentas")
+              .update({ clave: claveVal })
+              .eq("id_cuenta", cuentaExist.id_cuenta);
+            if (claveErr) throw claveErr;
+          }
+
           const payload = { correo_miembro: correoVal };
           if (claveVal) payload.clave_miembro = claveVal;
           if (assignCuenta) payload.id_cuenta = assignCuenta;
           if (assignPerfil) payload.id_perfil = assignPerfil;
+          if (Number(platId) === 9) payload.cuenta_nueva = tipoVal === "nueva";
 
           const { error } = await supabase
             .from("ventas")

@@ -261,6 +261,7 @@
       };
       const getPlanHeaderTitle = (planObj) => {
         const raw = (planObj?.plan || "").trim();
+        if (!raw || /sin\s*plan/i.test(raw)) return "";
         return (
           isTrue(planObj?.completa) ||
           /cuentas?\s*completas?|completa/i.test(raw)
@@ -874,6 +875,12 @@
               .trim();
             usernameEl.textContent = fullName || user.correo || "Usuario";
           }
+          const accesoCliente = user?.acceso_cliente;
+          isMayorista =
+            accesoCliente === false ||
+            accesoCliente === "false" ||
+            accesoCliente === 0 ||
+            accesoCliente === "0";
           setSessionRoles(user || {});
           const sessionRoles = getSessionRoles();
           const isAdmin =
@@ -1001,6 +1008,7 @@
       let selectedRenovarCorreo = "";
       let selectedRenovarNPerfil = "";
       let selectedRenovarCorreoCliente = "";
+      let isMayorista = false;
 
       const closeRenovarModal = () => {
         modalRenovar?.classList.add("hidden");
@@ -1025,15 +1033,17 @@
           if (precioId) {
             supabase
               .from("precios")
-              .select("precio_usd_detal")
+              .select("precio_usd_detal, precio_usd_mayor")
               .eq("id_precio", precioId)
               .maybeSingle()
               .then(({ data, error }) => {
                 if (error) throw error;
-                const monto = Number(data?.precio_usd_detal);
-                selectedRenovarCostoBase = Number.isFinite(monto) ? monto : null;
-                renovarCostoEl.textContent = Number.isFinite(monto)
-                  ? `Costo: $${monto.toFixed(2)}`
+                const detal = Number(data?.precio_usd_detal);
+                const mayor = Number(data?.precio_usd_mayor);
+                const picked = isMayorista ? (Number.isFinite(mayor) ? mayor : detal) : (Number.isFinite(detal) ? detal : mayor);
+                selectedRenovarCostoBase = Number.isFinite(picked) ? picked : null;
+                renovarCostoEl.textContent = Number.isFinite(picked)
+                  ? `Costo: $${picked.toFixed(2)}`
                   : "Costo: -";
                 updateRenovarCosto();
               })

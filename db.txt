@@ -71,6 +71,8 @@ CREATE TABLE public.descuentos (
   meses smallint NOT NULL,
   descuento_1 real,
   descuento_2 real,
+  descuento_3 real,
+  descuento_4 real,
   CONSTRAINT descuentos_pkey PRIMARY KEY (id_descuento)
 );
 CREATE TABLE public.historial_reemplazos (
@@ -153,10 +155,19 @@ CREATE TABLE public.ordenes (
   monto_completo boolean,
   orden_cancelada boolean,
   id_admin bigint,
+  recargar_saldo boolean,
+  hora_confirmacion time without time zone,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
   CONSTRAINT ordenes_id_admin_fkey FOREIGN KEY (id_admin) REFERENCES public.usuarios(id_usuario)
+);
+CREATE TABLE public.pagina (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  logo text,
+  preview text,
+  logo_pestana text,
+  CONSTRAINT pagina_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.pagomoviles (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -213,6 +224,8 @@ CREATE TABLE public.plataformas (
   corte_directo boolean,
   max_miembros smallint,
   mostrar_stock boolean,
+  color_3 text,
+  banner text,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
   CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );
@@ -347,6 +360,7 @@ CREATE TABLE public.ventas (
   id_cuenta_miembro bigint,
   renovacion boolean,
   completa boolean,
+  cuenta_nueva boolean,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT ventas_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),

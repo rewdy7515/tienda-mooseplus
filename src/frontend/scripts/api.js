@@ -98,17 +98,34 @@ export async function fetchCart() {
   await ensureServerSession();
   try {
     const id = requireSession();
-    const res = await fetch(`${API_BASE}/api/cart?id_usuario=${encodeURIComponent(id)}`, {
+    const url = `${API_BASE}/api/cart?id_usuario=${encodeURIComponent(id)}`;
+    const startedAt = Date.now();
+    console.log("[fetchCart] request", { url, apiBase: API_BASE, id_usuario: id });
+    const res = await fetch(url, {
       credentials: "include",
+    });
+    const elapsedMs = Date.now() - startedAt;
+    console.log("[fetchCart] response", {
+      status: res.status,
+      ok: res.ok,
+      elapsedMs,
+      contentType: res.headers.get("content-type"),
     });
     if (!res.ok) {
       const text = await res.text();
-      console.error("cart get response", res.status, text);
+      console.error("cart get response", res.status, text?.slice(0, 800));
       return { items: [] };
     }
-    return res.json();
+    const data = await res.json();
+    console.log("[fetchCart] parsed", {
+      hasCarrito: Boolean(data?.carrito),
+      items: Array.isArray(data?.items) ? data.items.length : 0,
+    });
+    return data;
   } catch (err) {
-    console.error("No se pudo obtener el carrito:", err);
+    console.error("No se pudo obtener el carrito:", err, {
+      apiBase: API_BASE,
+    });
     return { items: [] };
   }
 }

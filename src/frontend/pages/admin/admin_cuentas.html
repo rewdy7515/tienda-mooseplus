@@ -51,6 +51,27 @@
         gap: 10px;
         flex-wrap: wrap;
       }
+      .table-base td.action-cell {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: nowrap;
+        white-space: nowrap;
+        width: auto;
+        height: auto;
+        overflow: visible;
+      }
+      .table-base th.action-cell {
+        white-space: nowrap;
+        width: auto;
+      }
+      .cuentas-wrapper .table-base {
+        width: max-content;
+        min-width: 100%;
+      }
+      .cuenta-table-wrap {
+        overflow-x: auto;
+      }
       .sugerencias-cuentas {
         position: absolute;
         top: 100%;
@@ -1516,7 +1537,7 @@
                   ${finalShowPerfil ? `<th>${getPerfilHeaderLabel(flags)}</th>` : ""}
                   ${finalShowPin ? "<th>PIN</th>" : ""}
                   <th>Fecha de corte</th>
-                  <th>Acción</th>
+                  <th class="action-cell">Acción</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -1730,7 +1751,7 @@
                         ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
                         ${showPin ? "<th>PIN</th>" : ""}
                         <th>Fecha corte</th>
-                        <th>Acción</th>
+                        <th class="action-cell">Acción</th>
                       </tr>
                     </thead>
                     <tbody>${rows}${addRow}</tbody>
@@ -2157,7 +2178,7 @@
                 ${claveCell}
                 ${perfilCell}
                 <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
-                <td style="display:flex; gap:6px; flex-wrap:wrap;">
+                <td class="action-cell">
                   <button class="btn-primary btn-reemplazar-row"
                     data-cuenta="${r.id_cuenta ?? ""}"
                     data-perfil="${r.id_perfil ?? ""}"
@@ -2199,7 +2220,7 @@
                       ${showClave ? "<th>Clave</th>" : ""}
                       ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
                       <th>Fecha de Corte</th>
-                      <th>Acción</th>
+                      <th class="action-cell">Acción</th>
                     </tr>
                   </thead>
                   <tbody>${trs}</tbody>
@@ -2583,7 +2604,7 @@
                 <td>${v.correo_miembro || "-"}</td>
                 <td>${renderFechaEditCell(v.fecha_corte, v.id_venta)}</td>
                 <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
-                <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <td class="action-cell">
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
                     isSuperadmin && v.id_venta
@@ -2617,7 +2638,7 @@
                     <th>Correo</th>
                     <th>Fecha de corte</th>
                     <th>Estado</th>
-                    <th>Acción</th>
+                    <th class="action-cell">Acción</th>
                   </tr>
                 </thead>
                 <tbody>${body}</tbody>
@@ -2664,7 +2685,7 @@
             ${showClaveCliente ? "<th>Clave</th>" : ""}
             <th>Fecha de corte</th>
             <th>Estado</th>
-            <th>Acción</th>
+            <th class="action-cell">Acción</th>
           </tr>`;
         } else if (colMode === "perfil") {
           thead = `<tr>
@@ -2675,7 +2696,7 @@
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
-            <th>Acción</th>
+            <th class="action-cell">Acción</th>
           </tr>`;
         } else if (colMode === "miembro") {
           thead = `<tr>
@@ -2684,7 +2705,7 @@
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
-            <th>Acción</th>
+            <th class="action-cell">Acción</th>
           </tr>`;
         } else {
           thead = `<tr>
@@ -2692,7 +2713,7 @@
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
-            <th>Acción</th>
+            <th class="action-cell">Acción</th>
           </tr>`;
         }
 
@@ -2823,7 +2844,7 @@
                 ${showClaveCliente ? `<td>${claveCell}</td>` : ""}
                 <td>${fechaCell}</td>
                 <td class="estado-cell ${estadoRow.className}">${estadoRow.label}</td>
-                <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <td class="action-cell">
                   ${accionButtons}
                 </td>
               </tr>`;
@@ -2876,7 +2897,7 @@
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
-                <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <td class="action-cell">
                   <button type="button" class="btn-primary btn-reemplazar-row"
                   data-perfil="${p.id_perfil || ""}"
                   data-correo="${info.correo || ""}"
@@ -2934,7 +2955,7 @@
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
-                <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                <td class="action-cell">
                   <button type="button" class="btn-primary btn-reemplazar-row"
                   data-perfil="${p.id_perfil || ""}"
                   data-correo="${info.correo || ""}"
@@ -2984,7 +3005,7 @@
                 }
               </td>
               <td class="estado-cell ${estado.className}">${estado.label}</td>
-              <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              <td class="action-cell">
                 <button type="button" class="btn-primary btn-reemplazar-row"
                 data-perfil="${p.id_perfil || ""}"
                 data-correo="${info.correo || ""}"
@@ -3220,7 +3241,7 @@
                   ${showClaveCliente ? "<th>Clave</th>" : ""}
                   <th>Ocupado por</th>
                   <th>Fecha de corte</th>
-                  <th>Acción</th>
+                  <th class="action-cell">Acción</th>
                 </tr>
               </thead>
               <tbody>
@@ -3254,7 +3275,7 @@
                                 : renderFechaInlineCell("", `data-cuenta="${m.id_cuenta || ""}"`)
                             }
                           </td>
-                          <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                          <td class="action-cell">
                             <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${m.id_cuenta || ""}">Reemplazar</button>
                             <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
                             <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>
@@ -5174,7 +5195,7 @@
               <td>${clave || "-"}</td>
               <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" /></td>
               <td>${renderFechaInlineCell("", `data-cuenta="${data.id_cuenta || ""}"`)}</td>
-              <td style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+              <td class="action-cell">
                 <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${data.id_cuenta || ""}">Reemplazar</button>
                 <button type="button" class="btn-outline btn-copy-row" data-copy="" disabled>Copiar</button>
                 <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${data.id_cuenta || ""}">Registrar servicio</button>
