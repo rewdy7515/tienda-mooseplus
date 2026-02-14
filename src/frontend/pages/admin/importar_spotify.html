@@ -202,11 +202,11 @@
         return data?.id_cuenta || null;
       };
 
-      const createCuentaCompleta = async (correo, clave, idUsuario) => {
+      const createCuentaCompleta = async (correo, clave, idUsuario, idPlataforma = 9) => {
         const { data, error } = await supabase
           .from("cuentas")
           .insert({
-            id_plataforma: 9,
+            id_plataforma: idPlataforma,
             correo,
             clave,
             inactiva: false,
@@ -256,7 +256,7 @@
             const usuario = (row.usuario || "").trim();
             const correo = (row.correo || "").trim();
             const clave = (row.clave || "").trim();
-            if (!fechaPago || !fechaCorte || !usuario || !correo || !clave) {
+            if (!fechaCorte || !usuario || !correo || !clave) {
               skipped += 1;
               continue;
             }
@@ -281,7 +281,7 @@
               id_cuenta: idCuentaMadre,
               id_cuenta_miembro: idCuentaMiembro,
               id_perfil: idPerfil,
-              fecha_pago: fechaPago,
+              fecha_pago: fechaPago || null,
               fecha_corte: fechaCorte,
               meses_contratados: meses,
               pendiente: false,
@@ -320,31 +320,47 @@
         try {
           let inserted = 0;
           let skipped = 0;
-          for (const row of parsed) {
+          const logSkip = (idx, reason, extra = {}) => {
+            console.warn("[importar spotify 2] fila omitida", {
+              fila: idx + 1,
+              reason,
+              ...extra,
+            });
+          };
+          for (const [idx, row] of parsed.entries()) {
             const fechaPago = normalizeDate(row.fecha_pago);
             const fechaCorte = normalizeDate(row.fecha_corte);
             const usuario = (row.usuario || "").trim();
             const correo = (row.correo || "").trim();
             const clave = (row.clave || "").trim();
-            if (!fechaPago || !fechaCorte || !usuario || !correo || !clave) {
+            if (!fechaCorte || !usuario || !correo || !clave) {
               skipped += 1;
+              logSkip(idx, "Campos requeridos incompletos", {
+                fecha_pago: fechaPago || null,
+                fecha_corte: fechaCorte || null,
+                usuario,
+                correo,
+                clave: clave ? "[ok]" : "",
+              });
               continue;
             }
             const idUsuario = await getOrCreateUsuario(usuario);
             if (!idUsuario) {
               skipped += 1;
+              logSkip(idx, "No se pudo obtener/crear usuario", { usuario });
               continue;
             }
-            const idCuenta = await createCuentaCompleta(correo, clave, idUsuario);
+            const idCuenta = await createCuentaCompleta(correo, clave, idUsuario, 11);
             if (!idCuenta) {
               skipped += 1;
+              logSkip(idx, "No se pudo crear cuenta", { correo, idUsuario });
               continue;
             }
             const meses = diffMonths(fechaPago, fechaCorte);
             const { error: ventaErr } = await supabase.from("ventas").insert({
               id_usuario: idUsuario,
               id_cuenta: idCuenta,
-              fecha_pago: fechaPago,
+              fecha_pago: fechaPago || null,
               fecha_corte: fechaCorte,
               meses_contratados: meses,
               pendiente: false,
