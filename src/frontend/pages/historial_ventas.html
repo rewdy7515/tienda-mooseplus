@@ -54,8 +54,9 @@
                 <th>Detalle</th>
                 <th>Monto</th>
                 <th>Método de pago</th>
-                <th>Nro de referencia</th>
+                <th>Referencia</th>
                 <th>Fecha</th>
+                <th>Hora</th>
               </tr>
             </thead>
             <tbody id="historial-body"></tbody>
@@ -92,11 +93,34 @@
         return plan ? `${cantidad} ${plan}` : `${cantidad}`;
       };
 
+      const truncateText = (value, max = 12) => {
+        const raw = String(value ?? "").trim();
+        if (!raw) return "-";
+        if (raw.length <= max) return raw;
+        return `${raw.slice(0, max)}...`;
+      };
+
+      const formatHora = (hora) => {
+        if (!hora) return "-";
+        const raw = String(hora).trim();
+        const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+        if (!match) return raw;
+        let hh = Number(match[1]);
+        const mm = match[2];
+        if (!Number.isFinite(hh)) return raw;
+        const suffix = hh >= 12 ? "pm" : "am";
+        hh = hh % 12;
+        if (hh === 0) hh = 12;
+        return `${hh}:${mm} ${suffix}`;
+      };
+
       const init = async () => {
         try {
           const { data: historial, error } = await supabase
             .from("historial_ventas")
-            .select("id_historial_ventas, id_venta, id_plataforma, id_usuario_cliente, id_metodo_de_pago, referencia, monto, fecha_pago")
+            .select(
+              "id_historial_ventas, id_venta, id_plataforma, id_usuario_cliente, id_metodo_de_pago, referencia, monto, fecha_pago, hora_pago"
+            )
             .order("fecha_pago", { ascending: false });
           if (error) throw error;
 
@@ -187,9 +211,11 @@
               const venta = r.id_venta ? ventasMap[r.id_venta] : null;
               const precio = venta?.id_precio ? preciosMap[venta.id_precio] : null;
               const detalle = precio ? buildDetalle(precio) : "-";
-              const metodo = r.id_metodo_de_pago ? metodoMap[r.id_metodo_de_pago] || "-" : "-";
+              const metodoRaw = r.id_metodo_de_pago ? metodoMap[r.id_metodo_de_pago] || "-" : "-";
+              const metodo = truncateText(metodoRaw, 12);
               const referencia = r.referencia ?? "-";
               const fecha = formatDDMMYYYY(r.fecha_pago) || r.fecha_pago || "-";
+              const hora = formatHora(r.hora_pago);
               return `
                 <tr>
                   <td>${r.id_venta ?? "-"}</td>
@@ -200,6 +226,7 @@
                   <td>${metodo}</td>
                   <td>${referencia}</td>
                   <td>${fecha}</td>
+                  <td>${hora}</td>
                 </tr>
               `;
             })

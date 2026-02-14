@@ -1324,6 +1324,7 @@ app.get("/api/inventario", async (req, res) => {
       .select(
         `
         id_venta,
+        nombre_cliente,
         correo_miembro,
         fecha_corte,
         id_precio,
@@ -1394,6 +1395,7 @@ app.get("/api/inventario", async (req, res) => {
         plat_clave_cliente: clave_cliente_flag,
         plan,
         id_venta: row.id_venta,
+        nombre_cliente: row.nombre_cliente || "",
         id_precio: row.id_precio || null,
         id_plataforma: row.cuentas?.id_plataforma || null,
         id_cuenta: memberId || row.id_cuenta || row.cuentas?.id_cuenta || null,

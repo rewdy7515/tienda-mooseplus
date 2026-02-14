@@ -79,6 +79,37 @@
         opacity: 1;
         transform: translateY(0);
       }
+      .cliente-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1200;
+      }
+      .cliente-modal.hidden {
+        display: none;
+      }
+      .cliente-modal-card {
+        width: min(92vw, 360px);
+        background: #fff;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 12px 26px rgba(0, 0, 0, 0.2);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .cliente-modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .cliente-modal-card .form-input {
+        width: 100%;
+        box-sizing: border-box;
+      }
     </style>
   </head>
   <body>
@@ -91,6 +122,21 @@
       <div id="entregar-tablas"></div>
     </main>
     <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
+    <div id="cliente-modal" class="cliente-modal hidden" aria-hidden="true">
+      <div class="cliente-modal-card">
+        <strong>Nombre del cliente:</strong>
+        <input
+          type="text"
+          id="cliente-nombre-input"
+          class="form-input"
+          placeholder="Nombre y apellido"
+        />
+        <div class="cliente-modal-actions">
+          <button type="button" class="btn-outline" id="cliente-cancel">Cancelar</button>
+          <button type="button" class="btn-primary" id="cliente-guardar">Guardar</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
@@ -106,8 +152,14 @@
       const statusEl = document.querySelector("#entregar-status");
       const tablasEl = document.querySelector("#entregar-tablas");
       const copyToast = document.querySelector("#copy-toast");
+      const clienteModal = document.querySelector("#cliente-modal");
+      const clienteNombreInput = document.querySelector("#cliente-nombre-input");
+      const btnClienteCancel = document.querySelector("#cliente-cancel");
+      const btnClienteGuardar = document.querySelector("#cliente-guardar");
       let copyToastTimer = null;
       const FORCE_CLIENT_INPUTS = true;
+      let canAnnotateCliente = false;
+      let activeClienteVentaId = null;
 
       const params = new URLSearchParams(window.location.search);
       const idOrdenParam = params.get("id_orden");
@@ -264,6 +316,9 @@
                         perfilHogar: r.perfil_hogar,
                         isSubCuenta: r.es_subcuenta,
                       });
+                const annotateBtn = canAnnotateCliente
+                  ? `<button type="button" class="btn-outline btn-anotar-cliente" data-venta="${r.id_venta}">Anotar cliente</button>`
+                  : "";
                 return `
                   <tr>
                     <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
@@ -327,6 +382,7 @@
                               ? '<span class="badge badge-warning">Pendiente</span>'
                               : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
                       }
+                      ${annotateBtn}
                     </td>
                   </tr>
                 `;
@@ -367,6 +423,7 @@
         try {
           const user = await loadCurrentUser();
           const userId = user?.id_usuario;
+          canAnnotateCliente = user?.acceso_cliente === false;
           const baseSelect =
             "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)";
           let ventas = [];
@@ -626,6 +683,19 @@
         const text = decodeURIComponent(btn.dataset.copy || "");
         copyToClipboard(text, btn);
       });
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-anotar-cliente");
+        if (!btn) return;
+        const ventaId = btn.dataset.venta;
+        if (!ventaId || !clienteModal) return;
+        activeClienteVentaId = ventaId;
+        if (clienteNombreInput) {
+          clienteNombreInput.value = "";
+          clienteNombreInput.focus();
+        }
+        clienteModal.classList.remove("hidden");
+        clienteModal.setAttribute("aria-hidden", "false");
+      });
       tablasEl?.addEventListener("click", async (e) => {
         const btn = e.target.closest(".btn-send-datos");
         if (!btn) return;
@@ -752,6 +822,37 @@
       });
 
       loadServicios();
+
+      const closeClienteModal = () => {
+        if (!clienteModal) return;
+        clienteModal.classList.add("hidden");
+        clienteModal.setAttribute("aria-hidden", "true");
+        activeClienteVentaId = null;
+      };
+
+      btnClienteCancel?.addEventListener("click", closeClienteModal);
+      clienteModal?.addEventListener("click", (e) => {
+        if (e.target === clienteModal) closeClienteModal();
+      });
+      btnClienteGuardar?.addEventListener("click", async () => {
+        if (!activeClienteVentaId) return;
+        const nombre = (clienteNombreInput?.value || "").trim();
+        if (!nombre) {
+          alert("Ingresa el nombre del cliente.");
+          return;
+        }
+        try {
+          const { error } = await supabase
+            .from("ventas")
+            .update({ nombre_cliente: nombre })
+            .eq("id_venta", activeClienteVentaId);
+          if (error) throw error;
+          closeClienteModal();
+        } catch (err) {
+          console.error("anotar cliente error", err);
+          alert("No se pudo guardar el nombre del cliente.");
+        }
+      });
     </script>
   </body>
 </html>

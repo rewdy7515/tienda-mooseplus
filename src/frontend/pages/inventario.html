@@ -121,6 +121,20 @@
         border-bottom: 0;
         border-radius: 0;
       }
+      .cliente-edit-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cliente-edit-wrap .btn-edit-cliente,
+      .cliente-edit-wrap .btn-save-cliente {
+        padding: 4px 6px;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .cliente-edit-wrap .cliente-edit-input {
+        min-width: 120px;
+      }
       /* Quitar borde curvo superior de tablas en inventario */
       .inventario-plan .table-base {
         border-radius: 0;
@@ -277,6 +291,7 @@
       let proximasSeleccionadas = new Set();
       let ventasIndex = [];
       let descuentosMap = {};
+      let showClienteColumn = false;
 
       const getPlatId = (p) =>
         p?.id_plataforma ??
@@ -347,6 +362,7 @@
                 : v.correo || "";
               rows.push({
                 id_venta: v.id_venta ?? "",
+                nombre_cliente: v.nombre_cliente || "",
                 correo: rowCorreo,
                 clave: v.clave || "",
                 n_perfil: v.n_perfil ?? "",
@@ -455,6 +471,7 @@
               const correoVal = isTrue(it?.plat_correo_cliente)
                 ? it.correo_cliente || ""
                 : it.correo || "";
+              const clienteVal = showClienteColumn ? (it.nombre_cliente || "") : "";
               const perfilVal = showPerfil
                 ? formatPerfilLabel(it.n_perfil ?? "")
                 : "";
@@ -464,6 +481,16 @@
               return `
             <tr>
               <td>${it.id_venta}</td>
+              ${
+                showClienteColumn
+                  ? `<td>
+                      <div class="cliente-edit-wrap" data-venta="${it.id_venta ?? ""}">
+                        <span class="cliente-text">${clienteVal || ""}</span>
+                        <button type="button" class="btn-outline btn-edit-cliente" title="Editar">✏️</button>
+                      </div>
+                    </td>`
+                  : ""
+              }
               <td class="copyable" data-label="Correo">${correoVal}</td>
               ${showClave ? `<td class="copyable" data-label="Clave">${it.clave || ""}</td>` : ""}
               ${showPerfil ? `<td>${perfilVal}</td>` : ""}
@@ -491,6 +518,7 @@
               <thead>
                 <tr>
                   <th>ID Venta</th>
+                  ${showClienteColumn ? "<th>Cliente</th>" : ""}
                   <th>Correo</th>
                   ${showClave ? "<th>Clave</th>" : ""}
                   ${showPerfil ? "<th>Perfil</th>" : ""}
@@ -566,6 +594,41 @@
         }, 1000);
       };
 
+      const startClienteEdit = (wrap) => {
+        if (!wrap || wrap.querySelector(".cliente-edit-input")) return;
+        const textEl = wrap.querySelector(".cliente-text");
+        const editBtn = wrap.querySelector(".btn-edit-cliente");
+        if (textEl) textEl.classList.add("hidden");
+        if (editBtn) editBtn.classList.add("hidden");
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "form-input cliente-edit-input";
+        input.value = (textEl?.textContent || "").trim();
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "btn-outline btn-save-cliente";
+        saveBtn.textContent = "💾";
+        wrap.appendChild(input);
+        wrap.appendChild(saveBtn);
+        input.focus();
+      };
+
+      const finishClienteEdit = (ventaId, value) => {
+        document.querySelectorAll(`.cliente-edit-wrap[data-venta="${ventaId}"]`).forEach((wrap) => {
+          const textEl = wrap.querySelector(".cliente-text");
+          const editBtn = wrap.querySelector(".btn-edit-cliente");
+          const input = wrap.querySelector(".cliente-edit-input");
+          const saveBtn = wrap.querySelector(".btn-save-cliente");
+          if (textEl) {
+            textEl.textContent = value || "";
+            textEl.classList.remove("hidden");
+          }
+          if (editBtn) editBtn.classList.remove("hidden");
+          input?.remove();
+          saveBtn?.remove();
+        });
+      };
+
       const handleSearch = (termRaw) => {
         const term = (termRaw || "").trim().toLowerCase();
         if (!term) {
@@ -589,6 +652,35 @@
         const txt = cell?.textContent?.trim() || btnCopy?.dataset.copy;
         if (!txt) return;
         copyToClipboard(txt);
+      });
+
+      document.addEventListener("click", async (e) => {
+        const editBtn = e.target.closest(".btn-edit-cliente");
+        if (editBtn) {
+          const wrap = editBtn.closest(".cliente-edit-wrap");
+          if (!wrap) return;
+          startClienteEdit(wrap);
+          return;
+        }
+        const saveBtn = e.target.closest(".btn-save-cliente");
+        if (!saveBtn) return;
+        const wrap = saveBtn.closest(".cliente-edit-wrap");
+        if (!wrap) return;
+        const ventaId = wrap.dataset.venta;
+        if (!ventaId) return;
+        const input = wrap.querySelector(".cliente-edit-input");
+        const nextVal = (input?.value || "").trim();
+        try {
+          const { error } = await supabase
+            .from("ventas")
+            .update({ nombre_cliente: nextVal || null })
+            .eq("id_venta", ventaId);
+          if (error) throw error;
+          finishClienteEdit(ventaId, nextVal);
+        } catch (err) {
+          console.error("actualizar nombre_cliente error", err);
+          alert("No se pudo guardar el nombre del cliente.");
+        }
       });
 
       const formatDate = (iso) => formatDDMMYYYY(iso);
@@ -772,6 +864,7 @@
               <thead>
                 <tr>
                   <th>ID Venta</th>
+                  ${showClienteColumn ? "<th>Cliente</th>" : ""}
                   <th>Correo</th>
                   ${showClave ? "<th>Clave</th>" : ""}
                   ${showPerfil ? "<th>Perfil</th>" : ""}
@@ -787,6 +880,7 @@
                 const correoVal = isTrue(p?.plat_correo_cliente)
                   ? v.correo_cliente || ""
                   : v.correo || "";
+                const clienteVal = showClienteColumn ? (v.nombre_cliente || "") : "";
                 const perfilVal = showPerfil
                   ? formatPerfilLabel(v.n_perfil ?? "")
                   : "";
@@ -796,6 +890,16 @@
                 return `
                     <tr>
                       <td>${v.id_venta ?? ""}</td>
+                      ${
+                        showClienteColumn
+                          ? `<td>
+                              <div class="cliente-edit-wrap" data-venta="${v.id_venta ?? ""}">
+                                <span class="cliente-text">${clienteVal || ""}</span>
+                                <button type="button" class="btn-outline btn-edit-cliente" title="Editar">✏️</button>
+                              </div>
+                            </td>`
+                          : ""
+                      }
                       <td class="copyable" data-label="Correo">${correoVal}</td>
                       ${showClave ? `<td class="copyable" data-label="Clave">${v.clave || ""}</td>` : ""}
                       ${showPerfil ? `<td>${perfilVal}</td>` : ""}
@@ -914,6 +1018,7 @@
             accesoCliente === "false" ||
             accesoCliente === 0 ||
             accesoCliente === "0";
+          showClienteColumn = isMayorista;
           setSessionRoles(user || {});
           const sessionRoles = getSessionRoles();
           const isAdmin =
