@@ -134,10 +134,13 @@
         width: 100%;
         max-width: 100%;
       }
+      .cuentas-busqueda .input-wrap {
+        position: relative;
+      }
       #inv-search {
         width: 100%;
         box-sizing: border-box;
-        padding: 10px 12px;
+        padding: 10px 44px 10px 12px;
         border-radius: 12px;
         border: 1px solid #e5e7eb;
         background: #fff;
@@ -145,6 +148,32 @@
         color: #111827;
         outline: none;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .inv-search-btn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+        z-index: 2;
+      }
+      .inv-search-btn img {
+        width: 18px;
+        height: 18px;
+        display: block;
+        filter: none;
+      }
+      .inv-search-btn:hover {
+        background: rgba(17, 24, 39, 0.08);
       }
       #inv-search::placeholder {
         color: #9ca3af;
@@ -162,7 +191,7 @@
       }
     </style>
   </head>
-  <body>
+  <body class="inventario-page">
     <div id="app-header" data-header-root="../" data-header-pages=""></div>
     <script src="../scripts/header-loader.js"></script>
     <div id="copy-toast" class="copy-toast" aria-live="polite">
@@ -179,6 +208,9 @@
             placeholder="Buscar por correo"
             autocomplete="off"
           />
+          <button type="button" class="inv-search-btn" id="inv-search-btn" aria-label="Buscar">
+            <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/buscar-icon.png" alt="" />
+          </button>
           <div id="inv-sugs" class="sugerencias-cuentas hidden"></div>
         </div>
       </div>
@@ -226,6 +258,7 @@
       const listEl = document.querySelector("#inventario-list");
       const statusEl = document.querySelector("#inventario-status");
       const searchInput = document.querySelector("#inv-search");
+      const searchBtn = document.querySelector("#inv-search-btn");
       const searchSugs = document.querySelector("#inv-sugs");
       const searchResults = document.querySelector("#inv-search-results");
       const copyToast = document.querySelector("#copy-toast");
@@ -910,6 +943,9 @@
       attachLogoHome();
       searchInput?.addEventListener("input", (e) => {
         handleSearch(e.target.value);
+      });
+      searchBtn?.addEventListener("click", () => {
+        handleSearch(searchInput?.value || "");
       });
 
       searchSugs?.addEventListener("click", (e) => {

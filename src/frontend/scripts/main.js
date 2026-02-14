@@ -551,8 +551,3 @@ viewCartBtn?.addEventListener("click", () => {
 
 // Redirección al inicio al hacer clic en el logo
 attachLogoHome();
-
-const btnCheckout = document.querySelector("#btn-checkout");
-btnCheckout?.addEventListener("click", () => {
-  window.location.href = "checkout.html";
-});

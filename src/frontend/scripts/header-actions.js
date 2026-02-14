@@ -288,8 +288,21 @@ if (!window.__headerActionsInit) {
           return;
         }
         const cartData = await fetchCart();
+        const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+        const useSaldo = isTrue(cartData?.usa_saldo);
         const montoUsd = Number(cartData?.monto_usd);
+        const montoFinal = Number(cartData?.monto_final);
+        const checkoutTotal =
+          useSaldo && Number.isFinite(montoFinal) ? montoFinal : montoUsd;
         const saldo = Number(user?.saldo) || 0;
+        if (!Number.isFinite(checkoutTotal)) {
+          window.location.href = toAbs("checkout.html", basePagesUrl);
+          return;
+        }
+        if (!useSaldo) {
+          window.location.href = toAbs("checkout.html", basePagesUrl);
+          return;
+        }
         if (!Number.isFinite(montoUsd) || saldo < montoUsd) {
           window.location.href = toAbs("checkout.html", basePagesUrl);
           return;

@@ -2,7 +2,7 @@
 
 body {
   margin: 0;
-  background: #fff;
+  background: #f6f7f9;
   font-family: sans-serif;
   overflow-x: hidden;
   padding-top: var(--header-offset, 0px);
@@ -13,6 +13,9 @@ body.modal-open {
 }
 
 body.checkout-page {
+  background: #f6f7f9;
+}
+body.inventario-page {
   background: #f6f7f9;
 }
 
@@ -39,6 +42,11 @@ main {
   z-index: 2000;
   transform: translateY(0);
   will-change: transform;
+  transition: background-color 0.15s ease;
+}
+
+.header:hover {
+  background: #1a1a1a;
 }
 
 .logo {
@@ -215,6 +223,13 @@ main {
   gap: 8px;
   cursor: pointer;
   padding-left: 15px;
+  border-radius: 999px;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.user-menu:hover {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
 }
 
 .avatar {
@@ -873,6 +888,10 @@ body.checkout-page .checkout-total {
   flex-direction: column;
   gap: 12px;
   margin-top: 12px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: #f6f7f9;
+  padding: 12px;
 }
 
 .inventario-item {
@@ -1387,6 +1406,10 @@ input[type="number"].input-inline {
   background: #c7d0db;
 }
 
+#platform-modal .modal-bottom .modal-qty button:active {
+  background: #b8c2cf;
+}
+
 #platform-modal .modal-bottom .modal-total {
   margin: 4px 0 0;
   font-weight: 700;
@@ -1773,6 +1796,14 @@ input[type="number"].input-inline {
   color: #fff;
   border-radius: 6px;
   cursor: pointer;
+}
+
+.modal-qty button:hover {
+  background: #2f2f2f;
+}
+
+.modal-qty button:active {
+  background: #4b5563;
 }
 
 .modal-qty span {

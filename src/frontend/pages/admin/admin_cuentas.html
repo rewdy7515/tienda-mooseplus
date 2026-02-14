@@ -120,6 +120,32 @@
         font-weight: 700;
         cursor: pointer;
       }
+      .proveedor-edit-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        position: relative;
+      }
+      .proveedor-input-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        position: relative;
+      }
+      .proveedor-input-wrap.hidden {
+        display: none;
+      }
+      .proveedor-input {
+        min-width: 160px;
+      }
+      .btn-edit-proveedor,
+      .btn-save-proveedor,
+      .btn-cancel-proveedor {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
 
       .cuenta-detalle {
         margin: 16px auto 0;
@@ -875,6 +901,7 @@
       const copyToast = document.querySelector("#copy-toast");
       let copyToastTimer = null;
       let pendingOcupadoInput = null;
+      let proveedoresCache = null;
       const normalizeText = (val) =>
         (val || "")
           .toString()
@@ -945,6 +972,62 @@
         } catch (err) {
           console.error("sugs ocupado error", err);
           return [];
+        }
+      };
+
+      const fetchProveedoresList = async () => {
+        if (Array.isArray(proveedoresCache)) return proveedoresCache;
+        try {
+          const { data, error } = await supabase
+            .from("proveedores")
+            .select("id_proveedor, nombre")
+            .order("nombre", { ascending: true });
+          if (error) throw error;
+          proveedoresCache = (data || []).filter((p) => p?.nombre);
+          return proveedoresCache;
+        } catch (err) {
+          console.error("fetch proveedores error", err);
+          proveedoresCache = [];
+          return [];
+        }
+      };
+
+      const renderProveedorSugs = (wrap, items, forceHide = false) => {
+        const sugs = wrap?.querySelector(".proveedor-sugs");
+        if (!sugs) return;
+        if (forceHide || !items.length) {
+          sugs.innerHTML = "";
+          sugs.classList.add("hidden");
+          return;
+        }
+        sugs.innerHTML = items
+          .map(
+            (p) =>
+              `<button type="button" data-id="${p.id_proveedor}" data-nombre="${p.nombre}">${p.nombre}</button>`,
+          )
+          .join("");
+        sugs.classList.remove("hidden");
+      };
+
+      const updateProveedorSuggestions = async (input) => {
+        if (!input) return;
+        const wrap = input.closest(".proveedor-input-wrap");
+        const term = (input.value || "").trim();
+        const list = await fetchProveedoresList();
+        if (!list.length) {
+          renderProveedorSugs(wrap, [], true);
+          return;
+        }
+        const norm = normalizeText(term);
+        const filtered = term
+          ? list.filter((p) => normalizeText(p.nombre).includes(norm)).slice(0, 6)
+          : list.slice(0, 6);
+        renderProveedorSugs(wrap, filtered, false);
+        const exact = list.find((p) => normalizeText(p.nombre) === norm);
+        if (exact) {
+          input.dataset.proveedorId = exact.id_proveedor;
+        } else {
+          delete input.dataset.proveedorId;
         }
       };
 
@@ -3145,6 +3228,18 @@
               const direccionHtml = direccionVal
                 ? `<p><strong>Dirección:</strong> <span class="cred-copy cuenta-direccion" data-clipboard="${direccionVal}">${direccionVal}</span></p>`
                 : "";
+              const proveedorVal = info.proveedorNombre || "";
+              const proveedorHtml = proveedorVal
+                ? proveedorVal
+                : `<span class="proveedor-edit-wrap" data-cuenta="${info.id_cuenta}">
+                    <button type="button" class="btn-edit-proveedor" aria-label="Editar proveedor">✏️</button>
+                    <span class="proveedor-input-wrap hidden">
+                      <input type="text" class="input-inline proveedor-input" placeholder="Proveedor" autocomplete="off" />
+                      <div class="sugerencias-cuentas proveedor-sugs hidden"></div>
+                      <button type="button" class="btn-save-proveedor" data-cuenta="${info.id_cuenta}" aria-label="Guardar proveedor">💾</button>
+                      <button type="button" class="btn-cancel-proveedor" aria-label="Cancelar">✖</button>
+                    </span>
+                  </span>`;
               const correoHtml = correoVal
                 ? correoVal
                 : `<span class="codigo-input-wrap">
@@ -3161,7 +3256,7 @@
           <div class="cuenta-meta two-cols">
             <div>
               <p><strong>Plataforma:</strong> ${info.plataformaNombre || "-"}</p>
-              <p><strong>Proveedor:</strong> ${info.proveedorNombre || "-"}</p>
+              <p><strong>Proveedor:</strong> ${proveedorHtml}</p>
               <p><strong>Región:</strong> ${info.region || "-"}</p>
               <p><strong>Correo:</strong> <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span></p>
               <p>
@@ -3857,6 +3952,90 @@
           const text = pinEl.dataset.clipboard || pinEl.textContent || "";
           if (!text) return;
           copyTextNotify(text);
+        }
+      });
+
+      // Editar proveedor (solo cuando está vacío)
+      detalleEl?.addEventListener("click", async (e) => {
+        const editProvBtn = e.target.closest(".btn-edit-proveedor");
+        if (editProvBtn) {
+          const wrap = editProvBtn.closest(".proveedor-edit-wrap");
+          const inputWrap = wrap?.querySelector(".proveedor-input-wrap");
+          const input = inputWrap?.querySelector(".proveedor-input");
+          if (inputWrap) inputWrap.classList.remove("hidden");
+          if (input) {
+            input.value = "";
+            input.focus();
+            updateProveedorSuggestions(input);
+          }
+          editProvBtn.classList.add("hidden");
+          return;
+        }
+        const cancelProvBtn = e.target.closest(".btn-cancel-proveedor");
+        if (cancelProvBtn) {
+          const inputWrap = cancelProvBtn.closest(".proveedor-input-wrap");
+          const wrap = cancelProvBtn.closest(".proveedor-edit-wrap");
+          const editBtn = wrap?.querySelector(".btn-edit-proveedor");
+          const sugs = inputWrap?.querySelector(".proveedor-sugs");
+          const input = inputWrap?.querySelector(".proveedor-input");
+          if (input) {
+            input.value = "";
+            delete input.dataset.proveedorId;
+          }
+          if (sugs) {
+            sugs.innerHTML = "";
+            sugs.classList.add("hidden");
+          }
+          if (inputWrap) inputWrap.classList.add("hidden");
+          if (editBtn) editBtn.classList.remove("hidden");
+          return;
+        }
+        const sugBtn = e.target.closest(".proveedor-sugs button");
+        if (sugBtn) {
+          const inputWrap = sugBtn.closest(".proveedor-input-wrap");
+          const input = inputWrap?.querySelector(".proveedor-input");
+          if (input) {
+            input.value = sugBtn.dataset.nombre || "";
+            input.dataset.proveedorId = sugBtn.dataset.id || "";
+            input.focus();
+          }
+          const sugs = inputWrap?.querySelector(".proveedor-sugs");
+          if (sugs) {
+            sugs.innerHTML = "";
+            sugs.classList.add("hidden");
+          }
+          return;
+        }
+        const saveProvBtn = e.target.closest(".btn-save-proveedor");
+        if (saveProvBtn) {
+          const inputWrap = saveProvBtn.closest(".proveedor-input-wrap");
+          const input = inputWrap?.querySelector(".proveedor-input");
+          const cuentaId = saveProvBtn.dataset.cuenta || currentCuentaDetalle?.id_cuenta;
+          const value = (input?.value || "").trim();
+          if (!cuentaId || !value) {
+            alert("Selecciona un proveedor.");
+            return;
+          }
+          const list = await fetchProveedoresList();
+          const norm = normalizeText(value);
+          const match =
+            list.find((p) => String(p.id_proveedor) === String(input?.dataset.proveedorId)) ||
+            list.find((p) => normalizeText(p.nombre) === norm);
+          if (!match?.id_proveedor) {
+            alert("Selecciona un proveedor válido de la lista.");
+            return;
+          }
+          try {
+            const { error } = await supabase
+              .from("cuentas")
+              .update({ id_proveedor: match.id_proveedor })
+              .eq("id_cuenta", cuentaId);
+            if (error) throw error;
+            loadCuentaDetalle(cuentaId);
+          } catch (err) {
+            console.error("guardar proveedor error", err);
+            alert("No se pudo guardar el proveedor.");
+          }
         }
       });
 
@@ -4626,6 +4805,10 @@
       };
 
       detalleEl?.addEventListener("input", (e) => {
+        if (e.target.matches(".proveedor-input")) {
+          updateProveedorSuggestions(e.target);
+          return;
+        }
         if (
           e.target.matches(".ocupado-input") ||
           e.target.matches(".cliente-edit-input") ||

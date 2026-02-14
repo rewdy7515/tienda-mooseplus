@@ -55,6 +55,7 @@ let countdownTimer = null;
 let saldoWatcher = null;
 let lastSaldoValue = null;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -684,14 +685,18 @@ async function init() {
       precios = catalog.precios;
       plataformas = catalog.plataformas;
       descuentos = catalog.descuentos || [];
-      totalUsd = Number.isFinite(Number(cartData?.monto_final))
-        ? Number(cartData.monto_final)
-        : Number.isFinite(Number(cartData?.monto_usd))
-        ? Number(cartData.monto_usd)
-        : 0;
+      const useSaldo = isTrue(cartData?.usa_saldo);
+      const montoUsdRaw = Number(cartData?.monto_usd);
+      const montoFinalRaw = Number(cartData?.monto_final);
+      totalUsd =
+        useSaldo && Number.isFinite(montoFinalRaw)
+          ? Number(montoFinalRaw)
+          : Number.isFinite(montoUsdRaw)
+          ? Number(montoUsdRaw)
+          : 0;
       precioTierLabel = "";
-      fixedMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
-        ? Number(cartData.monto_usd)
+      fixedMontoUsd = Number.isFinite(montoUsdRaw)
+        ? Number(montoUsdRaw)
         : totalUsd;
       fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
         ? Number(cartData.monto_bs)
@@ -774,14 +779,18 @@ btnSendPayment?.addEventListener("click", async () => {
       const cartData = await fetchCart();
       cartItems = cartData.items || [];
       cartId = cartData.id_carrito || null;
-      totalUsd = Number.isFinite(Number(cartData?.monto_final))
-        ? Number(cartData.monto_final)
-        : Number.isFinite(Number(cartData?.monto_usd))
-        ? Number(cartData.monto_usd)
-        : 0;
+      const useSaldo = isTrue(cartData?.usa_saldo);
+      const montoUsdRaw = Number(cartData?.monto_usd);
+      const montoFinalRaw = Number(cartData?.monto_final);
+      totalUsd =
+        useSaldo && Number.isFinite(montoFinalRaw)
+          ? Number(montoFinalRaw)
+          : Number.isFinite(montoUsdRaw)
+          ? Number(montoUsdRaw)
+          : 0;
       precioTierLabel = "";
-      fixedMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
-        ? Number(cartData.monto_usd)
+      fixedMontoUsd = Number.isFinite(montoUsdRaw)
+        ? Number(montoUsdRaw)
         : totalUsd;
       fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
         ? Number(cartData.monto_bs)

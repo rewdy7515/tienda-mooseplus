@@ -99,6 +99,88 @@ body.cart-drawer-open {
   top: auto !important;
 }
 
+.cart-saldo-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.btn-use-saldo,
+.btn-use-saldo.btn-outline {
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-weight: 700;
+  background: #000 !important;
+  color: #fff !important;
+  border: 1px solid #000 !important;
+}
+
+.btn-use-saldo.is-active,
+.btn-use-saldo.btn-outline.is-active {
+  background: #9aa0a6 !important;
+  color: #fff !important;
+  border-color: #9aa0a6 !important;
+}
+
+.btn-use-saldo:hover,
+.btn-use-saldo.btn-outline:hover {
+  background: #111 !important;
+  border-color: #111 !important;
+}
+
+.btn-use-saldo.is-active:hover,
+.btn-use-saldo.btn-outline.is-active:hover {
+  background: #8b9197 !important;
+  border-color: #8b9197 !important;
+}
+
+.cart-summary-table.is-dim {
+  opacity: 0.75;
+}
+
+.cart-summary-table.is-dim tbody tr:nth-child(odd) {
+  background: #d5dbe4;
+}
+
+.cart-summary-table.is-dim tbody tr:nth-child(even) {
+  background: #e5e9f0;
+}
+
+.cart-remove.btn-delete {
+  background: transparent;
+  border: none;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.cart-remove.btn-delete img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.cart-remove.btn-delete:hover {
+  opacity: 0.8;
+}
+
+.cart-remove.btn-delete:active {
+  opacity: 0.6;
+}
+
+.cart-actions-inline [data-cart-action="refresh"].is-loading {
+  background: #2f2f2f;
+  color: #fff;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+
 @media (max-width: 640px) {
   .cart-items.page-cart {
     max-height: none;

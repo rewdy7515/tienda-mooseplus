@@ -1031,51 +1031,6 @@ app.post("/api/cart/item", async (req, res) => {
     if (remaining === 0) {
       await supabaseAdmin.from("carritos").delete().eq("id_carrito", idCarrito);
       console.log("[cart:item] carrito vacío, eliminado", idCarrito);
-    } else {
-      try {
-        const { data: userRow, error: userErr } = await supabaseAdmin
-          .from("usuarios")
-          .select("acceso_cliente")
-          .eq("id_usuario", idUsuario)
-          .maybeSingle();
-        if (userErr) throw userErr;
-        const useMayor = userRow?.acceso_cliente === false;
-
-        const { data: items, error: itemsErr } = await supabaseAdmin
-          .from("carrito_items")
-          .select("id_precio, cantidad, meses")
-          .eq("id_carrito", idCarrito);
-        if (itemsErr) throw itemsErr;
-        const priceIds = (items || []).map((i) => i.id_precio).filter(Boolean);
-        let totalUsd = 0;
-        if (priceIds.length) {
-          const { data: prices, error: pricesErr } = await supabaseAdmin
-            .from("precios")
-            .select("id_precio, precio_usd_detal, precio_usd_mayor")
-            .in("id_precio", priceIds);
-          if (pricesErr) throw pricesErr;
-          const priceMap = (prices || []).reduce((acc, p) => {
-            acc[p.id_precio] = p;
-            return acc;
-          }, {});
-          totalUsd = (items || []).reduce((sum, it) => {
-            const price = priceMap[it.id_precio] || {};
-            const unit = useMayor
-              ? Number(price.precio_usd_mayor) || Number(price.precio_usd_detal) || 0
-              : Number(price.precio_usd_detal) || 0;
-            const qty = Number(it.cantidad) || 0;
-            const meses = Number(it.meses) || 1;
-            return sum + unit * qty * meses;
-          }, 0);
-        }
-        const { error: updMontoErr } = await supabaseAdmin
-          .from("carritos")
-          .update({ monto_usd: totalUsd })
-          .eq("id_carrito", idCarrito);
-        if (updMontoErr) throw updMontoErr;
-      } catch (mErr) {
-        console.error("[cart:item] update monto_usd error", mErr);
-      }
     }
 
     console.log("[cart:item] usuario", idUsuario, "carrito", idCarrito, "delta", parsedDelta, "id_precio", id_precio, "remaining", remaining);
@@ -1113,7 +1068,7 @@ app.get("/api/cart", async (_req, res) => {
 
     const { data: carritoInfo, error: carritoErr } = await supabaseAdmin
       .from("carritos")
-      .select("monto_usd, monto_bs, tasa_bs, descuento, monto_final, hora, fecha")
+      .select("monto_usd, monto_bs, tasa_bs, descuento, monto_final, hora, fecha, usa_saldo")
       .eq("id_carrito", carritoId)
       .maybeSingle();
     if (carritoErr) throw carritoErr;
@@ -1158,6 +1113,7 @@ app.get("/api/cart", async (_req, res) => {
       tasa_bs: carritoInfo?.tasa_bs ?? null,
       descuento: carritoInfo?.descuento ?? null,
       monto_final: carritoInfo?.monto_final ?? null,
+      usa_saldo: carritoInfo?.usa_saldo ?? null,
       hora: carritoInfo?.hora ?? null,
       fecha: carritoInfo?.fecha ?? null,
     });
@@ -1178,11 +1134,7 @@ app.post("/api/cart/montos", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
-    const monto_usd = Number(req.body?.monto_usd);
     const tasa_bs = req.body?.tasa_bs === null ? null : Number(req.body?.tasa_bs);
-    if (!Number.isFinite(monto_usd)) {
-      return res.status(400).json({ error: "monto_usd inválido" });
-    }
     const caracasNow = new Date(
       new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
     );
@@ -1196,7 +1148,6 @@ app.post("/api/cart/montos", async (req, res) => {
     const { error: updErr } = await supabaseAdmin
       .from("carritos")
       .update({
-        monto_usd,
         tasa_bs: Number.isFinite(tasa_bs) ? tasa_bs : null,
         hora,
         fecha,
@@ -1206,6 +1157,30 @@ app.post("/api/cart/montos", async (req, res) => {
     return res.json({ ok: true, id_carrito: carritoId });
   } catch (err) {
     console.error("[cart:montos] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Actualizar banderas del carrito (ej: usa_saldo)
+app.post("/api/cart/flags", async (req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    const carritoId = await getCurrentCarrito(idUsuario);
+    if (!carritoId) {
+      return res.status(400).json({ error: "Carrito no encontrado" });
+    }
+    const usa_saldo = isTrue(req.body?.usa_saldo);
+    const { error: updErr } = await supabaseAdmin
+      .from("carritos")
+      .update({ usa_saldo })
+      .eq("id_carrito", carritoId);
+    if (updErr) throw updErr;
+    return res.json({ ok: true, id_carrito: carritoId, usa_saldo });
+  } catch (err) {
+    console.error("[cart:flags] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }

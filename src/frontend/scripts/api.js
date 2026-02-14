@@ -194,6 +194,27 @@ export async function updateCartMontos(monto_usd, tasa_bs) {
   }
 }
 
+export async function updateCartFlags({ usa_saldo } = {}) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/cart/flags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ usa_saldo }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("cart/flags response", res.status, text);
+      return { error: text || "No se pudo actualizar el carrito" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("updateCartFlags error", err);
+    return { error: err.message };
+  }
+}
+
 export async function uploadComprobantes(files = []) {
   await ensureServerSession();
   try {

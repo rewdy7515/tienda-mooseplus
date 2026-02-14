@@ -9,6 +9,7 @@ import {
   startSession,
   submitCheckout,
   supabase,
+  updateCartFlags,
 } from "./api.js";
 import { TASA_MARKUP } from "./rate-config.js";
 import {
@@ -30,6 +31,7 @@ const itemsEl = document.querySelector("#cart-page-items");
 const btnContinue = document.querySelector("#btn-page-continue");
 const btnPay = document.querySelector("#btn-page-pay");
 const cartSaldoEl = document.querySelector("#cart-saldo");
+const btnUseSaldo = document.querySelector("#btn-use-saldo");
 const refreshNoteEl = document.querySelector("#cart-refresh-note");
 let cartItems = [];
 let precios = [];
@@ -37,15 +39,55 @@ let plataformas = [];
 let descuentos = [];
 let tasaBs = null;
 let currentUser = null;
+let userSaldo = 0;
 let cartMontoUsd = null;
+let cartMontoFinal = null;
 let cartDescuento = null;
 let cartNeedsSync = false;
+let cartUseSaldo = false;
+let dbUseSaldo = false;
 let dbCartSnapshot = new Map();
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) =>
   v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+const updateUseSaldoButton = () => {
+  if (!btnUseSaldo) return;
+  btnUseSaldo.classList.toggle("is-active", !!cartUseSaldo);
+  btnUseSaldo.setAttribute("aria-pressed", cartUseSaldo ? "true" : "false");
+};
+
+const setRefreshLoading = (btn, loading) => {
+  if (!btn) return;
+  if (loading) {
+    if (!btn.dataset.originalText) {
+      btn.dataset.originalText = btn.textContent || "Actualizar carrito";
+      btn.dataset.originalWidth = String(btn.offsetWidth || "");
+      btn.dataset.originalHeight = String(btn.offsetHeight || "");
+    }
+    btn.dataset.loading = "1";
+    btn.classList.add("is-loading");
+    const width = Number(btn.dataset.originalWidth);
+    const height = Number(btn.dataset.originalHeight);
+    if (Number.isFinite(width) && width > 0) btn.style.width = `${width}px`;
+    if (Number.isFinite(height) && height > 0) btn.style.height = `${height}px`;
+    btn.textContent = "Actualizando...";
+    btn.disabled = true;
+    return;
+  }
+  btn.dataset.loading = "";
+  if (btn.dataset.originalText) {
+    btn.textContent = btn.dataset.originalText;
+    delete btn.dataset.originalText;
+  }
+  delete btn.dataset.originalWidth;
+  delete btn.dataset.originalHeight;
+  btn.style.width = "";
+  btn.style.height = "";
+  btn.classList.remove("is-loading");
+};
 
 const getClosestDiscountPct = (rows, value, column) => {
   const key = Number(value) || 0;
@@ -117,12 +159,16 @@ const updateRefreshButtonState = () => {
   const refreshBtn = itemsEl?.querySelector('[data-cart-action="refresh"]');
   if (!refreshBtn) return;
   const needsSync = !!cartNeedsSync;
-  refreshBtn.disabled = !needsSync;
-  refreshBtn.classList.toggle("btn-disabled-soft", !needsSync);
+  const isLoading = refreshBtn.dataset.loading === "1";
+  refreshBtn.disabled = isLoading ? true : !needsSync;
+  refreshBtn.classList.toggle("btn-disabled-soft", !needsSync && !isLoading);
+  refreshBtn.classList.toggle("is-loading", isLoading);
   if (btnPay) {
-    btnPay.disabled = needsSync;
+    btnPay.disabled = needsSync || isLoading;
     btnPay.classList.toggle("btn-disabled-soft", needsSync);
   }
+  const summaryTable = itemsEl?.querySelector(".cart-summary-table");
+  summaryTable?.classList.toggle("is-dim", needsSync);
   refreshNoteEl?.classList.toggle("hidden", !needsSync);
 };
 
@@ -139,31 +185,29 @@ const buildCartSnapshot = (items) => {
 };
 
 const updateCartNeedsSync = () => {
-  if (!dbCartSnapshot || dbCartSnapshot.size === 0) {
-    cartNeedsSync = false;
-    updateRefreshButtonState();
-    return;
-  }
-  const current = buildCartSnapshot(cartItems);
-  if (current.size !== dbCartSnapshot.size) {
-    cartNeedsSync = true;
-    updateRefreshButtonState();
-    return;
-  }
-  for (const [key, val] of current.entries()) {
-    const base = dbCartSnapshot.get(key);
-    if (!base) {
-      cartNeedsSync = true;
-      updateRefreshButtonState();
-      return;
-    }
-    if (Number(base.cantidad) !== Number(val.cantidad) || Number(base.meses) !== Number(val.meses)) {
-      cartNeedsSync = true;
-      updateRefreshButtonState();
-      return;
+  let needsSync = false;
+  if (dbCartSnapshot && dbCartSnapshot.size > 0) {
+    const current = buildCartSnapshot(cartItems);
+    if (current.size !== dbCartSnapshot.size) {
+      needsSync = true;
+    } else {
+      for (const [key, val] of current.entries()) {
+        const base = dbCartSnapshot.get(key);
+        if (!base) {
+          needsSync = true;
+          break;
+        }
+        if (Number(base.cantidad) !== Number(val.cantidad) || Number(base.meses) !== Number(val.meses)) {
+          needsSync = true;
+          break;
+        }
+      }
     }
   }
-  cartNeedsSync = false;
+  if (cartUseSaldo !== dbUseSaldo) {
+    needsSync = true;
+  }
+  cartNeedsSync = needsSync;
   updateRefreshButtonState();
 };
 
@@ -201,6 +245,135 @@ const buildPrecioDetalle = (item, price, platform) => {
       : "mes";
   const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
   return `${qty} ${baseUnit}${plural} $${price.precio_usd_detal || ""}`;
+};
+
+const getPriceMaps = () => {
+  const priceById = (precios || []).reduce((acc, p) => {
+    acc[p.id_precio] = p;
+    return acc;
+  }, {});
+  const platformById = (plataformas || []).reduce((acc, p) => {
+    acc[p.id_plataforma] = p;
+    return acc;
+  }, {});
+  return { priceById, platformById };
+};
+
+const calcItemTotals = (item, price, platform) => {
+  const unit = price?.precio_usd_detal || 0;
+  const qtyVal = item?.cantidad || 0;
+  const mesesVal = item?.meses || price?.duracion || 1;
+  const baseSubtotal = round2(unit * qtyVal * mesesVal);
+  let descuentoMesesVal = 0;
+  let descuentoCantidadVal = 0;
+  let rateMeses = 0;
+  if (platform?.descuento_meses) {
+    const rawRate = getClosestDiscountPct(descuentos, mesesVal, "descuento_1");
+    rateMeses = rawRate > 1 ? rawRate / 100 : rawRate;
+    descuentoMesesVal = round2(baseSubtotal * rateMeses);
+  }
+  const rawRateQty = getClosestDiscountPct(descuentos, qtyVal, "descuento_2");
+  const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
+  if (rateQty > 0) {
+    descuentoCantidadVal = round2(baseSubtotal * rateQty);
+  }
+  const descuentoVal = round2(descuentoMesesVal + descuentoCantidadVal);
+  const subtotal = round2(baseSubtotal - descuentoVal);
+  return {
+    unit,
+    qtyVal,
+    mesesVal,
+    baseSubtotal,
+    descuentoMesesVal,
+    descuentoCantidadVal,
+    rateMeses,
+    rateQty,
+    descuentoVal,
+    subtotal,
+  };
+};
+
+const updateCartSummaryUI = () => {
+  if (!itemsEl) return;
+  const { priceById, platformById } = getPriceMaps();
+  let subtotalBruto = 0;
+  let totalDescuento = 0;
+  (cartItems || []).forEach((item) => {
+    const price = priceById[item.id_precio] || {};
+    const platform = platformById[price.id_plataforma] || {};
+    const totals = calcItemTotals(item, price, platform);
+    subtotalBruto = round2(subtotalBruto + totals.baseSubtotal);
+    totalDescuento = round2(totalDescuento + totals.descuentoVal);
+  });
+  const subtotalMostrar = round2(subtotalBruto);
+  const descuentoMostrar = round2(totalDescuento);
+  const showSaldoRow = dbUseSaldo && userSaldo > 0;
+  const saldoAplicado = showSaldoRow ? round2(userSaldo) : 0;
+  const totalMostrar = round2(
+    round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
+  );
+
+  const subtotalEl = itemsEl.querySelector('[data-summary="subtotal"]');
+  if (subtotalEl) subtotalEl.textContent = `$${subtotalMostrar.toFixed(2)}`;
+  const descuentoEl = itemsEl.querySelector('[data-summary="descuento"]');
+  if (descuentoEl) descuentoEl.textContent = `-$${descuentoMostrar.toFixed(2)}`;
+  const saldoEl = itemsEl.querySelector('[data-summary="saldo"]');
+  if (saldoEl) saldoEl.textContent = `-$${Number(saldoAplicado).toFixed(2)}`;
+  const saldoRow = itemsEl.querySelector(".cart-total-saldo");
+  if (saldoRow) {
+    saldoRow.classList.toggle("hidden", !showSaldoRow);
+  }
+  const totalEl = itemsEl.querySelector('[data-summary="total"]');
+  if (totalEl) totalEl.textContent = `$${Number(totalMostrar).toFixed(2)}`;
+};
+
+const updateCartRowUI = (idx) => {
+  if (!itemsEl) return;
+  const item = cartItems[idx];
+  if (!item) return;
+  const { priceById, platformById } = getPriceMaps();
+  const price = priceById[item.id_precio] || {};
+  const platform = platformById[price.id_plataforma] || {};
+  const totals = calcItemTotals(item, price, platform);
+
+  const renderDiscounts = () => {
+    const parts = [];
+    if (totals.descuentoMesesVal > 0) {
+      parts.push(`<span class="discount-badge">-${(totals.rateMeses * 100).toFixed(2)}% mes</span>`);
+    }
+    if (totals.descuentoCantidadVal > 0) {
+      parts.push(`<span class="discount-badge">-${(totals.rateQty * 100).toFixed(2)}% cant.</span>`);
+    }
+    return parts.join("");
+  };
+
+  const row = itemsEl.querySelector(`tr[data-index="${idx}"]`);
+  if (row) {
+    row.querySelectorAll(".cart-meses-value").forEach((el) => {
+      el.textContent = totals.mesesVal;
+    });
+    row.querySelectorAll(".cart-cantidad-value").forEach((el) => {
+      el.textContent = totals.qtyVal;
+    });
+    const subtotalEl = row.querySelector(".cart-subtotal-value");
+    if (subtotalEl) subtotalEl.textContent = `$${totals.subtotal.toFixed(2)}`;
+    const discountLine = row.querySelector(".cart-discount-line");
+    if (discountLine) discountLine.innerHTML = renderDiscounts();
+  }
+
+  const card = itemsEl.querySelector(`.cart-item-card[data-index="${idx}"]`);
+  if (card) {
+    card.querySelectorAll(".cart-meses-value").forEach((el) => {
+      el.textContent = totals.mesesVal;
+    });
+    card.querySelectorAll(".cart-cantidad-value").forEach((el) => {
+      el.textContent = totals.qtyVal;
+    });
+    const subtotalEl = card.querySelector(".cart-subtotal-value");
+    if (subtotalEl) subtotalEl.textContent = `$${totals.subtotal.toFixed(2)}`;
+    const discountLine = card.querySelector(".cart-discount-line");
+    if (discountLine) discountLine.innerHTML = renderDiscounts();
+  }
 };
 
 const renderCart = () => {
@@ -256,7 +429,9 @@ const renderCart = () => {
           <td>
             <div class="cart-info tight">
               <div class="cart-product">
-                <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">🗑️</button>
+                <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">
+                  <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/x-icon.png.webp" alt="" aria-hidden="true" />
+                </button>
                 <div class="cart-thumb-sm">
                   <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
                 </div>
@@ -291,7 +466,7 @@ const renderCart = () => {
             }
           </td>
           <td class="cart-cell-center">
-            $${subtotal.toFixed(2)}
+            <span class="cart-subtotal-value">$${subtotal.toFixed(2)}</span>
             <div class="cart-discount-line">
               ${
                 descuentoMesesVal > 0
@@ -328,7 +503,9 @@ const renderCart = () => {
               <p class="cart-detail">Tipo: ${tipo}</p>
               <p class="cart-detail">Precio: $${round2(unit).toFixed(2)}</p>
             </div>
-            <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">🗑️</button>
+            <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">
+              <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/x-icon.png.webp" alt="" aria-hidden="true" />
+            </button>
           </div>
           <div class="cart-item-bottom">
             <div class="cart-item-cell">
@@ -346,7 +523,7 @@ const renderCart = () => {
           </div>
           <div class="cart-item-subtotal">
             <span class="cart-item-label">Subtotal</span>
-            <div class="cart-subtotal">$${subtotal.toFixed(2)}</div>
+            <div class="cart-subtotal"><span class="cart-subtotal-value">$${subtotal.toFixed(2)}</span></div>
             <div class="cart-discount-line">
               ${
                 descuentoMesesVal > 0
@@ -370,7 +547,11 @@ const renderCart = () => {
 
   const descuentoMostrar = round2(totalDescuento);
   const subtotalMostrar = round2(subtotalBruto);
-  const totalMostrar = round2(subtotalMostrar - descuentoMostrar);
+  const showSaldoRow = dbUseSaldo && userSaldo > 0;
+  const saldoAplicado = showSaldoRow ? round2(userSaldo) : 0;
+  const totalMostrar = round2(
+    round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
+  );
   if (Number.isFinite(Number(cartDescuento))) {
     const diff = Math.abs(Number(cartDescuento) - totalDescuento);
     if (diff >= 0.01) {
@@ -380,6 +561,12 @@ const renderCart = () => {
       });
     }
   }
+  const saldoRow = `
+            <tr class="cart-total-row cart-total-saldo ${showSaldoRow ? "" : "hidden"}">
+              <td class="cart-cell-center">Saldo aplicado</td>
+              <td class="cart-cell-center"><span data-summary="saldo">-$${Number(saldoAplicado).toFixed(2)}</span></td>
+            </tr>
+          `;
   itemsEl.innerHTML = `
     <div class="cart-layout">
       <div class="cart-left">
@@ -412,15 +599,16 @@ const renderCart = () => {
           <tbody>
             <tr class="cart-total-row">
               <td class="cart-cell-center">Subtotal</td>
-              <td class="cart-cell-center">$${subtotalMostrar.toFixed(2)}</td>
+              <td class="cart-cell-center"><span data-summary="subtotal">$${subtotalMostrar.toFixed(2)}</span></td>
             </tr>
             <tr class="cart-total-row cart-total-discount">
               <td class="cart-cell-center">Descuentos aplicados</td>
-              <td class="cart-cell-center">-$${descuentoMostrar.toFixed(2)}</td>
+              <td class="cart-cell-center"><span data-summary="descuento">-$${descuentoMostrar.toFixed(2)}</span></td>
             </tr>
+            ${saldoRow}
             <tr class="cart-total-row cart-total-final">
               <td class="cart-cell-center">Total</td>
-              <td class="cart-cell-center">$${totalMostrar.toFixed(2)}</td>
+              <td class="cart-cell-center"><span data-summary="total">$${totalMostrar.toFixed(2)}</span></td>
             </tr>
           </tbody>
         </table>
@@ -440,17 +628,44 @@ const handleCartClick = async (e) => {
       return;
     }
     if (action === "refresh") {
+      const refreshBtn = cartActionBtn;
       try {
+        setRefreshLoading(refreshBtn, true);
         await syncCartValuesBeforeCheckout();
+        const freshCart = await fetchCart();
+        if (freshCart?.items) {
+          cartItems = freshCart.items;
+        }
+        dbUseSaldo = isTrue(freshCart?.usa_saldo);
+        cartUseSaldo = dbUseSaldo;
+        updateUseSaldoButton();
+        cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
+          ? Number(freshCart.monto_usd)
+          : cartMontoUsd;
+        cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
+          ? Number(freshCart.monto_final)
+          : cartMontoFinal;
+        cartDescuento = Number.isFinite(Number(freshCart?.descuento))
+          ? Number(freshCart.descuento)
+          : cartDescuento;
         dbCartSnapshot = buildCartSnapshot(cartItems);
         cartNeedsSync = false;
         updateCartNeedsSync();
+        const cardCount = itemsEl?.querySelectorAll(".cart-item-card").length || 0;
+        if (cardCount && cardCount !== cartItems.length) {
+          renderCart();
+        } else {
+          (cartItems || []).forEach((_, idx) => updateCartRowUI(idx));
+          updateCartSummaryUI();
+        }
         // No sobreescribir UI con datos de BD aquí.
         // Este botón debe empujar HTML -> BD.
-        alert("Carrito actualizado.");
       } catch (err) {
         console.error("refresh cart error", err);
         alert("No se pudo actualizar el carrito.");
+      } finally {
+        setRefreshLoading(refreshBtn, false);
+        updateCartNeedsSync();
       }
       return;
     }
@@ -476,36 +691,47 @@ const handleCartClick = async (e) => {
   if (btnRemove) {
     cartItems.splice(idx, 1);
     cartNeedsSync = true;
-  } else {
-    if (btnMinus || btnPlus) {
-      const delta = btnMinus ? -1 : 1;
-      const newQty = (item.cantidad || 0) + delta;
-      if (newQty <= 0) {
-        if (btnMinus) {
-          const nombrePlat = platform.nombre || `Precio ${item.id_precio || ""}`;
-          const ok = window.confirm(
-            `¿Quieres eliminar ${nombrePlat} de tu carrito?\n\nSi/No`
-          );
-          if (!ok) {
-            renderCart();
-            return;
-          }
-        }
-        cartItems.splice(idx, 1);
-      } else {
-        item.cantidad = newQty;
-      }
-      cartNeedsSync = true;
-    }
-    if (btnMesesMinus || btnMesesPlus) {
-      const delta = btnMesesMinus ? -1 : 1;
-      const current = item.meses || price.duracion || 1;
-      const next = Math.max(1, current + delta);
-      item.meses = next;
-      cartNeedsSync = true;
-    }
+    renderCart();
+    return;
   }
-  renderCart();
+
+  let didUpdate = false;
+  if (btnMinus || btnPlus) {
+    const delta = btnMinus ? -1 : 1;
+    const newQty = (item.cantidad || 0) + delta;
+    if (newQty <= 0) {
+      if (btnMinus) {
+        const nombrePlat = platform.nombre || `Precio ${item.id_precio || ""}`;
+        const ok = window.confirm(
+          `¿Quieres eliminar ${nombrePlat} de tu carrito?\n\nSi/No`
+        );
+        if (!ok) {
+          renderCart();
+          return;
+        }
+      }
+      cartItems.splice(idx, 1);
+      cartNeedsSync = true;
+      renderCart();
+      return;
+    }
+    item.cantidad = newQty;
+    cartNeedsSync = true;
+    didUpdate = true;
+  }
+  if (btnMesesMinus || btnMesesPlus) {
+    const delta = btnMesesMinus ? -1 : 1;
+    const current = item.meses || price.duracion || 1;
+    const next = Math.max(1, current + delta);
+    item.meses = next;
+    cartNeedsSync = true;
+    didUpdate = true;
+  }
+  if (didUpdate) {
+    updateCartRowUI(idx);
+    updateCartSummaryUI();
+    updateCartNeedsSync();
+  }
 };
 
 async function init() {
@@ -524,6 +750,7 @@ async function init() {
     if (cartSaldoEl && currentUser) {
       const saldoVal = Number(currentUser?.saldo);
       const saldoNum = Number.isFinite(saldoVal) ? saldoVal : 0;
+      userSaldo = saldoNum;
       cartSaldoEl.textContent = `Saldo: $${saldoNum.toFixed(2)}`;
     }
     setSessionRoles(currentUser || {});
@@ -545,8 +772,22 @@ async function init() {
       fetchP2PRate(),
     ]);
     dbCartSnapshot = buildCartSnapshot(cartData?.items || []);
+    dbUseSaldo = isTrue(cartData?.usa_saldo);
+    cartUseSaldo = dbUseSaldo;
+    const canUseSaldo = userSaldo > 0;
+    if (btnUseSaldo) {
+      btnUseSaldo.classList.toggle("hidden", !canUseSaldo);
+    }
+    if (!canUseSaldo) {
+      cartUseSaldo = false;
+      dbUseSaldo = false;
+    }
+    updateUseSaldoButton();
     cartMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
       ? Number(cartData.monto_usd)
+      : null;
+    cartMontoFinal = Number.isFinite(Number(cartData?.monto_final))
+      ? Number(cartData.monto_final)
       : null;
     cartDescuento = Number.isFinite(Number(cartData?.descuento))
       ? Number(cartData.descuento)
@@ -570,6 +811,11 @@ async function init() {
     renderCart();
     setStatus("");
     itemsEl?.addEventListener("click", handleCartClick);
+    btnUseSaldo?.addEventListener("click", () => {
+      cartUseSaldo = !cartUseSaldo;
+      updateUseSaldoButton();
+      updateCartNeedsSync();
+    });
   } catch (err) {
     console.error("cart page error", err);
     setStatus("No se pudo cargar el carrito.");
@@ -636,6 +882,11 @@ const syncCartValuesBeforeCheckout = async () => {
       id_perfil: dbItem.id_perfil ?? null,
     });
   }
+
+  if (cartUseSaldo !== dbUseSaldo) {
+    await updateCartFlags({ usa_saldo: cartUseSaldo });
+    dbUseSaldo = cartUseSaldo;
+  }
 };
 
 btnContinue?.addEventListener("click", () => {
@@ -655,6 +906,9 @@ btnPay?.addEventListener("click", () => {
       cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
         ? Number(freshCart.monto_usd)
         : cartMontoUsd;
+      cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
+        ? Number(freshCart.monto_final)
+        : cartMontoFinal;
       cartDescuento = Number.isFinite(Number(freshCart?.descuento))
         ? Number(freshCart.descuento)
         : cartDescuento;
@@ -663,11 +917,21 @@ btnPay?.addEventListener("click", () => {
         return;
       }
       const saldo = Number(currentUser?.saldo) || 0;
-      if (!Number.isFinite(cartMontoUsd)) {
+      const useSaldo = isTrue(freshCart?.usa_saldo);
+      const montoFinal = Number(freshCart?.monto_final);
+      const checkoutTotal =
+        useSaldo && Number.isFinite(montoFinal)
+          ? montoFinal
+          : cartMontoUsd;
+      if (!Number.isFinite(checkoutTotal)) {
         window.location.href = "checkout.html";
         return;
       }
-      if (saldo < cartMontoUsd) {
+      if (!useSaldo) {
+        window.location.href = "checkout.html";
+        return;
+      }
+      if (!Number.isFinite(cartMontoUsd) || saldo < cartMontoUsd) {
         window.location.href = "checkout.html";
         return;
       }

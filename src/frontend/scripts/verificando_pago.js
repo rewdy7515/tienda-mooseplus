@@ -58,6 +58,13 @@ const parseCaracasDate = (fechaStr, horaStr) => {
   return Number.isNaN(dt.getTime()) ? null : dt;
 };
 
+const getElapsedFromOrdenMs = () => {
+  if (!orden) return null;
+  const dt = parseCaracasDate(orden.fecha, orden.hora_orden);
+  if (!dt) return null;
+  return Date.now() - dt.getTime();
+};
+
 const getCaracasParts = () => {
   const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
   const pad2 = (val) => String(val).padStart(2, "0");
@@ -223,7 +230,10 @@ const verifyPago = async () => {
     return Number.isFinite(pagoMonto);
   });
   if (!match) {
-    setStatus("Pago no encontrado. Reintentando...");
+    const elapsedMs = getElapsedFromOrdenMs();
+    if (elapsedMs == null || elapsedMs >= 30 * 1000) {
+      setStatus("Pago no encontrado. Reintentando...");
+    }
     return;
   }
   if (match.saldo_acreditado === true) {
