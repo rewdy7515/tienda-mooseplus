@@ -132,6 +132,37 @@
         gap: 6px;
         position: relative;
       }
+      .proveedor-edit-wrap .proveedor-input-wrap {
+        display: none;
+      }
+      .proveedor-edit-wrap.is-editing .proveedor-input-wrap {
+        display: inline-flex;
+      }
+      .proveedor-edit-wrap.is-editing .btn-edit-proveedor {
+        display: none;
+      }
+      .proveedor-edit-wrap.is-editing .proveedor-text {
+        display: none;
+      }
+      .proveedor-edit-wrap .proveedor-input,
+      .proveedor-edit-wrap .proveedor-sugs,
+      .proveedor-edit-wrap .btn-save-proveedor,
+      .proveedor-edit-wrap .btn-cancel-proveedor {
+        display: none;
+      }
+      .proveedor-edit-wrap.is-editing .proveedor-input,
+      .proveedor-edit-wrap.is-editing .btn-save-proveedor,
+      .proveedor-edit-wrap.is-editing .btn-cancel-proveedor {
+        display: inline-flex;
+      }
+      .proveedor-edit-wrap.is-editing .proveedor-sugs {
+        display: block;
+      }
+      .cred-copy,
+      .pin-copy,
+      .codigo-view a {
+        cursor: pointer;
+      }
       .proveedor-input-wrap.hidden {
         display: none;
       }
@@ -156,6 +187,33 @@
         width: 100%;
         box-sizing: border-box;
         display: none;
+      }
+      .cuenta-platform-title {
+        display: inline-block;
+        padding: 4px 0;
+        border-radius: 0;
+        background: transparent;
+        font-size: 26px;
+        font-weight: 900;
+        line-height: 1.2;
+        margin: 0 0 6px;
+        color: var(--platform-color, #111);
+      }
+      .cuenta-platform-cred {
+        font-size: 18px;
+        font-weight: 700;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin: 0 0 12px;
+      }
+      .cuenta-platform-cred .cuenta-platform-label {
+        font-weight: 700;
+      }
+      .cuenta-platform-cred .cuenta-platform-sep {
+        opacity: 0.6;
+        margin: 0 4px;
       }
 
       .cuenta-meta {
@@ -2745,8 +2803,15 @@
         if (!detalleEl) return;
         detalleEl.style.display = "block";
         if (!info) {
+          detalleEl.style.removeProperty("--platform-color");
           detalleEl.innerHTML = '<p class="status">Sin datos.</p>';
           return;
+        }
+        const color1 = info.plataformaColor1 || "";
+        if (color1) {
+          detalleEl.style.setProperty("--platform-color", color1);
+        } else {
+          detalleEl.style.removeProperty("--platform-color");
         }
 
         const colMode = info.colMode || "ocupado";
@@ -3202,7 +3267,14 @@
               : "Cuenta completa";
 
         detalleEl.innerHTML = `
-          <h3 class="cuenta-title">Detalle de cuenta</h3>
+          <div class="cuenta-platform-title">${info.plataformaNombre || "-"}</div>
+          <div class="cuenta-platform-cred">
+            <span class="cuenta-platform-label">Correo:</span>
+            <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
+            <span class="cuenta-platform-sep">•</span>
+            <span class="cuenta-platform-label">Clave:</span>
+            <span class="cred-copy" data-clipboard="${info.clave || ""}">${info.clave || "-"}</span>
+          </div>
           ${
             (() => {
               const linkVal = info.link_codigo || "";
@@ -3229,25 +3301,25 @@
                 ? `<p><strong>Dirección:</strong> <span class="cred-copy cuenta-direccion" data-clipboard="${direccionVal}">${direccionVal}</span></p>`
                 : "";
               const proveedorVal = info.proveedorNombre || "";
-              const proveedorHtml = proveedorVal
-                ? proveedorVal
-                : `<span class="proveedor-edit-wrap" data-cuenta="${info.id_cuenta}">
-                    <button type="button" class="btn-edit-proveedor" aria-label="Editar proveedor">✏️</button>
-                    <span class="proveedor-input-wrap hidden">
-                      <input type="text" class="input-inline proveedor-input" placeholder="Proveedor" autocomplete="off" />
-                      <div class="sugerencias-cuentas proveedor-sugs hidden"></div>
-                      <button type="button" class="btn-save-proveedor" data-cuenta="${info.id_cuenta}" aria-label="Guardar proveedor">💾</button>
-                      <button type="button" class="btn-cancel-proveedor" aria-label="Cancelar">✖</button>
-                    </span>
-                  </span>`;
+              const proveedorHtml = `
+                <span class="proveedor-edit-wrap" data-cuenta="${info.id_cuenta}" data-proveedor-id="${info.proveedorId || ""}">
+                  <span class="proveedor-text">${proveedorVal || "-"}</span>
+                  <button type="button" class="btn-edit-proveedor" aria-label="Editar proveedor">✏️</button>
+                  <span class="proveedor-input-wrap hidden">
+                    <input type="text" class="input-inline proveedor-input" placeholder="Proveedor" autocomplete="off" />
+                    <span class="sugerencias-cuentas proveedor-sugs hidden"></span>
+                    <button type="button" class="btn-save-proveedor" data-cuenta="${info.id_cuenta}" aria-label="Guardar proveedor">💾</button>
+                    <button type="button" class="btn-cancel-proveedor" aria-label="Cancelar">✖</button>
+                  </span>
+                </span>`;
               const correoHtml = correoVal
-                ? correoVal
+                ? `<span class="cred-copy" data-clipboard="${correoVal}">${correoVal}</span>`
                 : `<span class="codigo-input-wrap">
                     <input type="text" class="input-inline" value="" placeholder="-" data-field="correo_codigo" />
                     <button type="button" class="codigo-save-btn" data-field="correo_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar correo">💾</button>
                   </span>`;
               const claveHtml = claveVal
-                ? claveVal
+                ? `<span class="pin-copy" data-clipboard="${claveVal}">${claveVal}</span>`
                 : `<span class="codigo-input-wrap">
                     <input type="text" class="input-inline" value="" placeholder="-" data-field="pin_codigo" />
                     <button type="button" class="codigo-save-btn" data-field="pin_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar clave">💾</button>
@@ -3255,7 +3327,6 @@
               return `
           <div class="cuenta-meta two-cols">
             <div>
-              <p><strong>Plataforma:</strong> ${info.plataformaNombre || "-"}</p>
               <p><strong>Proveedor:</strong> ${proveedorHtml}</p>
               <p><strong>Región:</strong> ${info.region || "-"}</p>
               <p><strong>Correo:</strong> <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span></p>
@@ -3443,6 +3514,7 @@
         if (!detalleEl) return;
         if (clienteVentasEl) clienteVentasEl.innerHTML = "";
         detalleEl.style.display = "block";
+        detalleEl.style.removeProperty("--platform-color");
         detalleEl.innerHTML = '<p class="status">Cargando cuenta...</p>';
         try {
           const { data: cuenta, error } = await supabase
@@ -3477,7 +3549,7 @@
               ? supabase
                   .from("plataformas")
                   .select(
-                    "nombre, usa_pines, max_dig_pin, por_acceso, por_pantalla, mas_perfiles, num_max_dispositivos, max_miembros, correo_cliente, clave_cliente",
+                    "nombre, color_1, usa_pines, max_dig_pin, por_acceso, por_pantalla, mas_perfiles, num_max_dispositivos, max_miembros, correo_cliente, clave_cliente",
                   )
                   .eq("id_plataforma", platId)
                   .maybeSingle()
@@ -3771,6 +3843,7 @@
 
           currentCuentaDetalle = {
             plataformaNombre: plat?.nombre || "",
+            plataformaColor1: plat?.color_1 || "",
             plataformaId: platId,
             id_plataforma: platId,
             proveedorNombre: prov?.nombre || "",
@@ -3962,20 +4035,26 @@
           const wrap = editProvBtn.closest(".proveedor-edit-wrap");
           const inputWrap = wrap?.querySelector(".proveedor-input-wrap");
           const input = inputWrap?.querySelector(".proveedor-input");
+          const textEl = wrap?.querySelector(".proveedor-text");
+          if (wrap) wrap.classList.add("is-editing");
           if (inputWrap) inputWrap.classList.remove("hidden");
           if (input) {
-            input.value = "";
+            input.value = textEl?.textContent?.trim() === "-" ? "" : textEl?.textContent?.trim() || "";
+            const provId = wrap?.dataset.proveedorId;
+            if (provId) {
+              input.dataset.proveedorId = provId;
+            } else {
+              delete input.dataset.proveedorId;
+            }
             input.focus();
             updateProveedorSuggestions(input);
           }
-          editProvBtn.classList.add("hidden");
           return;
         }
         const cancelProvBtn = e.target.closest(".btn-cancel-proveedor");
         if (cancelProvBtn) {
           const inputWrap = cancelProvBtn.closest(".proveedor-input-wrap");
           const wrap = cancelProvBtn.closest(".proveedor-edit-wrap");
-          const editBtn = wrap?.querySelector(".btn-edit-proveedor");
           const sugs = inputWrap?.querySelector(".proveedor-sugs");
           const input = inputWrap?.querySelector(".proveedor-input");
           if (input) {
@@ -3987,7 +4066,7 @@
             sugs.classList.add("hidden");
           }
           if (inputWrap) inputWrap.classList.add("hidden");
-          if (editBtn) editBtn.classList.remove("hidden");
+          if (wrap) wrap.classList.remove("is-editing");
           return;
         }
         const sugBtn = e.target.closest(".proveedor-sugs button");

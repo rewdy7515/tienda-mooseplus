@@ -51,10 +51,16 @@
           <div class="card-count" id="count-pedidos">--</div>
           <p class="card-desc">Solicitudes recientes</p>
         </div>
+        <div class="admin-card tareas" id="dash-tareas">
+          <p class="card-title">Tareas</p>
+          <div class="card-count">--</div>
+          <p class="card-desc">Pendientes</p>
+        </div>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-renovar-servicio">Renovar servicio cliente</button>
+        <button class="btn-primary admin-action" id="btn-usuarios">Usuarios</button>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
@@ -366,6 +372,10 @@
 
       document.getElementById("btn-renovar-servicio")?.addEventListener("click", () => {
         window.location.href = "renovar_cliente.html";
+      });
+
+      document.getElementById("btn-usuarios")?.addEventListener("click", () => {
+        window.location.href = "usuarios.html";
       });
 
       document.getElementById("btn-registrar-proveedor")?.addEventListener("click", () => {

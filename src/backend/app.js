@@ -1931,8 +1931,15 @@ app.post("/api/admin/import-contactos", async (req, res) => {
     return res.status(400).json({ error: "rows es requerido" });
   }
 
+  const normalizeFullName = (val) =>
+    String(val || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
   const makeNameKey = (nombre, apellido) =>
-    `${(nombre || "").trim().toLowerCase()}|${(apellido || "").trim().toLowerCase()}`;
+    normalizeFullName(`${(nombre || "").trim()} ${(apellido || "").trim()}`.trim());
 
   try {
     const idUsuario = await getOrCreateUsuario(req);
@@ -1948,14 +1955,12 @@ app.post("/api/admin/import-contactos", async (req, res) => {
           .replace(/\s*Cliente\s*$/i, "")
           .trim();
         if (!cleaned) return null;
-        const parts = cleaned.split(/\s+/);
-        const nombre = parts.shift() || "";
-        const apellido = parts.join(" ").trim() || null;
+        const fullName = normalizeFullName(cleaned);
+        if (!fullName) return null;
         return {
-          nombre,
-          apellido,
+          full_name: fullName,
           telefono,
-          name_key: makeNameKey(nombre, apellido),
+          name_key: fullName,
         };
       })
       .filter(Boolean);
@@ -1968,18 +1973,41 @@ app.post("/api/admin/import-contactos", async (req, res) => {
       .from("usuarios")
       .select("id_usuario, nombre, apellido");
     if (usrErr) throw usrErr;
-    const usuarioByName = (usuariosExist || []).reduce((acc, u) => {
-      const key = makeNameKey(u.nombre, u.apellido);
-      if (key && key !== "|") acc[key] = u.id_usuario;
+    const usuariosList = (usuariosExist || [])
+      .map((u) => ({
+        id_usuario: u.id_usuario,
+        name_key: makeNameKey(u.nombre, u.apellido),
+      }))
+      .filter((u) => u.name_key);
+    const usuarioByName = usuariosList.reduce((acc, u) => {
+      acc[u.name_key] = u.id_usuario;
       return acc;
     }, {});
+
+    const findUserIdByName = (nameKey) => {
+      const exact = usuarioByName[nameKey];
+      if (exact) return exact;
+      let best = null;
+      for (const u of usuariosList) {
+        if (nameKey === u.name_key || nameKey.startsWith(`${u.name_key} `)) {
+          if (!best || u.name_key.length > best.name_key.length) {
+            best = u;
+          }
+        }
+      }
+      return best?.id_usuario || null;
+    };
 
     const updatesById = new Map();
     let faltantes = 0;
     normalized.forEach((r) => {
-      const id = usuarioByName[r.name_key];
+      const id = findUserIdByName(r.name_key);
       if (!id) {
         faltantes += 1;
+        console.warn("[admin:import-contactos] sin match", {
+          usuario: r.full_name,
+          telefono: r.telefono,
+        });
         return;
       }
       updatesById.set(id, r.telefono);

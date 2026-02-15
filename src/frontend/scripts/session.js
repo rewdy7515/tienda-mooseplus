@@ -171,8 +171,8 @@ export function showDeliveryNotice() {
 
 // Marca el dot de inventario si notificacion_inventario == true
 export function updateDeliveryDot(show = false) {
-  const inventarioLink = Array.from(document.querySelectorAll("a")).find(
-    (a) => a.textContent?.toLowerCase().includes("inventario")
+  const inventarioLink = Array.from(document.querySelectorAll("a")).find((a) =>
+    (a.getAttribute("href") || "").includes("inventario.html")
   );
   if (!inventarioLink) return;
   let dot = inventarioLink.querySelector(".delivery-dot");

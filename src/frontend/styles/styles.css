@@ -1152,6 +1152,11 @@ input[type="number"].input-inline {
   border-color: #77b687;
   color: #fff;
 }
+.admin-card.tareas {
+  background: #bcd7ff;
+  border-color: #bcd7ff;
+  color: #1e3a8a;
+}
 .admin-card .card-title {
   margin: 0;
   font-weight: 700;
@@ -1686,7 +1691,7 @@ input[type="number"].input-inline {
   transform: translateX(-50%);
   width: 280px;
   max-width: 80vw;
-  background: #3c4048;
+  background: #50555f;
   color: #f9fafb;
   white-space: pre-line;
   font-size: 12px;

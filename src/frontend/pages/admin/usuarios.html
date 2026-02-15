@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Usuarios</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .usuarios-wrapper {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .usuarios-table {
+        width: 100%;
+      }
+      .usuarios-table th,
+      .usuarios-table td {
+        padding: 8px 10px;
+      }
+      .usuarios-table th {
+        background: #444;
+        color: #fff;
+      }
+      .usuarios-table tbody tr:nth-child(odd) {
+        background: #f5f5f5;
+      }
+      .usuarios-table tbody tr:nth-child(even) {
+        background: #fff;
+      }
+      .usuarios-edit-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .usuarios-edit-wrap .btn-edit,
+      .usuarios-edit-wrap .btn-save {
+        padding: 4px 6px;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .usuarios-edit-input {
+        min-width: 140px;
+      }
+      .registro-no {
+        background: #fee2e2;
+        color: #7f1d1d;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Usuarios</h2>
+      <div class="usuarios-wrapper">
+        <p id="usuarios-status" class="status">Cargando usuarios...</p>
+        <p id="usuarios-phone-stat" class="status"></p>
+        <div class="cuenta-table-wrap">
+          <table class="table-base usuarios-table">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Teléfono</th>
+                <th>Email</th>
+                <th>Registrado</th>
+              </tr>
+            </thead>
+            <tbody id="usuarios-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogoHome, attachLogout } from "../../scripts/session.js";
+      import { clearServerSession, supabase } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#usuarios-status");
+      const tbodyEl = document.querySelector("#usuarios-body");
+      const phoneStatEl = document.querySelector("#usuarios-phone-stat");
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const formatCliente = (row) => {
+        const nombre = (row?.nombre || "").trim();
+        const apellido = (row?.apellido || "").trim();
+        const full = `${nombre} ${apellido}`.trim();
+        return full || "-";
+      };
+
+      const init = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido, telefono, correo, fecha_registro")
+            .order("nombre", { ascending: true })
+            .order("apellido", { ascending: true });
+          if (error) throw error;
+          const rows = data || [];
+          if (!rows.length) {
+            setStatus("No hay usuarios registrados.");
+            if (tbodyEl) tbodyEl.innerHTML = "";
+            if (phoneStatEl) phoneStatEl.textContent = "";
+            return;
+          }
+          const invalidPhones = rows.filter((u) => {
+            const raw = String(u?.telefono ?? "").trim();
+            if (!raw) return true;
+            return !/^\d+$/.test(raw);
+          });
+          const pct = Math.round((invalidPhones.length / rows.length) * 1000) / 10;
+          if (phoneStatEl) {
+            phoneStatEl.textContent = `Usuarios sin teléfono válido: ${invalidPhones.length} de ${rows.length} (${pct}%)`;
+          }
+          const html = rows
+            .map((u) => {
+              const cliente = formatCliente(u);
+              const tel = u.telefono || "";
+              const email = u.correo || "";
+              const registrado = u.fecha_registro ? "Sí" : "No";
+              return `
+                <tr>
+                  <td>${cliente}</td>
+                  <td>
+                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="telefono">
+                      <span class="usuarios-text">${tel || "-"}</span>
+                      <button type="button" class="btn-outline btn-edit">✏️</button>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="correo">
+                      <span class="usuarios-text">${email || "-"}</span>
+                      <button type="button" class="btn-outline btn-edit">✏️</button>
+                    </div>
+                  </td>
+                  <td class="${registrado === "No" ? "registro-no" : ""}">${registrado}</td>
+                </tr>
+              `;
+            })
+            .join("");
+          if (tbodyEl) tbodyEl.innerHTML = html;
+          setStatus("");
+        } catch (err) {
+          console.error("usuarios error", err);
+          setStatus("No se pudieron cargar los usuarios.");
+        }
+      };
+
+      init();
+
+      const startEdit = (wrap) => {
+        if (!wrap || wrap.querySelector(".usuarios-edit-input")) return;
+        const textEl = wrap.querySelector(".usuarios-text");
+        const editBtn = wrap.querySelector(".btn-edit");
+        if (textEl) textEl.classList.add("hidden");
+        if (editBtn) editBtn.classList.add("hidden");
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "form-input usuarios-edit-input";
+        input.value = (textEl?.textContent || "").trim() === "-" ? "" : textEl?.textContent?.trim() || "";
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "btn-outline btn-save";
+        saveBtn.textContent = "💾";
+        wrap.appendChild(input);
+        wrap.appendChild(saveBtn);
+        input.focus();
+      };
+
+      const finishEdit = (wrap, nextVal) => {
+        const textEl = wrap.querySelector(".usuarios-text");
+        const editBtn = wrap.querySelector(".btn-edit");
+        const input = wrap.querySelector(".usuarios-edit-input");
+        const saveBtn = wrap.querySelector(".btn-save");
+        if (textEl) {
+          textEl.textContent = nextVal || "-";
+          textEl.classList.remove("hidden");
+        }
+        if (editBtn) editBtn.classList.remove("hidden");
+        input?.remove();
+        saveBtn?.remove();
+      };
+
+      const saveEdit = async (wrap) => {
+        if (!wrap) return;
+        const id = wrap.dataset.id;
+        const field = wrap.dataset.field;
+        const input = wrap.querySelector(".usuarios-edit-input");
+        if (!id || !field || !input) return;
+        let nextVal = input.value.trim();
+        if (field === "telefono") {
+          nextVal = nextVal.replace(/[^\d]/g, "");
+        }
+        try {
+          const payload = { [field]: nextVal || null };
+          const { error } = await supabase
+            .from("usuarios")
+            .update(payload)
+            .eq("id_usuario", id);
+          if (error) throw error;
+          finishEdit(wrap, nextVal);
+        } catch (err) {
+          console.error("usuarios update error", err);
+          alert("No se pudo guardar el dato.");
+        }
+      };
+
+      document.addEventListener("click", async (e) => {
+        const editBtn = e.target.closest(".usuarios-edit-wrap .btn-edit");
+        if (editBtn) {
+          const wrap = editBtn.closest(".usuarios-edit-wrap");
+          if (!wrap) return;
+          startEdit(wrap);
+          return;
+        }
+        const saveBtn = e.target.closest(".usuarios-edit-wrap .btn-save");
+        if (!saveBtn) return;
+        const wrap = saveBtn.closest(".usuarios-edit-wrap");
+        await saveEdit(wrap);
+      });
+
+      document.addEventListener("keydown", async (e) => {
+        if (e.key !== "Enter") return;
+        const input = e.target.closest(".usuarios-edit-input");
+        if (!input) return;
+        e.preventDefault();
+        const wrap = input.closest(".usuarios-edit-wrap");
+        await saveEdit(wrap);
+      });
+    </script>
+  </body>
+</html>

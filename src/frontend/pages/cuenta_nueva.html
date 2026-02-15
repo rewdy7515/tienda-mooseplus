@@ -217,6 +217,9 @@
       const modalTelefono = document.querySelector("#cn-telefono");
       let sugsCounter = 0;
       let suppressBlur = false;
+      let usuariosCache = null;
+      let usuariosCachePromise = null;
+      let checkCounter = 0;
       let adminId = null;
       let isSuperAdmin = false;
       let clienteSeleccionadoId = null;
@@ -229,6 +232,30 @@
           .replace(/[\u0300-\u036f]/g, "")
           .toLowerCase()
           .trim();
+
+      const loadUsuariosCache = async () => {
+        if (usuariosCache) return usuariosCache;
+        if (usuariosCachePromise) return usuariosCachePromise;
+        usuariosCachePromise = supabase
+          .from("usuarios")
+          .select("id_usuario, nombre, apellido, acceso_cliente")
+          .order("nombre", { ascending: true })
+          .order("apellido", { ascending: true })
+          .then(({ data, error }) => {
+            usuariosCachePromise = null;
+            if (error) throw error;
+            usuariosCache = (data || []).map((u) => ({
+              ...u,
+              full_norm: normalizeText(`${u.nombre || ""} ${u.apellido || ""}`),
+            }));
+            return usuariosCache;
+          })
+          .catch((err) => {
+            usuariosCachePromise = null;
+            throw err;
+          });
+        return usuariosCachePromise;
+      };
 
       // --- Sugerencias de clientes (rehecho) ---
       const clearSugs = () => {
@@ -261,25 +288,12 @@
           clearSugs();
           return;
         }
-        const tokens = termRaw.trim().split(/\s+/).filter(Boolean);
-        const firstToken = tokens[0] || "";
-        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
         const term = normalizeText(termRaw);
         const current = ++sugsCounter;
         try {
-          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido, acceso_cliente").limit(10);
-          query = query.or(
-            lastToken && lastToken !== firstToken
-              ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
-              : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
-          );
-          const { data, error } = await query;
+          const data = await loadUsuariosCache();
           if (current !== sugsCounter) return;
-          if (error) throw error;
-          const filtered = (data || []).filter((u) => {
-            const full = normalizeText(`${u.nombre || ""} ${u.apellido || ""}`);
-            return full.includes(term);
-          });
+          const filtered = (data || []).filter((u) => (u.full_norm || "").includes(term));
           const top = filtered.slice(0, 4);
           renderClienteSugs(top);
         } catch (err) {
@@ -305,10 +319,12 @@
           const nombre = btn.dataset.nombre || "";
           const apellido = btn.dataset.apellido || "";
           const acceso = btn.dataset.acceso;
+          const id = btn.dataset.id || "";
           clienteInput.value = toTitleCase(`${nombre} ${apellido}`.trim());
           suppressBlur = false;
           clearSugs();
-          if (clienteIdLabel) clienteIdLabel.textContent = `ID usuario: ${btn.dataset.id || "-"}`;
+          clienteSeleccionadoId = id || null;
+          if (clienteIdLabel) clienteIdLabel.textContent = `ID usuario: ${id || "-"}`;
           if (clienteAccesoLabel) {
             const accesoTxt = acceso === "false" ? "Revendedor" : "Cliente final";
             clienteAccesoLabel.textContent = `Acceso: ${accesoTxt}`;
@@ -360,37 +376,31 @@
       const checkClienteExiste = async () => {
         const valRaw = clienteInput?.value || "";
         if (!valRaw) return;
-        const tokens = valRaw.trim().split(/\s+/).filter(Boolean);
-        const firstToken = tokens[0] || "";
-        const lastToken = tokens.length > 1 ? tokens[tokens.length - 1] : "";
         const term = normalizeText(valRaw);
+        const current = ++checkCounter;
         try {
           console.log("[cuenta_nueva] buscar cliente", {
             raw: valRaw,
-            nombre: firstToken,
-            apellido: lastToken,
+            term,
           });
-          let query = supabase.from("usuarios").select("id_usuario, nombre, apellido").limit(10);
-          query = query.or(
-            lastToken && lastToken !== firstToken
-              ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
-              : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
-          );
-          const { data, error } = await query;
-          if (error) throw error;
-          const filtered = (data || []).filter((u) => {
-            const full = normalizeText(`${u.nombre || ""} ${u.apellido || ""}`);
-            return full.includes(term);
-          });
+          const data = await loadUsuariosCache();
+          if (current !== checkCounter) return;
+          if (normalizeText(clienteInput?.value || "") !== term) return;
+          const filtered = (data || []).filter((u) => (u.full_norm || "").includes(term));
           if (!filtered.length) {
             goStep1();
             showModal();
             clienteSeleccionadoId = null;
             if (clienteIdLabel) clienteIdLabel.textContent = "ID usuario: -";
+            if (clienteAccesoLabel) clienteAccesoLabel.textContent = "Acceso: -";
           } else if (clienteIdLabel && filtered[0]?.id_usuario) {
             clienteSeleccionadoId = filtered[0].id_usuario;
             console.log("[cuenta_nueva] id_usuario encontrado", clienteSeleccionadoId);
             clienteIdLabel.textContent = `ID usuario: ${clienteSeleccionadoId}`;
+            if (clienteAccesoLabel) {
+              const accesoTxt = filtered[0].acceso_cliente === false ? "Revendedor" : "Cliente final";
+              clienteAccesoLabel.textContent = `Acceso: ${accesoTxt}`;
+            }
             clearSugs();
           }
         } catch (err) {
@@ -436,7 +446,8 @@
         const nombre = toTitleCase(modalNombre?.value || "").trim();
         const apellido = toTitleCase(modalApellido?.value || "").trim();
         const correo = (modalCorreo?.value || "").trim();
-        const telefono = (modalTelefono?.value || "").trim();
+        let telefono = (modalTelefono?.value || "").trim();
+        telefono = telefono.replace(/[^\d]/g, "");
         if (!nombre || !apellido || !correo) {
           alert("Nombre, apellido y correo son obligatorios.");
           return;
@@ -454,7 +465,20 @@
             .select("id_usuario")
             .single();
           if (error) throw error;
-          if (clienteInput) clienteInput.value = `${nombre} ${apellido}`.trim();
+          const fullName = `${nombre} ${apellido}`.trim();
+          if (clienteInput) clienteInput.value = fullName;
+          clienteSeleccionadoId = data?.id_usuario || null;
+          if (clienteIdLabel) clienteIdLabel.textContent = `ID usuario: ${clienteSeleccionadoId || "-"}`;
+          if (clienteAccesoLabel) clienteAccesoLabel.textContent = "Acceso: Cliente final";
+          if (usuariosCache && clienteSeleccionadoId) {
+            usuariosCache.unshift({
+              id_usuario: clienteSeleccionadoId,
+              nombre,
+              apellido,
+              acceso_cliente: true,
+              full_norm: normalizeText(fullName),
+            });
+          }
           goStep1();
           hideModal();
           modalNombre && (modalNombre.value = "");
