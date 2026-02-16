@@ -6,6 +6,21 @@
     <title>Tareas</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
+      .tareas-platform {
+        margin: 12px 0 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .tareas-platform-header {
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-weight: 800;
+        font-size: 20px;
+        color: var(--plat-color, #2c2f36);
+        background: transparent;
+        text-transform: capitalize;
+      }
       .tareas-table-wrap {
         overflow-x: auto;
       }
@@ -50,19 +65,7 @@
     <main class="categorias-dinamicas">
       <h2>Tareas</h2>
       <p id="tareas-status" class="status">Cargando tareas...</p>
-      <div class="tareas-table-wrap" id="tareas-table-wrap">
-        <table class="table-base" id="tareas-table">
-          <thead>
-            <tr>
-              <th>Correo</th>
-              <th>Clave</th>
-              <th>Tarea</th>
-              <th>Accion</th>
-            </tr>
-          </thead>
-          <tbody id="tareas-body"></tbody>
-        </table>
-      </div>
+      <div class="tareas-table-wrap" id="tareas-table-wrap"></div>
     </main>
     <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
 
@@ -77,36 +80,85 @@
 
       const statusEl = document.querySelector("#tareas-status");
       const tableWrap = document.querySelector("#tareas-table-wrap");
-      const tbodyEl = document.querySelector("#tareas-body");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
 
+      const normalizePlatform = (plat) => {
+        if (!plat) return { id: "none", name: "Sin plataforma", color: "#2c2f36" };
+        const obj = Array.isArray(plat) ? plat[0] : plat;
+        return {
+          id: obj?.id_plataforma ?? "none",
+          name: obj?.nombre || "Sin plataforma",
+          color: obj?.color_1 || "#2c2f36",
+        };
+      };
+
+      const buildPlatformGroups = (rows) => {
+        const groups = new Map();
+        rows.forEach((row) => {
+          const plat = normalizePlatform(row.cuentas?.plataformas);
+          if (!groups.has(plat.id)) {
+            groups.set(plat.id, { platform: plat, rows: [] });
+          }
+          groups.get(plat.id).rows.push(row);
+        });
+        return Array.from(groups.values());
+      };
+
       const renderRows = (rows) => {
         if (!rows.length) {
-          tbodyEl.innerHTML = "";
+          if (tableWrap) tableWrap.innerHTML = "";
           setStatus("No hay tareas asignadas.");
           return;
         }
-        tbodyEl.innerHTML = rows
-          .map((row) => {
-            const correo = row.cuentas?.correo || "-";
-            const clave = row.cuentas?.clave || "-";
-            const tarea = row.tareas?.titulo || "-";
+        const sections = buildPlatformGroups(rows)
+          .map((group) => {
+            const { platform, rows: items } = group;
+            const rowsHtml = items
+              .map((row) => {
+                const correo = row.cuentas?.correo || "-";
+                const clave = row.cuentas?.clave || "-";
+                const tarea = row.tareas?.titulo || "-";
+                return `
+                  <tr data-id="${row.id_tarea_asignada}">
+                    <td><span class="copyable" data-clipboard="${correo === "-" ? "" : correo}">${correo}</span></td>
+                    <td><span class="copyable" data-clipboard="${clave === "-" ? "" : clave}">${clave}</span></td>
+                    <td>${tarea}</td>
+                    <td class="acciones-cell">
+                      <button type="button" class="btn-primary btn-delete-task" data-id="${row.id_tarea_asignada}" aria-label="Eliminar">✔</button>
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
             return `
-              <tr data-id="${row.id_tarea_asignada}">
-                <td><span class="copyable" data-clipboard="${correo === "-" ? "" : correo}">${correo}</span></td>
-                <td><span class="copyable" data-clipboard="${clave === "-" ? "" : clave}">${clave}</span></td>
-                <td>${tarea}</td>
-                <td class="acciones-cell">
-                  <button type="button" class="btn-primary btn-delete-task" data-id="${row.id_tarea_asignada}" aria-label="Eliminar">✔</button>
-                </td>
-              </tr>
+              <section class="tareas-platform" data-plat="${platform.id}" style="--plat-color:${platform.color}; --table-header-bg:${platform.color};">
+                <div class="tareas-platform-header">
+                  ${platform.name}
+                </div>
+                <div class="tareas-table-wrap">
+                  <table class="table-base">
+                    <thead>
+                      <tr>
+                        <th>Correo</th>
+                        <th>Clave</th>
+                        <th>Tarea</th>
+                        <th>Accion</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rowsHtml}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             `;
           })
           .join("");
+        if (tableWrap) tableWrap.innerHTML = sections;
         setStatus("");
       };
 
@@ -115,7 +167,7 @@
         const { data, error } = await supabase
           .from("tareas_asignadas")
           .select(
-            "id_tarea_asignada, tarea, cuenta, tareas: tareas!tareas_asignadas_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave)"
+            "id_tarea_asignada, tarea, cuenta, tareas: tareas!tareas_asignadas_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave, id_plataforma, plataformas:plataformas!cuentas_id_plataforma_fkey(id_plataforma, nombre, color_1))"
           )
           .order("id_tarea_asignada", { ascending: false });
         if (error) {
@@ -142,7 +194,7 @@
         }
       };
 
-      tbodyEl?.addEventListener("click", async (event) => {
+      tableWrap?.addEventListener("click", async (event) => {
         const copyTarget = event.target.closest(".copyable");
         if (copyTarget) {
           const text =
@@ -162,8 +214,13 @@
             .eq("id_tarea_asignada", id);
           if (error) throw error;
           const row = deleteBtn.closest("tr");
+          const tbody = row?.closest("tbody");
           if (row) row.remove();
-          if (!tbodyEl.querySelector("tr")) {
+          if (tbody && !tbody.querySelector("tr")) {
+            const section = tbody.closest(".tareas-platform");
+            section?.remove();
+          }
+          if (tableWrap && !tableWrap.querySelector("tr")) {
             setStatus("No hay tareas asignadas.");
           }
         } catch (err) {

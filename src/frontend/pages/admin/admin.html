@@ -53,7 +53,7 @@
         </div>
         <div class="admin-card tareas" id="dash-tareas">
           <p class="card-title">Tareas</p>
-          <div class="card-count">--</div>
+          <div class="card-count" id="count-tareas">--</div>
           <p class="card-desc">Pendientes</p>
         </div>
       </div>
@@ -133,6 +133,7 @@
       const countReportesEl = document.querySelector("#count-reportes");
       const countCortesEl = document.querySelector("#count-cortes");
       const countPedidosEl = document.querySelector("#count-pedidos");
+      const countTareasEl = document.querySelector("#count-tareas");
       const pinesPorComprarEl = document.querySelector("#pines-por-comprar");
       const adminGroups = Array.from(
         document.querySelectorAll(".admin-actions.admin-group"),
@@ -188,7 +189,12 @@
           const today = new Date().toISOString().slice(0, 10);
           const monthStart = getMonthStart();
           const nextMonthStart = getNextMonthStart();
-          const [{ count: repCount }, { count: cortesCount }, { count: pedidosCount }] = await Promise.all([
+          const [
+            { count: repCount },
+            { count: cortesCount },
+            { count: pedidosCount },
+            { count: tareasCount },
+          ] = await Promise.all([
             supabase
               .from("reportes")
               .select("id_reporte", { count: "exact", head: true })
@@ -203,10 +209,14 @@
               .from("ventas")
               .select("id_venta", { count: "exact", head: true })
               .eq("pendiente", true),
+            supabase
+              .from("tareas_asignadas")
+              .select("id_tarea_asignada", { count: "exact", head: true }),
           ]);
           if (countReportesEl) countReportesEl.textContent = repCount ?? 0;
           if (countCortesEl) countCortesEl.textContent = cortesCount ?? 0;
           if (countPedidosEl) countPedidosEl.textContent = pedidosCount ?? 0;
+          if (countTareasEl) countTareasEl.textContent = tareasCount ?? 0;
 
           if (pinesPorComprarEl) {
             const [
@@ -241,6 +251,7 @@
           if (countReportesEl) countReportesEl.textContent = "-";
           if (countCortesEl) countCortesEl.textContent = "-";
           if (countPedidosEl) countPedidosEl.textContent = "-";
+          if (countTareasEl) countTareasEl.textContent = "-";
           if (pinesPorComprarEl) pinesPorComprarEl.textContent = "Pines por comprar: -";
         }
       }

@@ -677,18 +677,19 @@
         const correoVal = row?.querySelector(".input-correo")?.value?.trim() || "";
         const claveVal = row?.querySelector(".input-clave")?.value?.trim() || "";
         const tipoVal = row?.querySelector(".input-tipo")?.value?.trim() || "";
+        const venta = ventasById[ventaId] || {};
+        const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
+        const platInfo = platById[platId] || {};
+        const needsClave = isTrue(platInfo?.clave_cliente);
         if (!correoVal) {
           alert("Ingresa el correo.");
           return;
         }
-        if (!claveVal) {
+        if (needsClave && !claveVal) {
           alert("Ingresa la clave.");
           return;
         }
         try {
-          const venta = ventasById[ventaId] || {};
-          const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
-          const platInfo = platById[platId] || {};
           if (Number(platId) === 9 && !tipoVal) {
             alert("Selecciona el tipo de cuenta.");
             return;
@@ -762,7 +763,7 @@
             if (linkErr) throw linkErr;
           }
 
-          if (cuentaExist?.id_cuenta && claveVal && claveVal !== (cuentaExist.clave || "")) {
+          if (needsClave && cuentaExist?.id_cuenta && claveVal && claveVal !== (cuentaExist.clave || "")) {
             const { error: claveErr } = await supabase
               .from("cuentas")
               .update({ clave: claveVal })
@@ -771,7 +772,7 @@
           }
 
           const payload = { correo_miembro: correoVal };
-          if (claveVal) payload.clave_miembro = claveVal;
+          if (needsClave && claveVal) payload.clave_miembro = claveVal;
           if (assignCuenta) payload.id_cuenta = assignCuenta;
           if (assignPerfil) payload.id_perfil = assignPerfil;
           if (Number(platId) === 9) payload.cuenta_nueva = tipoVal === "nueva";

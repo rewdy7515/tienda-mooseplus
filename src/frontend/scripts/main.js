@@ -312,11 +312,12 @@ const checkMissingDataNotice = async (currentUser) => {
     return;
   }
   try {
+    const userId = Number(currentUser.id_usuario);
     const { data: ventas, error } = await supabase
       .from("ventas")
       .select("id_venta, pendiente, correo_miembro, clave_miembro, id_precio, precios:precios(id_plataforma, plataformas:plataformas(correo_cliente, clave_cliente))")
-      .eq("id_usuario", currentUser.id_usuario)
-      .eq("pendiente", true);
+      .eq("pendiente", true)
+      .or(`id_usuario.eq.${userId},id_admin_venta.eq.${userId}`);
     if (error) throw error;
     const hasMissing = (ventas || []).some((v) => {
       const plat = v.precios?.plataformas || {};

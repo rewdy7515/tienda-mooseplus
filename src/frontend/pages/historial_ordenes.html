@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Historial de Ordenes</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .ordenes-list {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .orden-card {
+        width: 100%;
+        border: 1px solid #d1d5db;
+        background: #f8fafc;
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .orden-card-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .orden-card-title {
+        margin: 0;
+        font-weight: 800;
+        font-size: 16px;
+        color: #111827;
+      }
+      .orden-card-meta {
+        margin: 0;
+        font-size: 13px;
+        color: #4b5563;
+      }
+      .orden-status {
+        font-weight: 700;
+        font-size: 12px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .orden-status.ok {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .orden-status.wait {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      @media (max-width: 640px) {
+        .orden-card {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Historial de Ordenes</h2>
+      <p id="ordenes-status" class="status">Cargando ordenes...</p>
+      <div id="ordenes-list" class="ordenes-list"></div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogoHome, attachLogout } from "../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
+      import { formatDDMMYYYY } from "../scripts/date-format.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#ordenes-status");
+      const listEl = document.querySelector("#ordenes-list");
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const formatHora12 = (hora) => {
+        if (!hora) return "-";
+        const raw = String(hora).trim();
+        const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+        if (!match) return raw;
+        let hh = Number(match[1]);
+        const mm = match[2];
+        if (!Number.isFinite(hh)) return raw;
+        const suffix = hh >= 12 ? "pm" : "am";
+        hh = hh % 12;
+        if (hh === 0) hh = 12;
+        return `${hh}:${mm} ${suffix}`;
+      };
+
+      const renderOrdenes = (rows) => {
+        if (!rows.length) {
+          if (listEl) listEl.innerHTML = "";
+          setStatus("No hay ordenes registradas.");
+          return;
+        }
+        if (listEl) {
+          listEl.innerHTML = rows
+            .map((orden) => {
+              const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
+              const hora = formatHora12(orden.hora_orden);
+              const entregado = isTrue(orden.pago_verificado);
+              const estado = entregado ? "Entregado" : "En espera";
+              const estadoClass = entregado ? "ok" : "wait";
+              return `
+                <div class="orden-card" data-orden="${orden.id_orden}" role="button" tabindex="0">
+                  <div class="orden-card-info">
+                    <p class="orden-card-title">N. orden: ${orden.id_orden ?? "-"}</p>
+                    <p class="orden-card-meta">${fecha} · ${hora}</p>
+                  </div>
+                  <span class="orden-status ${estadoClass}">${estado}</span>
+                </div>
+              `;
+            })
+            .join("");
+        }
+        setStatus("");
+      };
+
+      const init = async () => {
+        try {
+          const TEST_USER_ID = 6;
+          const { data, error } = await supabase
+            .from("ordenes")
+            .select("id_orden, id_usuario, fecha, hora_orden, pago_verificado")
+            .eq("id_usuario", TEST_USER_ID)
+            .order("id_orden", { ascending: false });
+          if (error) throw error;
+          renderOrdenes(data || []);
+        } catch (err) {
+          console.error("historial ordenes error", err);
+          setStatus("No se pudieron cargar las ordenes.");
+        }
+      };
+
+      init();
+
+      listEl?.addEventListener("click", (event) => {
+        const card = event.target.closest(".orden-card");
+        if (!card) return;
+        const id = card.dataset.orden;
+        if (!id) return;
+        window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(id)}`;
+      });
+    </script>
+  </body>
+</html>
