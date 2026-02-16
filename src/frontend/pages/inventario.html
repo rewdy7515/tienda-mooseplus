@@ -261,6 +261,7 @@
         supabase,
       } from "../scripts/api.js";
       import { refreshCartFromServer } from "../scripts/cart.js";
+      import { copyTextNotify } from "../scripts/copy-toast.js";
 
       requireSession();
 
@@ -275,7 +276,6 @@
       const searchBtn = document.querySelector("#inv-search-btn");
       const searchSugs = document.querySelector("#inv-sugs");
       const searchResults = document.querySelector("#inv-search-results");
-      const copyToast = document.querySelector("#copy-toast");
       const actionsEl = document.querySelector(".inventario-actions");
       const btnProximas = document.querySelector("#btn-proximas");
       const modalProximas = document.querySelector("#modal-proximas");
@@ -559,39 +559,9 @@
         if (listEl) listEl.style.display = displayVal;
       };
 
-      const copyToClipboard = (text) => {
+      const copyToClipboard = async (text) => {
         if (!text) return;
-        const doFallbackCopy = () => {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-        };
-        const done = () => showCopyToast();
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard
-            .writeText(text)
-            .then(done)
-            .catch(() => {
-              doFallbackCopy();
-              done();
-            });
-        } else {
-          doFallbackCopy();
-          done();
-        }
-      };
-
-      let toastTimer = null;
-      const showCopyToast = () => {
-        if (!copyToast) return;
-        copyToast.classList.add("show");
-        if (toastTimer) clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => {
-          copyToast.classList.remove("show");
-        }, 1000);
+        await copyTextNotify(text);
       };
 
       const startClienteEdit = (wrap) => {
@@ -1097,18 +1067,7 @@
         const copyCell = e.target.closest(".copyable");
         if (copyCell) {
           const txt = copyCell.textContent?.trim() || "";
-          if (txt) {
-            try {
-              navigator.clipboard.writeText(txt);
-            } catch (_err) {
-              const textarea = document.createElement("textarea");
-              textarea.value = txt;
-              document.body.appendChild(textarea);
-              textarea.select();
-              document.execCommand("copy");
-              document.body.removeChild(textarea);
-            }
-          }
+          if (txt) copyTextNotify(txt);
           return;
         }
         const btn = e.target.closest(".btn-red-report");

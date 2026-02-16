@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tareas</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .tareas-table-wrap {
+        overflow-x: auto;
+      }
+      .acciones-cell {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .acciones-cell .btn-primary {
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .copyable {
+        cursor: pointer;
+      }
+      .copy-toast {
+        position: fixed;
+        top: 80px;
+        right: 18px;
+        background: #000;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        opacity: 0;
+        transform: translateY(-6px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        z-index: 999;
+        pointer-events: none;
+      }
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Tareas</h2>
+      <p id="tareas-status" class="status">Cargando tareas...</p>
+      <div class="tareas-table-wrap" id="tareas-table-wrap">
+        <table class="table-base" id="tareas-table">
+          <thead>
+            <tr>
+              <th>Correo</th>
+              <th>Clave</th>
+              <th>Tarea</th>
+              <th>Accion</th>
+            </tr>
+          </thead>
+          <tbody id="tareas-body"></tbody>
+        </table>
+      </div>
+    </main>
+    <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#tareas-status");
+      const tableWrap = document.querySelector("#tareas-table-wrap");
+      const tbodyEl = document.querySelector("#tareas-body");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const renderRows = (rows) => {
+        if (!rows.length) {
+          tbodyEl.innerHTML = "";
+          setStatus("No hay tareas asignadas.");
+          return;
+        }
+        tbodyEl.innerHTML = rows
+          .map((row) => {
+            const correo = row.cuentas?.correo || "-";
+            const clave = row.cuentas?.clave || "-";
+            const tarea = row.tareas?.titulo || "-";
+            return `
+              <tr data-id="${row.id_tarea_asignada}">
+                <td><span class="copyable" data-clipboard="${correo === "-" ? "" : correo}">${correo}</span></td>
+                <td><span class="copyable" data-clipboard="${clave === "-" ? "" : clave}">${clave}</span></td>
+                <td>${tarea}</td>
+                <td class="acciones-cell">
+                  <button type="button" class="btn-primary btn-delete-task" data-id="${row.id_tarea_asignada}" aria-label="Eliminar">✔</button>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+        setStatus("");
+      };
+
+      const loadTareas = async () => {
+        setStatus("Cargando tareas...");
+        const { data, error } = await supabase
+          .from("tareas_asignadas")
+          .select(
+            "id_tarea_asignada, tarea, cuenta, tareas: tareas!tareas_asignadas_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave)"
+          )
+          .order("id_tarea_asignada", { ascending: false });
+        if (error) {
+          console.error("tareas load error", error);
+          setStatus("No se pudieron cargar las tareas.");
+          return;
+        }
+        renderRows(data || []);
+      };
+
+      const init = async () => {
+        try {
+          const user = await loadCurrentUser();
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (!isAdmin) {
+            if (tableWrap) tableWrap.classList.add("hidden");
+            setStatus("No tienes permisos para ver las tareas.");
+            return;
+          }
+          await loadTareas();
+        } catch (err) {
+          console.error("tareas init error", err);
+          setStatus("No se pudieron cargar las tareas.");
+        }
+      };
+
+      tbodyEl?.addEventListener("click", async (event) => {
+        const copyTarget = event.target.closest(".copyable");
+        if (copyTarget) {
+          const text =
+            copyTarget.dataset.clipboard || copyTarget.textContent?.trim() || "";
+          if (text && text !== "-") await copyTextNotify(text);
+          return;
+        }
+
+        const deleteBtn = event.target.closest(".btn-delete-task");
+        if (!deleteBtn) return;
+        const id = Number(deleteBtn.dataset.id);
+        if (!Number.isFinite(id)) return;
+        try {
+          const { error } = await supabase
+            .from("tareas_asignadas")
+            .delete()
+            .eq("id_tarea_asignada", id);
+          if (error) throw error;
+          const row = deleteBtn.closest("tr");
+          if (row) row.remove();
+          if (!tbodyEl.querySelector("tr")) {
+            setStatus("No hay tareas asignadas.");
+          }
+        } catch (err) {
+          console.error("delete tarea error", err);
+          alert("No se pudo eliminar la tarea.");
+        }
+      });
+
+      init();
+    </script>
+  </body>
+</html>

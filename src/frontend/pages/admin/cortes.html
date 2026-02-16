@@ -292,6 +292,7 @@
       import { clearServerSession, supabase, loadCurrentUser } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
 
       requireSession();
       attachLogoHome();
@@ -438,18 +439,6 @@
       let platMaxMap = {};
       let platCorteClaveMap = {};
       let platCorteDirectoMap = {};
-
-      const copyToast = document.querySelector("#copy-toast");
-      let copyToastTimer = null;
-
-      const showCopyToast = () => {
-        if (!copyToast) return;
-        copyToast.classList.add("show");
-        if (copyToastTimer) clearTimeout(copyToastTimer);
-        copyToastTimer = setTimeout(() => {
-          copyToast.classList.remove("show");
-        }, 2000);
-      };
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -795,22 +784,7 @@
 
       const copyToClipboard = async (text) => {
         if (!text) return;
-        try {
-          await navigator.clipboard.writeText(text);
-          showCopyToast();
-        } catch (err) {
-          try {
-            const temp = document.createElement("textarea");
-            temp.value = text;
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand("copy");
-            temp.remove();
-            showCopyToast();
-          } catch (_) {
-            console.error("No se pudo copiar al portapapeles");
-          }
-        }
+        await copyTextNotify(text);
       };
 
       const selectRow = (target) => {

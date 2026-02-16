@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ordenes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .ordenes-table-wrap {
+        overflow-x: auto;
+      }
+      .estado-cell {
+        text-align: center;
+        font-weight: 700;
+        border-radius: 0;
+      }
+      .estado-ok {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .estado-bad {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .acciones-cell {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .acciones-cell .btn-primary,
+      .acciones-cell .btn-outline {
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .ordenes-filters {
+        display: flex;
+        gap: 8px;
+        margin: 8px 0 12px;
+      }
+      .btn-filter.is-active {
+        background: #111;
+        color: #fff;
+        border-color: #111;
+        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.25);
+      }
+      .btn-filter:not(.is-active) {
+        background: #e5e7eb;
+        color: #111;
+        border-color: #cbd5e1;
+      }
+      .orden-row-selected td {
+        background: #dbeafe;
+      }
+      .orden-row-selected td.estado-cell {
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Ordenes</h2>
+      <p id="ordenes-status" class="status">Cargando ordenes...</p>
+      <div class="ordenes-filters" id="ordenes-filters">
+        <button
+          type="button"
+          class="btn-primary btn-filter is-active"
+          id="btn-filter-checkout"
+          aria-pressed="true"
+        >
+          Pagos desde checkout
+        </button>
+      </div>
+      <div class="ordenes-table-wrap" id="ordenes-table-wrap">
+        <table class="table-base" id="ordenes-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Cliente</th>
+              <th>Metodo de pago</th>
+              <th>Monto</th>
+              <th>Referencia</th>
+              <th>Fecha</th>
+              <th>Hora</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="ordenes-body"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const statusEl = document.querySelector("#ordenes-status");
+      const tableWrap = document.querySelector("#ordenes-table-wrap");
+      const filterWrap = document.querySelector("#ordenes-filters");
+      const tbodyEl = document.querySelector("#ordenes-body");
+      const filterCheckoutBtn = document.querySelector("#btn-filter-checkout");
+
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      let allOrdenes = [];
+      let userMap = {};
+      let metodoMap = {};
+      let filterCheckoutActive = true;
+
+      const setStatus = (msg) => {
+        if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const formatMonto = (monto) => {
+        const num = Number(monto);
+        if (!Number.isFinite(num)) return "-";
+        return num.toFixed(2);
+      };
+
+      const buildMap = (rows, idKey, nameBuilder) => {
+        return (rows || []).reduce((acc, row) => {
+          const id = row?.[idKey];
+          if (!id) return acc;
+          acc[id] = nameBuilder(row);
+          return acc;
+        }, {});
+      };
+
+      const renderOrdenes = () => {
+        const rows = filterCheckoutActive
+          ? allOrdenes.filter((o) => o.id_admin == null)
+          : allOrdenes;
+        if (!rows.length) {
+          tbodyEl.innerHTML = "";
+          setStatus("No hay ordenes registradas.");
+          return;
+        }
+        tbodyEl.innerHTML = rows
+          .map((orden) => {
+            const cliente = userMap[orden.id_usuario] || "-";
+            const metodo = metodoMap[orden.id_metodo_de_pago] || "-";
+            const montoVal = Number.isFinite(Number(orden.monto_bs))
+              ? formatMonto(orden.monto_bs)
+              : formatMonto(orden.total);
+            const referencia = orden.referencia || "-";
+            const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
+            const hora = orden.hora_orden || "-";
+            const verificado = isTrue(orden.pago_verificado);
+            const estado = verificado ? "Verificado" : "No verificado";
+            const estadoClass = verificado ? "estado-ok" : "estado-bad";
+            return `
+              <tr data-orden="${orden.id_orden}">
+                <td>${orden.id_orden ?? "-"}</td>
+                <td>${cliente || "-"}</td>
+                <td>${metodo}</td>
+                <td>${montoVal}</td>
+                <td>${referencia}</td>
+                <td>${fecha}</td>
+                <td>${hora}</td>
+                <td class="estado-cell ${estadoClass}">${estado}</td>
+                <td class="acciones-cell">
+                  <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}">Entregar servicio</button>
+                  <button type="button" class="btn-outline btn-rechazar" data-orden="${orden.id_orden}">Rechazar</button>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+        setStatus("");
+      };
+
+      const loadOrdenes = async () => {
+        setStatus("Cargando ordenes...");
+        const { data: ordenes, error } = await supabase
+          .from("ordenes")
+          .select("id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, referencia, fecha, hora_orden, pago_verificado")
+          .order("id_orden", { ascending: false });
+        if (error) {
+          console.error("ordenes load error", error);
+          setStatus("No se pudieron cargar las ordenes.");
+          return;
+        }
+        allOrdenes = ordenes || [];
+        if (!allOrdenes.length) {
+          tbodyEl.innerHTML = "";
+          setStatus("No hay ordenes registradas.");
+          return;
+        }
+
+        const userIds = Array.from(new Set(allOrdenes.map((o) => o.id_usuario).filter(Boolean)));
+        const metodoIds = Array.from(
+          new Set(allOrdenes.map((o) => o.id_metodo_de_pago).filter(Boolean))
+        );
+
+        userMap = {};
+        if (userIds.length) {
+          const { data: users, error: userErr } = await supabase
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido")
+            .in("id_usuario", userIds);
+          if (userErr) {
+            console.error("usuarios load error", userErr);
+          } else {
+            userMap = buildMap(users, "id_usuario", (u) =>
+              [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || "-"
+            );
+          }
+        }
+
+        metodoMap = {};
+        if (metodoIds.length) {
+          const { data: metodos, error: metErr } = await supabase
+            .from("metodos_de_pago")
+            .select("id_metodo_de_pago, nombre")
+            .in("id_metodo_de_pago", metodoIds);
+          if (metErr) {
+            console.error("metodos load error", metErr);
+          } else {
+            metodoMap = buildMap(metodos, "id_metodo_de_pago", (m) => m.nombre || "-");
+          }
+        }
+
+        renderOrdenes();
+      };
+
+      const init = async () => {
+        try {
+          const user = await loadCurrentUser();
+          const isSuperAdmin = isTrue(user?.permiso_superadmin);
+          if (!isSuperAdmin) {
+            if (tableWrap) tableWrap.classList.add("hidden");
+            if (filterWrap) filterWrap.classList.add("hidden");
+            setStatus("No tienes permisos para ver las ordenes.");
+            return;
+          }
+          await loadOrdenes();
+        } catch (err) {
+          console.error("ordenes init error", err);
+          setStatus("No se pudieron cargar las ordenes.");
+        }
+      };
+
+      filterCheckoutBtn?.addEventListener("click", () => {
+        filterCheckoutActive = !filterCheckoutActive;
+        filterCheckoutBtn.classList.toggle("is-active", filterCheckoutActive);
+        filterCheckoutBtn.setAttribute("aria-pressed", filterCheckoutActive ? "true" : "false");
+        renderOrdenes();
+      });
+
+      document.addEventListener("click", async (event) => {
+        const row = event.target.closest("#ordenes-table tbody tr");
+        if (row) {
+          tbodyEl.querySelectorAll(".orden-row-selected").forEach((tr) => {
+            tr.classList.remove("orden-row-selected");
+          });
+          row.classList.add("orden-row-selected");
+        }
+        const entregarBtn = event.target.closest(".btn-entregar");
+        if (entregarBtn) {
+          const idOrden = entregarBtn.dataset.orden;
+          if (idOrden) {
+            window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(idOrden)}`;
+          }
+          return;
+        }
+
+        const rechazarBtn = event.target.closest(".btn-rechazar");
+        if (rechazarBtn) {
+          const idOrden = Number(rechazarBtn.dataset.orden);
+          if (!Number.isFinite(idOrden)) return;
+          const confirmed = window.confirm("¿Rechazar esta orden?");
+          if (!confirmed) return;
+          const { error } = await supabase
+            .from("ordenes")
+            .update({ orden_cancelada: true })
+            .eq("id_orden", idOrden);
+          if (error) {
+            console.error("rechazar orden error", error);
+            window.alert("No se pudo rechazar la orden.");
+            return;
+          }
+          const row = rechazarBtn.closest("tr");
+          if (row) row.remove();
+          if (!tbodyEl.children.length) {
+            setStatus("No hay ordenes registradas.");
+          }
+        }
+      });
+
+      init();
+    </script>
+  </body>
+</html>

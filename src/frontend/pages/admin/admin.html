@@ -61,6 +61,7 @@
         <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-renovar-servicio">Renovar servicio cliente</button>
         <button class="btn-primary admin-action" id="btn-usuarios">Usuarios</button>
+        <button class="btn-primary admin-action hidden" id="btn-ordenes">Ordenes</button>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
@@ -140,6 +141,7 @@
       const spotifyStatus = document.querySelector("#spotify-cuentas-status");
       const spotifyLibresEl = document.querySelector("#spotify-libres");
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
+      const btnOrdenes = document.querySelector("#btn-ordenes");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
       const modalRenovarList = document.querySelector("#spotify-renovar-list");
       const modalRenovarYes = document.querySelector("#spotify-renovar-yes");
@@ -318,9 +320,14 @@
           }
           currentUserId = user?.id_usuario || null;
           const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          const isSuperAdmin = isTrue(user?.permiso_superadmin);
           if (adminLink) {
             adminLink.classList.toggle("hidden", !isAdmin);
             adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (btnOrdenes) {
+            btnOrdenes.classList.toggle("hidden", !isSuperAdmin);
+            btnOrdenes.style.display = isSuperAdmin ? "inline-flex" : "none";
           }
           if (!isAdmin) {
             document.querySelector("main .status").textContent =
@@ -343,6 +350,9 @@
       });
       document.querySelector("#dash-pedidos")?.addEventListener("click", () => {
         window.location.href = "pedidos_pendientes.html";
+      });
+      document.querySelector("#dash-tareas")?.addEventListener("click", () => {
+        window.location.href = "tareas.html";
       });
 
       init();
@@ -376,6 +386,9 @@
 
       document.getElementById("btn-usuarios")?.addEventListener("click", () => {
         window.location.href = "usuarios.html";
+      });
+      document.getElementById("btn-ordenes")?.addEventListener("click", () => {
+        window.location.href = "ordenes.html";
       });
 
       document.getElementById("btn-registrar-proveedor")?.addEventListener("click", () => {

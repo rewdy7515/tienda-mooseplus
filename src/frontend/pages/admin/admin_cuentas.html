@@ -199,6 +199,40 @@
         margin: 0 0 6px;
         color: var(--platform-color, #111);
       }
+      .cuenta-platform-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      .btn-marcar-tarea {
+        white-space: nowrap;
+      }
+      .tareas-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 320px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      .tarea-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 14px;
+      }
+      .tarea-item input {
+        margin-top: 2px;
+      }
+      .tareas-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
       .cuenta-platform-cred {
         font-size: 18px;
         font-weight: 700;
@@ -740,6 +774,7 @@
       } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
       import {
         buildNotificationPayload,
         pickNotificationUserIds,
@@ -956,8 +991,6 @@
       let modalCancelar = null;
       let modalSi = null;
       let modalNo = null;
-      const copyToast = document.querySelector("#copy-toast");
-      let copyToastTimer = null;
       let pendingOcupadoInput = null;
       let proveedoresCache = null;
       const normalizeText = (val) =>
@@ -1276,39 +1309,6 @@
         renewOverlay?.classList.remove("show");
       };
 
-      const showCopyToast = () => {
-        if (!copyToast) return;
-        copyToast.classList.add("show");
-        if (copyToastTimer) clearTimeout(copyToastTimer);
-        copyToastTimer = setTimeout(
-          () => copyToast.classList.remove("show"),
-          2000,
-        );
-      };
-
-      const copyTextNotify = async (text) => {
-        if (!text) return;
-        let copied = false;
-        try {
-          await navigator.clipboard.writeText(text);
-          copied = true;
-        } catch (_) {
-          try {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-            copied = true;
-          } catch (err) {
-            console.error("copy error", err);
-          }
-        }
-        if (copied) showCopyToast();
-        return copied;
-      };
-
       const copyWithToast = async (el) => {
         if (!el) return;
         const text = el.dataset?.clipboard || el.textContent?.trim() || "";
@@ -1329,6 +1329,10 @@
       let isSuperadmin = false;
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
       const modalMiembroAdd = document.querySelector("#modal-miembro-add");
+      const modalTareas = document.querySelector("#modal-tareas");
+      const tareasListEl = document.querySelector("#tareas-list");
+      const btnTareasCancel = document.querySelector("#btn-tareas-cancel");
+      const btnTareasSend = document.querySelector("#btn-tareas-send");
       const btnMiembroSi = document.querySelector("#btn-miembro-si");
       const btnMiembroNo = document.querySelector("#btn-miembro-no");
       let pendingMiembroAdd = null;
@@ -1342,6 +1346,8 @@
       const modalReemplazoMsg = document.querySelector("#modal-reemplazo-msg");
       let currentCanvaCuenta = null;
       let currentCanvaFlags = null;
+      let tareasCache = null;
+      let tareasCuentaId = null;
 
       (async () => {
         try {
@@ -2309,6 +2315,10 @@
                 : "";
               const perfilCell = showPerfil ? `<td>${perfilLabel}</td>` : "";
               const claveCell = showClave ? `<td>${r.clave || ""}</td>` : "";
+              const estadoInfo = getEstadoVenta({
+                fecha_corte: r.fecha_corte,
+                suspendido: r.suspendido === true,
+              });
               return `
               <tr>
                 <td>${r.id_venta ?? ""}</td>
@@ -2319,6 +2329,7 @@
                 ${claveCell}
                 ${perfilCell}
                 <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
+                <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
                 <td class="action-cell">
                   <button class="btn-primary btn-reemplazar-row"
                     data-cuenta="${r.id_cuenta ?? ""}"
@@ -2361,6 +2372,7 @@
                       ${showClave ? "<th>Clave</th>" : ""}
                       ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
                       <th>Fecha de Corte</th>
+                      <th>Estado</th>
                       <th class="action-cell">Acción</th>
                     </tr>
                   </thead>
@@ -2382,7 +2394,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro",
+              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido",
             )
             .eq("id_usuario", idUsuario);
           if (error) throw error;
@@ -2499,6 +2511,7 @@
               n_perfil: perfilInfo.n_perfil ?? "",
               pin: perfilInfo.pin ?? "",
               fecha_corte: v.fecha_corte || "",
+              suspendido: v.suspendido === true,
               id_plataforma: platId,
               perfil_hogar: perfilInfo.perfil_hogar,
               es_subcuenta: false,
@@ -2858,7 +2871,7 @@
         } else {
           thead = `<tr>
             <th>ID Venta</th>
-            <th>Ocupado por</th>
+            <th>Cliente</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
             <th class="action-cell">Acción</th>
@@ -2906,6 +2919,25 @@
             fecha_corte_fmt: "",
             suspendido: false,
           });
+        }
+        if (colMode === "ocupado" && !isCuentaMadre) {
+          if (rows.length === 0) {
+            rows.push({
+              perfil: "",
+              pin: "",
+              hogar: false,
+              id_perfil: null,
+              n_raw: null,
+              reemplazado: false,
+              ocupadoPor: "",
+              id_venta: null,
+              fecha_corte: "",
+              fecha_corte_fmt: "",
+              suspendido: false,
+            });
+          } else if (rows.length > 1) {
+            rows = [rows[0]];
+          }
         }
 
         const getEstado = (row) => getEstadoVenta(row);
@@ -3218,7 +3250,7 @@
               </div>`;
 
         let plat9Table = "";
-        if (info.isPlat9) {
+        if (info.isPlat9 && info.cuenta_madre === true) {
           const filas = info.plat9Rows || [];
           const needsPlus = filas.length < 5;
           const plat9ColCount = 5 + (showClaveCliente ? 1 : 0);
@@ -3267,7 +3299,10 @@
               : "Cuenta completa";
 
         detalleEl.innerHTML = `
-          <div class="cuenta-platform-title">${info.plataformaNombre || "-"}</div>
+          <div class="cuenta-platform-header">
+            <div class="cuenta-platform-title">${info.plataformaNombre || "-"}</div>
+            <button type="button" class="btn-outline btn-marcar-tarea" data-cuenta="${info.id_cuenta || ""}">Marcar tarea</button>
+          </div>
           <div class="cuenta-platform-cred">
             <span class="cuenta-platform-label">Correo:</span>
             <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
@@ -3319,7 +3354,17 @@
                     <button type="button" class="codigo-save-btn" data-field="correo_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar correo">💾</button>
                   </span>`;
               const claveHtml = claveVal
-                ? `<span class="pin-copy" data-clipboard="${claveVal}">${claveVal}</span>`
+                ? `<span class="codigo-field" data-field="pin_codigo">
+                    <span class="codigo-view">
+                      <span class="pin-copy" data-clipboard="${claveVal}">${claveVal}</span>
+                    </span>
+                    <button type="button" class="codigo-edit-btn" data-field="pin_codigo" data-cuenta="${info.id_cuenta}" aria-label="Editar clave">✏️</button>
+                    <span class="codigo-input-wrap hidden">
+                      <input type="text" class="input-inline" value="${claveVal}" placeholder="-" data-field="pin_codigo" />
+                      <button type="button" class="codigo-save-btn" data-field="pin_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar clave">💾</button>
+                      <button type="button" class="codigo-cancel-btn" aria-label="Cancelar">✖</button>
+                    </span>
+                  </span>`
                 : `<span class="codigo-input-wrap">
                     <input type="text" class="input-inline" value="" placeholder="-" data-field="pin_codigo" />
                     <button type="button" class="codigo-save-btn" data-field="pin_codigo" data-cuenta="${info.id_cuenta}" aria-label="Guardar clave">💾</button>
@@ -3442,7 +3487,15 @@
                             }
                           </td>
                           <td class="action-cell">
-                            <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${m.id_cuenta || ""}">Reemplazar</button>
+                            <button
+                              type="button"
+                              class="btn-primary btn-reemplazar-row"
+                              data-perfil=""
+                              data-cuenta="${m.id_cuenta || ""}"
+                              data-idventa="${m.id_venta || ""}"
+                              data-venta-miembro="${m.venta_miembro ? "true" : "false"}"
+                              data-venta-perfil="${m.venta_perfil ? "true" : "false"}"
+                            >Reemplazar</button>
                             <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
                             <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>
                             ${
@@ -4660,8 +4713,34 @@
               if (error) throw error;
               newVentaId = ventaRow?.id_venta || null;
             } else {
+              const nombreVal = (nameInput?.value || "").trim();
+              if (!nombreVal || !/\s+/.test(nombreVal)) {
+                alert("Ingresa nombre y apellido.");
+                return;
+              }
               if (!finalUserId) {
-                alert("Selecciona un cliente válido.");
+                const parts = nombreVal.split(/\s+/);
+                const nombre = parts.shift() || "";
+                const apellido = parts.join(" ").trim();
+                if (nombre && apellido) {
+                  const { data: userFound, error: uErr } = await supabase
+                    .from("usuarios")
+                    .select("id_usuario")
+                    .ilike("nombre", nombre)
+                    .ilike("apellido", apellido)
+                    .limit(1)
+                    .maybeSingle();
+                  if (uErr) throw uErr;
+                  if (userFound?.id_usuario) {
+                    finalUserId = userFound.id_usuario;
+                    if (nameInput) nameInput.dataset.userId = userFound.id_usuario;
+                  }
+                }
+              }
+              if (!finalUserId) {
+                pendingOcupadoInput = nameInput;
+                goStep1();
+                showModal();
                 return;
               }
               if (!fechaVal) {
@@ -4878,7 +4957,7 @@
           !Number.isNaN(new Date(fechaInput.value).valueOf());
         const enabled = correoInput
           ? !!(hasName && hasCorreo && hasDate && hasClave)
-          : !!(hasName && hasUser && hasDate);
+          : !!(hasName && hasDate);
         btn.disabled = !enabled;
         btn.classList.toggle("btn-disabled", !enabled);
       };
@@ -5458,7 +5537,15 @@
               <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" /></td>
               <td>${renderFechaInlineCell("", `data-cuenta="${data.id_cuenta || ""}"`)}</td>
               <td class="action-cell">
-                <button type="button" class="btn-primary btn-reemplazar-row" data-perfil="" data-cuenta="${data.id_cuenta || ""}">Reemplazar</button>
+                <button
+                  type="button"
+                  class="btn-primary btn-reemplazar-row"
+                  data-perfil=""
+                  data-cuenta="${data.id_cuenta || ""}"
+                  data-idventa=""
+                  data-venta-miembro="true"
+                  data-venta-perfil="false"
+                >Reemplazar</button>
                 <button type="button" class="btn-outline btn-copy-row" data-copy="" disabled>Copiar</button>
                 <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${data.id_cuenta || ""}">Registrar servicio</button>
               </td>
@@ -5494,7 +5581,8 @@
             return;
           }
           const plataformaId = currentCuentaDetalle.plataformaId;
-          const cuentaId = currentCuentaDetalle.id_cuenta;
+          const cuentaId =
+            btnRepl.dataset.cuenta || currentCuentaDetalle.id_cuenta;
           const rowPerfil = currentCuentaDetalle.perfiles?.find(
             (p) => String(p.id_perfil) === String(btnRepl.dataset.perfil || ""),
           );
@@ -5513,8 +5601,14 @@
             .maybeSingle();
           if (ventaInfoErr) throw ventaInfoErr;
 
-          const ventaPerfil = currentCuentaDetalle.venta_perfil === true;
-          const ventaMiembro = currentCuentaDetalle.venta_miembro === true;
+          const hasVentaPerfilAttr = btnRepl.dataset.ventaPerfil !== undefined;
+          const hasVentaMiembroAttr = btnRepl.dataset.ventaMiembro !== undefined;
+          const ventaPerfil = hasVentaPerfilAttr
+            ? isTrue(btnRepl.dataset.ventaPerfil)
+            : currentCuentaDetalle.venta_perfil === true;
+          const ventaMiembro = hasVentaMiembroAttr
+            ? isTrue(btnRepl.dataset.ventaMiembro)
+            : currentCuentaDetalle.venta_miembro === true;
           const perfilHogar = rowPerfil?.hogar === true;
 
           let nuevoCuenta = null;
@@ -5691,6 +5785,56 @@
         }
       };
 
+      const closeTareasModal = () => {
+        if (!modalTareas) return;
+        modalTareas.classList.add("hidden");
+        modalTareas.setAttribute("aria-hidden", "true");
+        tareasCuentaId = null;
+      };
+
+      const renderTareasList = (tareas) => {
+        if (!tareasListEl) return;
+        if (!Array.isArray(tareas) || !tareas.length) {
+          tareasListEl.innerHTML =
+            '<p class="status" style="margin:0;">No hay tareas.</p>';
+          return;
+        }
+        tareasListEl.innerHTML = tareas
+          .map(
+            (t) => `
+              <label class="tarea-item">
+                <input type="checkbox" value="${t.id_tarea}">
+                <span>${t.titulo || "-"}</span>
+              </label>
+            `,
+          )
+          .join("");
+      };
+
+      const loadTareas = async () => {
+        if (tareasCache) return tareasCache;
+        const { data, error } = await supabase
+          .from("tareas")
+          .select("id_tarea, titulo")
+          .order("id_tarea", { ascending: true });
+        if (error) {
+          console.error("cargar tareas error", error);
+          tareasCache = [];
+          return tareasCache;
+        }
+        tareasCache = data || [];
+        return tareasCache;
+      };
+
+      const openTareasModal = async (cuentaId) => {
+        if (!modalTareas) return;
+        tareasCuentaId = cuentaId || currentCuentaId || null;
+        modalTareas.classList.remove("hidden");
+        modalTareas.setAttribute("aria-hidden", "false");
+        const tareas = await loadTareas();
+        renderTareasList(tareas);
+      };
+
       // Acciones de detalle: PIN y Reemplazo
       detalleEl?.addEventListener("click", async (e) => {
         const alertBtn = e.target.closest(".cliente-alert");
@@ -5699,6 +5843,12 @@
           if (correo) {
             window.open(`admin_cuentas.html?correo=${encodeURIComponent(correo)}`, "_blank");
           }
+          return;
+        }
+        const btnTareas = e.target.closest(".btn-marcar-tarea");
+        if (btnTareas) {
+          const cuentaId = btnTareas.dataset.cuenta || currentCuentaId;
+          await openTareasModal(cuentaId);
           return;
         }
         const btnCambiar = e.target.closest(".btn-cambiar-completa");
@@ -5798,6 +5948,40 @@
       modalReemplazo?.addEventListener("click", (e) => {
         if (e.target.classList.contains("modal-close")) {
           modalReemplazo.classList.add("hidden");
+        }
+      });
+
+      btnTareasCancel?.addEventListener("click", closeTareasModal);
+      modalTareas?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) closeTareasModal();
+        if (e.target.classList.contains("modal-close")) closeTareasModal();
+      });
+      btnTareasSend?.addEventListener("click", async () => {
+        if (!tareasCuentaId) {
+          closeTareasModal();
+          return;
+        }
+        const selected = Array.from(
+          tareasListEl?.querySelectorAll('input[type="checkbox"]:checked') || [],
+        ).map((el) => Number(el.value)).filter(Boolean);
+        if (!selected.length) {
+          alert("Selecciona al menos una tarea.");
+          return;
+        }
+        try {
+          const rows = selected.map((id) => ({
+            tarea: id,
+            cuenta: Number(tareasCuentaId),
+          }));
+          const { error } = await supabase
+            .from("tareas_asignadas")
+            .insert(rows);
+          if (error) throw error;
+          alert("Tareas asignadas.");
+          closeTareasModal();
+        } catch (err) {
+          console.error("asignar tareas error", err);
+          alert("No se pudieron asignar las tareas.");
         }
       });
 
@@ -6089,6 +6273,21 @@
       });
     </script>
 
+    <div id="modal-tareas" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card" style="max-width: 420px">
+        <button class="modal-close" aria-label="Cerrar">×</button>
+        <div class="modal-body resumen-body">
+          <h3 style="margin: 0">Marcar tarea</h3>
+          <div id="tareas-list" class="tareas-list"></div>
+          <div class="tareas-actions">
+            <button type="button" class="btn-outline" id="btn-tareas-cancel">Cancelar</button>
+            <button type="button" class="btn-primary" id="btn-tareas-send">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="modal-reemplazo-row" class="modal hidden">
       <div class="modal-backdrop"></div>
       <div
@@ -6096,7 +6295,7 @@
         style="max-width: 280px; text-align: center"
       >
         <button class="modal-close" aria-label="Cerrar">×</button>
-        <div class="modal-body">
+        <div class="modal-body resumen-body">
           <p id="modal-reemplazo-msg" style="margin: 0; font-weight: 600">
             Reemplazando...
           </p>

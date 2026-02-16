@@ -29,6 +29,7 @@ CREATE TABLE public.carritos (
   tasa_bs double precision,
   descuento double precision,
   monto_final double precision,
+  usa_saldo boolean,
   CONSTRAINT carritos_pkey PRIMARY KEY (id_carrito),
   CONSTRAINT carritos_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
@@ -160,7 +161,8 @@ CREATE TABLE public.ordenes (
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
-  CONSTRAINT ordenes_id_admin_fkey FOREIGN KEY (id_admin) REFERENCES public.usuarios(id_usuario)
+  CONSTRAINT ordenes_id_admin_fkey FOREIGN KEY (id_admin) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT ordenes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.pagina (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -183,6 +185,7 @@ CREATE TABLE public.pagomoviles (
   num_telefono text,
   saldo_acreditado_a bigint,
   saldo_acreditado boolean,
+  hora_recibido time without time zone,
   CONSTRAINT pagomoviles_pkey PRIMARY KEY (id),
   CONSTRAINT pagomoviles_saldo_acreditado_a_fkey FOREIGN KEY (saldo_acreditado_a) REFERENCES public.usuarios(id_usuario)
 );
@@ -288,6 +291,20 @@ CREATE TABLE public.reportes (
   CONSTRAINT reportes_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT reportes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
+CREATE TABLE public.tareas (
+  id_tarea bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  titulo text,
+  detalle text,
+  CONSTRAINT tareas_pkey PRIMARY KEY (id_tarea)
+);
+CREATE TABLE public.tareas_asignadas (
+  id_tarea_asignada bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  tarea bigint NOT NULL,
+  cuenta bigint,
+  CONSTRAINT tareas_asignadas_pkey PRIMARY KEY (id_tarea_asignada),
+  CONSTRAINT tareas_asignadas_tarea_fkey FOREIGN KEY (tarea) REFERENCES public.tareas(id_tarea),
+  CONSTRAINT tareas_asignadas_cuenta_fkey FOREIGN KEY (cuenta) REFERENCES public.cuentas(id_cuenta)
+);
 CREATE TABLE public.tarjetas_de_regalo (
   id_tarjeta_de_regalo bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   pin text,
@@ -361,6 +378,7 @@ CREATE TABLE public.ventas (
   renovacion boolean,
   completa boolean,
   cuenta_nueva boolean,
+  nombre_cliente text,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT ventas_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),

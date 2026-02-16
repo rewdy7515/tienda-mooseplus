@@ -531,7 +531,6 @@
             tasa_bs: 400,
             id_usuario_override: idCliente,
             bypass_verificacion: isSuperAdmin === true,
-            id_admin: adminId,
           };
           console.log("[cuenta_nueva] payload checkout", {
             idCliente,
@@ -546,16 +545,27 @@
             alert(`Error al procesar: ${resp.error}`);
             return;
           }
+          // Marca el admin que procesó la orden
+          if (adminId && resp?.id_orden) {
+            const { error: updOrdenErr } = await supabase
+              .from("ordenes")
+              .update({ id_admin: adminId })
+              .eq("id_orden", resp.id_orden);
+            if (updOrdenErr) {
+              console.error("set id_admin orden error", updOrdenErr);
+            }
+          }
+
           // Marca el admin que procesó la venta en ventas via id_orden
           if (adminId && resp?.id_orden) {
             const { error: updVentaErr } = await supabase
               .from("ventas")
               .update({ id_admin_venta: adminId })
               .eq("id_orden", resp.id_orden);
-          if (updVentaErr) {
-            console.error("set id_admin_venta error", updVentaErr);
+            if (updVentaErr) {
+              console.error("set id_admin_venta error", updVentaErr);
+            }
           }
-        }
 
         // Notificaciones de nuevo servicio por cada venta de la orden
         try {

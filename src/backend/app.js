@@ -2180,7 +2180,6 @@ app.post("/api/checkout", async (req, res) => {
         id_carrito: carritoId,
         pago_verificado: bypassVerificacion ? true : false,
         monto_completo: null,
-        id_admin: sessionUserId || (sessionIsSuper ? adminFromBody : null),
       })
       .select("id_orden")
       .single();
@@ -2189,7 +2188,6 @@ app.post("/api/checkout", async (req, res) => {
       id_orden: orden.id_orden,
       en_espera,
       pago_verificado: bypassVerificacion ? true : false,
-      id_admin: sessionUserId || null,
     });
 
     if (requiereVerificacion) {

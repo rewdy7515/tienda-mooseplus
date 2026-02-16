@@ -467,23 +467,28 @@
       const buildTipoCuentaOptions = (miembros, cuentaMadre) => {
         if (!tipoCuentaSelect) return;
         tipoCuentaSelect.innerHTML = '<option value="">Seleccione</option>';
-        const opts = [
-          { val: "perfiles", label: "Perfiles" },
-        ];
-        if (cuentaMadre) {
+        const isPlat9 = String(platSelect?.value) === "9";
+        const opts = [];
+        if (isPlat9) {
           opts.push({ val: "cuenta_madre", label: "Cuenta madre" });
+          opts.push({ val: "cuenta_completa", label: "Cuenta completa" });
+        } else {
+          opts.push({ val: "perfiles", label: "Perfiles" });
+          if (cuentaMadre) {
+            opts.push({ val: "cuenta_madre", label: "Cuenta madre" });
+          }
+          if (miembros) {
+            opts.push({ val: "perfil_independiente", label: "Perfil independiente" });
+          }
+          opts.push({ val: "cuenta_completa", label: "Cuenta completa" });
         }
-        if (miembros) {
-          opts.push({ val: "perfil_independiente", label: "Perfil independiente" });
-        }
-        opts.push({ val: "cuenta_completa", label: "Cuenta completa" });
         opts.forEach((o) => {
           const opt = document.createElement("option");
           opt.value = o.val;
           opt.textContent = o.label;
           tipoCuentaSelect.appendChild(opt);
         });
-        tipoCuentaSelect.value = cuentaMadre ? "cuenta_madre" : "perfiles";
+        tipoCuentaSelect.value = isPlat9 ? "cuenta_madre" : cuentaMadre ? "cuenta_madre" : "perfiles";
       };
 
       const adjustDuracion = (delta) => {

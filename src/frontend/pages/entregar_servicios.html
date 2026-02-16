@@ -144,6 +144,7 @@
       import { buildServiceCopyText } from "../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../scripts/date-format.js";
       import { buildNotification } from "../scripts/notification-templates.js";
+      import { copyTextNotify } from "../scripts/copy-toast.js";
 
       requireSession();
       attachLogoHome();
@@ -151,13 +152,11 @@
 
       const statusEl = document.querySelector("#entregar-status");
       const tablasEl = document.querySelector("#entregar-tablas");
-      const copyToast = document.querySelector("#copy-toast");
       const clienteModal = document.querySelector("#cliente-modal");
       const clienteNombreInput = document.querySelector("#cliente-nombre-input");
       const btnClienteCancel = document.querySelector("#cliente-cancel");
       const btnClienteGuardar = document.querySelector("#cliente-guardar");
-      let copyToastTimer = null;
-      const FORCE_CLIENT_INPUTS = true;
+      const FORCE_CLIENT_INPUTS = false;
       let canAnnotateCliente = false;
       let activeClienteVentaId = null;
 
@@ -189,35 +188,6 @@
           anchor.textContent = "Copiado";
           setTimeout(() => (anchor.textContent = "Copiar"), 1200);
         }
-      };
-
-      const showCopyToast = () => {
-        if (!copyToast) return;
-        copyToast.classList.add("show");
-        if (copyToastTimer) clearTimeout(copyToastTimer);
-        copyToastTimer = setTimeout(() => copyToast.classList.remove("show"), 2000);
-      };
-
-      const copyTextNotify = async (text) => {
-        if (!text) return;
-        let copied = false;
-        try {
-          await navigator.clipboard.writeText(text);
-          copied = true;
-        } catch (_) {
-          try {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-            copied = true;
-          } catch (err) {
-            console.error("copy error", err);
-          }
-        }
-        if (copied) showCopyToast();
       };
 
       const escapeHtml = (val) =>
@@ -296,9 +266,11 @@
               .map((r) => {
                 const perfilTxt = r.perfil || "";
                 const isPendiente = r.pendiente;
+                const requiresClientInputs = showClientInputs && isPendiente;
+                const hasEntregaData = !!(r.correo || r.clave || r.pin || r.n_perfil);
                 const copyText = isRenovacion
                   ? buildRenovacionMensaje(r, r.fecha_corte, r.plataforma)
-                  : isPendiente
+                  : requiresClientInputs
                     ? ""
                     : buildServiceCopyText({
                         plataforma: r.plataforma,
@@ -324,7 +296,7 @@
                     <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
                     <td>
                       ${
-                        showClientInputs && isPendiente
+                        requiresClientInputs
                           ? `<div class="fecha-wrap">
                               <div class="input-inline">
                                 <input type="text" class="form-input input-correo" placeholder="Correo" value="" />
@@ -338,7 +310,7 @@
                       }
                     </td>
                     ${isRenovacion ? "" : `<td>${
-                      showClaveInput && isPendiente
+                      showClaveInput && requiresClientInputs
                         ? `<div class="fecha-wrap">
                             <div class="input-inline">
                               <input type="text" class="form-input input-clave" placeholder="Clave" value="" />
@@ -351,7 +323,7 @@
                           : ""
                     }</td>`}
                     ${showTipoColumn ? `<td>${
-                      showClientInputs && isPendiente
+                      requiresClientInputs
                         ? `<div class="fecha-wrap">
                             <div class="input-inline">
                               <select class="form-input input-tipo" required>
@@ -376,9 +348,9 @@
                       ${
                         isRenovacion
                           ? `<button type="button" class="btn-outline btn-copy-renew" data-copy="${encodeURIComponent(copyText)}">Copiar mensaje de renovación</button>`
-                          : showClientInputs && isPendiente
+                          : requiresClientInputs
                             ? `<button type="button" class="btn-outline btn-send-datos" data-venta="${r.id_venta}">Enviar datos</button>`
-                            : isPendiente
+                            : isPendiente && !hasEntregaData
                               ? '<span class="badge badge-warning">Pendiente</span>'
                               : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
                       }

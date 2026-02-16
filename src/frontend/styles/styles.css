@@ -1978,6 +1978,33 @@ input[type="number"].input-inline {
   max-width: 100%;
 }
 
+.copyable,
+[data-clipboard] {
+  cursor: pointer;
+}
+
+.copy-toast {
+  position: fixed;
+  top: 80px;
+  right: 18px;
+  background: #000;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.copy-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* Contenedor de tablas (datos de cuentas) */
 .cuenta-table-wrap {
   overflow-x: auto;

@@ -92,6 +92,7 @@
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
       import { buildNotificationPayload } from "../../scripts/notification-templates.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
 
       requireSession();
       attachLogoHome();
@@ -99,8 +100,6 @@
 
       const statusEl = document.querySelector("#pp-status");
       const tablasEl = document.querySelector("#pp-tablas");
-      const copyToast = document.querySelector("#copy-toast");
-      let copyToastTimer = null;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -670,21 +669,74 @@
           copyBtn.type = "button";
           copyBtn.className = "btn-outline btn-copy-row";
           copyBtn.textContent = "Copiar";
-          const perfilNum = nPerfil ? Number(nPerfil) : null;
+          let copyCorreo = correoCuenta || "";
+          let copyClave = claveCuenta || "";
+          let copyPerfil = nPerfil || "";
+          let copyPin = "";
+          let copyFecha = nextIso;
+          let copyPlatId = idPlataforma ? Number(idPlataforma) : null;
+          let copyVentaPerfil = false;
+          let copyVentaMiembro = false;
+          let copyPerfilHogar = false;
+
+          try {
+            const { data: ventaInfo, error: vErr } = await supabase
+              .from("ventas")
+              .select(
+                "id_venta, fecha_corte, correo_miembro, clave_miembro, id_cuenta, id_cuenta_miembro, id_perfil, cuentas:cuentas!ventas_id_cuenta_fkey(correo, clave, id_plataforma, venta_perfil, venta_miembro), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)",
+              )
+              .eq("id_venta", idVenta)
+              .maybeSingle();
+            if (vErr) throw vErr;
+            if (ventaInfo) {
+              copyCorreo =
+                ventaInfo.correo_miembro ||
+                ventaInfo.cuentas_miembro?.correo ||
+                ventaInfo.cuentas?.correo ||
+                copyCorreo;
+              copyClave =
+                ventaInfo.clave_miembro ||
+                ventaInfo.cuentas_miembro?.clave ||
+                ventaInfo.cuentas?.clave ||
+                copyClave;
+              copyPerfil =
+                ventaInfo.perfiles?.n_perfil ??
+                copyPerfil ??
+                "";
+              copyPin = ventaInfo.perfiles?.pin || "";
+              copyPerfilHogar = ventaInfo.perfiles?.perfil_hogar === true;
+              copyFecha = ventaInfo.fecha_corte || copyFecha;
+              copyPlatId = ventaInfo.cuentas?.id_plataforma || copyPlatId;
+              if (!isCompleta) {
+                copyVentaPerfil =
+                  ventaInfo.cuentas?.venta_perfil ??
+                  ventaInfo.cuentas_miembro?.venta_perfil ??
+                  false;
+                copyVentaMiembro =
+                  ventaInfo.cuentas?.venta_miembro ??
+                  ventaInfo.cuentas_miembro?.venta_miembro ??
+                  false;
+              }
+            }
+          } catch (err) {
+            console.warn("venta info para copiar no disponible", err);
+          }
+
+          const perfilNum = Number(copyPerfil);
           const copyText = buildServiceCopyText({
             plataforma,
             idVenta: idVenta || null,
-            correo: correoCuenta,
-            clave: claveCuenta,
-            nPerfil: Number.isFinite(perfilNum) ? perfilNum : null,
-            pin: "",
-            fechaCorte: nextIso,
+            correo: copyCorreo,
+            clave: copyClave,
+            nPerfil: Number.isFinite(perfilNum) ? perfilNum : copyPerfil || null,
+            pin: copyPin,
+            fechaCorte: copyFecha,
             porAcceso,
             usaPines,
-            ventaPerfil: false,
-            ventaMiembro: false,
-            idPlataforma: idPlataforma ? Number(idPlataforma) : null,
-            perfilHogar: false,
+            ventaPerfil: copyVentaPerfil,
+            ventaMiembro: copyVentaMiembro,
+            idPlataforma: copyPlatId,
+            perfilHogar: copyPerfilHogar,
             isSubCuenta: false,
           });
           copyBtn.dataset.copy = encodeURIComponent(copyText);
@@ -778,47 +830,19 @@
           alert("No se pudo cambiar la cuenta madre.");
         }
       });
-      const showCopyToast = () => {
-        if (!copyToast) return;
-        copyToast.classList.add("show");
-        if (copyToastTimer) clearTimeout(copyToastTimer);
-        copyToastTimer = setTimeout(() => {
-          copyToast.classList.remove("show");
-        }, 2000);
-      };
       tablasEl?.addEventListener("click", async (e) => {
         const copyBtn = e.target.closest(".btn-copy-row");
         if (copyBtn) {
           const text = decodeURIComponent(copyBtn.dataset.copy || "");
           if (!text) return;
-          try {
-            await navigator.clipboard.writeText(text);
-          } catch (_err) {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-          }
-          showCopyToast();
+          await copyTextNotify(text);
           return;
         }
         const cell = e.target.closest(".copyable");
         if (!cell) return;
         const text = cell.dataset.clipboard || cell.textContent || "";
         if (!text) return;
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch (_err) {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-        }
-        showCopyToast();
+        await copyTextNotify(text);
       });
 
       loadPendientes();
