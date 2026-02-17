@@ -57,6 +57,7 @@ const updateUseSaldoButton = () => {
   if (!btnUseSaldo) return;
   btnUseSaldo.classList.toggle("is-active", !!cartUseSaldo);
   btnUseSaldo.setAttribute("aria-pressed", cartUseSaldo ? "true" : "false");
+  btnUseSaldo.textContent = cartUseSaldo ? "Usando saldo" : "Usar saldo";
 };
 
 const setRefreshLoading = (btn, loading) => {

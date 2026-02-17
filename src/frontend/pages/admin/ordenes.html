@@ -61,6 +61,12 @@
         background: #dbeafe;
         color: #1e3a8a;
       }
+      #ordenes-table tbody tr.orden-row-odd {
+        background: #eef1f5;
+      }
+      #ordenes-table tbody tr.orden-row-even {
+        background: #ffffff;
+      }
     </style>
   </head>
   <body>
@@ -149,6 +155,18 @@
         }, {});
       };
 
+      const applyVisibleRowStripes = () => {
+        if (!tbodyEl) return;
+        const rows = Array.from(tbodyEl.querySelectorAll("tr")).filter(
+          (tr) => window.getComputedStyle(tr).display !== "none"
+        );
+        rows.forEach((tr, idx) => {
+          const odd = idx % 2 === 0;
+          tr.classList.toggle("orden-row-odd", odd);
+          tr.classList.toggle("orden-row-even", !odd);
+        });
+      };
+
       const renderOrdenes = () => {
         const rows = filterCheckoutActive
           ? allOrdenes.filter((o) => isTrue(o.origen_checkout))
@@ -196,6 +214,7 @@
             `;
           })
           .join("");
+        applyVisibleRowStripes();
         setStatus("");
       };
 
