@@ -683,6 +683,8 @@
         const tipoVal = row?.querySelector(".input-tipo")?.value?.trim() || "";
         const venta = ventasById[ventaId] || {};
         const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
+        const platIdNum = Number(platId);
+        const hasPlatId = Number.isFinite(platIdNum) && platIdNum > 0;
         const platInfo = platById[platId] || {};
         const needsClave = isTrue(platInfo?.clave_cliente);
         if (!correoVal) {
@@ -694,11 +696,12 @@
           return;
         }
         try {
-          if (Number(platId) === 9 && !tipoVal) {
+          if (platIdNum === 9 && !tipoVal) {
             alert("Selecciona el tipo de cuenta.");
             return;
           }
           const needsMadre = platInfo.cuenta_madre === true;
+          const requireMadreActiva = platIdNum === 9;
           let assignCuenta = null;
           let assignPerfil = null;
           let clientCuentaId = null;
@@ -715,7 +718,21 @@
 
           if (needsMadre) {
             clientCuentaId = cuentaExist?.id_cuenta || null;
-            const motherFromClient = cuentaExist?.id_cuenta_madre || null;
+            let motherFromClient = cuentaExist?.id_cuenta_madre || null;
+
+            if (motherFromClient && requireMadreActiva) {
+              const { data: madreActiva, error: madreActivaErr } = await supabase
+                .from("cuentas")
+                .select("id_cuenta, inactiva")
+                .eq("id_cuenta", motherFromClient)
+                .eq("id_plataforma", platIdNum)
+                .eq("cuenta_madre", true)
+                .maybeSingle();
+              if (madreActivaErr) throw madreActivaErr;
+              if (!madreActiva || isTrue(madreActiva.inactiva)) {
+                motherFromClient = null;
+              }
+            }
 
             if (motherFromClient) {
               const { data: perfPref, error: pErr } = await supabase
@@ -733,16 +750,20 @@
               }
             }
 
-            if (!assignPerfil && platId) {
-              const { data: perfAlt, error: pAltErr } = await supabase
+            if (!assignPerfil && hasPlatId) {
+              let perfAltQuery = supabase
                 .from("perfiles")
-                .select("id_perfil, id_cuenta, n_perfil, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, cuenta_madre)")
-                .eq("cuentas.id_plataforma", Number(platId))
+                .select("id_perfil, id_cuenta, n_perfil, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, cuenta_madre, inactiva)")
+                .eq("cuentas.id_plataforma", platIdNum)
                 .eq("cuentas.cuenta_madre", true)
                 .eq("ocupado", false)
-                .order("n_perfil", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+                .order("n_perfil", { ascending: true });
+              if (requireMadreActiva) {
+                perfAltQuery = perfAltQuery.or("inactiva.is.null,inactiva.eq.false", {
+                  foreignTable: "cuentas",
+                });
+              }
+              const { data: perfAlt, error: pAltErr } = await perfAltQuery.limit(1).maybeSingle();
               if (pAltErr) throw pAltErr;
               if (perfAlt?.id_perfil) {
                 assignPerfil = perfAlt.id_perfil;
@@ -779,7 +800,7 @@
           if (needsClave && claveVal) payload.clave_miembro = claveVal;
           if (assignCuenta) payload.id_cuenta = assignCuenta;
           if (assignPerfil) payload.id_perfil = assignPerfil;
-          if (Number(platId) === 9) payload.cuenta_nueva = tipoVal === "nueva";
+          if (platIdNum === 9) payload.cuenta_nueva = tipoVal === "nueva";
 
           const { error } = await supabase
             .from("ventas")

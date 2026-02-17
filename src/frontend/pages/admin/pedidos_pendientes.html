@@ -691,6 +691,9 @@
         const isReportado = btn?.dataset?.reportado === "true";
         const costoActivacion = Number(activationData?.costo);
         const proveedorId = Number(activationData?.idProveedor);
+        const idPlataformaNum = Number(idPlataforma);
+        const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
+        const requireMadreActiva = idPlataformaNum === 9;
 
         if (!idVenta) return;
         if (!correoCuenta) {
@@ -713,7 +716,7 @@
             ocupado: false,
             venta_dominio: true,
             dominio_de: idUsuario ? Number(idUsuario) : null,
-            id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
           };
           if (Number.isFinite(proveedorId) && proveedorId > 0) {
             updateCuenta.id_proveedor = proveedorId;
@@ -735,7 +738,7 @@
             ocupado: false,
             venta_dominio: true,
             dominio_de: idUsuario ? Number(idUsuario) : null,
-            id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
             id_proveedor: Number.isFinite(proveedorId) && proveedorId > 0 ? proveedorId : null,
           };
           const { data: cuentaNueva, error: cuentaErr } = await supabase
@@ -750,16 +753,36 @@
 
         let cuentaMadreId = null;
         let perfilId = null;
-        if (cuentaMadreFlag && idPlataforma) {
+        if (cuentaMadreFlag && hasIdPlataforma) {
           if (existingMadreId && existingPerfilId) {
-            cuentaMadreId = Number(existingMadreId);
-            perfilId = Number(existingPerfilId);
-          } else {
-            const { data: madre, error: madreErr } = await supabase
+            let canUseExistingMadre = true;
+            if (requireMadreActiva) {
+              const { data: madreActual, error: madreActualErr } = await supabase
+                .from("cuentas")
+                .select("id_cuenta, inactiva")
+                .eq("id_cuenta", Number(existingMadreId))
+                .eq("id_plataforma", idPlataformaNum)
+                .eq("cuenta_madre", true)
+                .maybeSingle();
+              if (madreActualErr) throw madreActualErr;
+              canUseExistingMadre = Boolean(madreActual) && !isTrue(madreActual.inactiva);
+            }
+            if (canUseExistingMadre) {
+              cuentaMadreId = Number(existingMadreId);
+              perfilId = Number(existingPerfilId);
+            }
+          }
+          if (!cuentaMadreId || !perfilId) {
+            let madreQuery = supabase
               .from("cuentas")
               .select("id_cuenta")
-              .eq("id_plataforma", Number(idPlataforma))
-              .eq("cuenta_madre", true)
+              .eq("id_plataforma", idPlataformaNum)
+              .eq("cuenta_madre", true);
+            if (requireMadreActiva) {
+              madreQuery = madreQuery.or("inactiva.is.null,inactiva.eq.false");
+            }
+            const { data: madre, error: madreErr } = await madreQuery
+              .order("id_cuenta", { ascending: true })
               .limit(1)
               .maybeSingle();
             if (madreErr) throw madreErr;
@@ -822,7 +845,7 @@
             venta_cliente: false,
             renovacion: false,
             id_venta: Number(idVenta),
-            id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
             id_cuenta: nuevaCuentaId,
             registrado_por: currentUser?.id_usuario || null,
           });
