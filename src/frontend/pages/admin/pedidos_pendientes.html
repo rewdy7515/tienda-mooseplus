@@ -239,6 +239,14 @@
       };
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const hasPerfilId = (val) => Number.isFinite(Number(val)) && Number(val) > 0;
+      const getVenezuelaToday = () => {
+        const veDate = new Date().toLocaleDateString("en-CA", {
+          timeZone: "America/Caracas",
+        });
+        const [y, m, d] = String(veDate).split("-").map(Number);
+        if (!y || !m || !d) return new Date();
+        return new Date(y, m - 1, d);
+      };
       const addMonthsKeepDay = (baseDate, months) => {
         const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
         const day = baseDate.getDate();
@@ -246,6 +254,12 @@
         const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
         d.setDate(Math.min(day, lastDay));
         return d;
+      };
+      const toYMD = (date) => {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+        const d = String(date.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
       };
 
       const hideProvSuggestions = () => {
@@ -678,7 +692,9 @@
         const idPlataforma = btn?.dataset?.idPlataforma || "";
         const correoCuenta = btn?.dataset?.correo || "";
         const claveCuenta = btn?.dataset?.clave || "";
-        const fechaCorte = btn?.dataset?.fecha || "Pendiente";
+        const fechaCorteRaw = (btn?.dataset?.fecha || "").trim();
+        const fechaCorte = fechaCorteRaw || "Pendiente";
+        const ventaSinFechaCorte = !fechaCorteRaw;
         const perfil = btn?.dataset?.perfil || "";
         const nPerfil = btn?.dataset?.nperfil || "";
         const porAcceso = btn?.dataset?.poracceso === "true";
@@ -820,9 +836,9 @@
           if (linkErr) throw linkErr;
         }
 
-        const base = new Date();
+        const base = getVenezuelaToday();
         const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
-        const nextIso = next.toISOString().slice(0, 10);
+        const nextIso = toYMD(next);
         const updateVenta = {
           pendiente: false,
           id_cuenta: cuentaMadreId || null,
@@ -830,7 +846,7 @@
           id_perfil: perfilId || null,
           cuenta_nueva: false,
         };
-        if (!isReportado) {
+        if (ventaSinFechaCorte || !isReportado) {
           updateVenta.fecha_corte = nextIso;
         }
         const { error: updErr } = await supabase.from("ventas").update(updateVenta).eq("id_venta", idVenta);

@@ -3450,6 +3450,7 @@
                 <tr>
                   <th>Correo</th>
                   ${showClaveCliente ? "<th>Clave</th>" : ""}
+                  ${showPin ? "<th>PIN</th>" : ""}
                   <th>Ocupado por</th>
                   <th>Fecha de corte</th>
                   <th class="action-cell">Acción</th>
@@ -3466,6 +3467,7 @@
                             idVenta: m.id_venta,
                             correo: m.correo,
                             clave: m.clave,
+                            pin: m.pin,
                             fechaCorte: m.fecha_corte,
                             porAcceso: info.por_acceso,
                             usaPines: info.usa_pines,
@@ -3478,6 +3480,7 @@
                         <tr>
                           <td><span class="correo-copy" data-clipboard="${m.correo || ""}">${m.correo || "-"}</span></td>
                           ${showClaveCliente ? `<td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>` : ""}
+                          ${showPin ? `<td><span class="pin-copy" data-clipboard="${m.pin || ""}">${m.pin || "-"}</span></td>` : ""}
                           <td>${hasVenta ? m.ocupado || "-" : `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />`}</td>
                           <td>
                             ${
@@ -3516,7 +3519,7 @@
                     if (Number.isFinite(maxMiembros) && maxMiembros > 0 && actuales >= maxMiembros) {
                       return "";
                     }
-                    const colSpan = 4 + (showClaveCliente ? 1 : 0);
+                    const colSpan = 4 + (showClaveCliente ? 1 : 0) + (showPin ? 1 : 0);
                     return `<tr class="row-add-miembro">
                       <td colspan="${colSpan}" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
                     </tr>`;
@@ -3829,7 +3832,7 @@
           const { data: miembros, error: membErr } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, id_plataforma, venta_miembro, venta_perfil",
+              "id_cuenta, correo, clave, pin, id_plataforma, venta_miembro, venta_perfil",
             )
             .eq("id_cuenta_madre", idCuenta);
           if (membErr) throw membErr;
@@ -3865,6 +3868,7 @@
               id_cuenta: m.id_cuenta,
               correo: m.correo,
               clave: m.clave,
+              pin: m.pin,
               ocupado: mapUser[m.id_cuenta] || "-",
               id_venta: mapVenta[m.id_cuenta]?.id_venta || null,
               fecha_corte: mapVenta[m.id_cuenta]?.fecha_corte || "",
@@ -5308,22 +5312,22 @@
         const tbody = addRow.closest("tbody");
         if (!tbody) return;
         if (tbody.querySelector(".miembro-input-row")) return;
+        const currentFlags = getPlatFlags(currentCuentaDetalle || {});
+        const colSpanMiembroInput =
+          4 + (currentFlags.showClave ? 1 : 0) + (currentFlags.showPin ? 1 : 0);
         const inputRow = document.createElement("tr");
         inputRow.className = "miembro-input-row";
         inputRow.innerHTML = `
-          <td>
-            <div class="input-wrap">
-              <input type="text" id="miembro-input" placeholder="Buscar correo (plataforma 1)" autocomplete="off" />
-              <div id="miembro-sugs" class="sugerencias-cuentas hidden"></div>
-            </div>
-          </td>
-          <td>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <input type="text" id="miembro-clave" placeholder="Clave" />
+          <td colspan="${colSpanMiembroInput}">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <div class="input-wrap" style="min-width:220px; flex:1 1 260px;">
+                <input type="text" id="miembro-input" placeholder="Buscar correo (plataforma 1)" autocomplete="off" />
+                <div id="miembro-sugs" class="sugerencias-cuentas hidden"></div>
+              </div>
+              <input type="text" id="miembro-clave" placeholder="Clave" style="min-width:150px;" />
               <button type="button" class="btn-save-miembro">💾</button>
             </div>
           </td>
-          <td></td>
         `;
         tbody.insertBefore(inputRow, addRow);
 
@@ -5472,18 +5476,7 @@
             .eq("id_cuenta", cuentaMiembro.id_cuenta);
           if (updErr) throw updErr;
           alert("Miembro actualizado.");
-          const newRow = document.createElement("tr");
-          newRow.innerHTML = `
-            <td>${correoVal}</td>
-            <td>${claveVal || "-"}</td>
-            <td>-</td>
-          `;
-          const tbody = row?.parentElement;
-          if (tbody) {
-            const addRow = tbody.querySelector(".row-add-miembro");
-            tbody.insertBefore(newRow, addRow);
-          }
-          row?.remove();
+          await loadCuentaDetalle(currentCuentaId || currentCuentaDetalle?.id_cuenta);
         } catch (err) {
           console.error("guardar miembro extra error", err);
           alert("No se pudo guardar el miembro.");
@@ -5521,39 +5514,13 @@
             id_proveedor: currentCuentaDetalle?.proveedorId || null,
             ocupado: ocupado === false ? false : null,
           };
-          const { data, error } = await supabase
+          const { error } = await supabase
             .from("cuentas")
             .insert(payload)
             .select("id_cuenta")
-            .single();
+            .maybeSingle();
           if (error) throw error;
-          const tbody = detalleEl?.querySelector(".miembros-table tbody");
-          const addRow = tbody?.querySelector(".row-add-miembro");
-          if (tbody && addRow) {
-            const newRow = document.createElement("tr");
-            newRow.innerHTML = `
-              <td>${correo}</td>
-              <td>${clave || "-"}</td>
-              <td><input type="text" class="ocupado-input" placeholder="Nombre y apellido" /></td>
-              <td>${renderFechaInlineCell("", `data-cuenta="${data.id_cuenta || ""}"`)}</td>
-              <td class="action-cell">
-                <button
-                  type="button"
-                  class="btn-primary btn-reemplazar-row"
-                  data-perfil=""
-                  data-cuenta="${data.id_cuenta || ""}"
-                  data-idventa=""
-                  data-venta-miembro="true"
-                  data-venta-perfil="false"
-                >Reemplazar</button>
-                <button type="button" class="btn-outline btn-copy-row" data-copy="" disabled>Copiar</button>
-                <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${data.id_cuenta || ""}">Registrar servicio</button>
-              </td>
-            `;
-            tbody.insertBefore(newRow, addRow);
-          }
-          const inputRow = detalleEl?.querySelector(".miembro-input-row");
-          inputRow?.remove();
+          await loadCuentaDetalle(currentCuentaId || idCuentaMiembro);
           alert("Servicio agregado como miembro.");
         } catch (err) {
           console.error("crear miembro extra error", err);

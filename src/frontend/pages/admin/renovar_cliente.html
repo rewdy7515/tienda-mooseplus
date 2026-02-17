@@ -219,6 +219,20 @@
         }
       };
 
+      const normalizePin = (value) => {
+        if (value == null) return "";
+        const raw = String(value).trim();
+        return raw;
+      };
+
+      const resolveServicioPin = ({ cuentaBase = null, cuentaMiembro = null, perfil = null } = {}) => {
+        const pinMiembro = normalizePin(cuentaMiembro?.pin);
+        if (pinMiembro) return pinMiembro;
+        const pinCuenta = normalizePin(cuentaBase?.pin);
+        if (pinCuenta) return pinCuenta;
+        return normalizePin(perfil?.pin);
+      };
+
       const mostrarCargando = (msg = "Cargando...") => {
         if (resultadoEl) {
           resultadoEl.innerHTML = `<p class="status">${msg}</p>`;
@@ -482,13 +496,18 @@
             if (cuentasIds.length) {
               const { data: cuentas, error: ctaErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo, clave, venta_miembro")
+                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro")
                 .in("id_cuenta", cuentasIds);
               if (ctaErr) {
                 console.error("buscar cuentas error", ctaErr);
               } else {
                 cuentaMapa = (cuentas || []).reduce((acc, c) => {
-                  acc[c.id_cuenta] = { id_plataforma: c.id_plataforma, correo: c.correo, clave: c.clave };
+                  acc[c.id_cuenta] = {
+                    id_plataforma: c.id_plataforma,
+                    correo: c.correo,
+                    clave: c.clave,
+                    pin: c.pin,
+                  };
                   return acc;
                 }, {});
                 const platIds = [
@@ -537,7 +556,7 @@
             if (memberCuentaIds.length) {
               const { data: cuentasMiembro, error: cmErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, correo, clave, venta_miembro")
+                .select("id_cuenta, correo, clave, pin, venta_miembro")
                 .in("id_cuenta", memberCuentaIds);
               if (cmErr) {
                 console.error("buscar cuentas miembro error", cmErr);
@@ -557,6 +576,11 @@
               const perfInfo = v.id_perfil ? perfilMapa[v.id_perfil] : null;
               const memberId = perfInfo?.id_cuenta_miembro;
               const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
+              const pinServicio = resolveServicioPin({
+                cuentaBase: cuentaInfo,
+                cuentaMiembro: memberCuenta,
+                perfil: perfInfo,
+              });
               const fechaRaw = v.fecha_corte || "";
               const showPerfil = !!(platInfo?.por_pantalla || perfInfo?.n_perfil);
               const isPlatPerfilHogar = platId === 1;
@@ -575,7 +599,7 @@
                 id_usuario_cliente: v.id_usuario || null,
                 correo: memberCuenta?.correo || cuentaInfo.correo || user.correo,
                 clave: memberCuenta?.clave || cuentaInfo.clave || "",
-                pin: perfInfo?.pin || "",
+                pin: pinServicio,
                 nombreCompleto: user.nombreCompleto,
                 id_perfil: v.id_perfil,
                 n_perfil: v.id_perfil ? perfInfo?.n_perfil : "",
@@ -610,7 +634,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, id_plataforma, clave, venta_dominio, id_cuenta_madre, venta_miembro")
+            .select("id_cuenta, correo, id_plataforma, clave, pin, venta_dominio, id_cuenta_madre, venta_miembro")
             .ilike("correo", `%${term}%`)
             .limit(10);
           if (cErr) throw cErr;
@@ -699,7 +723,7 @@
           if (memberCuentaIds.length) {
             const { data: cuentasMiembro, error: cmErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, clave, venta_miembro")
+              .select("id_cuenta, correo, clave, pin, venta_miembro")
               .in("id_cuenta", memberCuentaIds);
             if (cmErr) throw cmErr;
             memberCuentaMap = (cuentasMiembro || []).reduce((acc, c) => {
@@ -719,7 +743,7 @@
           if (missingIds.length) {
             const { data: extraCuentas, error: extraErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, id_plataforma, clave, venta_miembro")
+              .select("id_cuenta, correo, id_plataforma, clave, pin, venta_miembro")
               .in("id_cuenta", missingIds);
             if (extraErr) throw extraErr;
             (extraCuentas || []).forEach((c) => {
@@ -748,6 +772,11 @@
             const perf = v.id_perfil ? perfMap[v.id_perfil] : null;
             const memberId = perf?.id_cuenta_miembro;
             const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
+            const pinServicio = resolveServicioPin({
+              cuentaBase: cuenta,
+              cuentaMiembro: memberCuenta,
+              perfil: perf,
+            });
             const showPerfil = !!(plat?.por_pantalla || plat?.por_acceso || perf);
             const isPlatPerfilHogar = plat?.id_plataforma === 1;
             const hogarActualizado =
@@ -768,7 +797,7 @@
               clave: memberCuenta?.clave || cuenta?.clave || "",
               id_perfil: v.id_perfil || null,
               n_perfil: perf?.n_perfil || null,
-              pin: perf?.pin || "",
+              pin: pinServicio,
               cliente: userMap[v.id_usuario] || "-",
               perfil: perf?.n_perfil ? `M${perf.n_perfil}` : "",
               hogarText: isPlatPerfilHogar && perf ? (perf.perfil_hogar ? "Activado" : "Desactivado") : "",
@@ -1306,6 +1335,7 @@
                       plataforma: res.plataforma || res.plataforma_nombre || "",
                       correoCuenta: correoTxt,
                       clave: claveTxt,
+                      pin: res.pin || "",
                       perfil: perfilTxt,
                       fechaCorte: res.fecha_corte || "",
                       idVenta: res.id_venta || null,
@@ -1530,6 +1560,7 @@
                     plataforma: modalRowContext.plataforma_nombre || "",
                     correoCuenta: correoTxt,
                     clave: claveTxt,
+                    pin: modalRowContext.pin || "",
                     perfil: perfilTxt,
                     fechaCorte: nuevaFecha || "",
                     idVenta: modalRowContext.id_venta || null,

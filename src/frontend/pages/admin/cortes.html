@@ -449,6 +449,17 @@
         const usaPines = !!plataforma.usa_pines;
         const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
         const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
+        const ventaPerfil =
+          v.cuentas?.venta_perfil === true ||
+          v.cuentas?.venta_perfil === "true" ||
+          v.cuentas?.venta_perfil === 1 ||
+          v.cuentas?.venta_perfil === "1";
+        const ventaMiembro =
+          v.cuentas?.venta_miembro === true ||
+          v.cuentas?.venta_miembro === "true" ||
+          v.cuentas?.venta_miembro === 1 ||
+          v.cuentas?.venta_miembro === "1" ||
+          Number.isFinite(Number(v.id_cuenta_miembro));
         const cliente = v.usuarios
           ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
           : "-";
@@ -458,8 +469,7 @@
         const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
         const showDot =
           plataforma.id_plataforma === 1 &&
-          ((v.cuentas?.venta_perfil === true && v.perfiles?.perfil_hogar === true) ||
-            v.cuentas?.venta_miembro === true);
+          ((ventaPerfil === true && v.perfiles?.perfil_hogar === true) || ventaMiembro === true);
         const perfilCell = `${perfil}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
         const pin = v.perfiles?.pin ?? "";
         const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
@@ -496,8 +506,8 @@
             <td style="display:flex; gap:6px; flex-wrap:wrap;">
               ${
                 plataforma.id_plataforma === 12 && v.aviso_corte !== true
-                  ? `<button class="aviso-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Aviso</button>`
-                  : `<button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>`
+                  ? `<button class="aviso-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${ventaPerfil ? "true" : "false"}" data-vmiem="${ventaMiembro ? "true" : "false"}" data-plat="${plataforma.id_plataforma || ""}">Aviso</button>`
+                  : `<button class="cortar-btn" data-venta="${v.id_venta}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${ventaPerfil ? "true" : "false"}" data-vmiem="${ventaMiembro ? "true" : "false"}" data-plat="${plataforma.id_plataforma || ""}">Cortar</button>`
               }
             </td>
           </tr>
@@ -549,7 +559,7 @@
             </td>
             <td></td>
             <td style="display:flex; gap:6px; flex-wrap:wrap;">
-              <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}">Cortar</button>
+              <button class="cortar-btn" data-reemplazo="${v.id_reemplazo || ""}" data-usapines="${usaPines}" data-corteclave="${corteClave}" data-cortedirecto="${corteDirecto}" data-vperf="${v.cuentas?.venta_perfil ? "true" : "false"}" data-vmiem="${v.cuentas?.venta_miembro ? "true" : "false"}" data-plat="${plataforma.id_plataforma || ""}">Cortar</button>
             </td>
           </tr>
         `;
@@ -857,6 +867,7 @@
             cortarBtn.dataset.cortedirecto = avisoBtn.dataset.cortedirecto || "false";
             cortarBtn.dataset.vperf = avisoBtn.dataset.vperf || "false";
             cortarBtn.dataset.vmiem = avisoBtn.dataset.vmiem || "false";
+            cortarBtn.dataset.plat = avisoBtn.dataset.plat || "";
             avisoBtn.replaceWith(cortarBtn);
           } catch (err) {
             console.error("aviso corte error", err);
@@ -918,6 +929,8 @@
           const corteDirecto = cortarBtn.dataset.cortedirecto === "true";
           const ventaPerfil = cortarBtn.dataset.vperf === "true";
           const ventaMiembro = cortarBtn.dataset.vmiem === "true";
+          const plataformaId = Number(cortarBtn.dataset.plat || "");
+          const isNetflixVentaMiembro = ventaMiembro && plataformaId === 1;
           const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
           const pinChanged = pinInput && pinInput.dataset.original !== pinInput.value;
           const claveChanged = claveInput && claveInput.dataset.original !== claveInput.value;
@@ -1019,6 +1032,14 @@
                 );
               }
             }
+            if (isNetflixVentaMiembro && cuentaId && pinInput) {
+              const pinVal = (pinInput.value || "").trim();
+              if (pinVal) {
+                updates.push(
+                  supabase.from("cuentas").update({ pin: pinVal }).eq("id_cuenta", cuentaId)
+                );
+              }
+            }
             if (updates.length) {
               const results = await Promise.all(updates);
               const err = results.find((r) => r.error)?.error;
@@ -1043,6 +1064,14 @@
               if (perfilId) {
                 updates.push(
                   supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
+                );
+              }
+            }
+            if (isNetflixVentaMiembro && cuentaId && pinInput) {
+              const pinVal = (pinInput.value || "").trim();
+              if (pinVal) {
+                updates.push(
+                  supabase.from("cuentas").update({ pin: pinVal }).eq("id_cuenta", cuentaId)
                 );
               }
             }

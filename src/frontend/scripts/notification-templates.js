@@ -62,6 +62,7 @@ export const notificationTemplates = {
       if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
       if (item.clave) parts.push(`Clave: ${item.clave}`);
       if (item.perfil) parts.push(`Perfil: ${item.perfil}`);
+      if (item.pin) parts.push(`PIN: ${item.pin}`);
       if (item.fechaCorte) {
         parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
       }
@@ -113,6 +114,7 @@ export const notificationTemplates = {
       if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
       if (item.clave) parts.push(`Clave: ${item.clave}`);
       if (item.perfil) parts.push(`Perfil: ${item.perfil}`);
+      if (item.pin) parts.push(`PIN: ${item.pin}`);
       if (item.fechaCorte) {
         parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
       }
