@@ -22,6 +22,10 @@
         background: #fee2e2;
         color: #991b1b;
       }
+      .estado-warn {
+        background: #fef3c7;
+        color: #92400e;
+      }
       .acciones-cell {
         display: flex;
         gap: 8px;
@@ -98,7 +102,16 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        supabase,
+        procesarOrden,
+      } from "../../scripts/api.js";
+      import {
+        buildNotificationPayload,
+        pickNotificationUserIds,
+      } from "../../scripts/notification-templates.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
@@ -138,7 +151,7 @@
 
       const renderOrdenes = () => {
         const rows = filterCheckoutActive
-          ? allOrdenes.filter((o) => o.id_admin == null)
+          ? allOrdenes.filter((o) => isTrue(o.origen_checkout))
           : allOrdenes;
         if (!rows.length) {
           tbodyEl.innerHTML = "";
@@ -156,8 +169,11 @@
             const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
             const hora = orden.hora_orden || "-";
             const verificado = isTrue(orden.pago_verificado);
-            const estado = verificado ? "Verificado" : "No verificado";
-            const estadoClass = verificado ? "estado-ok" : "estado-bad";
+            const cancelada = isTrue(orden.orden_cancelada);
+            const estado = cancelada ? "Rechazada" : verificado ? "Verificado" : "Pendiente";
+            const estadoClass = cancelada ? "estado-bad" : verificado ? "estado-ok" : "estado-warn";
+            const canEntregar = !verificado && !cancelada;
+            const canRechazar = !verificado && !cancelada;
             return `
               <tr data-orden="${orden.id_orden}">
                 <td>${orden.id_orden ?? "-"}</td>
@@ -169,8 +185,12 @@
                 <td>${hora}</td>
                 <td class="estado-cell ${estadoClass}">${estado}</td>
                 <td class="acciones-cell">
-                  <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}">Entregar servicio</button>
-                  <button type="button" class="btn-outline btn-rechazar" data-orden="${orden.id_orden}">Rechazar</button>
+                  <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}" ${canEntregar ? "" : "disabled"}>
+                    ${canEntregar ? "Entregar servicio" : cancelada ? "Rechazada" : "Entregado"}
+                  </button>
+                  <button type="button" class="btn-outline btn-rechazar" data-orden="${orden.id_orden}" ${canRechazar ? "" : "disabled"}>
+                    Rechazar servicio
+                  </button>
                 </td>
               </tr>
             `;
@@ -179,18 +199,139 @@
         setStatus("");
       };
 
+      const markOrdenProcesada = (idOrden, idAdminEntrega = null) => {
+        const id = Number(idOrden);
+        if (!Number.isFinite(id)) return;
+        const idx = allOrdenes.findIndex((o) => Number(o.id_orden) === id);
+        if (idx >= 0) {
+          const current = allOrdenes[idx];
+          const parsedAdmin = Number.isFinite(Number(idAdminEntrega))
+            ? Number(idAdminEntrega)
+            : current?.id_admin ?? null;
+          allOrdenes[idx] = {
+            ...current,
+            pago_verificado: true,
+            id_admin: parsedAdmin,
+          };
+        }
+        renderOrdenes();
+      };
+
+      const markOrdenRechazada = (idOrden) => {
+        const id = Number(idOrden);
+        if (!Number.isFinite(id)) return;
+        const idx = allOrdenes.findIndex((o) => Number(o.id_orden) === id);
+        if (idx >= 0) {
+          allOrdenes[idx] = {
+            ...allOrdenes[idx],
+            orden_cancelada: true,
+          };
+        }
+        renderOrdenes();
+      };
+
+      const notifyVentasEntregadas = async (idOrden) => {
+        const id = Number(idOrden);
+        if (!Number.isFinite(id)) return;
+
+        const { data: ventasOrden, error: ventasOrdErr } = await supabase
+          .from("ventas")
+          .select(
+            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente)), perfiles:perfiles(n_perfil)"
+          )
+          .eq("id_orden", id);
+        if (ventasOrdErr) throw ventasOrdErr;
+
+        const nuevosServiciosPorUsuario = new Map();
+        const renovacionesPorUsuario = new Map();
+
+        (ventasOrden || []).forEach((v) => {
+          const uid = Number(v?.id_usuario);
+          if (!Number.isFinite(uid)) return;
+          const cuentaRow = v.cuentas_miembro || v.cuentas || null;
+          const platName = cuentaRow?.plataformas?.nombre || "Plataforma";
+          const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
+          const correoTxt = v.correo_miembro || cuentaRow?.correo || "";
+          const claveTxt = v.clave_miembro || cuentaRow?.clave || "";
+
+          const item = {
+            plataforma: platName,
+            correoCuenta: correoTxt,
+            clave: claveTxt,
+            perfil: perfilTxt,
+            fechaCorte: v.fecha_corte || "",
+            idVenta: v.id_venta || null,
+          };
+
+          if (v.renovacion) {
+            const itemsRenov = renovacionesPorUsuario.get(uid) || [];
+            itemsRenov.push(item);
+            renovacionesPorUsuario.set(uid, itemsRenov);
+            return;
+          }
+
+          const itemsNuevos = nuevosServiciosPorUsuario.get(uid) || [];
+          itemsNuevos.push(item);
+          nuevosServiciosPorUsuario.set(uid, itemsNuevos);
+        });
+
+        const rowsNotif = [];
+        const userIdsToFlag = new Set();
+
+        nuevosServiciosPorUsuario.forEach((items, uid) => {
+          if (!items.length) return;
+          const userIds = pickNotificationUserIds("nuevo_servicio", { ventaUserId: uid });
+          if (!userIds.length) return;
+          const payload = buildNotificationPayload("nuevo_servicio", { items });
+          userIds.forEach((idUsuario) => {
+            rowsNotif.push({ ...payload, id_usuario: idUsuario });
+            userIdsToFlag.add(idUsuario);
+          });
+        });
+
+        renovacionesPorUsuario.forEach((items, uid) => {
+          if (!items.length) return;
+          const userIds = pickNotificationUserIds("servicio_renovado", { ventaUserId: uid });
+          if (!userIds.length) return;
+          const payload = buildNotificationPayload("servicio_renovado", { items });
+          userIds.forEach((idUsuario) => {
+            rowsNotif.push({ ...payload, id_usuario: idUsuario });
+            userIdsToFlag.add(idUsuario);
+          });
+        });
+
+        if (rowsNotif.length) {
+          const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);
+          if (notifErr) throw notifErr;
+        }
+
+        const idsFlag = Array.from(userIdsToFlag);
+        if (idsFlag.length) {
+          const { error: flagErr } = await supabase
+            .from("usuarios")
+            .update({ notificacion_inventario: true })
+            .in("id_usuario", idsFlag);
+          if (flagErr) {
+            console.error("notificacion_inventario update error", flagErr);
+          }
+        }
+      };
+
       const loadOrdenes = async () => {
         setStatus("Cargando ordenes...");
         const { data: ordenes, error } = await supabase
           .from("ordenes")
-          .select("id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, referencia, fecha, hora_orden, pago_verificado")
+          .select("id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, referencia, fecha, hora_orden, pago_verificado, orden_cancelada")
           .order("id_orden", { ascending: false });
         if (error) {
           console.error("ordenes load error", error);
           setStatus("No se pudieron cargar las ordenes.");
           return;
         }
-        allOrdenes = ordenes || [];
+        allOrdenes = (ordenes || []).map((orden) => ({
+          ...orden,
+          origen_checkout: orden.id_admin == null,
+        }));
         if (!allOrdenes.length) {
           tbodyEl.innerHTML = "";
           setStatus("No hay ordenes registradas.");
@@ -267,18 +408,54 @@
         }
         const entregarBtn = event.target.closest(".btn-entregar");
         if (entregarBtn) {
-          const idOrden = entregarBtn.dataset.orden;
-          if (idOrden) {
-            window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(idOrden)}`;
+          if (entregarBtn.disabled) return;
+          const idOrden = Number(entregarBtn.dataset.orden);
+          if (!Number.isFinite(idOrden)) return;
+          const prevText = entregarBtn.textContent;
+          entregarBtn.disabled = true;
+          entregarBtn.textContent = "Procesando...";
+          setStatus(`Procesando orden #${idOrden}...`);
+          try {
+            const resp = await procesarOrden(idOrden);
+            if (resp?.error) {
+              console.error("procesar orden error", resp);
+              window.alert(resp.error || "No se pudo procesar la orden.");
+              setStatus("No se pudo procesar la orden.");
+              return;
+            }
+            markOrdenProcesada(idOrden, resp?.id_admin);
+            if (!resp?.already_processed) {
+              try {
+                await notifyVentasEntregadas(idOrden);
+              } catch (notifErr) {
+                console.error("notificaciones ordenes error", notifErr);
+              }
+            }
+            if (resp?.already_processed) {
+              setStatus(`Orden #${idOrden} ya estaba procesada.`);
+            } else {
+              setStatus(`Orden #${idOrden} procesada correctamente.`);
+            }
+          } catch (err) {
+            console.error("procesar orden exception", err);
+            window.alert("No se pudo procesar la orden.");
+            setStatus("No se pudo procesar la orden.");
+          } finally {
+            const currentBtn = tbodyEl?.querySelector(`.btn-entregar[data-orden="${idOrden}"]`);
+            if (currentBtn && !currentBtn.disabled) {
+              currentBtn.disabled = false;
+              currentBtn.textContent = prevText || "Entregar servicio";
+            }
           }
           return;
         }
 
         const rechazarBtn = event.target.closest(".btn-rechazar");
         if (rechazarBtn) {
+          if (rechazarBtn.disabled) return;
           const idOrden = Number(rechazarBtn.dataset.orden);
           if (!Number.isFinite(idOrden)) return;
-          const confirmed = window.confirm("¿Rechazar esta orden?");
+          const confirmed = window.confirm("¿Rechazar este servicio?");
           if (!confirmed) return;
           const { error } = await supabase
             .from("ordenes")
@@ -289,11 +466,8 @@
             window.alert("No se pudo rechazar la orden.");
             return;
           }
-          const row = rechazarBtn.closest("tr");
-          if (row) row.remove();
-          if (!tbodyEl.children.length) {
-            setStatus("No hay ordenes registradas.");
-          }
+          markOrdenRechazada(idOrden);
+          setStatus(`Orden #${idOrden} rechazada.`);
         }
       });
 

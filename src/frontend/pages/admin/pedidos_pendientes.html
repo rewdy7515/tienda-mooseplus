@@ -73,6 +73,78 @@
         background: #dbeafe;
         color: #1e3a8a;
       }
+      .modal-activar-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .modal-activar-title {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 800;
+        color: #111827;
+      }
+      .modal-activar-row {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .modal-activar-row label {
+        font-weight: 700;
+      }
+      .modal-activar-row .input-wrap {
+        position: relative;
+      }
+      .modal-activar-row input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .modal-activar-prov {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: start;
+      }
+      .modal-activar-prov .btn-outline {
+        padding: 10px 12px;
+      }
+      .modal-activar-sugerencias {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        z-index: 30;
+        margin-top: 6px;
+      }
+      .modal-activar-sugerencias.hidden {
+        display: none;
+      }
+      .modal-activar-sugerencias button {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+      }
+      .modal-activar-sugerencias button:last-child {
+        border-bottom: none;
+      }
+      .modal-activar-sugerencias button:hover {
+        background: #f7f7f7;
+      }
+      .modal-activar-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
     </style>
   </head>
   <body>
@@ -85,6 +157,48 @@
       <div id="pp-tablas"></div>
     </main>
     <div id="copy-toast" class="copy-toast">Copiado al portapapeles</div>
+    <div id="modal-activar-servicio" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-sol">
+        <button type="button" class="modal-close" id="modal-activar-close" aria-label="Cerrar">×</button>
+        <div class="modal-activar-body">
+          <h3 class="modal-activar-title">Activar servicio</h3>
+          <div class="modal-activar-row">
+            <label for="input-activar-costo">¿Costo para activar el servicio?</label>
+            <input
+              id="input-activar-costo"
+              class="form-input"
+              type="number"
+              min="0"
+              step="0.01"
+              inputmode="decimal"
+              placeholder="0.00"
+            />
+          </div>
+          <div class="modal-activar-row">
+            <label for="input-activar-proveedor">Proveedor</label>
+            <div class="modal-activar-prov">
+              <div class="input-wrap">
+                <input
+                  id="input-activar-proveedor"
+                  class="form-input"
+                  type="search"
+                  placeholder="Buscar proveedor por nombre"
+                  autocomplete="off"
+                />
+                <div id="activar-prov-sugerencias" class="modal-activar-sugerencias hidden"></div>
+              </div>
+              <button type="button" id="btn-activar-add-proveedor" class="btn-outline" title="Registrar proveedor">+</button>
+            </div>
+          </div>
+          <p id="activar-modal-status" class="status"></p>
+          <div class="modal-activar-actions">
+            <button type="button" id="btn-activar-cancelar" class="btn-outline">Cancelar</button>
+            <button type="button" id="btn-activar-entregar" class="btn-primary">Entregar servicio</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { supabase, loadCurrentUser, clearServerSession } from "../../scripts/api.js";
@@ -100,10 +214,31 @@
 
       const statusEl = document.querySelector("#pp-status");
       const tablasEl = document.querySelector("#pp-tablas");
+      const modalActivarEl = document.querySelector("#modal-activar-servicio");
+      const modalActivarCloseBtn = document.querySelector("#modal-activar-close");
+      const modalActivarCancelarBtn = document.querySelector("#btn-activar-cancelar");
+      const modalActivarEntregarBtn = document.querySelector("#btn-activar-entregar");
+      const modalActivarCostoInput = document.querySelector("#input-activar-costo");
+      const modalActivarProveedorInput = document.querySelector("#input-activar-proveedor");
+      const modalActivarProvSugs = document.querySelector("#activar-prov-sugerencias");
+      const modalActivarAddProveedorBtn = document.querySelector("#btn-activar-add-proveedor");
+      const modalActivarStatusEl = document.querySelector("#activar-modal-status");
+      const modalActivarTitleEl = document.querySelector(".modal-activar-title");
+
+      let currentUser = null;
+      let pendingEntregaBtn = null;
+      let proveedorSeleccionadoId = null;
+      let proveedoresSugeridos = [];
+      let proveedorFetchCounter = 0;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
+      const setModalStatus = (msg) => {
+        if (modalActivarStatusEl) modalActivarStatusEl.textContent = msg || "";
+      };
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const hasPerfilId = (val) => Number.isFinite(Number(val)) && Number(val) > 0;
       const addMonthsKeepDay = (baseDate, months) => {
         const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
         const day = baseDate.getDate();
@@ -113,11 +248,95 @@
         return d;
       };
 
+      const hideProvSuggestions = () => {
+        if (!modalActivarProvSugs) return;
+        modalActivarProvSugs.classList.add("hidden");
+      };
+
+      const renderProvSuggestions = (items, forceHide = false) => {
+        if (!modalActivarProvSugs) return;
+        if (forceHide || !items.length) {
+          modalActivarProvSugs.innerHTML = "";
+          hideProvSuggestions();
+          return;
+        }
+        modalActivarProvSugs.innerHTML = items
+          .map(
+            (p) => `
+              <button type="button" data-id="${p.id_proveedor}" data-nombre="${p.nombre || ""}">
+                ${p.nombre || ""}
+              </button>
+            `
+          )
+          .join("");
+        modalActivarProvSugs.classList.remove("hidden");
+      };
+
+      const buscarProveedoresActivacion = async (texto, hide = false) => {
+        const term = (texto || "").trim();
+        if (!term) {
+          proveedoresSugeridos = [];
+          renderProvSuggestions([], true);
+          return;
+        }
+        const current = ++proveedorFetchCounter;
+        try {
+          const { data, error } = await supabase
+            .from("proveedores")
+            .select("id_proveedor, nombre")
+            .ilike("nombre", `%${term}%`)
+            .order("nombre", { ascending: true })
+            .limit(6);
+          if (current !== proveedorFetchCounter) return;
+          if (error) throw error;
+          proveedoresSugeridos = data || [];
+          renderProvSuggestions(proveedoresSugeridos, hide);
+        } catch (err) {
+          console.error("buscar proveedores activacion error", err);
+          proveedoresSugeridos = [];
+          renderProvSuggestions([], true);
+        }
+      };
+
+      const openModalActivacion = (btn) => {
+        pendingEntregaBtn = btn || null;
+        proveedorSeleccionadoId = null;
+        proveedoresSugeridos = [];
+        setModalStatus("");
+        if (modalActivarCostoInput) modalActivarCostoInput.value = "";
+        if (modalActivarProveedorInput) modalActivarProveedorInput.value = "";
+        renderProvSuggestions([], true);
+        if (modalActivarTitleEl) {
+          const plat = btn?.dataset?.plataforma || "servicio";
+          modalActivarTitleEl.textContent = `Activar servicio (${plat})`;
+        }
+        modalActivarEl?.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+        modalActivarCostoInput?.focus();
+      };
+
+      const closeModalActivacion = () => {
+        modalActivarEl?.classList.add("hidden");
+        document.body.classList.remove("modal-open");
+        pendingEntregaBtn = null;
+        proveedorSeleccionadoId = null;
+        setModalStatus("");
+        renderProvSuggestions([], true);
+      };
+
+      const requiereModalActivacion = (btn) => {
+        if (!btn) return false;
+        const correoCliente = isTrue(btn.dataset.correoCliente);
+        const ligadoPerfil = hasPerfilId(btn.dataset.idPerfil);
+        return correoCliente && !ligadoPerfil;
+      };
+
       const renderSection = (title, grouped) => {
         const entries = Object.entries(grouped);
         if (!entries.length) return "";
         const content = entries
           .map(([_, payload]) => {
+            const headerStyle = payload.color_1 ? ` style="--table-header-bg:${payload.color_1};"` : "";
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
             const showTipo = String(payload.id_plataforma || "") === "9";
@@ -183,7 +402,7 @@
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -233,7 +452,7 @@
               })
               .join("");
             return `
-              <div class="proximas-bloque">
+              <div class="proximas-bloque"${headerStyle}>
                 <h3 class="proximas-title">${payload.nombre}</h3>
                 ${tablesHtml}
               </div>
@@ -294,6 +513,7 @@
       const loadPendientes = async () => {
         try {
           const user = await loadCurrentUser();
+          currentUser = user || null;
           if (!user) {
             setStatus("Usuario no autenticado.");
             return;
@@ -353,7 +573,7 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines")
+              .select("id_plataforma, nombre, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines")
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
@@ -402,6 +622,7 @@
                   platInfo.usa_pines === "true" ||
                   platInfo.usa_pines === "1",
                 groups: {},
+                color_1: platInfo.color_1 || null,
               };
             const motherId = isCompleta ? "sin-madre" : v.id_cuenta || "sin-madre";
             if (!grouped[platId].groups[motherId]) {
@@ -448,6 +669,257 @@
           console.error("pedidos pendientes error", err);
           setStatus("No se pudieron cargar los pedidos.");
         }
+      };
+
+      const handleEntregarServicio = async (btn, activationData = null) => {
+        const idVenta = btn?.dataset?.venta;
+        const idUsuario = btn?.dataset?.usuario;
+        const plataforma = btn?.dataset?.plataforma || "";
+        const idPlataforma = btn?.dataset?.idPlataforma || "";
+        const correoCuenta = btn?.dataset?.correo || "";
+        const claveCuenta = btn?.dataset?.clave || "";
+        const fechaCorte = btn?.dataset?.fecha || "Pendiente";
+        const perfil = btn?.dataset?.perfil || "";
+        const nPerfil = btn?.dataset?.nperfil || "";
+        const porAcceso = btn?.dataset?.poracceso === "true";
+        const usaPines = btn?.dataset?.usapines === "true";
+        const existingMadreId = btn?.dataset?.idCuenta || "";
+        const existingPerfilId = btn?.dataset?.idPerfil || "";
+        const isCompleta = btn?.dataset?.completa === "true";
+        const cuentaMadreFlag = btn?.dataset?.cuentaMadre === "true" && !isCompleta;
+        const mesesContratados = Number(btn?.dataset?.meses || 1);
+        const isReportado = btn?.dataset?.reportado === "true";
+        const costoActivacion = Number(activationData?.costo);
+        const proveedorId = Number(activationData?.idProveedor);
+
+        if (!idVenta) return;
+        if (!correoCuenta) {
+          alert("Falta el correo del cliente.");
+          return;
+        }
+
+        let nuevaCuentaId = null;
+        const { data: cuentaExist, error: existErr } = await supabase
+          .from("cuentas")
+          .select("id_cuenta, clave")
+          .eq("correo", correoCuenta)
+          .order("id_cuenta", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (existErr) throw existErr;
+        if (cuentaExist?.id_cuenta) {
+          const updateCuenta = {
+            inactiva: false,
+            ocupado: false,
+            venta_dominio: true,
+            dominio_de: idUsuario ? Number(idUsuario) : null,
+            id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+          };
+          if (Number.isFinite(proveedorId) && proveedorId > 0) {
+            updateCuenta.id_proveedor = proveedorId;
+          }
+          if (claveCuenta && claveCuenta !== (cuentaExist.clave || "")) {
+            updateCuenta.clave = claveCuenta;
+          }
+          const { error: updCuentaErr } = await supabase
+            .from("cuentas")
+            .update(updateCuenta)
+            .eq("id_cuenta", cuentaExist.id_cuenta);
+          if (updCuentaErr) throw updCuentaErr;
+          nuevaCuentaId = cuentaExist.id_cuenta;
+        } else {
+          const insertCuenta = {
+            correo: correoCuenta,
+            clave: claveCuenta || null,
+            inactiva: false,
+            ocupado: false,
+            venta_dominio: true,
+            dominio_de: idUsuario ? Number(idUsuario) : null,
+            id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            id_proveedor: Number.isFinite(proveedorId) && proveedorId > 0 ? proveedorId : null,
+          };
+          const { data: cuentaNueva, error: cuentaErr } = await supabase
+            .from("cuentas")
+            .insert(insertCuenta)
+            .select("id_cuenta")
+            .single();
+          if (cuentaErr) throw cuentaErr;
+          nuevaCuentaId = cuentaNueva?.id_cuenta || null;
+        }
+        if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
+
+        let cuentaMadreId = null;
+        let perfilId = null;
+        if (cuentaMadreFlag && idPlataforma) {
+          if (existingMadreId && existingPerfilId) {
+            cuentaMadreId = Number(existingMadreId);
+            perfilId = Number(existingPerfilId);
+          } else {
+            const { data: madre, error: madreErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta")
+              .eq("id_plataforma", Number(idPlataforma))
+              .eq("cuenta_madre", true)
+              .limit(1)
+              .maybeSingle();
+            if (madreErr) throw madreErr;
+            cuentaMadreId = madre?.id_cuenta || null;
+            if (cuentaMadreId) {
+              const { data: perf, error: perfErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil")
+                .eq("id_cuenta", cuentaMadreId)
+                .eq("ocupado", false)
+                .order("n_perfil", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+              if (perfErr) throw perfErr;
+              perfilId = perf?.id_perfil || null;
+              if (!perfilId) {
+                const msg = document.querySelector(`.madre-stock-msg[data-plat="${idPlataforma}"]`);
+                if (msg) msg.classList.remove("hidden");
+              }
+              if (perfilId) {
+                const { error: occErr } = await supabase
+                  .from("perfiles")
+                  .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
+                  .eq("id_perfil", perfilId);
+                if (occErr) throw occErr;
+              }
+            }
+          }
+        }
+        if (cuentaMadreId) {
+          const { error: linkErr } = await supabase
+            .from("cuentas")
+            .update({ id_cuenta_madre: cuentaMadreId })
+            .eq("id_cuenta", nuevaCuentaId);
+          if (linkErr) throw linkErr;
+        }
+
+        const base = new Date();
+        const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
+        const nextIso = next.toISOString().slice(0, 10);
+        const updateVenta = {
+          pendiente: false,
+          id_cuenta: cuentaMadreId || null,
+          id_cuenta_miembro: nuevaCuentaId,
+          id_perfil: perfilId || null,
+          cuenta_nueva: false,
+        };
+        if (!isReportado) {
+          updateVenta.fecha_corte = nextIso;
+        }
+        const { error: updErr } = await supabase.from("ventas").update(updateVenta).eq("id_venta", idVenta);
+        if (updErr) throw updErr;
+
+        if (Number.isFinite(costoActivacion) && costoActivacion >= 0 && Number.isFinite(proveedorId) && proveedorId > 0) {
+          const { error: histErr } = await supabase.from("historial_ventas").insert({
+            id_usuario_cliente: idUsuario ? Number(idUsuario) : null,
+            id_proveedor: proveedorId,
+            monto: costoActivacion,
+            fecha_pago: new Date().toISOString().slice(0, 10),
+            venta_cliente: false,
+            renovacion: false,
+            id_venta: Number(idVenta),
+            id_plataforma: idPlataforma ? Number(idPlataforma) : null,
+            id_cuenta: nuevaCuentaId,
+            registrado_por: currentUser?.id_usuario || null,
+          });
+          if (histErr) throw histErr;
+        }
+
+        if (idUsuario) {
+          const notif = buildNotificationPayload("nuevo_servicio", {
+            plataforma,
+            correoCuenta,
+            perfil,
+            fechaCorte,
+          });
+          const { error: nErr } = await supabase
+            .from("notificaciones")
+            .insert({ ...notif, id_usuario: Number(idUsuario) });
+          if (nErr) throw nErr;
+        }
+
+        const status = document.createElement("span");
+        status.className = "badge badge-green";
+        status.textContent = "Servicio entregado";
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "btn-outline btn-copy-row";
+        copyBtn.textContent = "Copiar";
+        let copyCorreo = correoCuenta || "";
+        let copyClave = claveCuenta || "";
+        let copyPerfil = nPerfil || "";
+        let copyPin = "";
+        let copyFecha = nextIso;
+        let copyPlatId = idPlataforma ? Number(idPlataforma) : null;
+        let copyVentaPerfil = false;
+        let copyVentaMiembro = false;
+        let copyPerfilHogar = false;
+
+        try {
+          const { data: ventaInfo, error: vErr } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, fecha_corte, correo_miembro, clave_miembro, id_cuenta, id_cuenta_miembro, id_perfil, cuentas:cuentas!ventas_id_cuenta_fkey(correo, clave, id_plataforma, venta_perfil, venta_miembro), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)",
+            )
+            .eq("id_venta", idVenta)
+            .maybeSingle();
+          if (vErr) throw vErr;
+          if (ventaInfo) {
+            copyCorreo =
+              ventaInfo.correo_miembro ||
+              ventaInfo.cuentas_miembro?.correo ||
+              ventaInfo.cuentas?.correo ||
+              copyCorreo;
+            copyClave =
+              ventaInfo.clave_miembro ||
+              ventaInfo.cuentas_miembro?.clave ||
+              ventaInfo.cuentas?.clave ||
+              copyClave;
+            copyPerfil = ventaInfo.perfiles?.n_perfil ?? copyPerfil ?? "";
+            copyPin = ventaInfo.perfiles?.pin || "";
+            copyPerfilHogar = ventaInfo.perfiles?.perfil_hogar === true;
+            copyFecha = ventaInfo.fecha_corte || copyFecha;
+            copyPlatId = ventaInfo.cuentas?.id_plataforma || copyPlatId;
+            if (!isCompleta) {
+              copyVentaPerfil =
+                ventaInfo.cuentas?.venta_perfil ??
+                ventaInfo.cuentas_miembro?.venta_perfil ??
+                false;
+              copyVentaMiembro =
+                ventaInfo.cuentas?.venta_miembro ??
+                ventaInfo.cuentas_miembro?.venta_miembro ??
+                false;
+            }
+          }
+        } catch (err) {
+          console.warn("venta info para copiar no disponible", err);
+        }
+
+        const perfilNum = Number(copyPerfil);
+        const copyText = buildServiceCopyText({
+          plataforma,
+          idVenta: idVenta || null,
+          correo: copyCorreo,
+          clave: copyClave,
+          nPerfil: Number.isFinite(perfilNum) ? perfilNum : copyPerfil || null,
+          pin: copyPin,
+          fechaCorte: copyFecha,
+          porAcceso,
+          usaPines,
+          ventaPerfil: copyVentaPerfil,
+          ventaMiembro: copyVentaMiembro,
+          idPlataforma: copyPlatId,
+          perfilHogar: copyPerfilHogar,
+          isSubCuenta: false,
+        });
+        copyBtn.dataset.copy = encodeURIComponent(copyText);
+        btn.parentElement?.appendChild(status);
+        btn.parentElement?.appendChild(copyBtn);
+        btn.remove();
       };
 
       tablasEl?.addEventListener("click", async (e) => {
@@ -513,236 +985,12 @@
         }
         const btn = e.target.closest(".btn-entregar");
         if (!btn) return;
-        const idVenta = btn.dataset.venta;
-        const idUsuario = btn.dataset.usuario;
-        const plataforma = btn.dataset.plataforma || "";
-        const idPlataforma = btn.dataset.idPlataforma || "";
-        const correoCuenta = btn.dataset.correo || "";
-        const claveCuenta = btn.dataset.clave || "";
-        const fechaCorte = btn.dataset.fecha || "Pendiente";
-        const perfil = btn.dataset.perfil || "";
-        const nPerfil = btn.dataset.nperfil || "";
-        const porAcceso = btn.dataset.poracceso === "true";
-        const usaPines = btn.dataset.usapines === "true";
-        const existingMadreId = btn.dataset.idCuenta || "";
-        const existingPerfilId = btn.dataset.idPerfil || "";
-        const isCompleta = btn.dataset.completa === "true";
-        const cuentaMadreFlag = btn.dataset.cuentaMadre === "true" && !isCompleta;
-        const mesesContratados = Number(btn.dataset.meses || 1);
-        const isReportado = btn.dataset.reportado === "true";
-        if (!idVenta) return;
         try {
-          if (!correoCuenta) {
-            alert("Falta el correo del cliente.");
+          if (requiereModalActivacion(btn)) {
+            openModalActivacion(btn);
             return;
           }
-          let nuevaCuentaId = null;
-          const { data: cuentaExist, error: existErr } = await supabase
-            .from("cuentas")
-            .select("id_cuenta, clave")
-            .eq("correo", correoCuenta)
-            .order("id_cuenta", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          if (existErr) throw existErr;
-          if (cuentaExist?.id_cuenta) {
-            const updateCuenta = {
-              inactiva: false,
-              ocupado: false,
-              venta_dominio: true,
-              dominio_de: idUsuario ? Number(idUsuario) : null,
-              id_plataforma: idPlataforma ? Number(idPlataforma) : null,
-            };
-            if (claveCuenta && claveCuenta !== (cuentaExist.clave || "")) {
-              updateCuenta.clave = claveCuenta;
-            }
-            const { error: updCuentaErr } = await supabase
-              .from("cuentas")
-              .update(updateCuenta)
-              .eq("id_cuenta", cuentaExist.id_cuenta);
-            if (updCuentaErr) throw updCuentaErr;
-            nuevaCuentaId = cuentaExist.id_cuenta;
-          } else {
-            const { data: cuentaNueva, error: cuentaErr } = await supabase
-              .from("cuentas")
-              .insert({
-                correo: correoCuenta,
-                clave: claveCuenta || null,
-                inactiva: false,
-                ocupado: false,
-                venta_dominio: true,
-                dominio_de: idUsuario ? Number(idUsuario) : null,
-                id_plataforma: idPlataforma ? Number(idPlataforma) : null,
-              })
-              .select("id_cuenta")
-              .single();
-            if (cuentaErr) throw cuentaErr;
-            nuevaCuentaId = cuentaNueva?.id_cuenta || null;
-          }
-          if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
-
-          let cuentaMadreId = null;
-          let perfilId = null;
-          if (cuentaMadreFlag && idPlataforma) {
-            if (existingMadreId && existingPerfilId) {
-              cuentaMadreId = Number(existingMadreId);
-              perfilId = Number(existingPerfilId);
-            } else {
-            const { data: madre, error: madreErr } = await supabase
-              .from("cuentas")
-              .select("id_cuenta")
-              .eq("id_plataforma", Number(idPlataforma))
-              .eq("cuenta_madre", true)
-              .limit(1)
-              .maybeSingle();
-            if (madreErr) throw madreErr;
-            cuentaMadreId = madre?.id_cuenta || null;
-            if (cuentaMadreId) {
-              const { data: perf, error: perfErr } = await supabase
-                .from("perfiles")
-                .select("id_perfil")
-                .eq("id_cuenta", cuentaMadreId)
-                .eq("ocupado", false)
-                .order("n_perfil", { ascending: true })
-                .limit(1)
-                .maybeSingle();
-              if (perfErr) throw perfErr;
-              perfilId = perf?.id_perfil || null;
-              if (!perfilId) {
-                const msg = document.querySelector(
-                  `.madre-stock-msg[data-plat="${idPlataforma}"]`
-                );
-                if (msg) msg.classList.remove("hidden");
-              }
-              if (perfilId) {
-                const { error: occErr } = await supabase
-                  .from("perfiles")
-                  .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
-                  .eq("id_perfil", perfilId);
-                if (occErr) throw occErr;
-              }
-            }
-            }
-          }
-          if (cuentaMadreId) {
-            const { error: linkErr } = await supabase
-              .from("cuentas")
-              .update({ id_cuenta_madre: cuentaMadreId })
-              .eq("id_cuenta", nuevaCuentaId);
-            if (linkErr) throw linkErr;
-          }
-
-          const base = new Date();
-          const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
-          const nextIso = next.toISOString().slice(0, 10);
-          const updateVenta = {
-            pendiente: false,
-            id_cuenta: cuentaMadreId || null,
-            id_cuenta_miembro: nuevaCuentaId,
-            id_perfil: perfilId || null,
-            cuenta_nueva: false,
-          };
-          if (!isReportado) {
-            updateVenta.fecha_corte = nextIso;
-          }
-          const { error: updErr } = await supabase
-            .from("ventas")
-            .update(updateVenta)
-            .eq("id_venta", idVenta);
-          if (updErr) throw updErr;
-          if (idUsuario) {
-            const notif = buildNotificationPayload("nuevo_servicio", {
-              plataforma,
-              correoCuenta,
-              perfil,
-              fechaCorte,
-            });
-            const { error: nErr } = await supabase
-              .from("notificaciones")
-              .insert({ ...notif, id_usuario: Number(idUsuario) });
-            if (nErr) throw nErr;
-          }
-          const status = document.createElement("span");
-          status.className = "badge badge-green";
-          status.textContent = "Servicio entregado";
-          const copyBtn = document.createElement("button");
-          copyBtn.type = "button";
-          copyBtn.className = "btn-outline btn-copy-row";
-          copyBtn.textContent = "Copiar";
-          let copyCorreo = correoCuenta || "";
-          let copyClave = claveCuenta || "";
-          let copyPerfil = nPerfil || "";
-          let copyPin = "";
-          let copyFecha = nextIso;
-          let copyPlatId = idPlataforma ? Number(idPlataforma) : null;
-          let copyVentaPerfil = false;
-          let copyVentaMiembro = false;
-          let copyPerfilHogar = false;
-
-          try {
-            const { data: ventaInfo, error: vErr } = await supabase
-              .from("ventas")
-              .select(
-                "id_venta, fecha_corte, correo_miembro, clave_miembro, id_cuenta, id_cuenta_miembro, id_perfil, cuentas:cuentas!ventas_id_cuenta_fkey(correo, clave, id_plataforma, venta_perfil, venta_miembro), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)",
-              )
-              .eq("id_venta", idVenta)
-              .maybeSingle();
-            if (vErr) throw vErr;
-            if (ventaInfo) {
-              copyCorreo =
-                ventaInfo.correo_miembro ||
-                ventaInfo.cuentas_miembro?.correo ||
-                ventaInfo.cuentas?.correo ||
-                copyCorreo;
-              copyClave =
-                ventaInfo.clave_miembro ||
-                ventaInfo.cuentas_miembro?.clave ||
-                ventaInfo.cuentas?.clave ||
-                copyClave;
-              copyPerfil =
-                ventaInfo.perfiles?.n_perfil ??
-                copyPerfil ??
-                "";
-              copyPin = ventaInfo.perfiles?.pin || "";
-              copyPerfilHogar = ventaInfo.perfiles?.perfil_hogar === true;
-              copyFecha = ventaInfo.fecha_corte || copyFecha;
-              copyPlatId = ventaInfo.cuentas?.id_plataforma || copyPlatId;
-              if (!isCompleta) {
-                copyVentaPerfil =
-                  ventaInfo.cuentas?.venta_perfil ??
-                  ventaInfo.cuentas_miembro?.venta_perfil ??
-                  false;
-                copyVentaMiembro =
-                  ventaInfo.cuentas?.venta_miembro ??
-                  ventaInfo.cuentas_miembro?.venta_miembro ??
-                  false;
-              }
-            }
-          } catch (err) {
-            console.warn("venta info para copiar no disponible", err);
-          }
-
-          const perfilNum = Number(copyPerfil);
-          const copyText = buildServiceCopyText({
-            plataforma,
-            idVenta: idVenta || null,
-            correo: copyCorreo,
-            clave: copyClave,
-            nPerfil: Number.isFinite(perfilNum) ? perfilNum : copyPerfil || null,
-            pin: copyPin,
-            fechaCorte: copyFecha,
-            porAcceso,
-            usaPines,
-            ventaPerfil: copyVentaPerfil,
-            ventaMiembro: copyVentaMiembro,
-            idPlataforma: copyPlatId,
-            perfilHogar: copyPerfilHogar,
-            isSubCuenta: false,
-          });
-          copyBtn.dataset.copy = encodeURIComponent(copyText);
-          btn.parentElement?.appendChild(status);
-          btn.parentElement?.appendChild(copyBtn);
-          btn.remove();
+          await handleEntregarServicio(btn);
         } catch (err) {
           console.error("entregar servicio error", err);
           alert("No se pudo entregar el servicio.");
@@ -843,6 +1091,103 @@
         const text = cell.dataset.clipboard || cell.textContent || "";
         if (!text) return;
         await copyTextNotify(text);
+      });
+
+      modalActivarCloseBtn?.addEventListener("click", () => {
+        closeModalActivacion();
+      });
+      modalActivarCancelarBtn?.addEventListener("click", () => {
+        closeModalActivacion();
+      });
+      modalActivarEl?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) {
+          closeModalActivacion();
+        }
+      });
+      modalActivarAddProveedorBtn?.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.location.href = "registrar_proveedor.html";
+      });
+      modalActivarProveedorInput?.addEventListener("input", (e) => {
+        proveedorSeleccionadoId = null;
+        setModalStatus("");
+        buscarProveedoresActivacion(e.target.value).catch((err) => {
+          console.error("buscar proveedores activacion input error", err);
+        });
+      });
+      modalActivarProveedorInput?.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        buscarProveedoresActivacion(modalActivarProveedorInput?.value || "", false).catch((err) => {
+          console.error("buscar proveedores activacion enter error", err);
+        });
+      });
+      modalActivarProvSugs?.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        proveedorSeleccionadoId = Number(btn.dataset.id || "");
+        if (modalActivarProveedorInput) {
+          modalActivarProveedorInput.value = btn.dataset.nombre || "";
+        }
+        setModalStatus("");
+        hideProvSuggestions();
+      });
+      modalActivarEntregarBtn?.addEventListener("click", async () => {
+        const btn = pendingEntregaBtn;
+        if (!btn) {
+          closeModalActivacion();
+          return;
+        }
+        const rawCosto = String(modalActivarCostoInput?.value || "")
+          .trim()
+          .replace(",", ".");
+        const costoVal = Number(rawCosto);
+        if (!Number.isFinite(costoVal) || costoVal < 0) {
+          setModalStatus("Ingresa un costo valido.");
+          return;
+        }
+        const provText = (modalActivarProveedorInput?.value || "").trim();
+        if (!provText) {
+          setModalStatus("Selecciona un proveedor.");
+          return;
+        }
+        let provId = Number(proveedorSeleccionadoId);
+        if (!Number.isFinite(provId) || provId <= 0) {
+          const exact = (proveedoresSugeridos || []).find(
+            (p) => (p?.nombre || "").trim().toLowerCase() === provText.toLowerCase()
+          );
+          if (exact?.id_proveedor) {
+            provId = Number(exact.id_proveedor);
+          }
+        }
+        if (!Number.isFinite(provId) || provId <= 0) {
+          setModalStatus("Selecciona un proveedor valido de la lista.");
+          return;
+        }
+
+        const payload = { costo: costoVal, idProveedor: provId };
+        closeModalActivacion();
+        try {
+          await handleEntregarServicio(btn, payload);
+        } catch (err) {
+          console.error("entregar servicio con activacion error", err);
+          alert("No se pudo entregar el servicio.");
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modalActivarEl && !modalActivarEl.classList.contains("hidden")) {
+          closeModalActivacion();
+        }
+      });
+      document.addEventListener("click", (e) => {
+        if (!modalActivarProvSugs || !modalActivarProveedorInput) return;
+        if (
+          modalActivarProvSugs.contains(e.target) ||
+          modalActivarProveedorInput.contains(e.target)
+        ) {
+          return;
+        }
+        hideProvSuggestions();
       });
 
       loadPendientes();

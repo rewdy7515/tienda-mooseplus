@@ -6,6 +6,76 @@
     <title>Historial de Ordenes</title>
     <link rel="stylesheet" href="../styles/styles.css" />
     <style>
+      .usuarios-busqueda {
+        margin: 8px 0 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-width: 560px;
+      }
+      .usuarios-busqueda .input-wrap {
+        position: relative;
+        width: 100%;
+      }
+      #usuario-search {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #e5e7eb;
+        background: #fff;
+        font-size: 15px;
+        color: #111827;
+        outline: none;
+        transition:
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+      #usuario-search::placeholder {
+        color: #9ca3af;
+      }
+      #usuario-search:focus {
+        border-color: #111;
+        box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.12);
+      }
+      .usuario-search-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .sugerencias-usuarios {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        margin-top: 6px;
+        overflow: hidden;
+        z-index: 30;
+      }
+      .sugerencias-usuarios.hidden {
+        display: none;
+      }
+      .sugerencia-usuario-btn {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        color: #111;
+      }
+      .sugerencia-usuario-btn:last-child {
+        border-bottom: none;
+      }
+      .sugerencia-usuario-btn:hover {
+        background: #f7f7f7;
+      }
       .ordenes-list {
         margin-top: 12px;
         display: flex;
@@ -61,6 +131,10 @@
           flex-direction: column;
           align-items: flex-start;
         }
+        .usuario-search-actions .btn-primary,
+        .usuario-search-actions .btn-outline {
+          width: 100%;
+        }
       }
     </style>
   </head>
@@ -70,6 +144,22 @@
 
     <main class="categorias-dinamicas">
       <h2>Historial de Ordenes</h2>
+      <div class="usuarios-busqueda">
+        <div class="input-wrap">
+          <input
+            type="text"
+            id="usuario-search"
+            placeholder="Buscar usuario por nombre y apellido"
+            autocomplete="off"
+          />
+          <div id="usuario-sugs" class="sugerencias-usuarios hidden"></div>
+        </div>
+        <div class="usuario-search-actions">
+          <button id="btn-search-user" type="button" class="btn-primary">Buscar usuario</button>
+          <button id="btn-reset-user" type="button" class="btn-outline">Ver mis ordenes</button>
+        </div>
+      </div>
+      <p id="ordenes-context" class="status"></p>
       <p id="ordenes-status" class="status">Cargando ordenes...</p>
       <div id="ordenes-list" class="ordenes-list"></div>
     </main>
@@ -84,13 +174,36 @@
       attachLogout(clearServerSession);
 
       const statusEl = document.querySelector("#ordenes-status");
+      const contextEl = document.querySelector("#ordenes-context");
       const listEl = document.querySelector("#ordenes-list");
+      const searchInput = document.querySelector("#usuario-search");
+      const searchSugs = document.querySelector("#usuario-sugs");
+      const btnSearchUser = document.querySelector("#btn-search-user");
+      const btnResetUser = document.querySelector("#btn-reset-user");
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
 
+      const setContext = (msg) => {
+        if (contextEl) contextEl.textContent = msg || "";
+      };
+
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const formatUserName = (u) =>
+        [u?.nombre, u?.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u?.id_usuario ?? ""}`;
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      let sessionUser = null;
+      let selectedUser = null;
+      let searchResults = [];
+      let searchReqId = 0;
 
       const formatHora12 = (hora) => {
         if (!hora) return "-";
@@ -135,31 +248,176 @@
         setStatus("");
       };
 
+      listEl?.addEventListener("click", (event) => {
+        const card = event.target.closest(".orden-card");
+        if (!card) return;
+        const id = card.dataset.orden;
+        if (!id) return;
+        window.location.href = `detalle_ordenes.html?id_orden=${encodeURIComponent(id)}`;
+      });
+
+      const loadOrdenesByUserId = async (userId) => {
+        if (!userId) return;
+        setStatus("Cargando ordenes...");
+        const { data, error } = await supabase
+          .from("ordenes")
+          .select("id_orden, id_usuario, fecha, hora_orden, pago_verificado")
+          .eq("id_usuario", userId)
+          .order("id_orden", { ascending: false });
+        if (error) throw error;
+        renderOrdenes(data || []);
+      };
+
+      const hideSuggestions = () => {
+        searchSugs?.classList.add("hidden");
+      };
+
+      const renderSuggestions = (users = []) => {
+        if (!searchSugs) return;
+        if (!users.length) {
+          searchSugs.innerHTML = "";
+          hideSuggestions();
+          return;
+        }
+        searchSugs.innerHTML = users
+          .map((u, idx) => {
+            const name = escapeHtml(formatUserName(u));
+            return `<button type="button" class="sugerencia-usuario-btn" data-idx="${idx}">${name}</button>`;
+          })
+          .join("");
+        searchSugs.classList.remove("hidden");
+      };
+
+      const loadUserSuggestions = async (termRaw) => {
+        const term = String(termRaw || "").trim();
+        if (term.length < 2) {
+          searchResults = [];
+          renderSuggestions([]);
+          return;
+        }
+        const reqId = ++searchReqId;
+        const safeTerm = term.replace(/,/g, " ");
+        const { data, error } = await supabase
+          .from("usuarios")
+          .select("id_usuario, nombre, apellido")
+          .or(`nombre.ilike.%${safeTerm}%,apellido.ilike.%${safeTerm}%`)
+          .order("nombre", { ascending: true })
+          .limit(8);
+        if (reqId !== searchReqId) return;
+        if (error) {
+          console.error("usuarios search error", error);
+          searchResults = [];
+          renderSuggestions([]);
+          return;
+        }
+        searchResults = data || [];
+        renderSuggestions(searchResults);
+      };
+
+      const selectUser = async (user) => {
+        if (!user?.id_usuario) return;
+        selectedUser = user;
+        if (searchInput) searchInput.value = formatUserName(user);
+        hideSuggestions();
+        setContext(`Mostrando ordenes de: ${formatUserName(user)}`);
+        await loadOrdenesByUserId(user.id_usuario);
+      };
+
+      const resetToSessionOrders = async () => {
+        if (!sessionUser?.id_usuario) return;
+        selectedUser = sessionUser;
+        if (searchInput) searchInput.value = "";
+        hideSuggestions();
+        setContext("Mostrando solo ordenes de tu sesion.");
+        await loadOrdenesByUserId(sessionUser.id_usuario);
+      };
+
+      const runSearch = async () => {
+        const term = (searchInput?.value || "").trim();
+        if (!term) {
+          await resetToSessionOrders();
+          return;
+        }
+        await loadUserSuggestions(term);
+        const normalized = term.toLowerCase();
+        const exact =
+          searchResults.find((u) => formatUserName(u).toLowerCase() === normalized) || searchResults[0];
+        if (!exact) {
+          setStatus("No se encontro ningun usuario con ese nombre.");
+          return;
+        }
+        await selectUser(exact);
+      };
+
       const init = async () => {
         try {
-          const TEST_USER_ID = 6;
-          const { data, error } = await supabase
-            .from("ordenes")
-            .select("id_orden, id_usuario, fecha, hora_orden, pago_verificado")
-            .eq("id_usuario", TEST_USER_ID)
-            .order("id_orden", { ascending: false });
-          if (error) throw error;
-          renderOrdenes(data || []);
+          const user = await loadCurrentUser();
+          const userId = user?.id_usuario;
+          if (!userId) {
+            setStatus("Usuario no autenticado.");
+            return;
+          }
+          sessionUser = user;
+          selectedUser = user;
+          await resetToSessionOrders();
         } catch (err) {
           console.error("historial ordenes error", err);
           setStatus("No se pudieron cargar las ordenes.");
         }
       };
 
-      init();
-
-      listEl?.addEventListener("click", (event) => {
-        const card = event.target.closest(".orden-card");
-        if (!card) return;
-        const id = card.dataset.orden;
-        if (!id) return;
-        window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(id)}`;
+      btnSearchUser?.addEventListener("click", async () => {
+        try {
+          await runSearch();
+        } catch (err) {
+          console.error("runSearch error", err);
+          setStatus("No se pudo buscar el usuario.");
+        }
       });
+
+      btnResetUser?.addEventListener("click", async () => {
+        try {
+          await resetToSessionOrders();
+        } catch (err) {
+          console.error("resetToSessionOrders error", err);
+          setStatus("No se pudieron cargar tus ordenes.");
+        }
+      });
+
+      searchInput?.addEventListener("input", (event) => {
+        loadUserSuggestions(event.target.value).catch((err) => {
+          console.error("loadUserSuggestions error", err);
+        });
+      });
+
+      searchInput?.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        runSearch().catch((err) => {
+          console.error("runSearch enter error", err);
+          setStatus("No se pudo buscar el usuario.");
+        });
+      });
+
+      searchSugs?.addEventListener("click", (event) => {
+        const btn = event.target.closest(".sugerencia-usuario-btn");
+        if (!btn) return;
+        const idx = Number(btn.dataset.idx);
+        if (!Number.isFinite(idx)) return;
+        const user = searchResults[idx];
+        selectUser(user).catch((err) => {
+          console.error("selectUser error", err);
+          setStatus("No se pudieron cargar las ordenes del usuario.");
+        });
+      });
+
+      document.addEventListener("click", (event) => {
+        if (!searchSugs || !searchInput) return;
+        if (searchSugs.contains(event.target) || searchInput.contains(event.target)) return;
+        hideSuggestions();
+      });
+
+      init();
     </script>
   </body>
 </html>

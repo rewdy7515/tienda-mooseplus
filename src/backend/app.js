@@ -1339,7 +1339,17 @@ app.get("/api/inventario", async (req, res) => {
           clave,
           venta_perfil,
           venta_miembro,
-          plataformas(nombre, color_1, color_2, color_3, usa_pines, por_pantalla, correo_cliente, clave_cliente)
+          plataformas(
+            nombre,
+            color_1,
+            color_2,
+            color_3,
+            usa_pines,
+            por_pantalla,
+            por_acceso,
+            correo_cliente,
+            clave_cliente
+          )
         ),
         perfiles:perfiles(
           id_perfil,
@@ -1348,7 +1358,7 @@ app.get("/api/inventario", async (req, res) => {
           id_cuenta_miembro,
           perfil_hogar
         ),
-        precios:precios(plan)
+        precios:precios(plan, sub_cuenta)
       `
       )
       .eq("id_usuario", idUsuario);
@@ -1381,9 +1391,11 @@ app.get("/api/inventario", async (req, res) => {
       const color_3 = row.cuentas?.plataformas?.color_3 || null;
       const usa_pines = row.cuentas?.plataformas?.usa_pines ?? null;
       const por_pantalla = row.cuentas?.plataformas?.por_pantalla ?? null;
+      const por_acceso = row.cuentas?.plataformas?.por_acceso ?? null;
       const correo_cliente_flag = row.cuentas?.plataformas?.correo_cliente ?? null;
       const clave_cliente_flag = row.cuentas?.plataformas?.clave_cliente ?? null;
       const plan = row.precios?.plan || "Sin plan";
+      const sub_cuenta = row.precios?.sub_cuenta ?? null;
       const memberId = row.perfiles?.id_cuenta_miembro || null;
       const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
       return {
@@ -1393,6 +1405,7 @@ app.get("/api/inventario", async (req, res) => {
         color_3,
         usa_pines,
         por_pantalla,
+        por_acceso,
         plat_correo_cliente: correo_cliente_flag,
         plat_clave_cliente: clave_cliente_flag,
         plan,
@@ -1411,6 +1424,7 @@ app.get("/api/inventario", async (req, res) => {
         fecha_corte: row.fecha_corte,
         venta_perfil: row.cuentas?.venta_perfil,
         venta_miembro: row.cuentas?.venta_miembro,
+        sub_cuenta,
       };
     });
 
@@ -1423,6 +1437,7 @@ app.get("/api/inventario", async (req, res) => {
           id_plataforma: item.id_plataforma,
           usa_pines: item.usa_pines,
           por_pantalla: item.por_pantalla,
+          por_acceso: item.por_acceso,
           plat_correo_cliente: item.plat_correo_cliente,
           plat_clave_cliente: item.plat_clave_cliente,
           color_3: item.color_3,
@@ -1442,6 +1457,7 @@ app.get("/api/inventario", async (req, res) => {
       id_plataforma: payload.id_plataforma || null,
       usa_pines: payload.usa_pines ?? null,
       por_pantalla: payload.por_pantalla ?? null,
+      por_acceso: payload.por_acceso ?? null,
       plat_correo_cliente: payload.plat_correo_cliente ?? null,
       plat_clave_cliente: payload.plat_clave_cliente ?? null,
       planes: Object.entries(payload.planes).map(([plan, ventas]) => ({ plan, ventas })),
@@ -1463,6 +1479,32 @@ app.get("/api/ventas/orden", async (req, res) => {
     const idOrden = Number(req.query?.id_orden);
     if (!Number.isFinite(idOrden)) {
       return res.status(400).json({ error: "id_orden inválido" });
+    }
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    if (!idUsuarioSesion) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    let isSuper = false;
+    const { data: permRow, error: permErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("permiso_superadmin")
+      .eq("id_usuario", idUsuarioSesion)
+      .maybeSingle();
+    if (permErr) throw permErr;
+    isSuper = isTrue(permRow?.permiso_superadmin);
+    if (!isSuper) {
+      const { data: ordenRow, error: ordErr } = await supabaseAdmin
+        .from("ordenes")
+        .select("id_orden, id_usuario")
+        .eq("id_orden", idOrden)
+        .maybeSingle();
+      if (ordErr) throw ordErr;
+      if (!ordenRow) {
+        return res.status(404).json({ error: "Orden no encontrada" });
+      }
+      if (Number(ordenRow.id_usuario) !== Number(idUsuarioSesion)) {
+        return res.status(403).json({ error: "Orden no pertenece al usuario." });
+      }
     }
     console.log("[ventas/orden] request", { id_orden: idOrden });
     const { data, error } = await supabaseAdmin
@@ -1489,6 +1531,57 @@ app.get("/api/ventas/orden", async (req, res) => {
     res.json({ ventas: data || [] });
   } catch (err) {
     console.error("[ventas/orden] error", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Detalle de orden (info + items del carrito asociado)
+app.get("/api/ordenes/detalle", async (req, res) => {
+  try {
+    const idOrden = Number(req.query?.id_orden);
+    if (!Number.isFinite(idOrden)) {
+      return res.status(400).json({ error: "id_orden inválido" });
+    }
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    if (!idUsuarioSesion) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    const { data: permRow, error: permErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("permiso_superadmin")
+      .eq("id_usuario", idUsuarioSesion)
+      .maybeSingle();
+    if (permErr) throw permErr;
+    const isSuper = isTrue(permRow?.permiso_superadmin);
+
+    const { data: orden, error: ordErr } = await supabaseAdmin
+      .from("ordenes")
+      .select(
+        "id_orden, id_usuario, id_admin, id_carrito, fecha, hora_orden, referencia, total, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada, id_metodo_de_pago, comprobante"
+      )
+      .eq("id_orden", idOrden)
+      .maybeSingle();
+    if (ordErr) throw ordErr;
+    if (!orden) {
+      return res.status(404).json({ error: "Orden no encontrada" });
+    }
+    if (!isSuper && Number(orden.id_usuario) !== Number(idUsuarioSesion)) {
+      return res.status(403).json({ error: "Orden no pertenece al usuario." });
+    }
+
+    let items = [];
+    if (orden.id_carrito) {
+      const { data: cartItems, error: itemErr } = await supabaseAdmin
+        .from("carrito_items")
+        .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
+        .eq("id_carrito", orden.id_carrito);
+      if (itemErr) throw itemErr;
+      items = cartItems || [];
+    }
+
+    res.json({ orden, items });
+  } catch (err) {
+    console.error("[ordenes/detalle] error", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2289,6 +2382,10 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     const idUsuarioVentas = Number(orden?.id_usuario) || idUsuarioSesion;
     const isOrderAdmin =
       idUsuarioSesion && orden?.id_admin && Number(orden.id_admin) === Number(idUsuarioSesion);
+    const sessionAdminId = Number.isFinite(Number(idUsuarioSesion)) ? Number(idUsuarioSesion) : null;
+    const ordenAdminId = Number.isFinite(Number(orden?.id_admin)) ? Number(orden.id_admin) : null;
+    const canAssignDeliverAdmin = sessionIsSuper && sessionAdminId && !ordenAdminId;
+    const idAdminEntrega = canAssignDeliverAdmin ? sessionAdminId : ordenAdminId;
     if (
       idUsuarioSesion &&
       orden?.id_usuario &&
@@ -2298,10 +2395,6 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     ) {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
-    if (!orden?.id_carrito) {
-      return res.status(400).json({ error: "Orden sin carrito asociado." });
-    }
-
     const { data: ventasExist, error: ventasErr } = await supabaseAdmin
       .from("ventas")
       .select("id_venta")
@@ -2309,6 +2402,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       .limit(1);
     if (ventasErr) throw ventasErr;
     if (ventasExist?.length) {
+      const ordenPatch = {};
       if (!orden?.pago_verificado) {
         const { data: pendRows, error: pendErr } = await supabaseAdmin
           .from("ventas")
@@ -2316,9 +2410,16 @@ app.post("/api/ordenes/procesar", async (req, res) => {
           .eq("id_orden", idOrden)
           .eq("pendiente", true);
         if (pendErr) throw pendErr;
+        ordenPatch.pago_verificado = true;
+        ordenPatch.en_espera = (pendRows || []).length > 0;
+      }
+      if (canAssignDeliverAdmin) {
+        ordenPatch.id_admin = sessionAdminId;
+      }
+      if (Object.keys(ordenPatch).length) {
         await supabaseAdmin
           .from("ordenes")
-          .update({ pago_verificado: true, en_espera: (pendRows || []).length > 0 })
+          .update(ordenPatch)
           .eq("id_orden", idOrden);
       }
       console.log("[ordenes/procesar] ya procesada", { id_orden: idOrden, ventas: ventasExist.length });
@@ -2327,7 +2428,11 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         id_orden: idOrden,
         already_processed: true,
         ventas: ventasExist.length,
+        id_admin: idAdminEntrega,
       });
+    }
+    if (!orden?.id_carrito) {
+      return res.status(400).json({ error: "Orden sin carrito asociado." });
     }
 
     const context = await buildCheckoutContext({
@@ -2368,9 +2473,16 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       pendientes: result.pendientesCount,
     });
 
+    const ordenUpdate = {
+      pago_verificado: true,
+      en_espera: result.pendientesCount > 0,
+    };
+    if (canAssignDeliverAdmin) {
+      ordenUpdate.id_admin = sessionAdminId;
+    }
     await supabaseAdmin
       .from("ordenes")
-      .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
+      .update(ordenUpdate)
       .eq("id_orden", idOrden);
 
     res.json({
@@ -2378,6 +2490,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       id_orden: idOrden,
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
+      id_admin: idAdminEntrega,
     });
   } catch (err) {
     console.error("[ordenes/procesar] error", err);

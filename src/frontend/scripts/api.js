@@ -6,11 +6,42 @@ const supabase = createClient(
   "sb_publishable_pUhdf8wgEJyUtUg6TZqcTA_qF9gwEjJ"
 );
 
-// Mantén mismo host; si estás en el servidor estático local (127.0.0.1:5500) apunta al backend local en 3000.
+const normalizeApiBase = (value) => {
+  if (!value) return "";
+  const raw = String(value).trim().replace(/\/+$/, "");
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return "";
+};
+
+const readApiBaseOverride = () => {
+  if (typeof window === "undefined") return "";
+  try {
+    const query = new URLSearchParams(window.location.search || "").get("api_base");
+    const fromQuery = normalizeApiBase(query);
+    if (fromQuery) {
+      window.localStorage.setItem("api_base", fromQuery);
+      return fromQuery;
+    }
+  } catch (_err) {
+    // noop
+  }
+  try {
+    return normalizeApiBase(window.localStorage.getItem("api_base"));
+  } catch (_err) {
+    return "";
+  }
+};
+
+// En local (ej. :5500) usa backend en :3000 con el mismo hostname.
 const API_BASE = (() => {
   if (typeof window === "undefined") return "http://localhost:3000";
-  const { protocol, host } = window.location;
-  if (host === "127.0.0.1:5500") return "http://127.0.0.1:3000";
+  const override = readApiBaseOverride();
+  if (override) return override;
+  const { protocol, hostname, host, port } = window.location;
+  if (!host) return "http://localhost:3000";
+  const isLocalHost = hostname === "127.0.0.1" || hostname === "localhost";
+  if (isLocalHost && port !== "3000") return `http://${hostname}:3000`;
   return `${protocol}//${host}`;
 })();
 
@@ -312,15 +343,58 @@ export async function fetchVentasOrden(idOrden) {
       }
     );
     if (!res.ok) {
-      const text = await res.text();
-      console.error("ventas/orden response", res.status, text);
-      return { error: text || "No se pudo cargar ventas por orden" };
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (err) {
+        message = (await res.text()) || "";
+      }
+      if (!message && res.status === 403) {
+        message = "Orden no pertenece al usuario.";
+      }
+      if (!message && res.status === 401) {
+        message = "Usuario no autenticado.";
+      }
+      console.error("ventas/orden response", res.status, message);
+      return { error: message || "No se pudo cargar ventas por orden", status: res.status };
     }
     const json = await res.json();
     console.log("fetchVentasOrden result", { idOrden, ventas: json?.ventas?.length || 0 });
     return json;
   } catch (err) {
     console.error("fetchVentasOrden error", err);
+    return { error: err.message };
+  }
+}
+
+export async function fetchOrdenDetalle(idOrden) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/ordenes/detalle?id_orden=${encodeURIComponent(idOrden)}`,
+      { credentials: "include" }
+    );
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (err) {
+        message = (await res.text()) || "";
+      }
+      if (!message && res.status === 403) {
+        message = "Orden no pertenece al usuario.";
+      }
+      if (!message && res.status === 401) {
+        message = "Usuario no autenticado.";
+      }
+      console.error("ordenes/detalle response", res.status, message);
+      return { error: message || "No se pudo cargar el detalle de la orden", status: res.status };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("ordenes/detalle error", err);
     return { error: err.message };
   }
 }

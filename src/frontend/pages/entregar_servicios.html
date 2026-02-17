@@ -401,7 +401,11 @@
           let ventas = [];
           if (idOrdenParam) {
             const resp = await fetchVentasOrden(idOrdenParam);
-            if (resp?.error) throw new Error(resp.error);
+            if (resp?.error) {
+              setStatus(resp.error);
+              if (tablasEl) tablasEl.innerHTML = "";
+              return;
+            }
             ventas = resp?.ventas || [];
             console.log("entregar_servicios ventas por orden", { idOrdenParam, total: ventas.length });
           } else {
