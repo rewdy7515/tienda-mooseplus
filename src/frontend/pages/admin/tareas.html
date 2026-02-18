@@ -36,6 +36,31 @@
       .copyable {
         cursor: pointer;
       }
+      .correo-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .correo-search-btn {
+        width: 20px;
+        height: 20px;
+        border: 1px solid #111;
+        border-radius: 999px;
+        background: #fff;
+        color: #111;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+      }
+      .correo-search-btn:hover {
+        background: #111;
+        color: #fff;
+      }
       .copy-toast {
         position: fixed;
         top: 80px;
@@ -120,11 +145,21 @@
             const rowsHtml = items
               .map((row) => {
                 const correo = row.cuentas?.correo || "-";
+                const correoSafe = correo === "-" ? "" : String(correo).replace(/"/g, "&quot;");
+                const correoLookupBtn =
+                  correo === "-"
+                    ? ""
+                    : `<button type="button" class="correo-search-btn" data-correo="${correoSafe}" title="Buscar correo en Admin Cuentas">?</button>`;
                 const clave = row.cuentas?.clave || "-";
                 const tarea = row.tareas?.titulo || "-";
                 return `
                   <tr data-id="${row.id_tarea_asignada}">
-                    <td><span class="copyable" data-clipboard="${correo === "-" ? "" : correo}">${correo}</span></td>
+                    <td>
+                      <span class="correo-cell">
+                        <span class="copyable" data-clipboard="${correo === "-" ? "" : correo}">${correo}</span>
+                        ${correoLookupBtn}
+                      </span>
+                    </td>
                     <td><span class="copyable" data-clipboard="${clave === "-" ? "" : clave}">${clave}</span></td>
                     <td>${tarea}</td>
                     <td class="acciones-cell">
@@ -200,6 +235,15 @@
           const text =
             copyTarget.dataset.clipboard || copyTarget.textContent?.trim() || "";
           if (text && text !== "-") await copyTextNotify(text);
+          return;
+        }
+
+        const correoSearchBtn = event.target.closest(".correo-search-btn");
+        if (correoSearchBtn) {
+          const correo = correoSearchBtn.dataset.correo || "";
+          if (correo) {
+            window.open(`admin_cuentas.html?correo=${encodeURIComponent(correo)}`, "_blank");
+          }
           return;
         }
 

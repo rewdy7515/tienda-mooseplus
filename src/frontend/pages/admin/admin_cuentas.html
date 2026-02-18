@@ -3410,7 +3410,7 @@
             </label>
           </div>
           <div class="cuenta-toggle">
-            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || "-"}" data-plat="${info.id_plataforma || ""}" data-usa-pins="${info.usa_pines ? "1" : "0"}">${recargarLabel}</button>
+            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || ""}" data-plat="${info.id_plataforma || ""}" data-usa-pins="${info.usa_pines ? "1" : "0"}">${recargarLabel}</button>
             <div class="cuenta-tipo-label">${tipoServicio}</div>
           </div>
           ${
@@ -4868,16 +4868,16 @@
 
         const btnRec = e.target.closest(".btn-recargar-cuenta");
         if (!btnRec) return;
-          const platId = Number(btnRec.dataset.plat || 0);
-          const usaPins = isTrue(btnRec.dataset.usaPins);
-          if (recPinRow) recPinRow.style.display = usaPins ? "" : "none";
+        const platId = Number(btnRec.dataset.plat || 0);
+        const usaPins = isTrue(btnRec.dataset.usaPins);
+        const parsedBaseDate = parseDateValue(btnRec.dataset.corte);
+        if (recPinRow) recPinRow.style.display = usaPins ? "" : "none";
         renewPlatId = platId || null;
         if (platId === 1) {
           recCorreo.textContent = btnRec.dataset.correo || "-";
           recClave.textContent = btnRec.dataset.clave || "-";
-          const corteBase = btnRec.dataset.corte || "";
           if (recCorte) {
-            const baseDate = corteBase ? new Date(corteBase) : new Date();
+            const baseDate = parsedBaseDate || new Date();
             const plus30 = new Date(
               baseDate.getTime() + 30 * 24 * 60 * 60 * 1000,
             );
@@ -4904,14 +4904,16 @@
         } else {
           renewMeses = 1;
           renewFechaTouched = false;
-          renewBaseDate = btnRec.dataset.corte
-            ? new Date(btnRec.dataset.corte)
-            : new Date();
+          renewBaseDate = parsedBaseDate || new Date();
           if (renewCosto) renewCosto.value = "";
           if (renewMesesEl) renewMesesEl.textContent = renewMeses;
           const next = new Date(renewBaseDate);
           next.setMonth(next.getMonth() + renewMeses);
-          if (renewCorte) renewCorte.value = next.toISOString().slice(0, 10);
+          if (renewCorte) {
+            renewCorte.value = Number.isNaN(next.valueOf())
+              ? ""
+              : next.toISOString().slice(0, 10);
+          }
           renewCorte?.addEventListener(
             "input",
             () => {
@@ -5147,10 +5149,14 @@
         if (!renewCorte) return;
         if (renewFechaTouched) return;
         const base =
-          renewBaseDate instanceof Date ? new Date(renewBaseDate) : new Date();
+          renewBaseDate instanceof Date && !Number.isNaN(renewBaseDate.valueOf())
+            ? new Date(renewBaseDate)
+            : new Date();
         const next = new Date(base);
         next.setMonth(next.getMonth() + renewMeses);
-        renewCorte.value = next.toISOString().slice(0, 10);
+        renewCorte.value = Number.isNaN(next.valueOf())
+          ? ""
+          : next.toISOString().slice(0, 10);
       };
 
       renewMas?.addEventListener("click", () => {

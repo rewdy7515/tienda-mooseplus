@@ -308,7 +308,7 @@ const updateCartSummaryUI = () => {
   });
   const subtotalMostrar = round2(subtotalBruto);
   const descuentoMostrar = round2(totalDescuento);
-  const showSaldoRow = dbUseSaldo && userSaldo > 0;
+  const showSaldoRow = cartUseSaldo && userSaldo > 0;
   const saldoAplicado = showSaldoRow ? round2(userSaldo) : 0;
   const totalMostrar = round2(
     round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
@@ -548,7 +548,7 @@ const renderCart = () => {
 
   const descuentoMostrar = round2(totalDescuento);
   const subtotalMostrar = round2(subtotalBruto);
-  const showSaldoRow = dbUseSaldo && userSaldo > 0;
+  const showSaldoRow = cartUseSaldo && userSaldo > 0;
   const saldoAplicado = showSaldoRow ? round2(userSaldo) : 0;
   const totalMostrar = round2(
     round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
@@ -815,6 +815,7 @@ async function init() {
     btnUseSaldo?.addEventListener("click", () => {
       cartUseSaldo = !cartUseSaldo;
       updateUseSaldoButton();
+      updateCartSummaryUI();
       updateCartNeedsSync();
     });
   } catch (err) {
