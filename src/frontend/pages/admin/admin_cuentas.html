@@ -199,6 +199,15 @@
         margin: 0 0 6px;
         color: var(--platform-color, #111);
       }
+      .cuenta-platform-title.is-clickable {
+        cursor: pointer;
+      }
+      .platform-link-icon {
+        display: inline-block;
+        margin-left: 6px;
+        font-size: 14px;
+        vertical-align: middle;
+      }
       .cuenta-platform-header {
         display: flex;
         align-items: center;
@@ -3297,10 +3306,25 @@
             : info.venta_miembro === true
               ? "Miembro"
               : "Cuenta completa";
+        const plataformaLink = (info.plataformaLink || "").trim();
+        const plataformaLinkAttr = plataformaLink
+          ? plataformaLink.replace(/"/g, "&quot;")
+          : "";
+        const plataformaTitleClass = plataformaLink
+          ? "cuenta-platform-title is-clickable"
+          : "cuenta-platform-title";
 
         detalleEl.innerHTML = `
           <div class="cuenta-platform-header">
-            <div class="cuenta-platform-title">${info.plataformaNombre || "-"}</div>
+            <div class="${plataformaTitleClass}" ${
+              plataformaLinkAttr
+                ? `data-link="${plataformaLinkAttr}" title="Abrir página de la plataforma"`
+                : ""
+            }>${info.plataformaNombre || "-"}${
+              plataformaLinkAttr
+                ? '<span class="platform-link-icon" aria-hidden="true">↗</span>'
+                : ""
+            }</div>
             <button type="button" class="btn-outline btn-marcar-tarea" data-cuenta="${info.id_cuenta || ""}">Marcar tarea</button>
           </div>
           <div class="cuenta-platform-cred">
@@ -3601,11 +3625,11 @@
                   .eq("id_proveedor", provId)
                   .maybeSingle()
               : Promise.resolve({ data: null, error: null }),
-            platId
-              ? supabase
-                  .from("plataformas")
-                  .select(
-                    "nombre, color_1, usa_pines, max_dig_pin, por_acceso, por_pantalla, mas_perfiles, num_max_dispositivos, max_miembros, correo_cliente, clave_cliente",
+                platId
+                  ? supabase
+                      .from("plataformas")
+                      .select(
+                    "nombre, color_1, usa_pines, max_dig_pin, por_acceso, por_pantalla, mas_perfiles, num_max_dispositivos, max_miembros, correo_cliente, clave_cliente, link_pagina",
                   )
                   .eq("id_plataforma", platId)
                   .maybeSingle()
@@ -3900,6 +3924,7 @@
 
           currentCuentaDetalle = {
             plataformaNombre: plat?.nombre || "",
+            plataformaLink: plat?.link_pagina || "",
             plataformaColor1: plat?.color_1 || "",
             plataformaId: platId,
             id_plataforma: platId,
@@ -4051,6 +4076,15 @@
 
       // Copiar correo/clave en detalle de cuenta
       detalleEl?.addEventListener("click", (e) => {
+        const platformTitle = e.target.closest(".cuenta-platform-title[data-link]");
+        if (platformTitle) {
+          const rawLink = (platformTitle.dataset.link || "").trim();
+          if (rawLink) {
+            const href = /^https?:\/\//i.test(rawLink) ? rawLink : `https://${rawLink}`;
+            window.open(href, "_blank", "noopener");
+          }
+          return;
+        }
         const cred = e.target.closest(".cred-copy");
         if (cred) {
           const text = cred.dataset.clipboard || cred.textContent || "";

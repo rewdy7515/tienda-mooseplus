@@ -43,6 +43,9 @@
       .usuarios-edit-input {
         min-width: 140px;
       }
+      .usuarios-edit-wrap[data-quick-edit="1"] .usuarios-text {
+        cursor: pointer;
+      }
       .registro-no {
         background: #fee2e2;
         color: #7f1d1d;
@@ -125,20 +128,23 @@
           const html = rows
             .map((u) => {
               const cliente = formatCliente(u);
-              const tel = u.telefono || "";
-              const email = u.correo || "";
+              const tel = String(u.telefono || "").trim();
+              const email = String(u.correo || "").trim();
+              const phoneIsValid = !!tel && /^\d+$/.test(tel);
+              const telefonoQuickEdit = phoneIsValid ? "0" : "1";
+              const correoQuickEdit = email ? "0" : "1";
               const registrado = u.fecha_registro ? "Sí" : "No";
               return `
                 <tr>
                   <td>${cliente}</td>
                   <td>
-                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="telefono">
+                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="telefono" data-quick-edit="${telefonoQuickEdit}">
                       <span class="usuarios-text">${tel || "-"}</span>
                       <button type="button" class="btn-outline btn-edit">✏️</button>
                     </div>
                   </td>
                   <td>
-                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="correo">
+                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="correo" data-quick-edit="${correoQuickEdit}">
                       <span class="usuarios-text">${email || "-"}</span>
                       <button type="button" class="btn-outline btn-edit">✏️</button>
                     </div>
@@ -189,6 +195,13 @@
         if (editBtn) editBtn.classList.remove("hidden");
         input?.remove();
         saveBtn?.remove();
+        const field = wrap?.dataset?.field || "";
+        if (field === "telefono") {
+          const raw = String(nextVal || "").trim();
+          wrap.dataset.quickEdit = raw && /^\d+$/.test(raw) ? "0" : "1";
+        } else if (field === "correo") {
+          wrap.dataset.quickEdit = String(nextVal || "").trim() ? "0" : "1";
+        }
       };
 
       const saveEdit = async (wrap) => {
@@ -216,6 +229,13 @@
       };
 
       document.addEventListener("click", async (e) => {
+        const saveBtn = e.target.closest(".usuarios-edit-wrap .btn-save");
+        if (saveBtn) {
+          const wrap = saveBtn.closest(".usuarios-edit-wrap");
+          await saveEdit(wrap);
+          return;
+        }
+
         const editBtn = e.target.closest(".usuarios-edit-wrap .btn-edit");
         if (editBtn) {
           const wrap = editBtn.closest(".usuarios-edit-wrap");
@@ -223,10 +243,15 @@
           startEdit(wrap);
           return;
         }
-        const saveBtn = e.target.closest(".usuarios-edit-wrap .btn-save");
-        if (!saveBtn) return;
-        const wrap = saveBtn.closest(".usuarios-edit-wrap");
-        await saveEdit(wrap);
+
+        const wrap = e.target.closest(".usuarios-edit-wrap");
+        if (!wrap || wrap.querySelector(".usuarios-edit-input")) return;
+        const clickedText = !!e.target.closest(".usuarios-text");
+        const clickedCell = !!e.target.closest("td");
+        const quickEdit = wrap.dataset.quickEdit === "1";
+        if ((clickedText || clickedCell) && quickEdit) {
+          startEdit(wrap);
+        }
       });
 
       document.addEventListener("keydown", async (e) => {

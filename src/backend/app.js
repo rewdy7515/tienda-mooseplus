@@ -2026,10 +2026,51 @@ app.post("/api/admin/import-contactos", async (req, res) => {
     return res.status(400).json({ error: "rows es requerido" });
   }
 
-  const normalizeFullName = (val) =>
-    String(val || "")
+  const sanitizeValue = (val) =>
+    String(val ?? "")
+      .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+      .replace(/\u00A0/g, " ")
+      .trim();
+  const normalizeHeader = (val) =>
+    sanitizeValue(val)
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const pickRowValue = (row, aliases = []) => {
+    if (!row || typeof row !== "object") return "";
+    for (const alias of aliases) {
+      const direct = sanitizeValue(row[alias]);
+      if (direct) return direct;
+    }
+    const aliasKeys = new Set(aliases.map((a) => normalizeHeader(a)));
+    for (const [key, value] of Object.entries(row)) {
+      if (!aliasKeys.has(normalizeHeader(key))) continue;
+      const parsed = sanitizeValue(value);
+      if (parsed) return parsed;
+    }
+    return "";
+  };
+  const stripClienteSuffix = (val) => {
+    let out = sanitizeValue(val).replace(/\s+/g, " ");
+    if (!out) return "";
+    let prev = "";
+    while (out && out !== prev) {
+      prev = out;
+      out = out
+        .replace(/\s*[-–—|]?\s*cliente\s*moose\s*[+＋﹢]?\s*$/i, "")
+        .replace(/\s*[-–—|]?\s*moose\s*[+＋﹢]?\s*$/i, "")
+        .replace(/\s*[-–—|]?\s*cliente\s*$/i, "")
+        .trim();
+    }
+    return out;
+  };
+  const normalizeFullName = (val) =>
+    sanitizeValue(val)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9\s]/gi, " ")
       .replace(/\s+/g, " ")
       .trim()
       .toLowerCase();
@@ -2042,19 +2083,36 @@ app.post("/api/admin/import-contactos", async (req, res) => {
 
     const normalized = rows
       .map((r) => {
-        const rawUser = (r.usuario || "").toString().trim();
-        const telefono = (r.telefono || "").toString().trim();
+        const rawUser = pickRowValue(r, [
+          "usuario",
+          "nombre",
+          "nombre completo",
+          "name",
+          "full name",
+          "full_name",
+          "display name",
+          "display_name",
+        ]);
+        const telefono = pickRowValue(r, [
+          "telefono",
+          "teléfono",
+          "phone",
+          "phone 1 - value",
+          "phone 1 value",
+          "phone1",
+          "mobile",
+          "celular",
+          "numero",
+          "número",
+        ]);
         if (!rawUser || !telefono) return null;
-        const cleaned = rawUser
-          .replace(/\s*Cliente Moose\+\s*$/i, "")
-          .replace(/\s*Cliente\s*$/i, "")
-          .trim();
+        const cleaned = stripClienteSuffix(rawUser);
         if (!cleaned) return null;
         const fullName = normalizeFullName(cleaned);
         if (!fullName) return null;
         return {
           full_name: fullName,
-          telefono,
+          telefono: sanitizeValue(telefono).replace(/^['"]+|['"]+$/g, ""),
           name_key: fullName,
         };
       })
@@ -2084,7 +2142,11 @@ app.post("/api/admin/import-contactos", async (req, res) => {
       if (exact) return exact;
       let best = null;
       for (const u of usuariosList) {
-        if (nameKey === u.name_key || nameKey.startsWith(`${u.name_key} `)) {
+        if (
+          nameKey === u.name_key ||
+          nameKey.startsWith(`${u.name_key} `) ||
+          u.name_key.startsWith(`${nameKey} `)
+        ) {
           if (!best || u.name_key.length > best.name_key.length) {
             best = u;
           }
