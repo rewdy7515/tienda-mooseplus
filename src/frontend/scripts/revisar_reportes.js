@@ -7,6 +7,7 @@ import {
 } from "./session.js";
 import { clearServerSession, loadCurrentUser, supabase, ensureServerSession } from "./api.js";
 import { formatDDMMYYYY } from "./date-format.js";
+import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
 
 requireSession();
 
@@ -14,8 +15,7 @@ const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const statusEl = document.querySelector("#revisar-status");
-const filtrosEl = document.querySelector("#plataformas-filtros");
-const bodyEl = document.querySelector("#reportes-body");
+const listEl = document.querySelector("#reportes-list");
 const modal = document.querySelector("#modal-detalle");
 const modalPlatTitle = document.querySelector("#modal-plat-title");
 const modalCorreo = document.querySelector("#modal-correo");
@@ -43,22 +43,74 @@ const checkSuscripcion = document.querySelector("#check-suscripcion");
 const checkPerfiles = document.querySelector("#check-perfiles");
 const checkIngreso = document.querySelector("#check-ingreso");
 const checkPinSame = document.querySelector("#check-pin-same");
-const modalReemplazoConfirm = document.querySelector("#modal-reemplazo-confirm");
-const selectRazonReemplazo = document.querySelector("#select-razon-reemplazo");
-const btnConfirmarReemplazo = document.querySelector("#btn-confirmar-reemplazo");
-const btnCancelarReemplazo = document.querySelector("#btn-cancelar-reemplazo");
 
 let currentRow = null;
 let oldClave = "";
 let oldPin = "";
 let cambioClave = false;
 let cambioPin = false;
-let pendingReplacement = null;
+const reportesById = new Map();
 
 const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
 
+const normalizeHexColor = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash) ? withHash : null;
+};
+
+const isDarkHex = (hex) => {
+  const c = normalizeHexColor(hex);
+  if (!c) return false;
+  const full = c.length === 4 ? `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}` : c;
+  const r = parseInt(full.slice(1, 3), 16);
+  const g = parseInt(full.slice(3, 5), 16);
+  const b = parseInt(full.slice(5, 7), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq < 140;
+};
+
+const buttonStyleForColor = (color) => {
+  const c = normalizeHexColor(color);
+  if (!c) return "";
+  const textColor = isDarkHex(c) ? "#fff" : "#111";
+  return ` style="background:${c};border-color:${c};color:${textColor};"`;
+};
+
+const tableStyleForColor = (color) => {
+  const c = normalizeHexColor(color);
+  if (!c) return "";
+  const textColor = isDarkHex(c) ? "#fff" : "#111";
+  return ` style="--table-header-bg:${c};--table-header-color:${textColor};"`;
+};
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 const getDescripcion = (row) => {
   return row.descripcion || "Otro...";
+};
+
+const notifyReporteCerrado = async (row) => {
+  const reportId = Number(row?.id_reporte);
+  const targetUserId = Number(row?.id_usuario);
+  if (!Number.isFinite(reportId) || !Number.isFinite(targetUserId)) return;
+  const fecha = new Date().toISOString().slice(0, 10);
+  const payload = {
+    titulo: `Reporte ${reportId} cerrado.`,
+    mensaje: '<a href="reportes/report.html" class="link-inline">Más detalles</a>',
+    fecha,
+    leido: false,
+    id_usuario: targetUserId,
+  };
+  const { error } = await supabase.from("notificaciones").insert(payload);
+  if (error) throw error;
 };
 
 async function getImageUrl(path) {
@@ -92,62 +144,80 @@ async function getImageUrl(path) {
   }
 }
 
-const renderTable = (items = []) => {
-  if (!bodyEl) return;
-  if (!items.length) {
-    bodyEl.innerHTML = `<tr><td colspan="6" class="status">No hay reportes pendientes para esta plataforma.</td></tr>`;
+const renderReportesList = (plataformas = []) => {
+  if (!listEl) return;
+  if (!plataformas.length) {
+    listEl.innerHTML = "";
     return;
   }
-  bodyEl.innerHTML = items
-    .map((r) => {
-      const idFmt = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
-      const cliente = [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
-      const correo = r.cuentas?.correo || "-";
-      const motivo = getDescripcion(r);
-      const fecha = formatDate(r.created_at || r.fecha || null);
+  listEl.innerHTML = plataformas
+    .map((p, idx) => {
+      const rowsHtml = (p.items || [])
+        .map((r) => {
+          const idFmt = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
+          const cliente =
+            [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
+          const correo = r.cuentas?.correo || "-";
+          const motivo = getDescripcion(r);
+          const fecha = formatDate(r.fecha_creacion || null);
+          return `
+            <tr>
+              <td>${escapeHtml(idFmt)}</td>
+              <td>${escapeHtml(cliente)}</td>
+              <td>${escapeHtml(correo)}</td>
+              <td>${escapeHtml(motivo)}</td>
+              <td>${escapeHtml(fecha)}</td>
+              <td>
+                <div class="actions-inline">
+                  <button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle">Más detalles</button>
+                  <button class="btn-primary btn-small" data-id="${r.id_reporte}" data-action="cerrar">Cerrar reporte</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
       return `
-        <tr>
-          <td>${idFmt}</td>
-          <td>${cliente}</td>
-          <td>${correo}</td>
-          <td>${motivo}</td>
-          <td>${fecha}</td>
-          <td>
-            <div class="actions-inline">
-              <button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle">Más detalles</button>
-              <button class="btn-primary btn-small" data-id="${r.id_reporte}" data-action="cerrar">Cerrar reporte</button>
+        <section class="inventario-item" data-plat="${p.id}">
+          <button type="button" class="btn-outline inventario-btn" data-toggle-plat="${p.id}" data-idx="${idx}"${buttonStyleForColor(p.buttonColor)}>
+            <span class="plat-btn-main">
+              <span class="plat-btn-label">${escapeHtml(p.nombre || "Plataforma")}</span>
+              <span class="plat-count-icon" aria-hidden="true">!</span>
+            </span>
+            <span class="plat-count-badge" aria-label="${(p.items || []).length} reportes">
+              <span>${(p.items || []).length}</span>
+            </span>
+          </button>
+          <div class="inventario-plan hidden" data-plat-content="${p.id}">
+            <div class="tabla-wrapper">
+              <table class="table-base reportes-table"${tableStyleForColor(p.headerColor)}>
+                <thead>
+                  <tr>
+                    <th>ID Reporte</th>
+                    <th>Cliente</th>
+                    <th>Correo</th>
+                    <th>Motivo</th>
+                    <th>Fecha</th>
+                    <th>Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rowsHtml || '<tr><td colspan="6" class="status">No hay reportes pendientes para esta plataforma.</td></tr>'}
+                </tbody>
+              </table>
             </div>
-          </td>
-        </tr>
+          </div>
+        </section>
       `;
     })
     .join("");
-};
-
-const renderFiltros = (plataformas = [], onSelect) => {
-  if (!filtrosEl) return;
-  if (!plataformas.length) {
-    filtrosEl.innerHTML = "";
-    return;
-  }
-  filtrosEl.innerHTML = plataformas
-    .map(
-      (p, idx) =>
-        `<button class="btn-outline admin-action" data-plat="${p.id}" data-idx="${idx}">${p.nombre || "Plataforma"}</button>`
-    )
-    .join("");
-  filtrosEl.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-plat]");
-    if (!btn) return;
-    onSelect?.(btn.dataset.plat);
-  });
 };
 
 async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(nombre),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado"
+      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
@@ -157,17 +227,12 @@ async function loadReportes() {
 function closeModal() {
   modal?.classList.add("hidden");
   modalImagenWrapper?.classList.add("hidden");
+  modalImagenWrapper?.classList.remove("no-image");
   modalSinImagen?.classList.add("hidden");
   if (modalImagen) modalImagen.src = "";
   currentRow = null;
   cambioClave = false;
   cambioPin = false;
-}
-
-function closeReemplazoModal() {
-  modalReemplazoConfirm?.classList.add("hidden");
-  if (selectRazonReemplazo) selectRazonReemplazo.value = "";
-  pendingReplacement = null;
 }
 
 async function openModal(row) {
@@ -191,27 +256,33 @@ async function openModal(row) {
   }
   modalMotivo.textContent = getDescripcion(row);
 
+  const showNoImageBox = () => {
+    if (modalImagen) modalImagen.src = "";
+    modalImagenWrapper?.classList.remove("hidden");
+    modalImagenWrapper?.classList.add("no-image");
+    modalSinImagen?.classList.add("hidden");
+  };
+
   if (row.imagen) {
     const url = await getImageUrl(row.imagen);
     if (url && modalImagen) {
       modalImagen.src = url;
       modalImagenWrapper?.classList.remove("hidden");
+      modalImagenWrapper?.classList.remove("no-image");
       modalSinImagen?.classList.add("hidden");
       modalImagen.onload = () => {
         modalImagenWrapper?.classList.remove("hidden");
+        modalImagenWrapper?.classList.remove("no-image");
         modalSinImagen?.classList.add("hidden");
       };
       modalImagen.onerror = () => {
-        modalImagenWrapper?.classList.add("hidden");
-        modalSinImagen?.classList.remove("hidden");
+        showNoImageBox();
       };
     } else {
-      modalImagenWrapper?.classList.add("hidden");
-      modalSinImagen?.classList.remove("hidden");
+      showNoImageBox();
     }
   } else {
-    modalImagenWrapper?.classList.add("hidden");
-    modalSinImagen?.classList.remove("hidden");
+    showNoImageBox();
   }
   modal.classList.remove("hidden");
   currentRow = row;
@@ -245,40 +316,50 @@ async function init() {
     const activos = (all || []).filter((r) => r.en_revision !== false && r.solucionado === false);
     if (!activos.length) {
       if (statusEl) statusEl.textContent = "No hay reportes pendientes.";
-      renderTable([]);
+      if (listEl) listEl.innerHTML = "";
       return;
     }
+
+    reportesById.clear();
+    activos.forEach((r) => {
+      if (r?.id_reporte) reportesById.set(String(r.id_reporte), r);
+    });
 
     const porPlat = new Map();
     activos.forEach((r) => {
       const id = r.id_plataforma || r.cuentas?.id_plataforma || r.plataformas?.id_plataforma;
       const nombre = r.plataformas?.nombre || "Plataforma";
+      const buttonColor = r.plataformas?.color_1 || null;
+      const headerColor = r.plataformas?.color_2 || null;
       if (!id) return;
-      if (!porPlat.has(id)) porPlat.set(id, { id, nombre, items: [] });
+      if (!porPlat.has(id)) {
+        porPlat.set(id, { id, nombre, buttonColor, headerColor, items: [] });
+      }
       porPlat.get(id).items.push(r);
     });
 
     const plataformas = Array.from(porPlat.values());
-    renderFiltros(plataformas, (platId) => {
-      const selected = porPlat.get(Number(platId)) || porPlat.get(platId);
-      renderTable(selected?.items || []);
-      if (statusEl) statusEl.textContent = "";
-    });
+    renderReportesList(plataformas);
+    if (statusEl) statusEl.textContent = "";
 
-    // preselect first
-    const first = plataformas[0];
-    if (first) {
-      renderTable(first.items || []);
-      if (statusEl) statusEl.textContent = "";
-    }
+    listEl?.addEventListener("click", (e) => {
+      const toggleBtn = e.target.closest("button[data-toggle-plat]");
+      if (toggleBtn) {
+        const platId = String(toggleBtn.dataset.togglePlat || "");
+        const section = toggleBtn.closest(".inventario-item");
+        const content = section?.querySelector(`[data-plat-content="${platId}"]`);
+        if (content) {
+          content.classList.toggle("hidden");
+          section?.classList.toggle("open", !content.classList.contains("hidden"));
+        }
+        return;
+      }
 
-    bodyEl?.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-action]");
       if (!btn) return;
       const id = btn.dataset.id;
       if (!id) return;
-      const allItems = Array.from(porPlat.values()).flatMap((p) => p.items || []);
-      const row = allItems.find((r) => String(r.id_reporte) === String(id));
+      const row = reportesById.get(String(id));
       if (!row) return;
       const action = btn.dataset.action;
       if (action === "detalle") {
@@ -339,28 +420,7 @@ async function init() {
   });
 
   btnReemplazar?.addEventListener("click", () => {
-    if (!currentRow) {
-      alert("Selecciona un reporte.");
-      return;
-    }
-    const reporteCuentaId = currentRow.id_cuenta;
-    const reportePerfilId = currentRow.id_perfil ?? null;
-    const reportePlatId = currentRow.id_plataforma ?? currentRow.cuentas?.id_plataforma ?? currentRow.plataformas?.id_plataforma;
-    reemplazarServicio({ id_cuenta: reporteCuentaId, id_perfil: reportePerfilId, id_plataforma: reportePlatId });
-  });
-
-  modalReemplazoConfirm?.addEventListener("click", (e) => {
-    if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
-      closeReemplazoModal();
-    }
-  });
-
-  btnCancelarReemplazo?.addEventListener("click", () => {
-    closeReemplazoModal();
-  });
-
-  btnConfirmarReemplazo?.addEventListener("click", () => {
-    confirmarReemplazo();
+    reemplazarServicio();
   });
 } catch (err) {
     console.error("revisar reportes error", err);
@@ -428,6 +488,12 @@ async function guardarCambios() {
       .eq("id_reporte", currentRow.id_reporte);
     if (error) throw error;
 
+    try {
+      await notifyReporteCerrado(currentRow);
+    } catch (notifErr) {
+      console.error("notificacion reporte cerrado error", notifErr);
+    }
+
     alert("Campos guardados y reporte cerrado.");
     modalResumen?.classList.add("hidden");
     closeModal();
@@ -439,397 +505,263 @@ async function guardarCambios() {
   }
 }
 
-async function reemplazarServicio(reporteDatos = {}) {
-  if (!currentRow) return alert("Selecciona un reporte.");
-  const id_usuario = requireSession();
-  await ensureServerSession();
-  const plataformaId =
-    reporteDatos.id_plataforma ??
-    currentRow.id_plataforma ??
-    currentRow.cuentas?.id_plataforma ??
-    currentRow.plataformas?.id_plataforma;
-  const cuentaId = reporteDatos.id_cuenta ?? currentRow.id_cuenta;
-  const perfilId = reporteDatos.id_perfil ?? currentRow.id_perfil;
-  console.log("reemplazarServicio init", { plataformaId, cuentaId, perfilId, currentRow });
-  if (!plataformaId || !cuentaId) {
-    alert("Faltan datos de plataforma o cuenta.");
+async function reemplazarServicio() {
+  if (!currentRow) {
+    alert("Selecciona un reporte.");
     return;
   }
 
-  const cuentaInfo = currentRow.cuentas || {};
-  const ventaPerfil = !!cuentaInfo.venta_perfil;
-  const ventaMiembro = !!cuentaInfo.venta_miembro;
-  const esCuentaCompleta = !ventaPerfil && !ventaMiembro;
-  let perfilHogar = currentRow.perfiles?.perfil_hogar === true;
-  if (perfilId) {
-    const { data: perfData, error: perfErr } = await supabase
-      .from("perfiles")
-      .select("perfil_hogar")
-      .eq("id_perfil", perfilId)
-      .maybeSingle();
-    if (perfErr) {
-      console.error("perfil_hogar lookup error", perfErr);
-    } else if (perfData && typeof perfData.perfil_hogar === "boolean") {
-      perfilHogar = perfData.perfil_hogar;
-    }
-  }
+  try {
+    const idUsuarioSesion = requireSession();
+    await ensureServerSession();
 
-  // obtiene venta asociada
-  let ventaErr = null;
-  let ventasData = [];
-  if (perfilId) {
-    const { data, error } = await supabase
-      .from("ventas")
-      .select("id_venta")
-      .eq("id_cuenta", cuentaId)
-      .eq("id_perfil", perfilId)
-      .limit(1);
-    ventasData = data || [];
-    ventaErr = error;
-    if (!ventasData.length) {
-      const { data: fallbackData, error: fallbackErr } = await supabase
-        .from("ventas")
-        .select("id_venta")
-        .eq("id_cuenta", cuentaId)
-        .is("id_perfil", null)
-        .limit(1);
-      ventasData = fallbackData || [];
-      ventaErr = fallbackErr;
-      if (!ventasData.length) {
-        const { data: cuentaSolo, error: cuentaErr } = await supabase
-          .from("ventas")
-          .select("id_venta")
-          .eq("id_cuenta", cuentaId)
-          .limit(1);
-        ventasData = cuentaSolo || [];
-        ventaErr = cuentaErr;
-      }
-    }
-  } else {
-    const { data, error } = await supabase
-      .from("ventas")
-      .select("id_venta")
-      .eq("id_cuenta", cuentaId)
-      .is("id_perfil", null)
-      .limit(1);
-    ventasData = data || [];
-    ventaErr = error;
-    if (!ventasData.length) {
-      const { data: cuentaSolo, error: cuentaErr } = await supabase
-        .from("ventas")
-        .select("id_venta")
-        .eq("id_cuenta", cuentaId)
-        .limit(1);
-      ventasData = cuentaSolo || [];
-      ventaErr = cuentaErr;
-    }
-  }
-  console.log("venta asociada", { ventasData, ventaErr });
-  if (ventaErr || !ventasData?.length) {
-    alert("No se encontró la venta asociada.");
-    return;
-  }
-  const idVenta = ventasData[0].id_venta;
+    const plataformaId =
+      currentRow.id_plataforma ??
+      currentRow.cuentas?.id_plataforma ??
+      currentRow.plataformas?.id_plataforma;
+    const cuentaId = currentRow.id_cuenta;
+    const rowPerfil = currentRow.id_perfil
+      ? {
+          id_perfil: currentRow.id_perfil,
+          n_raw: currentRow.perfiles?.n_perfil ?? null,
+          perfil: currentRow.perfiles?.n_perfil ? `M${currentRow.perfiles.n_perfil}` : "",
+          hogar: currentRow.perfiles?.perfil_hogar === true,
+          fecha_corte: null,
+        }
+      : null;
 
-  // helpers
-  const findPerfilLibre = async (opts = {}) => {
-    const { requireHogar = null, excludeCuenta, requireVentaPerfil = null } = opts;
-    if (!excludeCuenta) {
-      console.warn("findPerfilLibre sin excludeCuenta, se usará la cuenta reportada para excluir");
-    }
-    // perfiles que ya están en reemplazos (no reutilizar)
-    let excluidos = [];
-    try {
-      const { data: repData } = await supabase.from("reemplazos").select("id_perfil").not("id_perfil", "is", null);
-      excluidos = (repData || []).map((r) => r.id_perfil);
-    } catch (err) {
-      console.error("reemplazos lookup error", err);
-    }
-    let query = supabase
-      .from("perfiles")
-      .select("id_perfil, perfil_hogar, id_cuenta, cuentas!inner(id_plataforma, venta_perfil, venta_miembro, inactiva)")
-      .eq("cuentas.id_plataforma", plataformaId)
-      .or("ocupado.is.null,ocupado.eq.false")
-      .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-      .order("id_perfil", { ascending: true })
-      .limit(1);
-    if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
-    if (requireHogar !== null) query = query.eq("perfil_hogar", requireHogar);
-    const { data, error } = await query;
-    if (error) return { error };
-    let rows = (data || []).filter((r) => r.id_cuenta !== excludeCuenta);
-    if (excluidos.length) {
-      rows = rows.filter((r) => !excluidos.includes(r.id_perfil));
-    }
-    if (requireVentaPerfil !== null) {
-      rows = rows.filter((r) => r.cuentas?.venta_perfil === requireVentaPerfil);
-    }
-    const disponibles = rows.map((r) => r.id_perfil);
-    console.log("findPerfilLibre", { opts, disponibles, rows, plataformaId, excludeCuenta });
-    if (!disponibles.length) {
-      console.warn("findPerfilLibre sin resultados", { opts, plataformaId, excludeCuenta });
-    }
-    return { data: rows[0] || null, disponibles };
-  };
-
-  const findSubCuentaLibre = async (_excludeCuenta) => {
-    return { data: null, error: null };
-  };
-
-  const findCuentaCompleta = async (excludeCuenta) => {
-    let query = supabase
-      .from("cuentas")
-      .select("id_cuenta, inactiva")
-      .eq("id_plataforma", plataformaId)
-      .eq("venta_perfil", false)
-      .eq("venta_miembro", false)
-      .or("ocupado.is.null,ocupado.eq.false")
-      .or("inactiva.is.null,inactiva.eq.false")
-      .order("id_cuenta", { ascending: true })
-      .limit(1);
-    if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
-    const { data, error } = await query;
-    const disponibles = (data || []).map((c) => c.id_cuenta);
-    console.log("findCuentaCompleta", { excludeCuenta, data, error, disponibles });
-    if (!disponibles.length) {
-      console.warn("findCuentaCompleta sin resultados", { excludeCuenta, plataformaId });
-    }
-    if (error) return { error };
-    return { data: data?.[0] || null, disponibles };
-  };
-
-  let nuevoCuenta = null;
-  let nuevoPerfil = null;
-  let nuevaSubCuenta = null;
-
-  // lógica de selección
-  if (esCuentaCompleta) {
-    const { data: cuentaLibre, error, disponibles = [] } = await findCuentaCompleta(cuentaId);
-    console.log("ruta cuenta completa", { cuentaLibre, error, disponibles });
-    if (error) {
-      alert("Error buscando cuenta libre.");
+    if (!plataformaId || !cuentaId) {
+      alert("Faltan datos de plataforma o cuenta.");
       return;
     }
-    if (!cuentaLibre) {
+
+    const findVentaAsociada = async (withUserFilter) => {
+      let query = supabase
+        .from("ventas")
+        .select("id_venta, id_usuario, fecha_corte")
+        .eq("id_cuenta", cuentaId)
+        .order("id_venta", { ascending: false })
+        .limit(1);
+      if (withUserFilter && currentRow?.id_usuario) {
+        query = query.eq("id_usuario", currentRow.id_usuario);
+      }
+      if (rowPerfil?.id_perfil) {
+        query = query.eq("id_perfil", rowPerfil.id_perfil);
+      } else {
+        query = query.is("id_perfil", null);
+      }
+      const { data, error } = await query;
+      return { data: data || [], error };
+    };
+
+    let { data: ventasData, error: ventaErr } = await findVentaAsociada(true);
+    if (!ventasData.length) {
+      const fallback = await findVentaAsociada(false);
+      ventasData = fallback.data;
+      ventaErr = fallback.error;
+    }
+    if (!ventasData.length && !rowPerfil?.id_perfil) {
+      let fallbackAny = supabase
+        .from("ventas")
+        .select("id_venta, id_usuario, fecha_corte")
+        .eq("id_cuenta", cuentaId)
+        .order("id_venta", { ascending: false })
+        .limit(1);
+      if (currentRow?.id_usuario) fallbackAny = fallbackAny.eq("id_usuario", currentRow.id_usuario);
+      const { data, error } = await fallbackAny;
+      ventasData = data || [];
+      ventaErr = error;
+      if (!ventasData.length) {
+        const finalFallback = await supabase
+          .from("ventas")
+          .select("id_venta, id_usuario, fecha_corte")
+          .eq("id_cuenta", cuentaId)
+          .order("id_venta", { ascending: false })
+          .limit(1);
+        ventasData = finalFallback.data || [];
+        ventaErr = finalFallback.error;
+      }
+    }
+    if (ventaErr || !ventasData?.length) {
+      alert("No se encontró la venta asociada.");
+      return;
+    }
+    const ventaInfo = ventasData[0];
+    const ventaId = ventaInfo.id_venta;
+
+    const ventaPerfil = isTrue(currentRow.cuentas?.venta_perfil);
+    const ventaMiembro = isTrue(currentRow.cuentas?.venta_miembro);
+    const perfilHogar = rowPerfil?.hogar === true;
+
+    const findPerfilLibre = async (platId, isHogar, excludeCuenta) => {
+      let query = supabase
+        .from("perfiles")
+        .select(
+          "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, correo, clave)",
+        )
+        .eq("cuentas.id_plataforma", platId)
+        .eq("ocupado", false)
+        .order("id_perfil", { ascending: true })
+        .limit(1);
+      if (isHogar === true) {
+        query = query.eq("perfil_hogar", true);
+      } else {
+        query = query.or("perfil_hogar.is.null,perfil_hogar.eq.false");
+      }
+      query = query.or("inactiva.is.null,inactiva.eq.false", {
+        foreignTable: "cuentas",
+      });
+      if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+      const { data, error } = await query;
+      if (error) return { error };
+      return { data: data?.[0] || null };
+    };
+
+    const findCuentaMiembroLibre = async (platId, excludeCuenta) => {
+      let query = supabase
+        .from("cuentas")
+        .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
+        .eq("id_plataforma", platId)
+        .eq("venta_perfil", false)
+        .eq("venta_miembro", true)
+        .eq("ocupado", false)
+        .order("id_cuenta", { ascending: true })
+        .limit(1);
+      query = query.or("inactiva.is.null,inactiva.eq.false");
+      if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+      const { data, error } = await query;
+      if (error) return { error };
+      return { data: data?.[0] || null };
+    };
+
+    let nuevoCuenta = null;
+    let nuevoPerfil = null;
+    let dataDestino = {};
+
+    if (rowPerfil?.id_perfil) {
+      const { data: perfilDestino, error: perfilErr } = await findPerfilLibre(
+        plataformaId,
+        perfilHogar,
+        cuentaId,
+      );
+      if (perfilErr) throw perfilErr;
+      if (!perfilDestino) {
+        alert("Sin stock");
+        return;
+      }
+      nuevoPerfil = perfilDestino.id_perfil;
+      nuevoCuenta = perfilDestino.id_cuenta;
+      dataDestino = {
+        correo: perfilDestino.cuentas?.correo || "",
+        clave: perfilDestino.cuentas?.clave || "",
+        pin: perfilDestino.pin,
+        n_perfil: perfilDestino.n_perfil,
+      };
+    } else if (ventaMiembro && !ventaPerfil) {
+      const { data: cuentaDestino, error: cuentaErr } = await findCuentaMiembroLibre(
+        plataformaId,
+        cuentaId,
+      );
+      if (cuentaErr) throw cuentaErr;
+      if (!cuentaDestino) {
+        alert("Sin stock");
+        return;
+      }
+      nuevoPerfil = null;
+      nuevoCuenta = cuentaDestino.id_cuenta;
+      dataDestino = {
+        correo: cuentaDestino.correo || "",
+        clave: cuentaDestino.clave || "",
+      };
+    } else {
       alert("Sin stock");
       return;
     }
-    nuevoCuenta = cuentaLibre.id_cuenta;
-    nuevoPerfil = null;
-    nuevaSubCuenta = null;
-  } else if (perfilId) {
-    if (perfilHogar) {
-      const { data: perfLibre, error, disponibles = [] } = await findPerfilLibre({
-        requireHogar: true,
-        excludeCuenta: cuentaId,
-      });
-      console.log("perfiles libres hogar", disponibles);
-      if (error) {
-        alert("Error buscando perfil libre.");
-        return;
-      }
-      if (!perfLibre) {
-        const { data: subLibre, error: subErr } = await findSubCuentaLibre(cuentaId);
-        console.log("perfil hogar sin perfil libre, buscando subCuenta", { subLibre, subErr });
-        if (subErr) {
-          alert("Error buscando sub cuenta.");
-          return;
-        }
-        if (!subLibre) {
-          console.warn("Sin stock hogar", { disponibles });
-          alert("Sin stock");
-          return;
-        }
-        nuevaSubCuenta = subLibre.id_sub_cuenta;
-        nuevoCuenta = subLibre.id_cuenta;
-      } else {
-        nuevoPerfil = perfLibre.id_perfil;
-        nuevoCuenta = perfLibre.id_cuenta;
-        console.log("perfil disponible (hogar)", nuevoPerfil);
-      }
-    } else {
-      const { data: perfLibre, error, disponibles = [] } = await findPerfilLibre({
-        requireHogar: false,
-        excludeCuenta: cuentaId,
-      });
-      console.log("perfiles libres no hogar", disponibles);
-      if (error) {
-        alert("Error buscando perfil libre.");
-        return;
-      }
-      if (!perfLibre) {
-        console.warn("Sin stock no hogar", { disponibles });
-        alert("Sin stock");
-        return;
-      }
-      nuevoPerfil = perfLibre.id_perfil;
-      nuevoCuenta = perfLibre.id_cuenta;
-      console.log("perfil disponible", nuevoPerfil);
+
+    const { error: updVentaErr } = await supabase
+      .from("ventas")
+      .update({ id_cuenta: nuevoCuenta || null, id_perfil: nuevoPerfil || null, id_sub_cuenta: null })
+      .eq("id_venta", ventaId);
+    if (updVentaErr) throw updVentaErr;
+
+    if (rowPerfil?.id_perfil) {
+      const { error: freeErr } = await supabase
+        .from("perfiles")
+        .update({ ocupado: false })
+        .eq("id_perfil", rowPerfil.id_perfil);
+      if (freeErr) console.error("[reemplazo] liberar perfil previo error", freeErr);
     }
-  } else {
-    if (ventaPerfil) {
-      const { data: perfLibre, error, disponibles = [] } = await findPerfilLibre({
-        excludeCuenta: cuentaId,
-        requireVentaPerfil: true,
-      });
-      console.log("ruta ventaPerfil", { perfLibre, error, disponibles });
-      if (error) {
-        alert("Error buscando perfil libre.");
-        return;
-      }
-      if (!perfLibre) {
-        console.warn("Sin stock ventaPerfil", { disponibles });
-        alert("Sin stock");
-        return;
-      }
-      nuevoPerfil = perfLibre.id_perfil;
-      nuevoCuenta = perfLibre.id_cuenta;
-    } else if (ventaMiembro) {
-      const { data: perfLibre, error, disponibles = [] } = await findPerfilLibre({ excludeCuenta: cuentaId });
-      console.log("ruta ventaMiembro perfLibre", { perfLibre, error, disponibles });
-      if (error) {
-        alert("Error buscando perfil libre.");
-        return;
-      }
-      if (perfLibre) {
-        nuevoPerfil = perfLibre.id_perfil;
-        nuevoCuenta = perfLibre.id_cuenta;
-      } else {
-        const { data: subLibre, error: subErr } = await findSubCuentaLibre(cuentaId);
-        console.log("ruta ventaMiembro subLibre", { subLibre, subErr });
-        if (subErr) {
-          alert("Error buscando sub cuenta.");
-          return;
-        }
-        if (!subLibre) {
-          console.warn("Sin stock ventaMiembro", { disponibles });
-          alert("Sin stock");
-          return;
-        }
-        nuevaSubCuenta = subLibre.id_sub_cuenta;
-        nuevoCuenta = subLibre.id_cuenta;
-      }
-    } else {
-      const { data: cuentaLibre, error } = await findCuentaCompleta(cuentaId);
-      console.log("ruta cuenta completa", { cuentaLibre, error });
-      if (error) {
-        alert("Error buscando cuenta libre.");
-        return;
-      }
-      if (!cuentaLibre) {
-        alert("Sin stock");
-        return;
-      }
-      nuevoCuenta = cuentaLibre.id_cuenta;
-      nuevoPerfil = null;
-      nuevaSubCuenta = null;
-    }
-  }
-
-  console.log("seleccion final", { nuevoCuenta, nuevoPerfil, nuevaSubCuenta });
-  if (!nuevoCuenta && !nuevoPerfil && !nuevaSubCuenta) {
-    alert("Sin stock");
-    return;
-  }
-
-  pendingReplacement = {
-    idVenta,
-    nuevoCuenta: nuevoCuenta || null,
-    nuevoPerfil: nuevoPerfil || null,
-    nuevaSubCuenta: nuevaSubCuenta || null,
-    cuentaOriginal: cuentaId,
-    perfilOriginal: perfilId || null,
-    plataformaId,
-    esCuentaCompleta,
-    ventaPerfil,
-    ventaMiembro,
-  };
-  modalReemplazoConfirm?.classList.remove("hidden");
-}
-
-async function confirmarReemplazo() {
-  if (!pendingReplacement || !currentRow) {
-    closeReemplazoModal();
-    return;
-  }
-  const razon = selectRazonReemplazo?.value?.trim();
-  if (!razon) {
-    alert("Selecciona la razón del reemplazo.");
-    return;
-  }
-  const btn = btnConfirmarReemplazo;
-  if (btn) btn.disabled = true;
-  try {
-    const id_usuario = requireSession();
-    await ensureServerSession();
-    const {
-      idVenta,
-      nuevoCuenta,
-      nuevoPerfil,
-      nuevaSubCuenta,
-      cuentaOriginal,
-      perfilOriginal,
-      esCuentaCompleta,
-      ventaPerfil,
-      ventaMiembro,
-    } = pendingReplacement;
-
-    const updates = {
-      id_cuenta: nuevoCuenta || null,
-      id_perfil: nuevoPerfil || null,
-      id_sub_cuenta: nuevaSubCuenta || null,
-    };
-
-    const updatesPromises = [];
-    let ventasUpdate = supabase.from("ventas").update(updates).eq("id_cuenta", cuentaOriginal);
-    ventasUpdate = perfilOriginal ? ventasUpdate.eq("id_perfil", perfilOriginal) : ventasUpdate.is("id_perfil", null);
-    ventasUpdate = ventasUpdate.eq("id_venta", idVenta);
-    updatesPromises.push(ventasUpdate);
-
     if (nuevoPerfil) {
-      updatesPromises.push(
-        supabase.from("perfiles").update({ ocupado: true }).eq("id_perfil", nuevoPerfil)
-      );
+      const { error: occErr } = await supabase
+        .from("perfiles")
+        .update({ ocupado: true })
+        .eq("id_perfil", nuevoPerfil);
+      if (occErr) console.error("[reemplazo] marcar perfil nuevo error", occErr);
     }
-    if (esCuentaCompleta && nuevoCuenta) {
-      updatesPromises.push(
-        supabase.from("cuentas").update({ ocupado: true }).eq("id_cuenta", nuevoCuenta)
-      );
+    if (nuevoCuenta) {
+      const { error: occCuentaErr } = await supabase
+        .from("cuentas")
+        .update({ ocupado: true })
+        .eq("id_cuenta", nuevoCuenta);
+      if (occCuentaErr) console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
     }
 
-    updatesPromises.push(
-      supabase
-        .from("reemplazos")
-        .insert([{ id_cuenta: cuentaOriginal, id_perfil: perfilOriginal || null }])
-    );
+    await supabase.from("reemplazos").insert({
+      id_cuenta: cuentaId,
+      id_perfil: rowPerfil?.id_perfil || null,
+      id_sub_cuenta: null,
+    });
 
-    const descripcionSol = `Razon del reemplazo: ${razon}`;
-    updatesPromises.push(
-      supabase
-        .from("reportes")
-        .update({
-          descripcion_solucion: descripcionSol,
-          en_revision: false,
-          solucionado: true,
-          solucionado_por: id_usuario,
-        })
-        .eq("id_reporte", currentRow.id_reporte)
-    );
+    try {
+      const userIds = pickNotificationUserIds("servicio_reemplazado", {
+        ventaUserId: ventaInfo?.id_usuario,
+      });
+      if (userIds.length) {
+        const notif = buildNotificationPayload(
+          "servicio_reemplazado",
+          {
+            plataforma: currentRow.plataformas?.nombre || "",
+            correoViejo: currentRow.cuentas?.correo || "",
+            perfilViejo: rowPerfil?.perfil || (rowPerfil?.n_raw ? `M${rowPerfil.n_raw}` : ""),
+            correoNuevo: dataDestino.correo || "",
+            perfilNuevo: dataDestino.n_perfil ? `M${dataDestino.n_perfil}` : "",
+            claveNuevo: dataDestino.clave || "",
+          },
+          { idCuenta: nuevoCuenta || null },
+        );
+        const rows = userIds.map((uid) => ({
+          ...notif,
+          id_usuario: uid,
+        }));
+        await supabase.from("notificaciones").insert(rows);
+      }
+    } catch (nErr) {
+      console.error("notificacion servicio_reemplazado error", nErr);
+    }
 
-    const results = await Promise.all(updatesPromises);
-    const err = results.find((r) => r?.error);
-    if (err?.error) {
-      alert("No se pudo realizar el reemplazo.");
-      return;
+    const descripcionSolucion = "Servicio reemplazado";
+    const { error: repErr } = await supabase
+      .from("reportes")
+      .update({
+        descripcion: descripcionSolucion,
+        descripcion_solucion: descripcionSolucion,
+        en_revision: false,
+        solucionado: true,
+        solucionado_por: idUsuarioSesion,
+      })
+      .eq("id_reporte", currentRow.id_reporte);
+    if (repErr) throw repErr;
+
+    try {
+      await notifyReporteCerrado(currentRow);
+    } catch (notifErr) {
+      console.error("notificacion reporte cerrado error", notifErr);
     }
 
     alert("Reemplazo realizado.");
-    closeReemplazoModal();
     closeModal();
   } catch (err) {
-    console.error("confirmar reemplazo error", err);
-    alert("No se pudo realizar el reemplazo.");
-  } finally {
-    if (btn) btn.disabled = false;
+    console.error("reemplazo reporte error", err);
+    alert("No se pudo reemplazar.");
   }
 }

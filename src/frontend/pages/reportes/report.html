@@ -5,6 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Reportes</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .reportes-pendientes-list .inventario-item,
+      .reportes-solucionados-list .inventario-item {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+      }
+      .reportes-pendientes-list .inventario-item + .inventario-item,
+      .reportes-solucionados-list .inventario-item + .inventario-item {
+        margin-top: 8px;
+      }
+      .reportes-pendientes-list .inventario-btn,
+      .reportes-solucionados-list .inventario-btn {
+        display: block;
+        width: 100%;
+        margin: 0;
+        border-radius: 8px;
+        background: var(--btn-plat-bg, #111);
+        color: #fff;
+        border: 1px solid var(--btn-plat-bg, #111);
+        box-shadow: none;
+        font-size: 18px;
+      }
+      .reportes-pendientes-list .inventario-item.open .inventario-btn,
+      .reportes-solucionados-list .inventario-item.open .inventario-btn {
+        border-radius: 8px 8px 0 0;
+      }
+      .reportes-pendientes-list .inventario-plan,
+      .reportes-solucionados-list .inventario-plan {
+        margin-top: 0;
+      }
+      .reportes-pendientes-list .inventario-plan .table-base,
+      .reportes-solucionados-list .inventario-plan .table-base {
+        border-radius: 0 0 10px 10px;
+        border-top: 0;
+      }
+      .reportes-pendientes-list .inventario-plan .reportes-table,
+      .reportes-solucionados-list .inventario-plan .reportes-table {
+        margin-top: 0;
+      }
+    </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
@@ -17,43 +59,13 @@
       </div>
       <h3>Reportes pendientes</h3>
       <div id="reportes-status" class="status"></div>
-      <div id="reportes-plataformas" class="admin-actions" style="gap:8px; margin-top:8px;"></div>
-      <div id="tabla-wrapper" class="tabla-wrapper hidden" style="margin-top: 12px;">
-        <table class="table-base reportes-table" id="tabla-pendientes">
-          <thead>
-            <tr>
-              <th>ID Reporte</th>
-              <th>Correo</th>
-              <th>Fecha del reporte</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody id="reportes-body">
-            <tr><td colspan="4" class="status">Selecciona una plataforma.</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <div id="reportes-pendientes-list" class="inventario-list reportes-pendientes-list"></div>
 
       <div class="actions" style="margin-top:20px;">
         <button id="btn-solucionados" class="btn-outline">Reportes solucionados (últimos 30 días)</button>
       </div>
       <div id="solucionados-section" class="hidden">
-        <div id="solucionados-plataformas" class="admin-actions" style="gap:8px; margin-top:8px;"></div>
-        <div id="solucionados-wrapper" class="tabla-wrapper hidden" style="margin-top: 12px;">
-          <table class="table-base reportes-table" id="tabla-solucionados">
-            <thead>
-              <tr>
-                <th>ID Reporte</th>
-                <th>Correo</th>
-                <th>Fecha del reporte</th>
-                <th>Acción</th>
-              </tr>
-            </thead>
-            <tbody id="solucionados-body">
-              <tr><td colspan="4" class="status">Selecciona una plataforma.</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div id="reportes-solucionados-list" class="inventario-list reportes-solucionados-list" style="margin-top: 12px;"></div>
       </div>
 
       <div id="modal-solucionado" class="modal hidden">

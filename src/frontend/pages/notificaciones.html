@@ -34,6 +34,13 @@
         background: #fff;
         box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
         overflow: hidden;
+        transition: transform 0.18s ease, box-shadow 0.18s ease,
+          border-color 0.18s ease;
+      }
+      .notif-item:hover {
+        transform: translateY(-2px);
+        border-color: #d1d5db;
+        box-shadow: 0 14px 26px rgba(15, 23, 42, 0.1);
       }
       .notif-item::before {
         content: "";
@@ -44,6 +51,10 @@
         height: 100%;
         background: linear-gradient(180deg, #111, #444);
         opacity: 0.85;
+        transition: opacity 0.18s ease;
+      }
+      .notif-item:hover::before {
+        opacity: 1;
       }
       .notif-item h4 {
         margin: 0 0 8px;
@@ -60,7 +71,7 @@
         font-size: 14px;
       }
       .notif-item p a {
-        font-weight: 700;
+        font-weight: 800;
         text-decoration: underline;
       }
       .notif-item .notif-line {
@@ -113,12 +124,31 @@
       const statusEl = document.querySelector("#notif-status");
       const tbody = document.querySelector("#notif-body");
       const TEST_USER_ID = 23;
+      const normalizePlatformName = (value = "") =>
+        String(value || "").trim().toLowerCase();
+      const normalizeHexColor = (value = "") => {
+        const raw = String(value || "").trim();
+        if (!raw) return null;
+        const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+        return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)
+          ? withHash
+          : null;
+      };
+      const buildPlatformColorMap = (rows = []) => {
+        const map = new Map();
+        (rows || []).forEach((row) => {
+          const key = normalizePlatformName(row?.nombre);
+          const color = normalizeHexColor(row?.color_1);
+          if (key && color) map.set(key, color);
+        });
+        return map;
+      };
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
 
-      const renderTable = (items = []) => {
+      const renderTable = (items = [], platformColors = new Map()) => {
         if (!tbody) return;
         if (!items.length) {
           setStatus("No hay notificaciones por ahora.");
@@ -136,8 +166,6 @@
               acceptNode: (node) => {
                 if (!node.nodeValue?.includes("@")) return NodeFilter.FILTER_REJECT;
                 if (node.parentElement?.closest("a")) return NodeFilter.FILTER_REJECT;
-                if (node.parentElement?.closest(".no-linkify"))
-                  return NodeFilter.FILTER_REJECT;
                 return NodeFilter.FILTER_ACCEPT;
               },
             }
@@ -175,14 +203,27 @@
         };
         const shouldShowDate = (title = "") =>
           title.toLowerCase().includes("pronto vence tu servicio");
+        const colorizePlatformNames = (html = "") => {
+          const wrap = document.createElement("div");
+          wrap.innerHTML = html;
+          wrap.querySelectorAll("strong").forEach((el) => {
+            const key = normalizePlatformName(el.textContent || "");
+            const color = platformColors.get(key);
+            if (!color) return;
+            el.style.color = color;
+            el.style.fontWeight = "800";
+          });
+          return wrap.innerHTML;
+        };
         tbody.innerHTML = items
           .map((n) => {
             const title = n.titulo || "-";
             const showDate = shouldShowDate(title);
+            const mensaje = colorizePlatformNames(linkifyEmails(n.mensaje || "-"));
             return `
           <div class="notif-item">
             <h4>${title}</h4>
-            <p>${linkifyEmails(n.mensaje || "-")}</p>
+            <p>${mensaje}</p>
             ${showDate ? `<small>${n.fecha || ""}</small>` : ""}
           </div>
         `;
@@ -330,6 +371,26 @@
               },
               { idCuenta: data1.idCuenta }
             ),
+            buildNotificationPayload(
+              "servicios_vencen_pronto",
+              {
+                items: [
+                  {
+                    plataforma: data1.plataforma,
+                    correoCuenta: data1.correoCuenta,
+                    fechaCorte: data1.fechaCorte,
+                    idVenta: v1?.id_venta || null,
+                  },
+                  {
+                    plataforma: data2.plataforma,
+                    correoCuenta: data2.correoCuenta,
+                    fechaCorte: data2.fechaCorte,
+                    idVenta: v2?.id_venta || null,
+                  },
+                ],
+              },
+              { idCuenta: data1.idCuenta }
+            ),
           ].map((row) => ({
             ...row,
             id_usuario: TEST_USER_ID,
@@ -355,13 +416,26 @@
           if (Number(user.id_usuario) === TEST_USER_ID) {
             await seedTestNotifications();
           }
+          let platformColors = new Map();
+          try {
+            const { data: plats, error: platsErr } = await supabase
+              .from("plataformas")
+              .select("nombre, color_1");
+            if (platsErr) {
+              console.error("cargar colores de plataformas error", platsErr);
+            } else {
+              platformColors = buildPlatformColorMap(plats || []);
+            }
+          } catch (platErr) {
+            console.error("cargar colores de plataformas error", platErr);
+          }
           const { data, error } = await supabase
             .from("notificaciones")
             .select("titulo, mensaje, fecha")
             .eq("id_usuario", user.id_usuario)
             .order("fecha", { ascending: false });
           if (error) throw error;
-          renderTable(data || []);
+          renderTable(data || [], platformColors);
         } catch (err) {
           console.error("cargar notificaciones error", err);
           setStatus("No se pudieron cargar las notificaciones.");

@@ -5,6 +5,128 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Revisar reportes</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .reportes-list {
+        background: #fff;
+        padding: 12px;
+        border-radius: 12px;
+      }
+      .reportes-list .inventario-item {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+      }
+      .reportes-list .inventario-item + .inventario-item {
+        margin-top: 8px;
+      }
+      .reportes-list .inventario-btn {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        margin: 0;
+        border-radius: 8px;
+        background: var(--btn-plat-bg, #111);
+        color: #fff;
+        border: 1px solid var(--btn-plat-bg, #111);
+        box-shadow: none;
+        font-size: 18px;
+        transition: filter 0.15s ease, opacity 0.15s ease;
+      }
+      .reportes-list .inventario-btn:hover {
+        background: var(--btn-plat-bg, #111);
+        border-color: var(--btn-plat-bg, #111);
+        filter: brightness(1.15);
+      }
+      .reportes-list .inventario-btn:active {
+        background: var(--btn-plat-bg, #111);
+        border-color: var(--btn-plat-bg, #111);
+        filter: brightness(0.9);
+      }
+      .reportes-list .plat-btn-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .reportes-list .plat-btn-main {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .reportes-list .plat-count-badge {
+        display: inline-flex;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+        flex: 0 0 auto;
+      }
+      .reportes-list .plat-count-icon {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.3);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 900;
+      }
+      .reportes-list .inventario-item.open .inventario-btn {
+        border-radius: 8px 8px 0 0;
+      }
+      .reportes-list .inventario-plan {
+        margin-top: 0;
+      }
+      .reportes-list .inventario-plan .table-base {
+        border-radius: 0 0 10px 10px;
+        border-top: 0;
+      }
+      .reportes-list .inventario-plan .reportes-table {
+        margin-top: 0;
+      }
+      #modal-imagen-wrapper {
+        width: 260px;
+        max-width: 100%;
+        min-height: 200px;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+      }
+      #modal-imagen-wrapper.no-image {
+        background: #e5e7eb;
+      }
+      #modal-imagen-wrapper.no-image::before {
+        content: "Sin imagen";
+        color: #6b7280;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      #modal-imagen-wrapper.no-image #modal-imagen {
+        display: none;
+      }
+      #modal-imagen-wrapper #modal-imagen {
+        width: 100%;
+        max-width: 100%;
+        max-height: 200px;
+        object-fit: contain;
+      }
+      #modal-sin-imagen {
+        display: none;
+      }
+    </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
@@ -13,28 +135,7 @@
     <main class="categorias-dinamicas">
       <h2>Reportes pendientes</h2>
       <p id="revisar-status" class="status">Cargando reportes...</p>
-
-      <div id="plataformas-filtros" class="admin-actions" style="gap: 8px; flex-wrap: wrap;"></div>
-
-      <div class="tabla-wrapper" style="margin-top: 16px;">
-        <table class="reportes-table" id="reportes-table">
-          <thead>
-            <tr>
-              <th>ID Reporte</th>
-              <th>Cliente</th>
-              <th>Correo</th>
-              <th>Motivo</th>
-              <th>Fecha</th>
-              <th>Acción</th>
-            </tr>
-          </thead>
-          <tbody id="reportes-body">
-            <tr>
-              <td colspan="6" class="status">Selecciona una plataforma.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <div id="reportes-list" class="inventario-list reportes-list"></div>
 
       <div id="modal-detalle" class="modal hidden">
         <div class="modal-backdrop"></div>
@@ -105,25 +206,6 @@
         </div>
       </div>
 
-      <div id="modal-reemplazo-confirm" class="modal hidden">
-        <div class="modal-backdrop"></div>
-        <div class="modal-card">
-          <button class="modal-close modal-reemplazo-close" aria-label="Cerrar">×</button>
-          <div class="modal-body">
-            <h3>Confirmar reemplazo</h3>
-            <label class="form-label" for="select-razon-reemplazo">Razón del reemplazo</label>
-            <select id="select-razon-reemplazo" class="form-select">
-              <option value="">Selecciona una razón</option>
-              <option value="error hogar">Error hogar</option>
-              <option value="cuenta inhabilitada por el proveedor">Cuenta inhabilitada por el proveedor</option>
-            </select>
-            <div class="modal-actions-column" style="margin-top:12px;">
-              <button class="btn-primary" id="btn-confirmar-reemplazo">Realizar reemplazo</button>
-              <button class="btn-outline" id="btn-cancelar-reemplazo">Cancelar reemplazo</button>
-            </div>
-          </div>
-        </div>
-      </div>
     </main>
 
     <script type="module" src="../../scripts/revisar_reportes.js"></script>

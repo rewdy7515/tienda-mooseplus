@@ -60,9 +60,6 @@ export const notificationTemplates = {
         );
       }
       if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
-      if (item.clave) parts.push(`Clave: ${item.clave}`);
-      if (item.perfil) parts.push(`Perfil: ${item.perfil}`);
-      if (item.pin) parts.push(`PIN: ${item.pin}`);
       if (item.fechaCorte) {
         parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
       }
@@ -112,9 +109,6 @@ export const notificationTemplates = {
         );
       }
       if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
-      if (item.clave) parts.push(`Clave: ${item.clave}`);
-      if (item.perfil) parts.push(`Perfil: ${item.perfil}`);
-      if (item.pin) parts.push(`PIN: ${item.pin}`);
       if (item.fechaCorte) {
         parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
       }
@@ -138,6 +132,43 @@ export const notificationTemplates = {
       mensaje: `Tu servicio de <strong>${plataforma}</strong>${cuentaTxt} vence el ${formatDDMMYYYY(
         fechaCorte
       )}.<br>Renueva para evitar interrupciones.`,
+    };
+  },
+
+  servicios_vencen_pronto: (data = {}) => {
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items =
+      rawItems.length > 0
+        ? rawItems
+        : [
+            {
+              plataforma: data.plataforma,
+              correoCuenta: data.correoCuenta,
+              fechaCorte: data.fechaCorte,
+              idVenta: data.idVenta,
+            },
+          ].filter((it) => it.plataforma || it.correoCuenta || it.fechaCorte || it.idVenta);
+
+    const blocks = items.map((item) => {
+      const parts = [];
+      if (item.plataforma || item.idVenta) {
+        const idTxt = item.idVenta ? `ID Venta: #${item.idVenta}` : "";
+        parts.push(
+          `<div class="notif-line"><strong>${item.plataforma || ""}</strong>${
+            idTxt ? ` <span class="notif-id-venta">${idTxt}</span>` : ""
+          }</div>`
+        );
+      }
+      if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
+      if (item.fechaCorte) {
+        parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
+      }
+      return parts.join("<br>");
+    });
+
+    return {
+      titulo: "Tus servicios vencen pronto",
+      mensaje: blocks.join("<br><br>"),
     };
   },
 };
@@ -167,7 +198,7 @@ export const buildNotificationPayload = (tipo, data = {}, { idCuenta = null, fec
 // Selecciona los id_usuario destinatarios según el tipo de notificación.
 // Params:
 //  - tipo: clave de plantilla
-//  - ventaUserId: id_usuario vinculado a la venta actual (para pin_actualizado, servicio_renovado, nuevo_servicio, servicio_reemplazado, recordatorio_corte)
+//  - ventaUserId: id_usuario vinculado a la venta actual (para pin_actualizado, servicio_renovado, nuevo_servicio, servicio_reemplazado, recordatorio_corte, servicios_vencen_pronto)
 //  - cuentaVentas: array de ventas de la cuenta [{ id_usuario, fecha_corte }]
 export const pickNotificationUserIds = (tipo, { ventaUserId = null, cuentaVentas = [] } = {}) => {
   const today = new Date().toISOString().slice(0, 10);
@@ -182,6 +213,7 @@ export const pickNotificationUserIds = (tipo, { ventaUserId = null, cuentaVentas
     case "nuevo_servicio":
     case "servicio_reemplazado":
     case "recordatorio_corte":
+    case "servicios_vencen_pronto":
       return ventaUserId ? [ventaUserId] : [];
 
     case "clave_actualizada": {

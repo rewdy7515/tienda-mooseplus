@@ -534,9 +534,6 @@ async function handleSubmit(e) {
       imagenPath = await uploadEvidence(file, id_usuario);
     }
 
-    const now = new Date();
-    const fecha_creacion = now.toISOString().slice(0, 10);
-
     const payload = {
       id_usuario,
       id_plataforma,
@@ -545,7 +542,6 @@ async function handleSubmit(e) {
       id_tipo_reporte: motivoTipoId,
       descripcion,
       imagen: imagenPath,
-      fecha_creacion,
       en_revision: true,
       solucionado: false,
     };

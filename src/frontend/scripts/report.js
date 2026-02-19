@@ -13,10 +13,7 @@ const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const statusEl = document.querySelector("#reportes-status");
-const filtrosEl = document.querySelector("#reportes-plataformas");
-const tbody = document.querySelector("#reportes-body");
-const tablaWrapper = document.querySelector("#tabla-wrapper");
-const tablaPendientes = document.querySelector("#tabla-pendientes");
+const pendientesListEl = document.querySelector("#reportes-pendientes-list");
 const btnCrear = document.querySelector("#btn-crear-reporte");
 const logo = document.querySelector(".logo");
 const modalSol = document.querySelector("#modal-solucionado");
@@ -30,12 +27,10 @@ const modalSolClose = document.querySelector(".modal-sol-close");
 
 let porPlataforma = new Map();
 let porPlataformaSol = new Map();
+let reportesSolById = new Map();
 const btnSolucionados = document.querySelector("#btn-solucionados");
 const solSection = document.querySelector("#solucionados-section");
-const solFiltros = document.querySelector("#solucionados-plataformas");
-const solWrapper = document.querySelector("#solucionados-wrapper");
-const solBody = document.querySelector("#solucionados-body");
-const tablaSolucionados = document.querySelector("#tabla-solucionados");
+const solListEl = document.querySelector("#reportes-solucionados-list");
 
 const normalizeHexColor = (value) => {
   const raw = String(value || "").trim();
@@ -65,17 +60,20 @@ const buttonStyleForColor = (color) => {
   return ` style="background:${c};border-color:${c};color:${textColor};"`;
 };
 
-const setTableHeaderColor = (tableEl, color) => {
-  if (!tableEl) return;
+const tableStyleForColor = (color) => {
   const c = normalizeHexColor(color);
-  if (!c) {
-    tableEl.style.removeProperty("--table-header-bg");
-    tableEl.style.removeProperty("--table-header-color");
-    return;
-  }
-  tableEl.style.setProperty("--table-header-bg", c);
-  tableEl.style.setProperty("--table-header-color", isDarkHex(c) ? "#fff" : "#111");
+  if (!c) return "";
+  const textColor = isDarkHex(c) ? "#fff" : "#111";
+  return ` style="--table-header-bg:${c};--table-header-color:${textColor};"`;
 };
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 async function init() {
   try {
@@ -106,44 +104,67 @@ async function init() {
 }
 
 function renderReportes(items = []) {
-  if (!filtrosEl || !tbody) return;
+  if (!pendientesListEl) return;
   if (!items.length) {
-    filtrosEl.innerHTML = "";
-    setTableHeaderColor(tablaPendientes, null);
-    tbody.innerHTML = `<tr><td colspan="3" class="status">No tienes reportes pendientes.</td></tr>`;
+    porPlataforma = new Map();
+    pendientesListEl.innerHTML = `<p class="status">No tienes reportes pendientes.</p>`;
     return;
   }
   porPlataforma = new Map();
   items.forEach((r) => {
     const id = r.id_plataforma;
     const nombre = r.plataformas?.nombre || `Plataforma ${id}`;
-    const color = r.plataformas?.color_1 || null;
-    if (!porPlataforma.has(id)) porPlataforma.set(id, { id, nombre, color, items: [] });
+    const buttonColor = r.plataformas?.color_1 || null;
+    const headerColor = r.plataformas?.color_2 || null;
+    if (!porPlataforma.has(id)) {
+      porPlataforma.set(id, { id, nombre, buttonColor, headerColor, items: [] });
+    }
     porPlataforma.get(id).items.push(r);
   });
-  filtrosEl.innerHTML = Array.from(porPlataforma.values())
-    .map(
-      (p, idx) =>
-        `<button class="btn-outline admin-action" data-plat="${p.id}" data-idx="${idx}"${buttonStyleForColor(p.color)}>${p.nombre}</button>`
-    )
+  pendientesListEl.innerHTML = Array.from(porPlataforma.values())
+    .map((p, idx) => {
+      const rows = (p.items || [])
+        .map((r) => {
+          const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
+          const correo = r.cuentas?.correo || "-";
+          const fecha = r.fecha_creacion || "-";
+          const estado = r.en_revision ? "En revisión" : "Pendiente";
+          return `
+            <tr>
+              <td>${escapeHtml(idReporte)}</td>
+              <td>${escapeHtml(correo)}</td>
+              <td>${escapeHtml(fecha)}</td>
+              <td>${escapeHtml(estado)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+      return `
+        <section class="inventario-item" data-plat="${p.id}">
+          <button type="button" class="btn-outline inventario-btn" data-toggle-plat="${p.id}" data-idx="${idx}"${buttonStyleForColor(p.buttonColor)}>
+            ${escapeHtml(p.nombre)}
+          </button>
+          <div class="inventario-plan hidden" data-plat-content="${p.id}">
+            <div class="tabla-wrapper">
+              <table class="table-base reportes-table"${tableStyleForColor(p.headerColor)}>
+                <thead>
+                  <tr>
+                    <th>ID Reporte</th>
+                    <th>Correo</th>
+                    <th>Fecha del reporte</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows || `<tr><td colspan="4" class="status">No hay reportes en revisión para esta plataforma.</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      `;
+    })
     .join("");
-  let currentPlat = null;
-  filtrosEl.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-plat]");
-    if (!btn) return;
-    const platId = Number(btn.dataset.plat);
-    if (currentPlat === platId) {
-      // toggle off
-      tablaWrapper?.classList.add("hidden");
-      setTableHeaderColor(tablaPendientes, null);
-      tbody.innerHTML = `<tr><td colspan="3" class="status">Selecciona una plataforma.</td></tr>`;
-      currentPlat = null;
-      return;
-    }
-    currentPlat = platId;
-    const plataforma = porPlataforma.get(platId);
-    renderTabla(plataforma?.items || [], plataforma?.color || null);
-  });
 }
 
 async function loadReportes() {
@@ -153,7 +174,7 @@ async function loadReportes() {
     await ensureServerSession();
     const { data, error } = await supabase
       .from("reportes")
-      .select("*, plataformas(nombre, color_1), cuentas(correo)")
+      .select("*, plataformas(nombre, color_1, color_2), cuentas(correo)")
       .eq("id_usuario", id)
       .eq("en_revision", true)
       .order("id_reporte", { ascending: false });
@@ -178,13 +199,24 @@ init();
 attachLogout(clearServerSession);
 attachLogoHome();
 
+pendientesListEl?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-toggle-plat]");
+  if (!btn) return;
+  const platId = String(btn.dataset.togglePlat || "");
+  const section = btn.closest(".inventario-item");
+  const content = section?.querySelector(`[data-plat-content="${platId}"]`);
+  if (!content) return;
+  content.classList.toggle("hidden");
+  section?.classList.toggle("open", !content.classList.contains("hidden"));
+});
+
 async function loadReportesSolucionados() {
   try {
     const id = requireSession();
     await ensureServerSession();
     const { data, error } = await supabase
       .from("reportes")
-      .select("*, plataformas(nombre, color_1), cuentas(correo, clave), perfiles(n_perfil, pin)")
+      .select("*, plataformas(nombre, color_1, color_2), cuentas(correo, clave), perfiles(n_perfil, pin)")
       .eq("id_usuario", id)
       .eq("solucionado", true)
       .order("id_reporte", { ascending: false });
@@ -193,56 +225,74 @@ async function loadReportesSolucionados() {
     (data || []).forEach((r) => {
       const idp = r.id_plataforma;
       const nombre = r.plataformas?.nombre || `Plataforma ${idp}`;
-      const color = r.plataformas?.color_1 || null;
-      if (!porPlataformaSol.has(idp)) porPlataformaSol.set(idp, { id: idp, nombre, color, items: [] });
+      const buttonColor = r.plataformas?.color_1 || null;
+      const headerColor = r.plataformas?.color_2 || null;
+      if (!porPlataformaSol.has(idp)) {
+        porPlataformaSol.set(idp, { id: idp, nombre, buttonColor, headerColor, items: [] });
+      }
       porPlataformaSol.get(idp).items.push(r);
     });
-    renderSolucionadosFiltros();
+    renderSolucionadosList();
   } catch (err) {
     console.error("load solucionados error", err);
   }
 }
 
-function renderSolucionadosFiltros() {
-  if (!solFiltros) return;
+function renderSolucionadosList() {
+  if (!solListEl) return;
   if (!porPlataformaSol.size) {
-    setTableHeaderColor(tablaSolucionados, null);
-    solFiltros.innerHTML = `<p class="status">No hay reportes solucionados en los últimos 30 días.</p>`;
+    reportesSolById = new Map();
+    solListEl.innerHTML = `<p class="status">No hay reportes solucionados en los últimos 30 días.</p>`;
     return;
   }
-  solFiltros.innerHTML = Array.from(porPlataformaSol.values())
-    .map(
-      (p) =>
-        `<button class="btn-outline admin-action" data-plat="${p.id}"${buttonStyleForColor(p.color)}>${p.nombre}</button>`
-    )
-    .join("");
-  solFiltros.addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-plat]");
-    if (!btn) return;
-    const platId = Number(btn.dataset.plat);
-    const plataforma = porPlataformaSol.get(platId);
-    renderTablaSol(plataforma?.items || [], plataforma?.color || null);
+  reportesSolById = new Map();
+  Array.from(porPlataformaSol.values()).forEach((p) => {
+    (p.items || []).forEach((r) => {
+      if (r?.id_reporte) reportesSolById.set(String(r.id_reporte), r);
+    });
   });
-}
-
-function renderTablaSol(items = [], headerColor = null) {
-  if (!solBody) return;
-  setTableHeaderColor(tablaSolucionados, headerColor);
-  if (!items.length) {
-    solBody.innerHTML = `<tr><td colspan="4" class="status">No hay reportes solucionados para esta plataforma.</td></tr>`;
-    solWrapper?.classList.add("hidden");
-    return;
-  }
-  solWrapper?.classList.remove("hidden");
-  solBody.innerHTML = items
-    .map(
-      (r) => `<tr>
-        <td>${r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-"}</td>
-        <td>${r.cuentas?.correo || "-"}</td>
-        <td>${r.fecha_creacion || "-"}</td>
-        <td><button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle-sol">Ver detalles</button></td>
-      </tr>`
-    )
+  solListEl.innerHTML = Array.from(porPlataformaSol.values())
+    .map((p, idx) => {
+      const rows = (p.items || [])
+        .map((r) => {
+          const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
+          const correo = r.cuentas?.correo || "-";
+          const fecha = r.fecha_creacion || "-";
+          return `
+            <tr>
+              <td>${escapeHtml(idReporte)}</td>
+              <td>${escapeHtml(correo)}</td>
+              <td>${escapeHtml(fecha)}</td>
+              <td><button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle-sol">Ver detalles</button></td>
+            </tr>
+          `;
+        })
+        .join("");
+      return `
+        <section class="inventario-item" data-plat="${p.id}">
+          <button type="button" class="btn-outline inventario-btn" data-toggle-sol="${p.id}" data-idx="${idx}"${buttonStyleForColor(p.buttonColor)}>
+            ${escapeHtml(p.nombre)}
+          </button>
+          <div class="inventario-plan hidden" data-sol-content="${p.id}">
+            <div class="tabla-wrapper">
+              <table class="table-base reportes-table"${tableStyleForColor(p.headerColor)}>
+                <thead>
+                  <tr>
+                    <th>ID Reporte</th>
+                    <th>Correo</th>
+                    <th>Fecha del reporte</th>
+                    <th>Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows || `<tr><td colspan="4" class="status">No hay reportes solucionados para esta plataforma.</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      `;
+    })
     .join("");
 }
 
@@ -252,12 +302,22 @@ btnSolucionados?.addEventListener("click", () => {
   solSection.classList.toggle("hidden", !isHidden);
 });
 
-solBody?.addEventListener("click", (e) => {
+solListEl?.addEventListener("click", (e) => {
+  const toggleBtn = e.target.closest("button[data-toggle-sol]");
+  if (toggleBtn) {
+    const platId = String(toggleBtn.dataset.toggleSol || "");
+    const section = toggleBtn.closest(".inventario-item");
+    const content = section?.querySelector(`[data-sol-content="${platId}"]`);
+    if (!content) return;
+    content.classList.toggle("hidden");
+    section?.classList.toggle("open", !content.classList.contains("hidden"));
+    return;
+  }
+
   const btn = e.target.closest("button[data-action='detalle-sol']");
   if (!btn) return;
   const id = btn.dataset.id;
-  const allItems = Array.from(porPlataformaSol.values()).flatMap((p) => p.items || []);
-  const row = allItems.find((r) => String(r.id_reporte) === String(id));
+  const row = reportesSolById.get(String(id));
   if (row) openModalSol(row);
 });
 
@@ -304,28 +364,3 @@ modalSol?.addEventListener("click", (e) => {
 });
 
 modalSolClose?.addEventListener("click", closeModalSol);
-
-function renderTabla(items = [], headerColor = null) {
-  if (!tbody) return;
-  setTableHeaderColor(tablaPendientes, headerColor);
-  if (!items.length) {
-    tbody.innerHTML = `<tr><td colspan="4" class="status">No hay reportes en revisión para esta plataforma.</td></tr>`;
-    tablaWrapper?.classList.add("hidden");
-    return;
-  }
-  tablaWrapper?.classList.remove("hidden");
-  const rows = items
-    .map((r) => {
-      const correo = r.cuentas?.correo || "-";
-      const fecha = r.fecha_creacion || "-";
-      const estado = r.en_revision ? "En revisión" : "Pendiente";
-      return `<tr>
-        <td>${r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-"}</td>
-        <td>${correo}</td>
-        <td>${fecha}</td>
-        <td>${estado}</td>
-      </tr>`;
-    })
-    .join("");
-  tbody.innerHTML = rows;
-}

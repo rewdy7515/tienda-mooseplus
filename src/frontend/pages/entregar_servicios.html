@@ -152,6 +152,8 @@
 
       const statusEl = document.querySelector("#entregar-status");
       const tablasEl = document.querySelector("#entregar-tablas");
+      const appHeaderEl = document.querySelector("#app-header");
+      const mainEl = document.querySelector("main.categorias-dinamicas");
       const clienteModal = document.querySelector("#cliente-modal");
       const clienteNombreInput = document.querySelector("#cliente-nombre-input");
       const btnClienteCancel = document.querySelector("#cliente-cancel");
@@ -393,35 +395,24 @@
 
       const loadServicios = async () => {
         try {
-          const user = await loadCurrentUser();
-          const userId = user?.id_usuario;
-          canAnnotateCliente = user?.acceso_cliente === false;
-          const baseSelect =
-            "id_venta, fecha_corte, id_perfil, id_precio, pendiente, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar), precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)";
-          let ventas = [];
-          if (idOrdenParam) {
-            const resp = await fetchVentasOrden(idOrdenParam);
-            if (resp?.error) {
-              setStatus(resp.error);
-              if (tablasEl) tablasEl.innerHTML = "";
-              return;
-            }
-            ventas = resp?.ventas || [];
-            console.log("entregar_servicios ventas por orden", { idOrdenParam, total: ventas.length });
-          } else {
-            if (!userId) {
-              setStatus("Usuario no autenticado.");
-              return;
-            }
-            const { data, error } = await supabase
-              .from("ventas")
-              .select(baseSelect)
-              .order("id_venta", { ascending: false })
-              .eq("id_usuario", userId);
-            if (error) throw error;
-            ventas = data || [];
-            console.log("entregar_servicios ventas por usuario", { userId, total: ventas.length });
+          if (!idOrdenParam) {
+            if (tablasEl) tablasEl.innerHTML = "";
+            setStatus("");
+            appHeaderEl?.classList.add("hidden");
+            mainEl?.classList.add("hidden");
+            return;
           }
+          const user = await loadCurrentUser();
+          canAnnotateCliente = user?.acceso_cliente === false;
+          let ventas = [];
+          const resp = await fetchVentasOrden(idOrdenParam);
+          if (resp?.error) {
+            setStatus(resp.error);
+            if (tablasEl) tablasEl.innerHTML = "";
+            return;
+          }
+          ventas = resp?.ventas || [];
+          console.log("entregar_servicios ventas por orden", { idOrdenParam, total: ventas.length });
 
           const platIds = Array.from(
             new Set(
@@ -597,7 +588,12 @@
                   if (!platId) return null;
                   const plat = platMap[platId] || {};
                   const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
-                  const correoCuenta = Number(platId) === 12 ? venta.correo_miembro || "" : venta.cuentas?.correo || "";
+                  const isVentaMiembro = isTrue(venta?.cuentas?.venta_miembro);
+                  const correoCuenta = isVentaMiembro
+                    ? venta.correo_miembro || ""
+                    : Number(platId) === 12
+                      ? venta.correo_miembro || ""
+                      : venta.cuentas?.correo || "";
                   return {
                     id_venta: h.id_venta,
                     correo: correoCuenta,

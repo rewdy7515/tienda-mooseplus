@@ -5123,6 +5123,7 @@
         if (e.target.matches(".fecha-input")) {
           const input = e.target;
           const row = input.closest("tr");
+          validateRegistrarBtn(row);
           if (row?.querySelector('.btn-save-edit[data-type="fecha"]')) return;
           const ventaBtn = row?.querySelector(".btn-edit-fecha");
           const ventaId = input.dataset.venta || ventaBtn?.dataset.venta;
