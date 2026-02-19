@@ -4984,17 +4984,14 @@
         const claveInput = row.querySelector(".clave-input");
         const btn = row.querySelector(".btn-registrar-servicio");
         if (!btn) return;
+        const normalizedName = (nameInput?.value || "").trim().replace(/\s+/g, " ");
         const hasName =
-          nameInput &&
-          nameInput.value.trim().length > 0 &&
-          /\s+/.test(nameInput.value.trim());
-        const hasUser = nameInput && nameInput.dataset.userId;
+          !!normalizedName &&
+          (normalizedName.length >= 3 || !!nameInput?.dataset?.userId);
         const hasCorreo = correoInput && correoInput.value.trim().length > 0;
         const hasClave = !claveInput || claveInput.value.trim().length > 0;
         const hasDate =
-          fechaInput &&
-          fechaInput.value &&
-          !Number.isNaN(new Date(fechaInput.value).valueOf());
+          !!(fechaInput && /^\d{4}-\d{2}-\d{2}$/.test(String(fechaInput.value || "").trim()));
         const enabled = correoInput
           ? !!(hasName && hasCorreo && hasDate && hasClave)
           : !!(hasName && hasDate);
@@ -5120,6 +5117,11 @@
       });
 
       detalleEl?.addEventListener("change", async (e) => {
+        if (e.target.matches(".correo-input") || e.target.matches(".clave-input")) {
+          const row = e.target.closest("tr");
+          validateRegistrarBtn(row);
+          return;
+        }
         if (e.target.matches(".fecha-input")) {
           const input = e.target;
           const row = input.closest("tr");
@@ -5127,9 +5129,19 @@
           if (row?.querySelector('.btn-save-edit[data-type="fecha"]')) return;
           const ventaBtn = row?.querySelector(".btn-edit-fecha");
           const ventaId = input.dataset.venta || ventaBtn?.dataset.venta;
-          if (!ventaId) return;
           const newDate = input.value;
           if (!newDate) return;
+          if (!ventaId) {
+            const span = row?.querySelector(".fecha-text");
+            if (span) {
+              span.textContent = formatDDMMYYYY(newDate) || newDate;
+              span.classList.remove("hidden");
+            }
+            input.classList.remove("show");
+            input.classList.add("hidden");
+            validateRegistrarBtn(row);
+            return;
+          }
           try {
             const { error } = await supabase
               .from("ventas")
