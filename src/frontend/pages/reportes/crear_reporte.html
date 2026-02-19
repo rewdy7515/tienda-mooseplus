@@ -5,6 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Crear reporte</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      #reporte-form .form-select {
+        border: 1px solid #d1d5db;
+        background: #fff;
+        color: #111827;
+      }
+      #reporte-form .form-select:focus {
+        border-color: #111;
+        box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.14);
+      }
+      #reporte-form .form-select:disabled {
+        background: #f3f4f6;
+        color: #6b7280;
+        cursor: not-allowed;
+      }
+      #reporte-form .form-select option {
+        background: #fff;
+        color: #111827;
+      }
+      #reporte-form .form-select option[value=""] {
+        color: #6b7280;
+      }
+    </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
@@ -14,10 +37,10 @@
       <h2>Crear reporte</h2>
       <form id="reporte-form" class="reporte-form">
         <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
-        <p class="status">Se muestran únicamente los servicios que tienes actualmente.</p>
         <select id="select-plataforma" class="form-select" required>
           <option value="">Seleccione plataforma</option>
         </select>
+        <p class="status">Se muestran únicamente los servicios que tienes actualmente.</p>
 
         <label class="form-label" for="select-correo">Correo <span class="required">*</span></label>
         <select id="select-correo" class="form-select" required>
@@ -34,10 +57,6 @@
         <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
         <select id="select-motivo" class="form-select" required>
           <option value="">Seleccione motivo</option>
-          <option value="contrasena">Contraseña incorrecta</option>
-          <option value="pin">PIN incorrecto</option>
-          <option value="suscripcion">Suscripción inactiva</option>
-          <option value="otro">Otro</option>
         </select>
 
         <div id="motivo-otro-wrapper" class="hidden">
@@ -52,6 +71,7 @@
           <input id="input-files" type="file" accept="image/*" hidden />
           <div id="file-preview" class="file-preview"></div>
         </div>
+        <p class="status">Asegúrate de que la imagen sea legible. Esto nos ayudará a identificar el problema.</p>
 
         <div class="form-group checkbox-line">
           <label class="form-label" for="chk-no-screenshot">

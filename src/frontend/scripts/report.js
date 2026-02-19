@@ -16,6 +16,7 @@ const statusEl = document.querySelector("#reportes-status");
 const filtrosEl = document.querySelector("#reportes-plataformas");
 const tbody = document.querySelector("#reportes-body");
 const tablaWrapper = document.querySelector("#tabla-wrapper");
+const tablaPendientes = document.querySelector("#tabla-pendientes");
 const btnCrear = document.querySelector("#btn-crear-reporte");
 const logo = document.querySelector(".logo");
 const modalSol = document.querySelector("#modal-solucionado");
@@ -34,6 +35,47 @@ const solSection = document.querySelector("#solucionados-section");
 const solFiltros = document.querySelector("#solucionados-plataformas");
 const solWrapper = document.querySelector("#solucionados-wrapper");
 const solBody = document.querySelector("#solucionados-body");
+const tablaSolucionados = document.querySelector("#tabla-solucionados");
+
+const normalizeHexColor = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash) ? withHash : null;
+};
+
+const isDarkHex = (hex) => {
+  const c = normalizeHexColor(hex);
+  if (!c) return false;
+  const full =
+    c.length === 4
+      ? `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}`
+      : c;
+  const r = parseInt(full.slice(1, 3), 16);
+  const g = parseInt(full.slice(3, 5), 16);
+  const b = parseInt(full.slice(5, 7), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq < 140;
+};
+
+const buttonStyleForColor = (color) => {
+  const c = normalizeHexColor(color);
+  if (!c) return "";
+  const textColor = isDarkHex(c) ? "#fff" : "#111";
+  return ` style="background:${c};border-color:${c};color:${textColor};"`;
+};
+
+const setTableHeaderColor = (tableEl, color) => {
+  if (!tableEl) return;
+  const c = normalizeHexColor(color);
+  if (!c) {
+    tableEl.style.removeProperty("--table-header-bg");
+    tableEl.style.removeProperty("--table-header-color");
+    return;
+  }
+  tableEl.style.setProperty("--table-header-bg", c);
+  tableEl.style.setProperty("--table-header-color", isDarkHex(c) ? "#fff" : "#111");
+};
 
 async function init() {
   try {
@@ -67,6 +109,7 @@ function renderReportes(items = []) {
   if (!filtrosEl || !tbody) return;
   if (!items.length) {
     filtrosEl.innerHTML = "";
+    setTableHeaderColor(tablaPendientes, null);
     tbody.innerHTML = `<tr><td colspan="3" class="status">No tienes reportes pendientes.</td></tr>`;
     return;
   }
@@ -74,13 +117,14 @@ function renderReportes(items = []) {
   items.forEach((r) => {
     const id = r.id_plataforma;
     const nombre = r.plataformas?.nombre || `Plataforma ${id}`;
-    if (!porPlataforma.has(id)) porPlataforma.set(id, { id, nombre, items: [] });
+    const color = r.plataformas?.color_1 || null;
+    if (!porPlataforma.has(id)) porPlataforma.set(id, { id, nombre, color, items: [] });
     porPlataforma.get(id).items.push(r);
   });
   filtrosEl.innerHTML = Array.from(porPlataforma.values())
     .map(
       (p, idx) =>
-        `<button class="btn-outline admin-action" data-plat="${p.id}" data-idx="${idx}">${p.nombre}</button>`
+        `<button class="btn-outline admin-action" data-plat="${p.id}" data-idx="${idx}"${buttonStyleForColor(p.color)}>${p.nombre}</button>`
     )
     .join("");
   let currentPlat = null;
@@ -91,12 +135,14 @@ function renderReportes(items = []) {
     if (currentPlat === platId) {
       // toggle off
       tablaWrapper?.classList.add("hidden");
+      setTableHeaderColor(tablaPendientes, null);
       tbody.innerHTML = `<tr><td colspan="3" class="status">Selecciona una plataforma.</td></tr>`;
       currentPlat = null;
       return;
     }
     currentPlat = platId;
-    renderTabla(porPlataforma.get(platId)?.items || []);
+    const plataforma = porPlataforma.get(platId);
+    renderTabla(plataforma?.items || [], plataforma?.color || null);
   });
 }
 
@@ -107,7 +153,7 @@ async function loadReportes() {
     await ensureServerSession();
     const { data, error } = await supabase
       .from("reportes")
-      .select("*, plataformas(nombre), cuentas(correo)")
+      .select("*, plataformas(nombre, color_1), cuentas(correo)")
       .eq("id_usuario", id)
       .eq("en_revision", true)
       .order("id_reporte", { ascending: false });
@@ -138,7 +184,7 @@ async function loadReportesSolucionados() {
     await ensureServerSession();
     const { data, error } = await supabase
       .from("reportes")
-      .select("*, plataformas(nombre), cuentas(correo, clave), perfiles(n_perfil, pin)")
+      .select("*, plataformas(nombre, color_1), cuentas(correo, clave), perfiles(n_perfil, pin)")
       .eq("id_usuario", id)
       .eq("solucionado", true)
       .order("id_reporte", { ascending: false });
@@ -147,7 +193,8 @@ async function loadReportesSolucionados() {
     (data || []).forEach((r) => {
       const idp = r.id_plataforma;
       const nombre = r.plataformas?.nombre || `Plataforma ${idp}`;
-      if (!porPlataformaSol.has(idp)) porPlataformaSol.set(idp, { id: idp, nombre, items: [] });
+      const color = r.plataformas?.color_1 || null;
+      if (!porPlataformaSol.has(idp)) porPlataformaSol.set(idp, { id: idp, nombre, color, items: [] });
       porPlataformaSol.get(idp).items.push(r);
     });
     renderSolucionadosFiltros();
@@ -159,22 +206,28 @@ async function loadReportesSolucionados() {
 function renderSolucionadosFiltros() {
   if (!solFiltros) return;
   if (!porPlataformaSol.size) {
+    setTableHeaderColor(tablaSolucionados, null);
     solFiltros.innerHTML = `<p class="status">No hay reportes solucionados en los últimos 30 días.</p>`;
     return;
   }
   solFiltros.innerHTML = Array.from(porPlataformaSol.values())
-    .map((p) => `<button class="btn-outline admin-action" data-plat="${p.id}">${p.nombre}</button>`)
+    .map(
+      (p) =>
+        `<button class="btn-outline admin-action" data-plat="${p.id}"${buttonStyleForColor(p.color)}>${p.nombre}</button>`
+    )
     .join("");
   solFiltros.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-plat]");
     if (!btn) return;
     const platId = Number(btn.dataset.plat);
-    renderTablaSol(porPlataformaSol.get(platId)?.items || []);
+    const plataforma = porPlataformaSol.get(platId);
+    renderTablaSol(plataforma?.items || [], plataforma?.color || null);
   });
 }
 
-function renderTablaSol(items = []) {
+function renderTablaSol(items = [], headerColor = null) {
   if (!solBody) return;
+  setTableHeaderColor(tablaSolucionados, headerColor);
   if (!items.length) {
     solBody.innerHTML = `<tr><td colspan="4" class="status">No hay reportes solucionados para esta plataforma.</td></tr>`;
     solWrapper?.classList.add("hidden");
@@ -252,8 +305,9 @@ modalSol?.addEventListener("click", (e) => {
 
 modalSolClose?.addEventListener("click", closeModalSol);
 
-function renderTabla(items = []) {
+function renderTabla(items = [], headerColor = null) {
   if (!tbody) return;
+  setTableHeaderColor(tablaPendientes, headerColor);
   if (!items.length) {
     tbody.innerHTML = `<tr><td colspan="4" class="status">No hay reportes en revisión para esta plataforma.</td></tr>`;
     tablaWrapper?.classList.add("hidden");

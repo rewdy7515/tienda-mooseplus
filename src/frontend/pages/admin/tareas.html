@@ -202,7 +202,7 @@
         const { data, error } = await supabase
           .from("tareas_asignadas")
           .select(
-            "id_tarea_asignada, tarea, cuenta, tareas: tareas!tareas_asignadas_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave, id_plataforma, plataformas:plataformas!cuentas_id_plataforma_fkey(id_plataforma, nombre, color_1))"
+            "id_tarea_asignada, id_tarea, cuenta, tareas: tareas!tareas_asignadas_id_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave, id_plataforma, plataformas:plataformas!cuentas_id_plataforma_fkey(id_plataforma, nombre, color_1))"
           )
           .order("id_tarea_asignada", { ascending: false });
         if (error) {

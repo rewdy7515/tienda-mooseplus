@@ -249,7 +249,7 @@
 
       let selectedProveedor = null;
       let fetchProvCounter = 0;
-      const plataformaInfo = new Map(); // id -> {miembros, num_max_dispositivos, usa_pines, max_dig_pin}
+      const plataformaInfo = new Map(); // id -> {miembros, num_max_dispositivos, usa_pines, max_dig_pin, por_pantalla}
       let currentUser = null;
       const toTitleCase = (str) =>
         (str || "").replace(/(\S+)/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
@@ -429,7 +429,7 @@
           const { data, error } = await supabase
             .from("plataformas")
             .select(
-              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo, cuenta_madre, max_miembros"
+              "id_plataforma, nombre, miembros, num_max_dispositivos, usa_pines, max_dig_pin, tarjeta_de_regalo, cuenta_madre, max_miembros, por_pantalla"
             )
             .order("nombre");
           if (error) throw error;
@@ -450,6 +450,7 @@
                 max_dig_pin: p.max_dig_pin,
                 max_miembros: p.max_miembros,
                 cuenta_madre: p.cuenta_madre,
+                por_pantalla: p.por_pantalla,
               });
             });
           if (tipoCuentaSelect) {
@@ -652,6 +653,11 @@
         const numDispositivos = Number(platMeta.num_max_dispositivos) > 0 ? Number(platMeta.num_max_dispositivos) : 1;
         const maxMiembros = Number(platMeta.max_miembros) > 0 ? Number(platMeta.max_miembros) : 0;
         const usaPines = platMeta.usa_pines === true || platMeta.usa_pines === "true" || platMeta.usa_pines === 1 || platMeta.usa_pines === "1";
+        const porPantalla =
+          platMeta.por_pantalla === true ||
+          platMeta.por_pantalla === "true" ||
+          platMeta.por_pantalla === 1 ||
+          platMeta.por_pantalla === "1";
         const maxDigPin = Number(platMeta.max_dig_pin) > 0 ? Number(platMeta.max_dig_pin) : 4;
         const requierePinRecarga =
           String(selectedProveedor) === "2" && String(plataforma) === "1";
@@ -801,6 +807,18 @@
             registrado_por: currentUser?.id_usuario || null,
           });
           if (histErr) throw histErr;
+
+          // Crear tareas automáticas al agregar cuentas por pantalla.
+          if (porPantalla && cuentaInserted?.id_cuenta) {
+            const tareasRows = [
+              { id_tarea: 2, cuenta: cuentaInserted.id_cuenta },
+            ];
+            if (usaPines) {
+              tareasRows.push({ id_tarea: 3, cuenta: cuentaInserted.id_cuenta });
+            }
+            const { error: tareasErr } = await supabase.from("tareas_asignadas").insert(tareasRows);
+            if (tareasErr) throw tareasErr;
+          }
 
           // Marcar pin de recarga como usado si aplica
           if (requierePinRecarga && cuentaInserted?.id_cuenta && pinRecargaSeleccionado?.id_tarjeta_de_regalo) {

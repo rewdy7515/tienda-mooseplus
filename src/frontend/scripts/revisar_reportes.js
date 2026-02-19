@@ -55,17 +55,9 @@ let cambioClave = false;
 let cambioPin = false;
 let pendingReplacement = null;
 
-const motifLabel = (row) => {
-  if (row.por_clave) return "Contraseña incorrecta";
-  if (row.por_pin) return "Pin incorrecto";
-  if (row.por_suscripcion) return "Suscripción inactiva";
-  return "Otro...";
-};
-
 const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
 
 const getDescripcion = (row) => {
-  if (row.por_clave || row.por_pin || row.por_suscripcion) return motifLabel(row);
   return row.descripcion || "Otro...";
 };
 
@@ -155,7 +147,7 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(nombre),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),por_clave,por_pin,por_suscripcion,descripcion,imagen,en_revision,solucionado"
+      "id_reporte,id_plataforma,plataformas(nombre),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado"
     )
     .eq("solucionado", false);
   if (error) throw error;

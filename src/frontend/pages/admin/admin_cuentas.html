@@ -5977,7 +5977,7 @@
         }
         try {
           const rows = selected.map((id) => ({
-            tarea: id,
+            id_tarea: id,
             cuenta: Number(tareasCuentaId),
           }));
           const { error } = await supabase

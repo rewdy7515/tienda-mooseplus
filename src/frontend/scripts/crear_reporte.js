@@ -37,10 +37,25 @@ let selectedCuentaId = null;
 let selectedPerfilId = null;
 let selectedPlataformaId = null;
 let cuentasPorPlataforma = new Map();
+let tiposReporteCatalog = [];
 const queryParams = new URLSearchParams(window.location.search);
 const prefillPlataforma = queryParams.get("plataforma");
 const prefillCuenta = queryParams.get("cuenta");
 const prefillPerfil = queryParams.get("perfil");
+const normalizeMotivo = (val) =>
+  String(val || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+const isOtroMotivo = (val) => {
+  const n = normalizeMotivo(val);
+  return n.startsWith("otro") || n.startsWith("otra");
+};
+const getSelectedMotivoTitle = () => {
+  const opt = selectMotivo?.selectedOptions?.[0];
+  return String(opt?.dataset?.titulo || opt?.textContent || "").trim();
+};
 
 const sanitizeFileName = (name) => {
   const base = name?.split?.("/")?.pop?.() || "archivo";
@@ -71,6 +86,8 @@ async function init() {
 
     await cargarPlataformas();
     await cargarCorreos();
+    await cargarMotivos();
+    renderMotivosPorPlataforma(selectedPlataformaId);
     initMotivoOtro();
     initNoScreenshotOption();
     initUploadUI();
@@ -86,7 +103,7 @@ async function cargarPlataformas() {
   const userId = requireSession();
   const { data, error } = await supabase
     .from("ventas")
-    .select("id_cuenta, cuentas(id_plataforma, plataformas(nombre))")
+    .select("id_cuenta, cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, plataformas(nombre))")
     .eq("id_usuario", userId);
   if (error) {
     console.error("plataformas ventas error", error);
@@ -118,6 +135,7 @@ async function cargarPlataformas() {
     selectCorreo.disabled = false;
     selectCorreo.classList.remove("input-disabled");
     poblarCorreosPorPlataforma(platId);
+    renderMotivosPorPlataforma(platId);
     perfilWrapper?.classList.add("hidden");
     selectCorreo.value = "";
   });
@@ -128,7 +146,7 @@ async function cargarCorreos() {
   const userId = requireSession();
   const { data, error } = await supabase
     .from("ventas")
-    .select("id_usuario, id_cuenta, cuentas(id_cuenta, correo, id_plataforma)")
+    .select("id_usuario, id_cuenta, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, id_plataforma)")
     .eq("id_usuario", userId);
   if (error) {
     console.error("correos ventas error", error);
@@ -156,6 +174,7 @@ async function aplicarPrefillQuery() {
   if (!prefillPlataforma || !selectPlataforma) return;
   selectPlataforma.value = prefillPlataforma;
   selectedPlataformaId = prefillPlataforma;
+  renderMotivosPorPlataforma(prefillPlataforma);
   selectCorreo.disabled = false;
   selectCorreo.classList.remove("input-disabled");
   poblarCorreosPorPlataforma(prefillPlataforma);
@@ -167,6 +186,84 @@ async function aplicarPrefillQuery() {
       selectedPerfilId = prefillPerfil;
       perfilWrapper?.classList.remove("hidden");
       selectPerfil.required = true;
+    }
+  }
+}
+
+async function cargarMotivos() {
+  if (!selectMotivo) return;
+  const { data, error } = await supabase
+    .from("reporte_tipos")
+    .select("*")
+    .order("titulo", { ascending: true });
+  if (error) {
+    console.error("motivos reporte error", error);
+    return;
+  }
+  const unique = [];
+  const seen = new Set();
+  (data || []).forEach((row) => {
+    const titulo = String(row?.titulo || "").trim();
+    if (!titulo) return;
+    if (isOtroMotivo(titulo)) return;
+    const parsedId = Number(
+      row?.id_tipo_reporte ?? row?.id_reporte_tipo ?? row?.id_tipo ?? row?.id
+    );
+    const idTipo = Number.isFinite(parsedId) ? parsedId : null;
+    if (!idTipo) return;
+    const key = normalizeMotivo(titulo);
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push({ id: idTipo, titulo });
+  });
+  tiposReporteCatalog = unique;
+}
+
+function renderMotivosPorPlataforma(platId) {
+  if (!selectMotivo) return;
+  const hasPlat = !!String(platId || "").trim();
+  selectMotivo.disabled = !hasPlat;
+  selectMotivo.classList.toggle("input-disabled", !hasPlat);
+  const selectedPrev = selectMotivo.value;
+  if (!hasPlat) {
+    selectMotivo.innerHTML = '<option value="">Seleccione motivo</option>';
+    selectMotivo.value = "";
+    updateMotivoExtra();
+    motivoOtroWrapper?.classList.add("hidden");
+    if (inputMotivoOtro) {
+      inputMotivoOtro.required = false;
+      inputMotivoOtro.value = "";
+    }
+    return;
+  }
+  const showTipo4 = String(platId || "") === "1";
+  const motivosFiltrados = (tiposReporteCatalog || []).filter((item) =>
+    showTipo4 ? true : Number(item.id) !== 4
+  );
+  selectMotivo.innerHTML = '<option value="">Seleccione motivo</option>';
+  motivosFiltrados.forEach((item) => {
+    const opt = document.createElement("option");
+    opt.value = String(item.id);
+    opt.textContent = item.titulo;
+    opt.dataset.titulo = item.titulo;
+    selectMotivo.appendChild(opt);
+  });
+  const optOtro = document.createElement("option");
+  optOtro.value = "__otro__";
+  optOtro.textContent = "Otro";
+  optOtro.dataset.titulo = "Otro";
+  selectMotivo.appendChild(optOtro);
+  if (selectedPrev && selectMotivo.querySelector(`option[value="${selectedPrev}"]`)) {
+    selectMotivo.value = selectedPrev;
+  } else {
+    selectMotivo.value = "";
+  }
+  updateMotivoExtra();
+  if (!isOtroMotivo(getSelectedMotivoTitle())) {
+    motivoOtroWrapper?.classList.add("hidden");
+    if (inputMotivoOtro) {
+      inputMotivoOtro.required = false;
+      inputMotivoOtro.value = "";
     }
   }
 }
@@ -203,8 +300,10 @@ async function cargarPerfilesPorCorreo(cuentaId) {
     selectedPerfilId = null;
     return;
   }
+  perfilWrapper.classList.remove("hidden");
   selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
-  selectedCuentaId = null;
+  selectPerfil.required = false;
+  selectedCuentaId = cuentaId;
   selectedPerfilId = null;
 
   const userId = requireSession();
@@ -216,7 +315,6 @@ async function cargarPerfilesPorCorreo(cuentaId) {
     .eq("id_cuenta", cuentaId);
   if (error) {
     console.error("perfiles por correo error", error);
-    perfilWrapper.classList.add("hidden");
     return;
   }
   const ventasFiltradas = (data || []).filter(
@@ -228,9 +326,6 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   const perfilesRaw = ventasFiltradas.filter((row) => row.id_cuenta === selectedCuentaId);
   if (!perfilesRaw.length) {
     selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
-    perfilWrapper.classList.add("hidden");
-    if (selectPerfil) selectPerfil.required = false;
-    selectedCuentaId = null;
     selectedPerfilId = null;
     return;
   }
@@ -245,7 +340,6 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   });
 
   if (!perfilesMap.size) {
-    perfilWrapper.classList.add("hidden");
     if (selectPerfil) selectPerfil.required = false;
     return;
   }
@@ -258,8 +352,14 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   });
   perfilWrapper.classList.remove("hidden");
   if (selectPerfil) selectPerfil.required = true;
-  // Siempre muestra el select; el usuario elige aunque solo haya 1
-  selectPerfil.value = "";
+  const perfilIds = Array.from(perfilesMap.keys()).map((id) => String(id));
+  if (perfilIds.length === 1) {
+    selectPerfil.value = perfilIds[0];
+    selectedPerfilId = perfilIds[0];
+  } else {
+    selectPerfil.value = "";
+    selectedPerfilId = null;
+  }
 }
 
 function initPerfilPorCorreo() {
@@ -279,7 +379,7 @@ function initPerfilPorCorreo() {
 function initMotivoOtro() {
   if (!selectMotivo || !motivoOtroWrapper) return;
   selectMotivo.addEventListener("change", () => {
-    const show = selectMotivo.value === "otro";
+    const show = isOtroMotivo(getSelectedMotivoTitle());
     motivoOtroWrapper.classList.toggle("hidden", !show);
     if (inputMotivoOtro) {
       inputMotivoOtro.required = show;
@@ -300,11 +400,10 @@ function initNoScreenshotOption() {
 }
 
 function updateMotivoExtra() {
-  const show = chkNoScreenshot?.checked && selectMotivo?.value !== "otro";
-  motivoExtraWrapper?.classList.toggle("hidden", !show);
+  motivoExtraWrapper?.classList.add("hidden");
   if (inputMotivoExtra) {
-    inputMotivoExtra.required = show;
-    if (!show) inputMotivoExtra.value = "";
+    inputMotivoExtra.required = false;
+    inputMotivoExtra.value = "";
   }
 }
 
@@ -400,19 +499,24 @@ async function handleSubmit(e) {
     const id_plataforma = selectedPlataformaId ? Number(selectedPlataformaId) : null;
     const id_cuenta = selectedCuentaId ? Number(selectedCuentaId) : null;
     const id_perfil = selectedPerfilId ? Number(selectedPerfilId) : null;
-    const motivo = selectMotivo?.value || "";
-
-    const flags = {
-      por_clave: false,
-      por_pin: false,
-      por_suscripcion: false,
-    };
-    if (motivo === "contrasena") flags.por_clave = true;
-    else if (motivo === "pin") flags.por_pin = true;
-    else if (motivo === "suscripcion") flags.por_suscripcion = true;
+    const motivoOption = selectMotivo?.selectedOptions?.[0] || null;
+    const motivoTipoRaw = String(motivoOption?.value || "").trim();
+    const motivoLabel = (motivoOption?.dataset?.titulo || motivoOption?.textContent || "").trim();
+    const motivoEsOtro = isOtroMotivo(motivoLabel);
+    const parsedTipo = Number(motivoTipoRaw);
+    const motivoTipoId = motivoEsOtro
+      ? null
+      : Number.isFinite(parsedTipo)
+        ? parsedTipo
+        : null;
+    if (!motivoLabel || (!motivoEsOtro && !Number.isFinite(motivoTipoId))) {
+      alert("Selecciona un motivo.");
+      submitBtn && (submitBtn.disabled = false);
+      return;
+    }
 
     let descripcion = null;
-    if (motivo === "otro") {
+    if (motivoEsOtro) {
       descripcion = (inputMotivoOtro?.value || "").trim() || null;
       if (!descripcion || descripcion.length < 3) {
         alert("Describe el problema (mínimo 3 caracteres).");
@@ -420,16 +524,8 @@ async function handleSubmit(e) {
         submitBtn && (submitBtn.disabled = false);
         return;
       }
-    } else if (chkNoScreenshot?.checked) {
-      descripcion = (inputMotivoExtra?.value || "").trim() || null;
-      if (!descripcion || descripcion.length < 3) {
-        alert("Describe el problema (mínimo 3 caracteres).");
-        inputMotivoExtra?.focus();
-        submitBtn && (submitBtn.disabled = false);
-        return;
-      }
     } else {
-      descripcion = null;
+      descripcion = motivoLabel;
     }
 
     let imagenPath = null;
@@ -446,7 +542,7 @@ async function handleSubmit(e) {
       id_plataforma,
       id_cuenta,
       id_perfil,
-      ...flags,
+      id_tipo_reporte: motivoTipoId,
       descripcion,
       imagen: imagenPath,
       fecha_creacion,

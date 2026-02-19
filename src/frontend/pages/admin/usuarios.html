@@ -51,6 +51,11 @@
         color: #7f1d1d;
         font-weight: 700;
       }
+      .registro-si {
+        background: #dcfce7;
+        color: #166534;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
@@ -66,6 +71,7 @@
           <table class="table-base usuarios-table">
             <thead>
               <tr>
+                <th>ID</th>
                 <th>Cliente</th>
                 <th>Teléfono</th>
                 <th>Email</th>
@@ -136,6 +142,7 @@
               const registrado = u.fecha_registro ? "Sí" : "No";
               return `
                 <tr>
+                  <td>${u.id_usuario ?? "-"}</td>
                   <td>${cliente}</td>
                   <td>
                     <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="telefono" data-quick-edit="${telefonoQuickEdit}">
@@ -149,7 +156,7 @@
                       <button type="button" class="btn-outline btn-edit">✏️</button>
                     </div>
                   </td>
-                  <td class="${registrado === "No" ? "registro-no" : ""}">${registrado}</td>
+                  <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">${registrado}</td>
                 </tr>
               `;
             })

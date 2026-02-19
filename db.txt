@@ -30,6 +30,7 @@ CREATE TABLE public.carritos (
   descuento double precision,
   monto_final double precision,
   usa_saldo boolean,
+  hora_creacion time without time zone,
   CONSTRAINT carritos_pkey PRIMARY KEY (id_carrito),
   CONSTRAINT carritos_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
@@ -61,11 +62,11 @@ CREATE TABLE public.cuentas (
   dominio_de bigint,
   venta_dominio boolean,
   cuenta_madre boolean,
+  pin integer,
   CONSTRAINT cuentas_pkey PRIMARY KEY (id_cuenta),
   CONSTRAINT cuentas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT cuentas_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
-  CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario),
-  CONSTRAINT cuentas_id_cuenta_madre_fkey FOREIGN KEY (id_cuenta_madre) REFERENCES public.cuentas(id_cuenta)
+  CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.descuentos (
   id_descuento bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -106,11 +107,13 @@ CREATE TABLE public.historial_ventas (
   referencia text,
   comprobante text,
   hora_pago time without time zone,
+  id_orden bigint,
   CONSTRAINT historial_ventas_pkey PRIMARY KEY (id_historial_ventas),
   CONSTRAINT historial_ventas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT historial_ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_id_usuario_cliente_fkey FOREIGN KEY (id_usuario_cliente) REFERENCES public.usuarios(id_usuario),
-  CONSTRAINT historial_ventas_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago)
+  CONSTRAINT historial_ventas_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
+  CONSTRAINT historial_ventas_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden)
 );
 CREATE TABLE public.metodos_de_pago (
   id_metodo_de_pago bigint NOT NULL,
@@ -229,6 +232,7 @@ CREATE TABLE public.plataformas (
   mostrar_stock boolean,
   color_3 text,
   banner text,
+  link_pagina text,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
   CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );
@@ -268,15 +272,17 @@ CREATE TABLE public.reemplazos (
   CONSTRAINT reemplazos_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT reemplazos_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil)
 );
+CREATE TABLE public.reporte_tipos (
+  id_tipo_reporte bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  titulo text NOT NULL,
+  CONSTRAINT reporte_tipos_pkey PRIMARY KEY (id_tipo_reporte)
+);
 CREATE TABLE public.reportes (
   id_reporte bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   id_usuario bigint,
   id_plataforma bigint,
   id_cuenta bigint,
   id_perfil bigint,
-  por_clave boolean,
-  por_pin boolean,
-  por_suscripcion boolean,
   descripcion text,
   imagen text,
   en_revision boolean,
@@ -285,11 +291,13 @@ CREATE TABLE public.reportes (
   hora_creacion date,
   solucionado_por bigint,
   descripcion_solucion text,
+  id_tipo_reporte bigint,
   CONSTRAINT reportes_pkey PRIMARY KEY (id_reporte),
   CONSTRAINT reportes_id_cuenta_fkey1 FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT reportes_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),
   CONSTRAINT reportes_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
-  CONSTRAINT reportes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
+  CONSTRAINT reportes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT reportes_id_tipo_reporte_fkey FOREIGN KEY (id_tipo_reporte) REFERENCES public.reporte_tipos(id_tipo_reporte)
 );
 CREATE TABLE public.tareas (
   id_tarea bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -299,11 +307,11 @@ CREATE TABLE public.tareas (
 );
 CREATE TABLE public.tareas_asignadas (
   id_tarea_asignada bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
-  tarea bigint NOT NULL,
+  id_tarea bigint NOT NULL,
   cuenta bigint,
   CONSTRAINT tareas_asignadas_pkey PRIMARY KEY (id_tarea_asignada),
-  CONSTRAINT tareas_asignadas_tarea_fkey FOREIGN KEY (tarea) REFERENCES public.tareas(id_tarea),
-  CONSTRAINT tareas_asignadas_cuenta_fkey FOREIGN KEY (cuenta) REFERENCES public.cuentas(id_cuenta)
+  CONSTRAINT tareas_asignadas_cuenta_fkey FOREIGN KEY (cuenta) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT tareas_asignadas_id_tarea_fkey FOREIGN KEY (id_tarea) REFERENCES public.tareas(id_tarea)
 );
 CREATE TABLE public.tarjetas_de_regalo (
   id_tarjeta_de_regalo bigint GENERATED ALWAYS AS IDENTITY NOT NULL,

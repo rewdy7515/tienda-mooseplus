@@ -955,19 +955,22 @@ body.checkout-page .checkout-total {
 }
 
 .reportes-table {
-  width: 100%;
-  border-collapse: collapse;
   margin-top: 10px;
 }
 
-.reportes-table th,
-.reportes-table td {
+.reportes-table:not(.table-base) {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.reportes-table:not(.table-base) th,
+.reportes-table:not(.table-base) td {
   padding: 10px;
   border: 1px solid #e5e5e5;
   font-size: 13px;
 }
 
-.reportes-table th {
+.reportes-table:not(.table-base) th {
   background: #f8f8f8;
   text-align: left;
 }
@@ -1927,9 +1930,17 @@ input[type="number"].input-inline {
   width: 95%;
 }
 
+.tabla-wrapper,
+.table-base-wrap,
+.table-scroll-x {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .table-base {
   width: 100%;
-  min-width: 700px;
+  min-width: max-content;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: auto;
@@ -1952,7 +1963,7 @@ input[type="number"].input-inline {
 }
 .table-base th {
   background: var(--table-header-bg, #2c2f36);
-  color: #fff;
+  color: var(--table-header-color, #fff);
   padding: 5px 10px;
   font-size: 17px;
   font-weight: 800;
