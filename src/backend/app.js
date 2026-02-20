@@ -10,6 +10,9 @@ const {
   getWhatsappClient,
   isWhatsappReady,
 } = require("../../whatsapp web/client");
+const {
+  buildNotificationPayload,
+} = require("../frontend/scripts/notification-templates-core");
 
 const app = express();
 app.use(
@@ -62,6 +65,28 @@ let lastAutoRecordatoriosState = {
   recordatoriosEnviados: false,
   error: null,
 };
+const NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED =
+  process.env.NUEVO_SERVICIO_NOTIF_QUEUE !== "false" && process.env.VERCEL !== "1";
+const NUEVO_SERVICIO_NOTIF_QUEUE_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.NUEVO_SERVICIO_NOTIF_QUEUE_INTERVAL_MS) || 15000,
+);
+const NUEVO_SERVICIO_NOTIF_QUEUE_BATCH = Math.max(
+  1,
+  Math.min(50, Number(process.env.NUEVO_SERVICIO_NOTIF_QUEUE_BATCH) || 20),
+);
+const NUEVO_SERVICIO_NOTIF_QUEUE_TABLE = "eventos_notificacion_nuevo_servicio";
+let nuevoServicioNotifQueueInProgress = false;
+let nuevoServicioNotifQueueTableMissing = false;
+let nuevoServicioNotifQueueLastRunAt = null;
+let nuevoServicioNotifQueueLastResult = {
+  fetched: 0,
+  sent: 0,
+  duplicates: 0,
+  failed: 0,
+  invalidUser: 0,
+};
+let nuevoServicioNotifQueueLastError = null;
 
 const uniqPositiveIds = (values = []) =>
   Array.from(
@@ -143,6 +168,191 @@ const didSendAllRecordatorios = (result = {}) => {
     Number(result.skippedNoPhone || 0) === 0 &&
     Number(result.skippedInvalidPhone || 0) === 0
   );
+};
+
+const isMissingTableError = (err, tableName) => {
+  const code = String(err?.code || "").trim();
+  const message = String(err?.message || "").toLowerCase();
+  if (code === "42P01") return true;
+  if (!tableName) return false;
+  return message.includes("does not exist") && message.includes(String(tableName).toLowerCase());
+};
+
+const normalizePerfilText = (perfilRaw) => {
+  const perfil = String(perfilRaw || "").trim();
+  if (!perfil) return "";
+  if (/^m\d+$/i.test(perfil)) return `M${perfil.replace(/^m/i, "")}`;
+  if (/^\d+$/.test(perfil)) return `M${perfil}`;
+  return perfil;
+};
+
+const markNuevoServicioQueueEventProcessed = async (idEvento, { error = null } = {}) => {
+  if (!idEvento) return;
+  const payload = {
+    procesado: true,
+    procesado_en: new Date().toISOString(),
+    ultimo_error: error ? String(error).slice(0, 500) : null,
+  };
+  const { error: updErr } = await supabaseAdmin
+    .from(NUEVO_SERVICIO_NOTIF_QUEUE_TABLE)
+    .update(payload)
+    .eq("id_evento", idEvento);
+  if (updErr) throw updErr;
+};
+
+const markNuevoServicioQueueEventError = async (idEvento, errorMessage) => {
+  if (!idEvento) return;
+  const payload = {
+    ultimo_error: String(errorMessage || "Error desconocido").slice(0, 500),
+  };
+  const { error: updErr } = await supabaseAdmin
+    .from(NUEVO_SERVICIO_NOTIF_QUEUE_TABLE)
+    .update(payload)
+    .eq("id_evento", idEvento);
+  if (updErr) throw updErr;
+};
+
+const processNuevoServicioNotificationQueue = async () => {
+  if (!NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED) {
+    return {
+      skipped: true,
+      reason: "disabled",
+      ...nuevoServicioNotifQueueLastResult,
+    };
+  }
+  if (nuevoServicioNotifQueueInProgress) {
+    return {
+      skipped: true,
+      reason: "in_progress",
+      ...nuevoServicioNotifQueueLastResult,
+    };
+  }
+
+  nuevoServicioNotifQueueInProgress = true;
+  const result = {
+    fetched: 0,
+    sent: 0,
+    duplicates: 0,
+    failed: 0,
+    invalidUser: 0,
+  };
+
+  try {
+    const { data: events, error: qErr } = await supabaseAdmin
+      .from(NUEVO_SERVICIO_NOTIF_QUEUE_TABLE)
+      .select(
+        "id_evento, id_venta, id_usuario, id_cuenta, id_plataforma, plataforma, correo_cuenta, perfil, fecha_corte, procesado",
+      )
+      .eq("procesado", false)
+      .order("id_evento", { ascending: true })
+      .limit(NUEVO_SERVICIO_NOTIF_QUEUE_BATCH);
+
+    if (qErr) {
+      if (isMissingTableError(qErr, NUEVO_SERVICIO_NOTIF_QUEUE_TABLE)) {
+        if (!nuevoServicioNotifQueueTableMissing) {
+          console.warn(
+            `[Notificaciones] Tabla ${NUEVO_SERVICIO_NOTIF_QUEUE_TABLE} no existe. Se reintentará automáticamente.`,
+          );
+        }
+        nuevoServicioNotifQueueTableMissing = true;
+        return {
+          skipped: true,
+          reason: "table_missing",
+          ...result,
+        };
+      }
+      throw qErr;
+    }
+
+    const queueItems = Array.isArray(events) ? events : [];
+    if (nuevoServicioNotifQueueTableMissing) {
+      console.log(
+        `[Notificaciones] Tabla ${NUEVO_SERVICIO_NOTIF_QUEUE_TABLE} detectada. Worker retomado.`,
+      );
+    }
+    nuevoServicioNotifQueueTableMissing = false;
+    result.fetched = queueItems.length;
+
+    for (const eventRow of queueItems) {
+      const idEvento = Number(eventRow?.id_evento);
+      const idUsuario = Number(eventRow?.id_usuario);
+      const idVenta = Number(eventRow?.id_venta);
+
+      if (!Number.isFinite(idUsuario) || idUsuario <= 0) {
+        result.invalidUser += 1;
+        try {
+          await markNuevoServicioQueueEventProcessed(idEvento, {
+            error: "id_usuario inválido",
+          });
+        } catch (markErr) {
+          console.error("[Notificaciones] No se pudo cerrar evento con id_usuario inválido", markErr);
+          result.failed += 1;
+        }
+        continue;
+      }
+
+      try {
+        if (Number.isFinite(idVenta) && idVenta > 0) {
+          const duplicatePattern = `%ID Venta: #${idVenta}%`;
+          const { data: existingRows, error: existingErr } = await supabaseAdmin
+            .from("notificaciones")
+            .select("id_notificacion")
+            .eq("id_usuario", idUsuario)
+            .eq("titulo", "Nuevo servicio")
+            .ilike("mensaje", duplicatePattern)
+            .limit(1);
+          if (existingErr) throw existingErr;
+          if ((existingRows || []).length) {
+            result.duplicates += 1;
+            await markNuevoServicioQueueEventProcessed(idEvento);
+            continue;
+          }
+        }
+
+        const perfilTxt = normalizePerfilText(eventRow?.perfil);
+        const plataformaTxt =
+          String(eventRow?.plataforma || "").trim() ||
+          (eventRow?.id_plataforma ? `Plataforma ${eventRow.id_plataforma}` : "Plataforma");
+        const payload = buildNotificationPayload(
+          "nuevo_servicio",
+          {
+            plataforma: plataformaTxt,
+            correoCuenta: String(eventRow?.correo_cuenta || "").trim(),
+            perfil: perfilTxt,
+            fechaCorte: eventRow?.fecha_corte || "",
+            idVenta: Number.isFinite(idVenta) && idVenta > 0 ? idVenta : null,
+          },
+          { idCuenta: toPositiveInt(eventRow?.id_cuenta) || null },
+        );
+
+        const { error: insErr } = await supabaseAdmin.from("notificaciones").insert({
+          ...payload,
+          id_usuario: idUsuario,
+        });
+        if (insErr) throw insErr;
+
+        await markNuevoServicioQueueEventProcessed(idEvento);
+        result.sent += 1;
+      } catch (itemErr) {
+        result.failed += 1;
+        try {
+          await markNuevoServicioQueueEventError(idEvento, itemErr?.message || "Error al crear notificación");
+        } catch (markErr) {
+          console.error("[Notificaciones] No se pudo registrar error en cola", markErr);
+        }
+      }
+    }
+
+    nuevoServicioNotifQueueLastError = null;
+    nuevoServicioNotifQueueLastResult = result;
+    return { ...result };
+  } catch (err) {
+    nuevoServicioNotifQueueLastError = err?.message || "Error desconocido";
+    throw err;
+  } finally {
+    nuevoServicioNotifQueueLastRunAt = new Date().toISOString();
+    nuevoServicioNotifQueueInProgress = false;
+  }
 };
 
 const ensureDailyRecordatoriosState = (dateStr) => {
@@ -336,6 +546,47 @@ const buildWhatsappRecordatorioItems = async () => {
       plain,
       ventaIds: uniqPositiveIds(group.ventaIds),
     };
+  });
+};
+
+const buildWhatsappPendingNoPhoneClients = async () => {
+  const items = await buildWhatsappRecordatorioItems();
+  const grouped = {};
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const rawPhone = String(item?.telefonoRaw || "").trim();
+    const hasRawPhone = Boolean(rawPhone);
+    const hasValidPhone = Boolean(item?.phone);
+    if (hasRawPhone && hasValidPhone) return;
+
+    const idUsuario = Number(item?.idUsuario);
+    const key = Number.isFinite(idUsuario) && idUsuario > 0 ? String(idUsuario) : String(item?.cliente || "cliente");
+    if (!grouped[key]) {
+      grouped[key] = {
+        idUsuario: Number.isFinite(idUsuario) && idUsuario > 0 ? idUsuario : null,
+        cliente: String(item?.cliente || "Cliente"),
+        telefono: rawPhone,
+        reason: hasRawPhone ? "invalid_phone" : "missing_phone",
+        ventaIds: [],
+      };
+    } else {
+      // Si hay múltiples filas para el mismo cliente, prioriza reason missing_phone.
+      if (grouped[key].reason !== "missing_phone" && !hasRawPhone) {
+        grouped[key].reason = "missing_phone";
+      }
+      if (!grouped[key].telefono && rawPhone) {
+        grouped[key].telefono = rawPhone;
+      }
+    }
+
+    const ventas = uniqPositiveIds(item?.ventaIds || []);
+    grouped[key].ventaIds = uniqPositiveIds([...(grouped[key].ventaIds || []), ...ventas]);
+  });
+
+  return Object.values(grouped).sort((a, b) => {
+    const aName = String(a?.cliente || "").toLowerCase();
+    const bName = String(b?.cliente || "").toLowerCase();
+    return aName.localeCompare(bName);
   });
 };
 
@@ -548,6 +799,22 @@ if (shouldStartWhatsapp && WHATSAPP_AUTO_RECORDATORIOS_ENABLED) {
   });
 }
 
+if (NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED) {
+  console.log(
+    `[Notificaciones] Worker nuevo_servicio activo (cada ${Math.round(
+      NUEVO_SERVICIO_NOTIF_QUEUE_INTERVAL_MS / 1000,
+    )}s).`,
+  );
+  setInterval(() => {
+    processNuevoServicioNotificationQueue().catch((err) => {
+      console.error("[Notificaciones] Worker nuevo_servicio error", err);
+    });
+  }, NUEVO_SERVICIO_NOTIF_QUEUE_INTERVAL_MS);
+  processNuevoServicioNotificationQueue().catch((err) => {
+    console.error("[Notificaciones] Worker nuevo_servicio init error", err);
+  });
+}
+
 app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async (req, res) => {
   clearCorsHeaders(res);
   try {
@@ -652,6 +919,66 @@ app.get("/api/whatsapp/recordatorios/auto-status", async (req, res) => {
     lastAutoRecordatoriosRunDate,
     lastAutoRecordatoriosState,
   });
+});
+
+app.get("/api/whatsapp/recordatorios/pending-no-phone", async (req, res) => {
+  try {
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    if (!idUsuarioSesion) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+
+    const { data: permRow, error: permErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("permiso_superadmin")
+      .eq("id_usuario", idUsuarioSesion)
+      .maybeSingle();
+    if (permErr) throw permErr;
+    const isSuper = isTrue(permRow?.permiso_superadmin);
+    if (!isSuper) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+
+    const clients = await buildWhatsappPendingNoPhoneClients();
+    return res.json({
+      total: clients.length,
+      clients,
+    });
+  } catch (err) {
+    console.error("[whatsapp/recordatorios/pending-no-phone] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res.status(500).json({
+      error: err?.message || "No se pudo calcular clientes sin teléfono para recordatorios",
+    });
+  }
+});
+
+app.get("/api/notificaciones/nuevo-servicio/worker-status", (req, res) => {
+  res.json({
+    enabled: NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED,
+    intervalMs: NUEVO_SERVICIO_NOTIF_QUEUE_INTERVAL_MS,
+    batch: NUEVO_SERVICIO_NOTIF_QUEUE_BATCH,
+    table: NUEVO_SERVICIO_NOTIF_QUEUE_TABLE,
+    inProgress: nuevoServicioNotifQueueInProgress,
+    tableMissing: nuevoServicioNotifQueueTableMissing,
+    lastRunAt: nuevoServicioNotifQueueLastRunAt,
+    lastResult: nuevoServicioNotifQueueLastResult,
+    lastError: nuevoServicioNotifQueueLastError,
+  });
+});
+
+app.post("/api/notificaciones/nuevo-servicio/procesar", async (req, res) => {
+  try {
+    const result = await processNuevoServicioNotificationQueue();
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[notificaciones/nuevo-servicio/procesar] error", err);
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudo procesar la cola de notificaciones" });
+  }
 });
 
 app.post("/api/whatsapp/send", async (req, res) => {

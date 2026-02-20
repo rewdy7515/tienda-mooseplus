@@ -438,6 +438,32 @@ export async function fetchEntregadas() {
   }
 }
 
+export async function fetchPendingReminderNoPhoneClients() {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/whatsapp/recordatorios/pending-no-phone`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return {
+        error: message || "No se pudo cargar clientes pendientes sin teléfono",
+        status: res.status,
+      };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("fetchPendingReminderNoPhoneClients error", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchP2PRate() {
   try {
     const res = await fetch(`${API_BASE}/api/p2p/rate`, {

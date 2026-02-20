@@ -5,6 +5,7 @@ import {
   loadCurrentUser,
   supabase,
   fetchEntregadas,
+  fetchPendingReminderNoPhoneClients,
   fetchTestingFlag,
   updateTestingFlag,
   fetchP2PRate,
@@ -48,6 +49,9 @@ const activeOrderLink = document.querySelector("#active-order-link");
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
+const recordatoriosSinTelefonoWrap = document.querySelector("#recordatorios-sin-telefono-wrap");
+const recordatoriosSinTelefonoList = document.querySelector("#recordatorios-sin-telefono-list");
+const recordatoriosSinTelefonoEmpty = document.querySelector("#recordatorios-sin-telefono-empty");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -414,6 +418,7 @@ const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
   if (!recordatoriosPendientesWrap || !recordatoriosPendientesList || !recordatoriosPendientesEmpty) return;
   if (!isSuperadmin) {
     recordatoriosPendientesList.innerHTML = "";
+    recordatoriosPendientesEmpty.classList.add("hidden");
     recordatoriosPendientesWrap.classList.add("hidden");
     return;
   }
@@ -436,18 +441,69 @@ const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
     ).sort();
 
     recordatoriosPendientesList.innerHTML = "";
+    if (!uniqueDates.length) {
+      recordatoriosPendientesEmpty.classList.add("hidden");
+      recordatoriosPendientesWrap.classList.add("hidden");
+      return;
+    }
+
     uniqueDates.forEach((dateStr) => {
       const li = document.createElement("li");
       li.textContent = formatToDDMMYYYY(dateStr);
       recordatoriosPendientesList.appendChild(li);
     });
 
-    const hasDates = uniqueDates.length > 0;
-    recordatoriosPendientesEmpty.classList.toggle("hidden", hasDates);
+    recordatoriosPendientesEmpty.classList.add("hidden");
     recordatoriosPendientesWrap.classList.remove("hidden");
   } catch (err) {
     console.error("recordatorios pendientes error", err);
+    recordatoriosPendientesEmpty.classList.add("hidden");
     recordatoriosPendientesWrap.classList.add("hidden");
+  }
+};
+
+const loadPendingReminderNoPhoneClients = async ({ isSuperadmin = false } = {}) => {
+  if (!recordatoriosSinTelefonoWrap || !recordatoriosSinTelefonoList || !recordatoriosSinTelefonoEmpty) return;
+  if (!isSuperadmin) {
+    recordatoriosSinTelefonoList.innerHTML = "";
+    recordatoriosSinTelefonoEmpty.classList.add("hidden");
+    recordatoriosSinTelefonoWrap.classList.add("hidden");
+    return;
+  }
+
+  try {
+    const resp = await fetchPendingReminderNoPhoneClients();
+    if (resp?.error) throw new Error(resp.error);
+
+    const clients = Array.isArray(resp?.clients) ? resp.clients : [];
+    recordatoriosSinTelefonoList.innerHTML = "";
+    if (!clients.length) {
+      recordatoriosSinTelefonoEmpty.classList.add("hidden");
+      recordatoriosSinTelefonoWrap.classList.add("hidden");
+      return;
+    }
+
+    clients.forEach((client) => {
+      const li = document.createElement("li");
+      const nombre = String(client?.cliente || "Cliente");
+      const telefono = String(client?.telefono || "").trim();
+      const reason = String(client?.reason || "");
+      if (reason === "invalid_phone" && telefono) {
+        li.textContent = `${nombre} (número inválido: ${telefono})`;
+      } else if (reason === "invalid_phone") {
+        li.textContent = `${nombre} (número inválido)`;
+      } else {
+        li.textContent = nombre;
+      }
+      recordatoriosSinTelefonoList.appendChild(li);
+    });
+
+    recordatoriosSinTelefonoEmpty.classList.add("hidden");
+    recordatoriosSinTelefonoWrap.classList.remove("hidden");
+  } catch (err) {
+    console.error("recordatorios sin telefono pendientes error", err);
+    recordatoriosSinTelefonoEmpty.classList.add("hidden");
+    recordatoriosSinTelefonoWrap.classList.add("hidden");
   }
 };
 
@@ -527,6 +583,7 @@ async function init() {
     await loadActiveOrderNotice(currentUser);
     await checkMissingDataNotice(currentUser);
     await loadPendingReminderDates({ isSuperadmin: isSuper });
+    await loadPendingReminderNoPhoneClients({ isSuperadmin: isSuper });
 
     const cachedCart = getCachedCart();
     const cartData = await fetchCart();

@@ -1445,6 +1445,9 @@
       const modalReemplazarCuenta = document.querySelector(
         "#modal-reemplazar-cuenta",
       );
+      const modalReemplazarRelacionados = document.querySelector(
+        "#modal-reemplazar-relacionados",
+      );
       const btnReemplazarCuentaClose = document.querySelector(
         "#btn-reemplazar-cuenta-close",
       );
@@ -1453,6 +1456,12 @@
       );
       const btnReemplazarCuentaConfirm = document.querySelector(
         "#btn-reemplazar-cuenta-confirm",
+      );
+      const btnReemplazarRelacionadosSi = document.querySelector(
+        "#btn-reemplazar-relacionados-si",
+      );
+      const btnReemplazarRelacionadosNo = document.querySelector(
+        "#btn-reemplazar-relacionados-no",
       );
       const inputReemplazarCuentaCorreo = document.querySelector(
         "#input-reemplazar-cuenta-correo",
@@ -1483,6 +1492,7 @@
       let tareasCache = null;
       let tareasCuentaId = null;
       let reemplazarCuentaTargetId = null;
+      let reemplazoRelacionadosContext = null;
 
       (async () => {
         try {
@@ -6077,6 +6087,123 @@
         renderTareasList(tareas);
       };
 
+      const closeReemplazarRelacionadosModal = () => {
+        if (!modalReemplazarRelacionados) return;
+        modalReemplazarRelacionados.classList.add("hidden");
+        modalReemplazarRelacionados.setAttribute("aria-hidden", "true");
+        reemplazoRelacionadosContext = null;
+      };
+
+      const openReemplazarRelacionadosModal = ({ oldCuentaId, nuevaCuentaId, perfilMapOldToNew }) => {
+        if (!modalReemplazarRelacionados) return;
+        reemplazoRelacionadosContext = {
+          oldCuentaId: Number(oldCuentaId) || null,
+          nuevaCuentaId: Number(nuevaCuentaId) || null,
+          perfilMapOldToNew: perfilMapOldToNew || {},
+        };
+        modalReemplazarRelacionados.classList.remove("hidden");
+        modalReemplazarRelacionados.setAttribute("aria-hidden", "false");
+      };
+
+      const replaceRelatedClientsFromCuenta = async ({
+        oldCuentaId,
+        nuevaCuentaId,
+        perfilMapOldToNew = {},
+      }) => {
+        const oldId = Number(oldCuentaId);
+        const newId = Number(nuevaCuentaId);
+        if (!Number.isFinite(oldId) || oldId <= 0) {
+          throw new Error("Cuenta origen inválida");
+        }
+        if (!Number.isFinite(newId) || newId <= 0) {
+          throw new Error("Cuenta destino inválida");
+        }
+
+        const { data: ventasRelacionadas, error: ventasErr } = await supabase
+          .from("ventas")
+          .select("id_venta, id_cuenta, id_cuenta_miembro, id_perfil")
+          .or(`id_cuenta.eq.${oldId},id_cuenta_miembro.eq.${oldId}`);
+        if (ventasErr) throw ventasErr;
+
+        const ventas = Array.isArray(ventasRelacionadas) ? ventasRelacionadas : [];
+        let updatedVentas = 0;
+        const perfilesAsignados = new Set();
+
+        for (const venta of ventas) {
+          const idVenta = Number(venta?.id_venta);
+          if (!Number.isFinite(idVenta) || idVenta <= 0) continue;
+          const oldPerfilId = Number(venta?.id_perfil);
+          const mappedPerfil =
+            Number.isFinite(oldPerfilId) && oldPerfilId > 0
+              ? Number(perfilMapOldToNew[oldPerfilId] || 0)
+              : 0;
+          const idCuentaVenta = Number(venta?.id_cuenta);
+          const idCuentaMiembroVenta = Number(venta?.id_cuenta_miembro);
+          const updatePayload = {};
+          if (Number.isFinite(idCuentaVenta) && idCuentaVenta === oldId) {
+            updatePayload.id_cuenta = newId;
+          }
+          if (Number.isFinite(idCuentaMiembroVenta) && idCuentaMiembroVenta === oldId) {
+            updatePayload.id_cuenta_miembro = newId;
+          }
+
+          if (
+            Number.isFinite(oldPerfilId) &&
+            oldPerfilId > 0 &&
+            Number.isFinite(idCuentaVenta) &&
+            idCuentaVenta === oldId
+          ) {
+            updatePayload.id_perfil =
+              Number.isFinite(mappedPerfil) && mappedPerfil > 0 ? mappedPerfil : null;
+          }
+          if (!Object.keys(updatePayload).length) continue;
+
+          const { error: updVentaErr } = await supabase
+            .from("ventas")
+            .update(updatePayload)
+            .eq("id_venta", idVenta);
+          if (updVentaErr) throw updVentaErr;
+          updatedVentas += 1;
+
+          if (
+            Number.isFinite(mappedPerfil) &&
+            mappedPerfil > 0 &&
+            Number.isFinite(idCuentaVenta) &&
+            idCuentaVenta === oldId
+          ) {
+            perfilesAsignados.add(mappedPerfil);
+          }
+        }
+
+        const { error: updMadreErr } = await supabase
+          .from("cuentas")
+          .update({ id_cuenta_madre: newId })
+          .eq("id_cuenta_madre", oldId);
+        if (updMadreErr) throw updMadreErr;
+
+        if (perfilesAsignados.size) {
+          const perfilIds = Array.from(perfilesAsignados);
+          const { error: occPerfErr } = await supabase
+            .from("perfiles")
+            .update({ ocupado: true })
+            .in("id_perfil", perfilIds);
+          if (occPerfErr) throw occPerfErr;
+        }
+
+        if (updatedVentas > 0) {
+          const { error: occCuentaErr } = await supabase
+            .from("cuentas")
+            .update({ ocupado: true })
+            .eq("id_cuenta", newId);
+          if (occCuentaErr) throw occCuentaErr;
+        }
+
+        return {
+          updatedVentas,
+          perfilesAsignados: perfilesAsignados.size,
+        };
+      };
+
       const closeReemplazarCuentaModal = () => {
         if (!modalReemplazarCuenta) return;
         modalReemplazarCuenta.classList.add("hidden");
@@ -6228,6 +6355,52 @@
           closeReemplazarCuentaModal();
         }
       });
+      modalReemplazarRelacionados?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) {
+          closeReemplazarRelacionadosModal();
+        }
+      });
+      btnReemplazarRelacionadosNo?.addEventListener("click", async () => {
+        const ctx = reemplazoRelacionadosContext;
+        closeReemplazarRelacionadosModal();
+        try {
+          if (ctx?.nuevaCuentaId) {
+            await loadCuentaDetalle(ctx.nuevaCuentaId);
+          }
+        } catch (err) {
+          console.error("cargar cuenta reemplazada error", err);
+        }
+        alert("Cuenta reemplazada.");
+      });
+      btnReemplazarRelacionadosSi?.addEventListener("click", async () => {
+        const ctx = reemplazoRelacionadosContext;
+        if (!ctx?.oldCuentaId || !ctx?.nuevaCuentaId) {
+          closeReemplazarRelacionadosModal();
+          return;
+        }
+        if (btnReemplazarRelacionadosSi) btnReemplazarRelacionadosSi.disabled = true;
+        if (btnReemplazarRelacionadosNo) btnReemplazarRelacionadosNo.disabled = true;
+        try {
+          const result = await replaceRelatedClientsFromCuenta({
+            oldCuentaId: ctx.oldCuentaId,
+            nuevaCuentaId: ctx.nuevaCuentaId,
+            perfilMapOldToNew: ctx.perfilMapOldToNew,
+          });
+          closeReemplazarRelacionadosModal();
+          await loadCuentaDetalle(ctx.nuevaCuentaId);
+          alert(
+            `Cuenta reemplazada. Clientes relacionados actualizados: ${result.updatedVentas}.`,
+          );
+        } catch (err) {
+          console.error("reemplazar clientes relacionados error", err);
+          closeReemplazarRelacionadosModal();
+          await loadCuentaDetalle(ctx.nuevaCuentaId);
+          alert("Cuenta reemplazada, pero no se pudieron reemplazar clientes relacionados.");
+        } finally {
+          if (btnReemplazarRelacionadosSi) btnReemplazarRelacionadosSi.disabled = false;
+          if (btnReemplazarRelacionadosNo) btnReemplazarRelacionadosNo.disabled = false;
+        }
+      });
       btnReemplazarCuentaConfirm?.addEventListener("click", async () => {
         const cuentaId = Number(reemplazarCuentaTargetId);
         if (!Number.isFinite(cuentaId) || cuentaId <= 0) {
@@ -6336,6 +6509,16 @@
           const nuevaCuentaId = Number(nuevaCuenta?.id_cuenta || 0);
           if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta nueva.");
 
+          const oldPerfilNById = (perfilesOrigen || []).reduce((acc, perfil) => {
+            const oldPerfilId = Number(perfil?.id_perfil);
+            const nPerfil = Number(perfil?.n_perfil);
+            if (Number.isFinite(oldPerfilId) && oldPerfilId > 0 && Number.isFinite(nPerfil)) {
+              acc[oldPerfilId] = nPerfil;
+            }
+            return acc;
+          }, {});
+          let newPerfilIdByN = {};
+
           if (shouldCreatePerfiles) {
             const perfilesByN = (perfilesOrigen || []).reduce((acc, perfil) => {
               const key = Number(perfil.n_perfil);
@@ -6371,12 +6554,29 @@
                 id_cuenta_miembro: null,
               };
             });
-            const { error: perfilesNuevosErr } = await supabase
+            const { data: perfilesNuevosRows, error: perfilesNuevosErr } = await supabase
               .from("perfiles")
               .insert(perfilesInsert)
-              .select("id_perfil");
+              .select("id_perfil, n_perfil");
             if (perfilesNuevosErr) throw perfilesNuevosErr;
+            newPerfilIdByN = (perfilesNuevosRows || []).reduce((acc, perfil) => {
+              const nPerfil = Number(perfil?.n_perfil);
+              const idPerfil = Number(perfil?.id_perfil);
+              if (Number.isFinite(nPerfil) && Number.isFinite(idPerfil) && idPerfil > 0) {
+                acc[nPerfil] = idPerfil;
+              }
+              return acc;
+            }, {});
           }
+
+          const perfilMapOldToNew = Object.entries(oldPerfilNById).reduce((acc, [oldPerfilId, nPerfil]) => {
+            const oldIdNum = Number(oldPerfilId);
+            const newId = Number(newPerfilIdByN[nPerfil] || 0);
+            if (Number.isFinite(oldIdNum) && oldIdNum > 0 && Number.isFinite(newId) && newId > 0) {
+              acc[oldIdNum] = newId;
+            }
+            return acc;
+          }, {});
 
           const { error: inactivarCuentaErr } = await supabase
             .from("cuentas")
@@ -6385,8 +6585,11 @@
           if (inactivarCuentaErr) throw inactivarCuentaErr;
 
           closeReemplazarCuentaModal();
-          await loadCuentaDetalle(nuevaCuentaId);
-          alert("Cuenta reemplazada.");
+          openReemplazarRelacionadosModal({
+            oldCuentaId: cuentaId,
+            nuevaCuentaId,
+            perfilMapOldToNew,
+          });
         } catch (err) {
           console.error("reemplazar cuenta error", err);
           alert("No se pudo reemplazar la cuenta.");
@@ -6832,6 +7035,19 @@
             >
               Reemplazar
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-reemplazar-relacionados" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen" style="max-width: 360px; text-align: center">
+        <div class="modal-body">
+          <p style="margin: 0 0 14px 0; font-weight: 700">¿Reemplazar clientes relacionados?</p>
+          <div style="display: flex; gap: 10px; justify-content: center">
+            <button type="button" class="btn-primary" id="btn-reemplazar-relacionados-si">Sí</button>
+            <button type="button" class="btn-outline" id="btn-reemplazar-relacionados-no">No</button>
           </div>
         </div>
       </div>
