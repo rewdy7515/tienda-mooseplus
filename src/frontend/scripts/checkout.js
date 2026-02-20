@@ -61,6 +61,7 @@ let lastSaldoValue = null;
 const MONTO_REFRESH_MS = 60 * 60 * 1000;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -435,7 +436,7 @@ const renderTotal = () => {
   if (!totalEl) return;
   if (orderTitleEl) {
     if (checkoutOrderId) {
-      orderTitleEl.textContent = `N. Orden: #${checkoutOrderId}`;
+      orderTitleEl.textContent = `N de orden: #${checkoutOrderId}`;
       orderTitleEl.style.display = "block";
     } else {
       orderTitleEl.textContent = "";
@@ -483,8 +484,15 @@ const verifyPagoMovil = async () => {
     alert("Selecciona el método de pago 1 para verificar.");
     return { ok: false };
   }
-  if (!refInput?.value.trim()) {
+  const refRaw = String(refInput?.value || "").trim();
+  const refDigits = normalizeReferenceDigits(refRaw);
+  if (!refRaw) {
     alert("Ingresa la referencia.");
+    refInput.classList.add("input-error");
+    return { ok: false };
+  }
+  if (refDigits.length < 4) {
+    alert("La referencia debe tener al menos 4 dígitos.");
     refInput.classList.add("input-error");
     return { ok: false };
   }
@@ -493,7 +501,7 @@ const verifyPagoMovil = async () => {
     return { ok: false };
   }
 
-  const refDigits = refInput.value.trim();
+  const refLast4 = refDigits.slice(-4);
   let montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
   let cartMontoBs = null;
   let cartTasaBs = null;
@@ -519,7 +527,7 @@ const verifyPagoMovil = async () => {
     alert("No se pudo obtener el monto o la tasa del carrito.");
     return { ok: false };
   }
-  console.log("[pago movil] input", { refDigits, montoBs, tasaBs, totalUsd, cartId });
+  console.log("[pago movil] input", { refDigits, refLast4, montoBs, tasaBs, totalUsd, cartId });
 
   const resp = await supabase
     .from("pagomoviles")
@@ -560,7 +568,7 @@ const verifyPagoMovil = async () => {
       diff: Number.isFinite(pagoMonto) ? Math.abs(pagoMonto - montoBs) : null,
       saldo_acreditado: p.saldo_acreditado,
     });
-    const refMatch = textoRefs.some((n) => n.slice(-4) === refDigits);
+    const refMatch = textoRefs.some((n) => n.slice(-4) === refLast4);
     if (!refMatch) return false;
     return Number.isFinite(pagoMonto);
   });
@@ -582,7 +590,7 @@ const verifyPagoMovil = async () => {
 
   if (sessionUserId) {
     const textoRefs = extractRefMatches(match.texto || "");
-    const refMatch = textoRefs.find((n) => n.slice(-4) === refDigits);
+    const refMatch = textoRefs.find((n) => n.slice(-4) === refLast4);
     const updates = {
       saldo_acreditado_a: sessionUserId,
       saldo_acreditado: true,
@@ -873,11 +881,20 @@ btnSendPayment?.addEventListener("click", async () => {
   const metodo = metodos[seleccionado];
   const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
   const isMetodoBs = metodoId === 1;
-  if (!refInput?.value.trim()) {
+  const referenciaRaw = String(refInput?.value || "").trim();
+  if (!referenciaRaw) {
     alert("Ingresa la referencia.");
     refInput.classList.add("input-error");
     return;
   }
+  const referenciaDigits = normalizeReferenceDigits(referenciaRaw);
+  if (isMetodoBs && referenciaDigits.length < 4) {
+    alert("La referencia debe tener al menos 4 dígitos.");
+    refInput?.classList.add("input-error");
+    return;
+  }
+  const referenciaValue = isMetodoBs ? referenciaDigits : referenciaRaw;
+  if (isMetodoBs && refInput) refInput.value = referenciaValue;
   if (isMetodoBs) {
     if (!Number.isFinite(tasaBs)) {
       alert("No se pudo obtener la tasa.");
@@ -901,7 +918,7 @@ btnSendPayment?.addEventListener("click", async () => {
         .from("ordenes")
         .update({
           id_metodo_de_pago: metodo.id_metodo_de_pago ?? metodo.id,
-          referencia: refInput.value.trim(),
+          referencia: referenciaValue,
           comprobante: comprobantes,
           total: totalUsd,
           tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
@@ -926,7 +943,7 @@ btnSendPayment?.addEventListener("click", async () => {
     const payload = {
       id_orden: checkoutOrderId,
       id_metodo_de_pago: metodo.id_metodo_de_pago ?? metodo.id,
-      referencia: refInput.value.trim(),
+      referencia: referenciaValue,
       comprobantes,
       total: totalUsd,
       tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
@@ -945,7 +962,7 @@ btnSendPayment?.addEventListener("click", async () => {
           fecha,
           hora_orden: hora,
           hora_confirmacion: hora,
-          referencia: refInput.value.trim(),
+          referencia: referenciaValue,
           comprobante: comprobantes,
         });
         if (!updated) {

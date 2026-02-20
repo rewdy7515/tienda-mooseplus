@@ -254,9 +254,11 @@ export function initCart({
       const meses = item?.meses || null;
       const idVenta = item?.id_venta || null;
       const idItem = item?.id_item || btn.dataset.idItem || null;
+      // Si tenemos id_item, forzamos eliminación total de la línea (no solo -1).
+      const removeDelta = idItem ? -999999 : -qtyToRemove;
       cartItems.splice(idx, 1);
       if (key)
-        sendCartDelta(key, -qtyToRemove, meses, {
+        sendCartDelta(key, removeDelta, meses, {
           id_venta: idVenta,
           id_item: idItem,
           renovacion: item?.renovacion,

@@ -44,8 +44,11 @@ if (!window.__cartWidgetInit) {
           return `${qty} ${baseUnit}${plural}${mesesTxt} $${price.precio_usd_detal || ""}`;
         })();
         return {
+          id_item: item.id_item,
           id_precio: item.id_precio,
           id_plataforma: price.id_plataforma,
+          id_cuenta: item.id_cuenta || null,
+          id_perfil: item.id_perfil || null,
           nombre: platform.nombre || `Precio ${item.id_precio}`,
           imagen: platform.imagen,
           plan: price.plan,
@@ -54,6 +57,10 @@ if (!window.__cartWidgetInit) {
           meses: item.meses,
           detalle,
           flags,
+          renovacion: item.renovacion === true,
+          id_venta: item.id_venta || null,
+          correo: item.correo || null,
+          n_perfil: item.n_perfil || null,
         };
       });
 

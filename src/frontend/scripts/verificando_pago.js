@@ -7,6 +7,7 @@ attachLogout(clearServerSession);
 
 const statusEl = document.querySelector("#verif-status");
 const processingBlock = document.querySelector("#processing-block");
+const ordenDisplay = document.querySelector("#orden-display");
 const refDisplay = document.querySelector("#ref-display");
 const montoDisplay = document.querySelector("#monto-display");
 const refEditWrap = document.querySelector("#ref-edit-wrap");
@@ -31,6 +32,7 @@ let processingOrder = false;
 let orderProcessed = false;
 let cartMontoBs = null;
 let cartTasaBs = null;
+const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
@@ -115,6 +117,12 @@ const startCountdown = () => {
   countdownTimer = setInterval(updateCountdown, 1000);
 };
 
+const renderOrden = () => {
+  if (!ordenDisplay) return;
+  const id = Number(orden?.id_orden ?? idOrden);
+  ordenDisplay.textContent = Number.isFinite(id) && id > 0 ? `#${id}` : "-";
+};
+
 const renderRef = () => {
   const ref = orden?.referencia || "";
   if (refDisplay) refDisplay.textContent = ref ? ref : "-";
@@ -196,11 +204,12 @@ const verifyPago = async () => {
     return;
   }
   const refStr = String(orden.referencia || "").trim();
-  if (!refStr || refStr.length < 4) {
+  const refDigits = normalizeReferenceDigits(refStr);
+  if (refDigits.length < 4) {
     setStatus("Ingresa los últimos 4 dígitos de referencia.");
     return;
   }
-  const last4 = refStr.slice(-4);
+  const last4 = refDigits.slice(-4);
   const tasaBs = Number(orden.tasa_bs);
   const totalUsd = Number(orden.total);
   if (!Number.isFinite(tasaBs) || !Number.isFinite(totalUsd)) {
@@ -383,13 +392,18 @@ const bindEdit = () => {
       setStatus("Ingresa la referencia.");
       return;
     }
+    const valDigits = normalizeReferenceDigits(val);
+    if (valDigits.length < 4) {
+      setStatus("La referencia debe tener al menos 4 dígitos.");
+      return;
+    }
     try {
       const { error } = await supabase
         .from("ordenes")
-        .update({ referencia: val })
+        .update({ referencia: valDigits })
         .eq("id_orden", orden.id_orden);
       if (error) throw error;
-      orden.referencia = val;
+      orden.referencia = valDigits;
       renderRef();
       if (refEditWrap) refEditWrap.classList.add("hidden");
       setStatus("Referencia actualizada.");
@@ -473,6 +487,7 @@ async function init() {
       }
     }
     renderRef();
+    renderOrden();
     renderMonto();
     bindEdit();
     bindRetryActions();

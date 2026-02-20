@@ -6094,12 +6094,28 @@
         reemplazoRelacionadosContext = null;
       };
 
-      const openReemplazarRelacionadosModal = ({ oldCuentaId, nuevaCuentaId, perfilMapOldToNew }) => {
+      const openReemplazarRelacionadosModal = ({
+        oldCuentaId,
+        nuevaCuentaId,
+        perfilMapOldToNew,
+        oldPerfilNById = {},
+        newPerfilNById = {},
+        plataformaNombre = "",
+        correoViejo = "",
+        correoNuevo = "",
+        claveNueva = "",
+      }) => {
         if (!modalReemplazarRelacionados) return;
         reemplazoRelacionadosContext = {
           oldCuentaId: Number(oldCuentaId) || null,
           nuevaCuentaId: Number(nuevaCuentaId) || null,
           perfilMapOldToNew: perfilMapOldToNew || {},
+          oldPerfilNById: oldPerfilNById || {},
+          newPerfilNById: newPerfilNById || {},
+          plataformaNombre: String(plataformaNombre || "").trim(),
+          correoViejo: String(correoViejo || "").trim(),
+          correoNuevo: String(correoNuevo || "").trim(),
+          claveNueva: String(claveNueva || "").trim(),
         };
         modalReemplazarRelacionados.classList.remove("hidden");
         modalReemplazarRelacionados.setAttribute("aria-hidden", "false");
@@ -6109,6 +6125,12 @@
         oldCuentaId,
         nuevaCuentaId,
         perfilMapOldToNew = {},
+        oldPerfilNById = {},
+        newPerfilNById = {},
+        plataformaNombre = "",
+        correoViejo = "",
+        correoNuevo = "",
+        claveNueva = "",
       }) => {
         const oldId = Number(oldCuentaId);
         const newId = Number(nuevaCuentaId);
@@ -6121,13 +6143,15 @@
 
         const { data: ventasRelacionadas, error: ventasErr } = await supabase
           .from("ventas")
-          .select("id_venta, id_cuenta, id_cuenta_miembro, id_perfil")
+          .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil")
           .or(`id_cuenta.eq.${oldId},id_cuenta_miembro.eq.${oldId}`);
         if (ventasErr) throw ventasErr;
 
         const ventas = Array.isArray(ventasRelacionadas) ? ventasRelacionadas : [];
         let updatedVentas = 0;
         const perfilesAsignados = new Set();
+        let notificationsSent = 0;
+        let notificationsFailed = 0;
 
         for (const venta of ventas) {
           const idVenta = Number(venta?.id_venta);
@@ -6165,6 +6189,52 @@
           if (updVentaErr) throw updVentaErr;
           updatedVentas += 1;
 
+          try {
+            const userIds = pickNotificationUserIds("servicio_reemplazado", {
+              ventaUserId: venta?.id_usuario,
+            });
+            if (userIds.length) {
+              const oldPerfilLabel = formatPerfilLabel(
+                oldPerfilNById?.[oldPerfilId] || "",
+              );
+              const newPerfilId = Number(updatePayload.id_perfil || 0);
+              const newPerfilLabel = formatPerfilLabel(
+                newPerfilNById?.[newPerfilId] || "",
+              );
+              const notif = buildNotificationPayload(
+                "servicio_reemplazado",
+                {
+                  plataforma:
+                    String(plataformaNombre || "").trim() ||
+                    String(currentCuentaDetalle?.plataformaNombre || "").trim(),
+                  correoViejo:
+                    String(correoViejo || "").trim() ||
+                    String(currentCuentaDetalle?.correo || "").trim(),
+                  perfilViejo: oldPerfilLabel || "",
+                  correoNuevo: String(correoNuevo || "").trim(),
+                  perfilNuevo: newPerfilLabel || "",
+                  claveNuevo: String(claveNueva || "").trim(),
+                },
+                { idCuenta: newId },
+              );
+              const notifRows = userIds.map((uid) => ({
+                ...notif,
+                id_usuario: uid,
+              }));
+              const { error: notifErr } = await supabase
+                .from("notificaciones")
+                .insert(notifRows);
+              if (notifErr) throw notifErr;
+              notificationsSent += notifRows.length;
+            }
+          } catch (notifErr) {
+            notificationsFailed += 1;
+            console.error(
+              "notificacion servicio_reemplazado relacionados error",
+              notifErr,
+            );
+          }
+
           if (
             Number.isFinite(mappedPerfil) &&
             mappedPerfil > 0 &&
@@ -6201,6 +6271,8 @@
         return {
           updatedVentas,
           perfilesAsignados: perfilesAsignados.size,
+          notificationsSent,
+          notificationsFailed,
         };
       };
 
@@ -6214,12 +6286,19 @@
         if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = "";
       };
 
-      const openReemplazarCuentaModal = ({ cuentaId }) => {
+      const openReemplazarCuentaModal = ({ cuentaId, fechaCorte = "" }) => {
         if (!modalReemplazarCuenta || !cuentaId) return;
         reemplazarCuentaTargetId = Number(cuentaId);
         if (inputReemplazarCuentaCorreo) inputReemplazarCuentaCorreo.value = "";
         if (inputReemplazarCuentaClave) inputReemplazarCuentaClave.value = "";
-        if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = "";
+        const fechaDefault =
+          String(fechaCorte || "").trim() ||
+          String(
+            currentCuentaDetalle?.fecha_corte_display ||
+              currentCuentaDetalle?.fecha_corte ||
+              "",
+          ).trim();
+        if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = fechaDefault;
         modalReemplazarCuenta.classList.remove("hidden");
         modalReemplazarCuenta.setAttribute("aria-hidden", "false");
       };
@@ -6304,6 +6383,11 @@
           openReemplazarCuentaModal({
             cuentaId:
               btnReemplazarCuenta.dataset.cuenta || currentCuentaDetalle?.id_cuenta,
+            fechaCorte:
+              btnReemplazarCuenta.dataset.fecha ||
+              currentCuentaDetalle?.fecha_corte_display ||
+              currentCuentaDetalle?.fecha_corte ||
+              "",
           });
           return;
         }
@@ -6385,11 +6469,25 @@
             oldCuentaId: ctx.oldCuentaId,
             nuevaCuentaId: ctx.nuevaCuentaId,
             perfilMapOldToNew: ctx.perfilMapOldToNew,
+            oldPerfilNById: ctx.oldPerfilNById,
+            newPerfilNById: ctx.newPerfilNById,
+            plataformaNombre: ctx.plataformaNombre,
+            correoViejo: ctx.correoViejo,
+            correoNuevo: ctx.correoNuevo,
+            claveNueva: ctx.claveNueva,
           });
           closeReemplazarRelacionadosModal();
           await loadCuentaDetalle(ctx.nuevaCuentaId);
+          const notifPart =
+            result.notificationsSent > 0 || result.notificationsFailed > 0
+              ? ` Notificaciones enviadas: ${result.notificationsSent}${
+                  result.notificationsFailed > 0
+                    ? `, con error: ${result.notificationsFailed}`
+                    : ""
+                }.`
+              : "";
           alert(
-            `Cuenta reemplazada. Clientes relacionados actualizados: ${result.updatedVentas}.`,
+            `Cuenta reemplazada. Clientes relacionados actualizados: ${result.updatedVentas}.${notifPart}`,
           );
         } catch (err) {
           console.error("reemplazar clientes relacionados error", err);
@@ -6577,6 +6675,17 @@
             }
             return acc;
           }, {});
+          const newPerfilNById = Object.entries(newPerfilIdByN).reduce(
+            (acc, [nPerfil, perfilId]) => {
+              const idNum = Number(perfilId);
+              const nNum = Number(nPerfil);
+              if (Number.isFinite(idNum) && idNum > 0 && Number.isFinite(nNum)) {
+                acc[idNum] = nNum;
+              }
+              return acc;
+            },
+            {},
+          );
 
           const { error: inactivarCuentaErr } = await supabase
             .from("cuentas")
@@ -6589,6 +6698,12 @@
             oldCuentaId: cuentaId,
             nuevaCuentaId,
             perfilMapOldToNew,
+            oldPerfilNById,
+            newPerfilNById,
+            plataformaNombre: currentCuentaDetalle?.plataformaNombre || "",
+            correoViejo: cuentaBase.correo || currentCuentaDetalle?.correo || "",
+            correoNuevo: correoVal,
+            claveNueva: claveVal,
           });
         } catch (err) {
           console.error("reemplazar cuenta error", err);
