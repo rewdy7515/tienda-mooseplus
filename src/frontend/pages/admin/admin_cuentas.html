@@ -537,6 +537,55 @@
         background: #111;
         color: #fff;
       }
+      .replace-account-modal-card {
+        max-width: 430px;
+      }
+      .replace-account-modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .replace-account-modal-title {
+        margin: 0;
+        color: #0f172a;
+        font-size: 20px;
+        font-weight: 800;
+      }
+      .replace-account-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .replace-account-label {
+        font-size: 13px;
+        font-weight: 700;
+        color: #374151;
+      }
+      .replace-account-input {
+        width: 100%;
+        min-height: 42px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 14px;
+        color: #111827;
+        background: #fff;
+        transition:
+          border-color 0.2s ease,
+          box-shadow 0.2s ease;
+        box-sizing: border-box;
+      }
+      .replace-account-input:focus {
+        border-color: #111827;
+        box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.12);
+        outline: none;
+      }
+      .replace-account-actions {
+        margin-top: 4px;
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
     </style>
   </head>
   <body>
@@ -1434,7 +1483,6 @@
       let tareasCache = null;
       let tareasCuentaId = null;
       let reemplazarCuentaTargetId = null;
-      let reemplazarCuentaIsMiembro = false;
 
       (async () => {
         try {
@@ -3026,6 +3074,16 @@
             rows = [rows[0]];
           }
         }
+        if (colMode === "miembro" && !isCuentaMadre) {
+          const fechaReferencia = info.fecha_corte_display || info.fecha_corte || "";
+          if (fechaReferencia) {
+            rows = rows.map((row) => ({
+              ...row,
+              fecha_corte: fechaReferencia,
+              fecha_corte_fmt: formatDDMMYYYY(fechaReferencia) || "",
+            }));
+          }
+        }
 
         const getEstado = (row) => getEstadoVenta(row);
 
@@ -3483,9 +3541,9 @@
               </p>
               <p><strong>Fecha de corte:</strong>
                 <span class="fecha-wrap cuenta-fecha-wrap">
-                  <span class="fecha-corte-text">${info.fecha_corte_fmt || formatDDMMYYYY(info.fecha_corte) || "-"}</span>
+                  <span class="fecha-corte-text">${info.fecha_corte_display_fmt || info.fecha_corte_fmt || formatDDMMYYYY(info.fecha_corte_display || info.fecha_corte) || "-"}</span>
                   <button type="button" class="btn-edit-fecha-cuenta" data-cuenta="${info.id_cuenta}">✏️</button>
-                  <input type="date" class="fecha-input-cuenta hidden" data-cuenta="${info.id_cuenta}" value="${info.fecha_corte || ""}" />
+                  <input type="date" class="fecha-input-cuenta hidden" data-cuenta="${info.id_cuenta}" value="${info.fecha_corte_display || info.fecha_corte || ""}" />
                   <button type="button" class="btn-save-fecha-cuenta hidden" data-cuenta="${info.id_cuenta}">💾</button>
                   <button type="button" class="btn-cancel-fecha-cuenta hidden">✖</button>
                 </span>
@@ -3512,7 +3570,7 @@
             </label>
           </div>
           <div class="cuenta-toggle">
-            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte || ""}" data-plat="${info.id_plataforma || ""}" data-usa-pins="${info.usa_pines ? "1" : "0"}">${recargarLabel}</button>
+            <button type="button" class="btn-recargar-cuenta" data-cuenta="${info.id_cuenta}" data-correo="${info.correo || ""}" data-clave="${info.clave || ""}" data-corte="${info.fecha_corte_display || info.fecha_corte || ""}" data-plat="${info.id_plataforma || ""}" data-usa-pins="${info.usa_pines ? "1" : "0"}">${recargarLabel}</button>
             <div class="cuenta-tipo-label">${tipoServicio}</div>
           </div>
           <div class="cuenta-toggle">
@@ -3522,8 +3580,7 @@
               data-cuenta="${info.id_cuenta}"
               data-correo="${info.correo || ""}"
               data-clave="${info.clave || ""}"
-              data-fecha="${info.fecha_corte || ""}"
-              data-miembro="${info.venta_miembro ? "true" : "false"}"
+              data-fecha="${info.fecha_corte_display || info.fecha_corte || ""}"
             >
               Reemplazar cuenta
             </button>
@@ -3704,6 +3761,10 @@
           const platId = cuenta.id_plataforma;
           const provId = cuenta.id_proveedor;
           const cuentaEstado = getEstadoCuenta(cuenta);
+          const isCuentaMiembroDependiente =
+            cuenta.venta_miembro === true && cuenta.cuenta_madre !== true;
+          let fechaCorteCuentaMostrar = cuenta.fecha_corte || "";
+          let estadoCuentaMostrar = cuentaEstado;
 
           const [
             { data: prov, error: provErr },
@@ -3752,23 +3813,24 @@
           perfiles = perfData || [];
 
           let correoMadre = "";
-          if (cuenta.venta_miembro === true && cuenta.id_cuenta_madre) {
-            const { data: madre, error: madreErr } = await supabase
+          if (
+            (cuenta.venta_miembro === true || cuenta.venta_dominio === true) &&
+            cuenta.id_cuenta_madre
+          ) {
+            const { data: madreData, error: madreErr } = await supabase
               .from("cuentas")
-              .select("correo")
+              .select("correo, fecha_corte, inactiva")
               .eq("id_cuenta", cuenta.id_cuenta_madre)
               .maybeSingle();
             if (madreErr) throw madreErr;
-            correoMadre = madre?.correo || "";
-          }
-          if (cuenta.venta_dominio === true && cuenta.id_cuenta_madre) {
-            const { data: madreDom, error: madreDomErr } = await supabase
-              .from("cuentas")
-              .select("correo")
-              .eq("id_cuenta", cuenta.id_cuenta_madre)
-              .maybeSingle();
-            if (madreDomErr) throw madreDomErr;
-            correoMadre = madreDom?.correo || correoMadre;
+            correoMadre = madreData?.correo || "";
+            if (isCuentaMiembroDependiente && madreData) {
+              fechaCorteCuentaMostrar = madreData.fecha_corte || "";
+              estadoCuentaMostrar = getEstadoCuenta({
+                inactiva: madreData.inactiva === true,
+                fecha_corte: madreData.fecha_corte || "",
+              });
+            }
           }
 
           const perfilIds = perfiles.map((p) => p.id_perfil).filter(Boolean);
@@ -4027,8 +4089,10 @@
             direccion: cuenta.direccion || "",
             fecha_corte: cuenta.fecha_corte || "",
             fecha_corte_fmt: formatDDMMYYYY(cuenta.fecha_corte) || "",
-            estadoCuenta: cuentaEstado.label,
-            estadoCuentaClass: cuentaEstado.className,
+            fecha_corte_display: fechaCorteCuentaMostrar,
+            fecha_corte_display_fmt: formatDDMMYYYY(fechaCorteCuentaMostrar) || "",
+            estadoCuenta: estadoCuentaMostrar.label,
+            estadoCuentaClass: estadoCuentaMostrar.className,
             perfiles: perfilesRows,
             madreRows,
             colMode,
@@ -6018,25 +6082,17 @@
         modalReemplazarCuenta.classList.add("hidden");
         modalReemplazarCuenta.setAttribute("aria-hidden", "true");
         reemplazarCuentaTargetId = null;
-        reemplazarCuentaIsMiembro = false;
         if (inputReemplazarCuentaCorreo) inputReemplazarCuentaCorreo.value = "";
         if (inputReemplazarCuentaClave) inputReemplazarCuentaClave.value = "";
         if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = "";
       };
 
-      const openReemplazarCuentaModal = ({
-        cuentaId,
-        correo = "",
-        clave = "",
-        fecha = "",
-        isMiembro = false,
-      }) => {
+      const openReemplazarCuentaModal = ({ cuentaId }) => {
         if (!modalReemplazarCuenta || !cuentaId) return;
         reemplazarCuentaTargetId = Number(cuentaId);
-        reemplazarCuentaIsMiembro = isMiembro === true || isMiembro === "true";
-        if (inputReemplazarCuentaCorreo) inputReemplazarCuentaCorreo.value = correo || "";
-        if (inputReemplazarCuentaClave) inputReemplazarCuentaClave.value = clave || "";
-        if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = fecha || "";
+        if (inputReemplazarCuentaCorreo) inputReemplazarCuentaCorreo.value = "";
+        if (inputReemplazarCuentaClave) inputReemplazarCuentaClave.value = "";
+        if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = "";
         modalReemplazarCuenta.classList.remove("hidden");
         modalReemplazarCuenta.setAttribute("aria-hidden", "false");
       };
@@ -6121,16 +6177,6 @@
           openReemplazarCuentaModal({
             cuentaId:
               btnReemplazarCuenta.dataset.cuenta || currentCuentaDetalle?.id_cuenta,
-            correo: btnReemplazarCuenta.dataset.correo || currentCuentaDetalle?.correo || "",
-            clave: btnReemplazarCuenta.dataset.clave || currentCuentaDetalle?.clave || "",
-            fecha:
-              btnReemplazarCuenta.dataset.fecha ||
-              currentCuentaDetalle?.fecha_corte ||
-              "",
-            isMiembro:
-              btnReemplazarCuenta.dataset.miembro ||
-              currentCuentaDetalle?.venta_miembro ||
-              false,
           });
           return;
         }
@@ -6265,7 +6311,7 @@
             fecha_corte: fechaVal || cuentaBase.fecha_corte || null,
             fecha_pagada: cuentaBase.fecha_pagada || null,
             inactiva: false,
-            ocupado: cuentaBase.ocupado === true,
+            ocupado: false,
             region: cuentaBase.region || null,
             correo_codigo: cuentaBase.correo_codigo || null,
             clave_codigo: cuentaBase.clave_codigo || null,
@@ -6290,7 +6336,6 @@
           const nuevaCuentaId = Number(nuevaCuenta?.id_cuenta || 0);
           if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta nueva.");
 
-          const mapPerfilNuevoPorN = {};
           if (shouldCreatePerfiles) {
             const perfilesByN = (perfilesOrigen || []).reduce((acc, perfil) => {
               const key = Number(perfil.n_perfil);
@@ -6318,96 +6363,26 @@
               return {
                 id_cuenta: nuevaCuentaId,
                 n_perfil: nPerfil,
-                ocupado: perfilOrigen?.ocupado === true,
+                ocupado: false,
                 pin: pinPerfil,
                 perfil_hogar:
                   Number(cuentaBase.id_plataforma) === 1 ? idx === 0 : false,
                 correo: null,
-                id_cuenta_miembro: perfilOrigen?.id_cuenta_miembro || null,
+                id_cuenta_miembro: null,
               };
             });
-            const { data: perfilesNuevos, error: perfilesNuevosErr } = await supabase
+            const { error: perfilesNuevosErr } = await supabase
               .from("perfiles")
               .insert(perfilesInsert)
-              .select("id_perfil, n_perfil");
+              .select("id_perfil");
             if (perfilesNuevosErr) throw perfilesNuevosErr;
-            (perfilesNuevos || []).forEach((perfil) => {
-              const nPerfil = Number(perfil?.n_perfil);
-              if (Number.isFinite(nPerfil) && perfil?.id_perfil) {
-                mapPerfilNuevoPorN[nPerfil] = perfil.id_perfil;
-              }
-            });
           }
 
-          const perfilOrigenById = (perfilesOrigen || []).reduce((acc, perfil) => {
-            if (perfil?.id_perfil) acc[perfil.id_perfil] = perfil;
-            return acc;
-          }, {});
-
-          const { data: ventasAfectadas, error: ventasAfectadasErr } = await supabase
-            .from("ventas")
-            .select("id_venta, id_cuenta, id_cuenta_miembro, id_perfil")
-            .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`);
-          if (ventasAfectadasErr) throw ventasAfectadasErr;
-          const ventasUpdates = (ventasAfectadas || []).map((venta) => {
-            const payload = {};
-            if (Number(venta.id_cuenta) === cuentaId) payload.id_cuenta = nuevaCuentaId;
-            if (Number(venta.id_cuenta_miembro) === cuentaId) {
-              payload.id_cuenta_miembro = nuevaCuentaId;
-            }
-            if (venta.id_perfil) {
-              const perfilOrigen = perfilOrigenById[venta.id_perfil];
-              const nPerfil = Number(perfilOrigen?.n_perfil);
-              const perfilNuevo =
-                Number.isFinite(nPerfil) && mapPerfilNuevoPorN[nPerfil]
-                  ? mapPerfilNuevoPorN[nPerfil]
-                  : null;
-              if (perfilNuevo) payload.id_perfil = perfilNuevo;
-              else if (Number(venta.id_cuenta) === cuentaId) payload.id_perfil = null;
-            }
-            const isVentaMiembro =
-              cuentaBase.venta_miembro === true ||
-              Number(venta.id_cuenta_miembro) === cuentaId ||
-              (Number(venta.id_cuenta) === cuentaId && !venta.id_cuenta_miembro);
-            if (isVentaMiembro) {
-              payload.correo_miembro = correoVal || null;
-              payload.clave_miembro = claveVal || null;
-              if (fechaVal) payload.fecha_corte = fechaVal;
-            }
-            if (!Object.keys(payload).length) return null;
-            return supabase.from("ventas").update(payload).eq("id_venta", venta.id_venta);
-          });
-          if (ventasUpdates.length) {
-            const results = await Promise.all(ventasUpdates.filter(Boolean));
-            const ventasUpdErr = results.find((r) => r?.error)?.error;
-            if (ventasUpdErr) throw ventasUpdErr;
-          }
-
-          const postUpdates = [];
-          postUpdates.push(
-            supabase
-              .from("perfiles")
-              .update({ id_cuenta_miembro: nuevaCuentaId })
-              .eq("id_cuenta_miembro", cuentaId),
-          );
-          if (cuentaBase.cuenta_madre === true) {
-            postUpdates.push(
-              supabase
-                .from("cuentas")
-                .update({ id_cuenta_madre: nuevaCuentaId })
-                .eq("id_cuenta_madre", cuentaId),
-            );
-          }
-          postUpdates.push(
-            supabase.from("reemplazos").insert({
-              id_cuenta: cuentaId,
-              id_perfil: null,
-              id_sub_cuenta: null,
-            }),
-          );
-          const postResults = await Promise.all(postUpdates);
-          const postErr = postResults.find((r) => r?.error)?.error;
-          if (postErr) throw postErr;
+          const { error: inactivarCuentaErr } = await supabase
+            .from("cuentas")
+            .update({ inactiva: true })
+            .eq("id_cuenta", cuentaId);
+          if (inactivarCuentaErr) throw inactivarCuentaErr;
 
           closeReemplazarCuentaModal();
           await loadCuentaDetalle(nuevaCuentaId);
@@ -6806,7 +6781,7 @@
 
     <div id="modal-reemplazar-cuenta" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop"></div>
-      <div class="modal-card" style="max-width: 380px">
+      <div class="modal-card replace-account-modal-card">
         <button
           class="modal-close"
           id="btn-reemplazar-cuenta-close"
@@ -6814,26 +6789,35 @@
         >
           ×
         </button>
-        <div class="modal-body modal-renovar-sel-body">
-          <h3 style="margin-top: 0">Reemplazar cuenta</h3>
-          <input
-            type="text"
-            id="input-reemplazar-cuenta-correo"
-            class="input"
-            placeholder="Correo"
-          />
-          <input
-            type="text"
-            id="input-reemplazar-cuenta-clave"
-            class="input"
-            placeholder="Clave"
-          />
-          <input
-            type="date"
-            id="input-reemplazar-cuenta-fecha"
-            class="input"
-          />
-          <div style="display: flex; gap: 10px; justify-content: flex-end">
+        <div class="replace-account-modal-body">
+          <h3 class="replace-account-modal-title">Reemplazar cuenta</h3>
+          <label class="replace-account-field">
+            <span class="replace-account-label">Correo</span>
+            <input
+              type="text"
+              id="input-reemplazar-cuenta-correo"
+              class="replace-account-input"
+              placeholder="correo@ejemplo.com"
+            />
+          </label>
+          <label class="replace-account-field">
+            <span class="replace-account-label">Clave</span>
+            <input
+              type="text"
+              id="input-reemplazar-cuenta-clave"
+              class="replace-account-input"
+              placeholder="Ingresa la clave"
+            />
+          </label>
+          <label class="replace-account-field">
+            <span class="replace-account-label">Fecha de corte</span>
+            <input
+              type="date"
+              id="input-reemplazar-cuenta-fecha"
+              class="replace-account-input"
+            />
+          </label>
+          <div class="replace-account-actions">
             <button
               type="button"
               class="btn-outline"

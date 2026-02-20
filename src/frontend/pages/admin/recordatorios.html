@@ -72,9 +72,9 @@
       <div class="recordatorios-wrap">
         <h2>Recordatorios</h2>
         <div class="rec-buttons">
-          <button type="button" id="btn-hoy">Fechas hoy</button>
-          <button type="button" id="btn-manana">Fechas mañana</button>
-          <button type="button" id="btn-hoy-manana">Fechas hoy-mañana</button>
+          <button type="button" id="btn-generar-recordatorios">
+            Generar recordatorios
+          </button>
         </div>
         <div id="rec-status" class="status"></div>
         <div id="rec-results" class="rec-results"></div>
@@ -88,9 +88,9 @@
       requireSession();
       attachLogoHome();
 
-      const btnHoy = document.querySelector("#btn-hoy");
-      const btnManana = document.querySelector("#btn-manana");
-      const btnHoyManana = document.querySelector("#btn-hoy-manana");
+      const btnGenerarRecordatorios = document.querySelector(
+        "#btn-generar-recordatorios",
+      );
       const statusEl = document.querySelector("#rec-status");
       const resultsEl = document.querySelector("#rec-results");
 
@@ -98,7 +98,21 @@
         if (statusEl) statusEl.textContent = msg || "";
       };
 
-      const fmtDate = (d) => d.toISOString().slice(0, 10);
+      const getCaracasDateStr = (offsetDays = 0) => {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(now);
+        const year = Number(parts.find((p) => p.type === "year")?.value || 0);
+        const month = Number(parts.find((p) => p.type === "month")?.value || 0);
+        const day = Number(parts.find((p) => p.type === "day")?.value || 0);
+        const base = new Date(Date.UTC(year, month - 1, day));
+        base.setUTCDate(base.getUTCDate() + offsetDays);
+        return base.toISOString().slice(0, 10);
+      };
 
       const copyToClipboard = async (text) => {
         try {
@@ -144,31 +158,14 @@
           return { html, plain };
         });
 
-      const mergeGrouped = (groups) => {
-        const merged = {};
-        (groups || []).forEach((g) => {
-          Object.entries(g || {}).forEach(([key, val]) => {
-            if (!merged[key]) {
-              merged[key] = { cliente: val.cliente, bloques: [] };
-            }
-            const seen = new Set(merged[key].bloques);
-            (val.bloques || []).forEach((b) => {
-              if (!seen.has(b)) {
-                merged[key].bloques.push(b);
-                seen.add(b);
-              }
-            });
-          });
-        });
-        return merged;
-      };
-
-      const fetchMessagesByDate = async (targetDate) => {
-        const fecha = fmtDate(targetDate);
+      const fetchMessages = async () => {
+        const fechaManana = getCaracasDateStr(1);
         const { data: ventas, error: ventErr } = await supabase
           .from("ventas")
-          .select("id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro")
-          .eq("fecha_corte", fecha);
+          .select(
+            "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado",
+          )
+          .or(`fecha_corte.eq.${fechaManana},recordatorio_enviado.eq.false`);
         if (ventErr) throw ventErr;
 
           const cuentasIds = Array.from(new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)));
@@ -271,55 +268,20 @@ ${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
         return { messages, grouped };
       };
 
-      const loadFechas = async (targetDate, label) => {
-        setStatus(`Cargando fechas de ${label}...`);
+      const loadRecordatorios = async () => {
+        setStatus("Generando recordatorios...");
         resultsEl.innerHTML = "";
         try {
-          const { messages } = await fetchMessagesByDate(targetDate);
+          const { messages } = await fetchMessages();
           renderCards(messages);
-          setStatus(messages.length ? "" : `Sin resultados para ${label}.`);
+          setStatus(messages.length ? "" : "Sin resultados.");
         } catch (err) {
-          console.error(`recordatorios ${label} error`, err);
-          setStatus(`No se pudieron cargar las fechas de ${label}.`);
+          console.error("recordatorios generar error", err);
+          setStatus("No se pudieron generar los recordatorios.");
         }
       };
 
-      const loadHoy = () => {
-        const hoy = new Date();
-        loadFechas(hoy, "hoy");
-      };
-
-      const loadManana = () => {
-        const mañana = new Date();
-        mañana.setDate(mañana.getDate() + 1);
-        loadFechas(mañana, "mañana");
-      };
-
-      btnHoy?.addEventListener("click", loadHoy);
-      btnManana?.addEventListener("click", loadManana);
-
-      const loadHoyManana = async () => {
-        setStatus("Cargando fechas de hoy y mañana...");
-        resultsEl.innerHTML = "";
-        try {
-          const hoy = new Date();
-          const manana = new Date();
-          manana.setDate(manana.getDate() + 1);
-          const [dataHoy, dataManana] = await Promise.all([
-            fetchMessagesByDate(hoy),
-            fetchMessagesByDate(manana),
-          ]);
-          const merged = mergeGrouped([dataHoy?.grouped, dataManana?.grouped]);
-          const messages = buildMessagesFromGrouped(merged);
-          renderCards(messages);
-          setStatus(messages.length ? "" : "Sin resultados para hoy y mañana.");
-        } catch (err) {
-          console.error("recordatorios hoy-mañana error", err);
-          setStatus("No se pudieron cargar las fechas de hoy y mañana.");
-        }
-      };
-
-      btnHoyManana?.addEventListener("click", loadHoyManana);
+      btnGenerarRecordatorios?.addEventListener("click", loadRecordatorios);
     </script>
   </body>
 </html>
