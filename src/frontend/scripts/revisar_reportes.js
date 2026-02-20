@@ -8,6 +8,7 @@ import {
 import { clearServerSession, loadCurrentUser, supabase, ensureServerSession } from "./api.js";
 import { formatDDMMYYYY } from "./date-format.js";
 import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
+import { copyTextNotify } from "./copy-toast.js";
 
 requireSession();
 
@@ -23,6 +24,8 @@ const modalClave = document.querySelector("#modal-clave");
 const modalMotivo = document.querySelector("#modal-motivo");
 const modalPerfil = document.querySelector("#modal-perfil");
 const modalPin = document.querySelector("#modal-pin");
+const btnCopyClave = document.querySelector("#btn-copy-clave");
+const btnCopyPin = document.querySelector("#btn-copy-pin");
 const perfilRows = document.querySelectorAll(".perfil-row");
 const modalImagenWrapper = document.querySelector("#modal-imagen-wrapper");
 const modalImagen = document.querySelector("#modal-imagen");
@@ -93,6 +96,18 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const normalizeCopyValue = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-") return "";
+  return text;
+};
+
+const copyValue = (value, toastText) => {
+  const text = normalizeCopyValue(value);
+  if (!text) return;
+  copyTextNotify(text, toastText);
+};
+
 const getDescripcion = (row) => {
   return row.descripcion || "Otro...";
 };
@@ -158,13 +173,18 @@ const renderReportesList = (plataformas = []) => {
           const cliente =
             [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
           const correo = r.cuentas?.correo || "-";
+          const correoText = escapeHtml(correo);
+          const correoCopyAttr = escapeHtml(correo);
+          const correoCell = normalizeCopyValue(correo)
+            ? `<span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>`
+            : correoText;
           const motivo = getDescripcion(r);
           const fecha = formatDate(r.fecha_creacion || null);
           return `
             <tr>
               <td>${escapeHtml(idFmt)}</td>
               <td>${escapeHtml(cliente)}</td>
-              <td>${escapeHtml(correo)}</td>
+              <td>${correoCell}</td>
               <td>${escapeHtml(motivo)}</td>
               <td>${escapeHtml(fecha)}</td>
               <td>
@@ -343,6 +363,14 @@ async function init() {
     if (statusEl) statusEl.textContent = "";
 
     listEl?.addEventListener("click", (e) => {
+      const copyTarget = e.target.closest("[data-copy]");
+      if (copyTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        copyValue(copyTarget.dataset.copy || "", "Correo copiado");
+        return;
+      }
+
       const toggleBtn = e.target.closest("button[data-toggle-plat]");
       if (toggleBtn) {
         const platId = String(toggleBtn.dataset.togglePlat || "");
@@ -421,6 +449,18 @@ async function init() {
 
   btnReemplazar?.addEventListener("click", () => {
     reemplazarServicio();
+  });
+
+  modalCorreo?.addEventListener("click", () => {
+    copyValue(modalCorreo.textContent || "", "Correo copiado");
+  });
+
+  btnCopyClave?.addEventListener("click", () => {
+    copyValue(modalClave?.value || "", "Clave copiada");
+  });
+
+  btnCopyPin?.addEventListener("click", () => {
+    copyValue(modalPin?.value || "", "PIN copiado");
   });
 } catch (err) {
     console.error("revisar reportes error", err);

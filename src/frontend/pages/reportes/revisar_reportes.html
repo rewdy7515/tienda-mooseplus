@@ -126,6 +126,19 @@
       #modal-sin-imagen {
         display: none;
       }
+      .copyable-field {
+        cursor: pointer;
+        text-decoration: underline dotted;
+        text-underline-offset: 2px;
+      }
+      .modal-inline-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .btn-copy-inline {
+        white-space: nowrap;
+      }
     </style>
   </head>
   <body>
@@ -146,14 +159,22 @@
               <h3 id="modal-plat-title" class="plat-title"></h3>
               <div class="modal-info-grid">
                 <div class="label">Correo:</div>
-                <div class="value" id="modal-correo"></div>
+                <div class="value copyable-field" id="modal-correo" title="Copiar correo"></div>
                 <div class="label">Contraseña:</div>
-                <div class="value"><input type="text" id="modal-clave" class="form-input input-inline" /></div>
+                <div class="value">
+                  <div class="modal-inline-actions">
+                    <input type="text" id="modal-clave" class="form-input input-inline" />
+                    <button type="button" class="btn-outline btn-copy-inline" id="btn-copy-clave">Copiar</button>
+                  </div>
+                </div>
                 <div class="label perfil-row">Perfil:</div>
                 <div class="value perfil-row" id="modal-perfil"></div>
                 <div class="label perfil-row">PIN:</div>
                 <div class="value perfil-row">
-                  <input type="number" id="modal-pin" class="form-input input-inline" inputmode="numeric" min="0" step="1" />
+                  <div class="modal-inline-actions">
+                    <input type="number" id="modal-pin" class="form-input input-inline" inputmode="numeric" min="0" step="1" />
+                    <button type="button" class="btn-outline btn-copy-inline perfil-row" id="btn-copy-pin">Copiar</button>
+                  </div>
                 </div>
                 <div class="label">Motivo:</div>
                 <div class="value" id="modal-motivo"></div>
