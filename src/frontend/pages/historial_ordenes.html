@@ -122,9 +122,13 @@
         background: #dcfce7;
         color: #166534;
       }
-      .orden-status.wait {
+      .orden-status.cancel {
         background: #fee2e2;
-        color: #991b1b;
+        color: #b91c1c;
+      }
+      .orden-status.wait {
+        background: #dbeafe;
+        color: #1d4ed8;
       }
       @media (max-width: 640px) {
         .orden-card {
@@ -231,8 +235,9 @@
               const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
               const hora = formatHora12(orden.hora_orden);
               const entregado = isTrue(orden.pago_verificado);
-              const estado = entregado ? "Entregado" : "En espera";
-              const estadoClass = entregado ? "ok" : "wait";
+              const cancelada = isTrue(orden.orden_cancelada);
+              const estado = cancelada ? "Cancelada" : entregado ? "Entregado" : "En espera";
+              const estadoClass = cancelada ? "cancel" : entregado ? "ok" : "wait";
               return `
                 <div class="orden-card" data-orden="${orden.id_orden}" role="button" tabindex="0">
                   <div class="orden-card-info">

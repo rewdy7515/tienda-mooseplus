@@ -852,6 +852,14 @@
         if (raw.toUpperCase().startsWith("M")) return raw;
         return `M${raw}`;
       };
+      const normalizeExternalLink = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        if (/^(https?:\/\/|mailto:|tel:|ftp:\/\/|\/\/)/i.test(raw)) {
+          return raw;
+        }
+        return `https://${raw}`;
+      };
       const getPlatFlags = (plat = {}, options = {}) => {
         const usaPines = isTrue(plat.usa_pines);
         const porPantalla = isTrue(plat.por_pantalla);
@@ -3483,12 +3491,13 @@
           ${
             (() => {
               const linkVal = info.link_codigo || "";
+              const linkHref = normalizeExternalLink(linkVal);
               const correoVal = info.correo_codigo || "";
               const claveVal = info.pin_codigo || "";
               const linkHtml = linkVal
                 ? `<span class="codigo-field" data-field="link_codigo">
                     <span class="codigo-view">
-                      <a href="${linkVal}" target="_blank" rel="noopener noreferrer">${linkVal}</a>
+                      <a href="${linkHref}" target="_blank" rel="noopener noreferrer">${linkVal}</a>
                     </span>
                     <button type="button" class="codigo-edit-btn" data-field="link_codigo" data-cuenta="${info.id_cuenta}" aria-label="Editar link">✏️</button>
                     <span class="codigo-input-wrap hidden">
@@ -4293,8 +4302,8 @@
         const platformTitle = e.target.closest(".cuenta-platform-title[data-link]");
         if (platformTitle) {
           const rawLink = (platformTitle.dataset.link || "").trim();
-          if (rawLink) {
-            const href = /^https?:\/\//i.test(rawLink) ? rawLink : `https://${rawLink}`;
+          const href = normalizeExternalLink(rawLink);
+          if (href) {
             window.open(href, "_blank", "noopener");
           }
           return;

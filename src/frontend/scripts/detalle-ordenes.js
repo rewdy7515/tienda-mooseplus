@@ -1,5 +1,12 @@
 import { requireSession, attachLogoHome, attachLogout } from "./session.js";
-import { clearServerSession, loadCatalog, loadCurrentUser, supabase } from "./api.js";
+import {
+  clearServerSession,
+  fetchOrdenDetalle,
+  fetchVentasOrden,
+  loadCatalog,
+  loadCurrentUser,
+  supabase,
+} from "./api.js";
 import { formatDDMMYYYY } from "./date-format.js";
 
 requireSession();
@@ -298,30 +305,36 @@ const getIdOrden = () => {
   return params.get("id_orden");
 };
 
-const fetchOrdenById = async (idOrden, idUsuario) => {
-  let query = supabase
-    .from("ordenes")
-    .select(
-      "id_orden, id_usuario, id_admin, id_carrito, fecha, hora_orden, referencia, total, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada, id_metodo_de_pago, comprobante"
-    )
-    .eq("id_orden", Number(idOrden));
-  if (idUsuario) {
-    query = query.eq("id_usuario", Number(idUsuario));
+const fetchItemsByVentasOrden = async (idOrden) => {
+  if (!idOrden) return [];
+  const resp = await fetchVentasOrden(idOrden);
+  if (resp?.error) {
+    throw new Error(resp.error);
   }
-  const { data, error } = await query.maybeSingle();
-  if (error) throw error;
-  return data || null;
-};
+  const rows = Array.isArray(resp?.ventas) ? resp.ventas : [];
+  if (!rows.length) return [];
 
-const fetchItemsByCarrito = async (idCarrito) => {
-  if (!idCarrito) return [];
-  const { data, error } = await supabase
-    .from("carrito_items")
-    .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
-    .eq("id_carrito", idCarrito)
-    .order("id_item", { ascending: true });
-  if (error) throw error;
-  return data || [];
+  const grouped = new Map();
+  for (const row of rows) {
+    const idPrecio = Number(row?.id_precio);
+    if (!Number.isFinite(idPrecio) || idPrecio <= 0) continue;
+    const meses = Math.max(1, Number(row?.meses_contratados) || 1);
+    const renovacion = isTrue(row?.renovacion);
+    const key = `${idPrecio}|${meses}|${renovacion ? 1 : 0}`;
+    const prev = grouped.get(key);
+    if (prev) {
+      prev.cantidad += 1;
+      continue;
+    }
+    grouped.set(key, {
+      id_precio: idPrecio,
+      cantidad: 1,
+      meses,
+      renovacion,
+      id_venta: row?.id_venta ?? null,
+    });
+  }
+  return Array.from(grouped.values());
 };
 
 const fetchItemsByHistorialOrden = async (idOrden, idUsuario) => {
@@ -392,7 +405,13 @@ const init = async () => {
       return;
     }
 
-    const orden = await fetchOrdenById(idOrden, userId);
+    const detalleResp = await fetchOrdenDetalle(idOrden);
+    if (detalleResp?.error) {
+      setStatus(detalleResp.error || "No se pudo cargar la orden.");
+      itemsTitleEl?.classList.add("hidden");
+      return;
+    }
+    const orden = detalleResp?.orden || null;
     if (!orden) {
       setStatus("Orden no encontrada.");
       itemsTitleEl?.classList.add("hidden");
@@ -401,24 +420,19 @@ const init = async () => {
     renderInfo(orden);
 
     setStatus("Cargando items...");
-    let items = [];
-    if (orden?.id_carrito) {
-      try {
-        items = await fetchItemsByCarrito(orden.id_carrito);
-      } catch (err) {
-        console.error("fetchItemsByCarrito error", err);
-        setStatus("No se pudieron cargar los items del carrito.");
-        itemsEl && (itemsEl.innerHTML = '<p class="cart-empty">No se pudieron cargar los items.</p>');
-        return;
-      }
-    } else {
+    let items = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
+    if (!items.length) {
       try {
         items = await fetchItemsByHistorialOrden(idOrden, userId);
       } catch (err) {
         console.error("fetchItemsByHistorialOrden error", err);
-        setStatus("No se pudieron cargar los items de historial.");
-        itemsEl && (itemsEl.innerHTML = '<p class="cart-empty">No se pudieron cargar los items.</p>');
-        return;
+      }
+    }
+    if (!items.length) {
+      try {
+        items = await fetchItemsByVentasOrden(idOrden);
+      } catch (err) {
+        console.error("fetchItemsByVentasOrden error", err);
       }
     }
     if (!items.length) {

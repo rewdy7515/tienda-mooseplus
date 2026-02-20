@@ -2644,6 +2644,8 @@ app.get("/api/ventas/orden", async (req, res) => {
       .select(
         `
         id_venta,
+        meses_contratados,
+        renovacion,
         fecha_corte,
         id_perfil,
         id_precio,
