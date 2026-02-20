@@ -1030,9 +1030,13 @@
                 updates.push(
                   supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
                 );
+              } else if (cuentaId) {
+                updates.push(
+                  supabase.from("cuentas").update({ pin: pinInput.value }).eq("id_cuenta", cuentaId)
+                );
               }
             }
-            if (isNetflixVentaMiembro && cuentaId && pinInput) {
+            if (isNetflixVentaMiembro && cuentaId && pinInput && pinInput.dataset.perfil) {
               const pinVal = (pinInput.value || "").trim();
               if (pinVal) {
                 updates.push(
@@ -1065,9 +1069,13 @@
                 updates.push(
                   supabase.from("perfiles").update({ pin: pinInput.value }).eq("id_perfil", perfilId)
                 );
+              } else if (cuentaId) {
+                updates.push(
+                  supabase.from("cuentas").update({ pin: pinInput.value }).eq("id_cuenta", cuentaId)
+                );
               }
             }
-            if (isNetflixVentaMiembro && cuentaId && pinInput) {
+            if (isNetflixVentaMiembro && cuentaId && pinInput && pinInput.dataset.perfil) {
               const pinVal = (pinInput.value || "").trim();
               if (pinVal) {
                 updates.push(

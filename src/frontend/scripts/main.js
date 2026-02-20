@@ -247,8 +247,11 @@ const loadStockSummary = async (_hasSession = false) => {
     });
   }
 
+  const cuentasCompletasFiltradas = (cuentasCompletas || []).filter(
+    (c) => c?.venta_perfil === false && c?.venta_miembro === false && c?.inactiva === false
+  );
   const completasCount = {};
-  (cuentasCompletas || []).forEach((c) => {
+  cuentasCompletasFiltradas.forEach((c) => {
     const platId = c.id_plataforma || "unknown";
     completasCount[platId] = (completasCount[platId] || 0) + 1;
   });

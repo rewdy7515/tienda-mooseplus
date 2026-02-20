@@ -178,6 +178,23 @@ function addMonthsKeepDay(baseDate, months) {
 
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const isInactive = (v) => isTrue(v);
+const toPositiveInt = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.trunc(parsed);
+};
+
+const buildReemplazosBlocklist = (rows) => {
+  const cuentas = new Set();
+  const perfiles = new Set();
+  (rows || []).forEach((row) => {
+    const cuentaId = toPositiveInt(row?.id_cuenta);
+    const perfilId = toPositiveInt(row?.id_perfil);
+    if (cuentaId) cuentas.add(cuentaId);
+    if (perfilId) perfiles.add(perfilId);
+  });
+  return { cuentas, perfiles };
+};
 
 const normalizeFilesArray = (value) => {
   if (Array.isArray(value)) return value;
@@ -346,6 +363,15 @@ const processOrderFromItems = async ({
   const asignaciones = [];
   const pendientes = [];
   const subCuentasAsignadas = [];
+  const { data: reemplazosRows, error: reemplazosErr } = await supabaseAdmin
+    .from("reemplazos")
+    .select("id_cuenta, id_perfil");
+  if (reemplazosErr) throw reemplazosErr;
+  const reemplazosBloqueados = buildReemplazosBlocklist(reemplazosRows);
+  const stockScanLimit = (cantidadReq) => {
+    const qty = Number.isFinite(Number(cantidadReq)) ? Number(cantidadReq) : 1;
+    return Math.max(40, qty * 10);
+  };
   for (const it of itemsNuevos) {
     const price = priceMap[it.id_precio];
     if (!price) {
@@ -385,9 +411,18 @@ const processOrderFromItems = async ({
       if (entregaInmediata) {
         cuentasQuery = cuentasQuery.or("venta_dominio.is.null,venta_dominio.eq.false");
       }
-      const { data: cuentasLibres, error: ctaErr } = await cuentasQuery.limit(cantidad);
+      const { data: cuentasLibres, error: ctaErr } = await cuentasQuery.limit(
+        stockScanLimit(cantidad)
+      );
       if (ctaErr) throw ctaErr;
-      const disponibles = (cuentasLibres || []).filter((c) => !isInactive(c.inactiva));
+      const disponibles = (cuentasLibres || []).filter((c) => {
+        const cuentaId = toPositiveInt(c?.id_cuenta);
+        return (
+          !isInactive(c?.inactiva) &&
+          !!cuentaId &&
+          !reemplazosBloqueados.cuentas.has(cuentaId)
+        );
+      });
       const faltantes = Math.max(0, cantidad - disponibles.length);
       disponibles.slice(0, cantidad).forEach((cta) => {
         asignaciones.push({
@@ -425,10 +460,18 @@ const processOrderFromItems = async ({
         .eq("cuentas.venta_perfil", true)
         .eq("ocupado", false)
         .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-        .limit(cantidad);
+        .limit(stockScanLimit(cantidad));
       if (perfErr) throw perfErr;
       const libresHogar = (perfilesHogar || []).filter(
-        (p) => !isInactive(p?.cuentas?.inactiva) && p.ocupado === false
+        (p) => {
+          const perfilId = toPositiveInt(p?.id_perfil);
+          return (
+            !isInactive(p?.cuentas?.inactiva) &&
+            p?.ocupado === false &&
+            !!perfilId &&
+            !reemplazosBloqueados.perfiles.has(perfilId)
+          );
+        }
       );
       const takeHogar = libresHogar.slice(0, cantidad);
       takeHogar.forEach((p) => {
@@ -454,11 +497,17 @@ const processOrderFromItems = async ({
           .eq("venta_miembro", true)
           .eq("ocupado", false)
           .or("inactiva.is.null,inactiva.eq.false")
-          .limit(faltantesPerf);
+          .limit(stockScanLimit(faltantesPerf));
         if (ctaMiembroErr) throw ctaMiembroErr;
-        const cuentasLibres = (cuentasMiembro || []).filter(
-          (c) => c.inactiva === false && c.ocupado === false
-        );
+        const cuentasLibres = (cuentasMiembro || []).filter((c) => {
+          const cuentaId = toPositiveInt(c?.id_cuenta);
+          return (
+            c?.inactiva === false &&
+            c?.ocupado === false &&
+            !!cuentaId &&
+            !reemplazosBloqueados.cuentas.has(cuentaId)
+          );
+        });
         const takeCtas = cuentasLibres.slice(0, faltantesPerf);
         takeCtas.forEach((cta) => {
           asignaciones.push({
@@ -498,7 +547,7 @@ const processOrderFromItems = async ({
         .eq("perfil_hogar", false)
         .eq("ocupado", false)
         .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
-        .limit(cantidad);
+        .limit(stockScanLimit(cantidad));
       perfilesQuery = isSpotify
         ? perfilesQuery.eq("cuentas.cuenta_madre", true)
         : perfilesQuery.or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" });
@@ -530,7 +579,14 @@ const processOrderFromItems = async ({
         }));
         console.log("[checkout][stock] raw sample", rawSample);
       }
-      const disponibles = (perfilesLibres || []).filter((p) => !isInactive(p?.cuentas?.inactiva));
+      const disponibles = (perfilesLibres || []).filter((p) => {
+        const perfilId = toPositiveInt(p?.id_perfil);
+        return (
+          !isInactive(p?.cuentas?.inactiva) &&
+          !!perfilId &&
+          !reemplazosBloqueados.perfiles.has(perfilId)
+        );
+      });
       console.log("[checkout] perfiles libres disponibles", {
         platId,
         count: disponibles.length,
@@ -586,6 +642,22 @@ const processOrderFromItems = async ({
   // Validación final: jamás usar cuentas inactivas
   const assignedCuentaIds = Array.from(new Set(asignaciones.map((a) => a.id_cuenta).filter(Boolean)));
   const assignedPerfilIds = Array.from(new Set(asignaciones.map((a) => a.id_perfil).filter(Boolean)));
+  const hasBlockedPerfil = (asignaciones || []).some((a) => {
+    const perfilId = toPositiveInt(a?.id_perfil);
+    return !!perfilId && reemplazosBloqueados.perfiles.has(perfilId);
+  });
+  if (hasBlockedPerfil) {
+    throw new Error("Se intentó asignar un perfil bloqueado por reemplazo.");
+  }
+  const hasBlockedCuenta = (asignaciones || []).some((a) => {
+    const perfilId = toPositiveInt(a?.id_perfil);
+    if (perfilId) return false;
+    const cuentaId = toPositiveInt(a?.id_cuenta);
+    return !!cuentaId && reemplazosBloqueados.cuentas.has(cuentaId);
+  });
+  if (hasBlockedCuenta) {
+    throw new Error("Se intentó asignar una cuenta bloqueada por reemplazo.");
+  }
   if (assignedCuentaIds.length) {
     const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
       .from("cuentas")

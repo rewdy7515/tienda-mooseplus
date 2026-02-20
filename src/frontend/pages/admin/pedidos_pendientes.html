@@ -230,6 +230,8 @@
       let proveedorSeleccionadoId = null;
       let proveedoresSugeridos = [];
       let proveedorFetchCounter = 0;
+      let reemplazosCache = null;
+      let reemplazosCachePromise = null;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -239,6 +241,45 @@
       };
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const hasPerfilId = (val) => Number.isFinite(Number(val)) && Number(val) > 0;
+      const toPositiveId = (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return Math.trunc(parsed);
+      };
+      const loadReemplazosBloqueados = async (force = false) => {
+        if (force) {
+          reemplazosCache = null;
+          reemplazosCachePromise = null;
+        }
+        if (reemplazosCache) return { data: reemplazosCache };
+        if (!reemplazosCachePromise) {
+          reemplazosCachePromise = supabase
+            .from("reemplazos")
+            .select("id_cuenta, id_perfil")
+            .then(({ data, error }) => {
+              if (error) throw error;
+              const cuentas = new Set();
+              const perfiles = new Set();
+              (data || []).forEach((row) => {
+                const cuentaId = toPositiveId(row?.id_cuenta);
+                const perfilId = toPositiveId(row?.id_perfil);
+                if (cuentaId) cuentas.add(cuentaId);
+                if (perfilId) perfiles.add(perfilId);
+              });
+              reemplazosCache = { cuentas, perfiles };
+              return reemplazosCache;
+            })
+            .finally(() => {
+              reemplazosCachePromise = null;
+            });
+        }
+        try {
+          const data = await reemplazosCachePromise;
+          return { data };
+        } catch (error) {
+          return { error };
+        }
+      };
       const getVenezuelaToday = () => {
         const veDate = new Date().toLocaleDateString("en-CA", {
           timeZone: "America/Caracas",
@@ -710,6 +751,8 @@
         const idPlataformaNum = Number(idPlataforma);
         const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
         const requireMadreActiva = idPlataformaNum === 9;
+        const { data: reemplazosBloqueados, error: replErr } = await loadReemplazosBloqueados();
+        if (replErr) throw replErr;
 
         if (!idVenta) return;
         if (!correoCuenta) {
@@ -784,8 +827,16 @@
               canUseExistingMadre = Boolean(madreActual) && !isTrue(madreActual.inactiva);
             }
             if (canUseExistingMadre) {
-              cuentaMadreId = Number(existingMadreId);
-              perfilId = Number(existingPerfilId);
+              const madreIdNum = toPositiveId(existingMadreId);
+              const perfilIdNum = toPositiveId(existingPerfilId);
+              const madreEnReemplazo =
+                !madreIdNum || reemplazosBloqueados.cuentas.has(madreIdNum);
+              const perfilEnReemplazo =
+                !perfilIdNum || reemplazosBloqueados.perfiles.has(perfilIdNum);
+              if (!madreEnReemplazo && !perfilEnReemplazo) {
+                cuentaMadreId = madreIdNum;
+                perfilId = perfilIdNum;
+              }
             }
           }
           if (!cuentaMadreId || !perfilId) {
@@ -797,34 +848,44 @@
             if (requireMadreActiva) {
               madreQuery = madreQuery.or("inactiva.is.null,inactiva.eq.false");
             }
-            const { data: madre, error: madreErr } = await madreQuery
+            const { data: madres, error: madreErr } = await madreQuery
               .order("id_cuenta", { ascending: true })
-              .limit(1)
-              .maybeSingle();
+              .limit(120);
             if (madreErr) throw madreErr;
-            cuentaMadreId = madre?.id_cuenta || null;
-            if (cuentaMadreId) {
-              const { data: perf, error: perfErr } = await supabase
+            const madresDisponibles = (madres || []).filter((madre) => {
+              const madreId = toPositiveId(madre?.id_cuenta);
+              return !!madreId && !reemplazosBloqueados.cuentas.has(madreId);
+            });
+            for (const madre of madresDisponibles) {
+              const madreId = toPositiveId(madre?.id_cuenta);
+              if (!madreId) continue;
+              const { data: perfilesMadre, error: perfErr } = await supabase
                 .from("perfiles")
                 .select("id_perfil")
-                .eq("id_cuenta", cuentaMadreId)
+                .eq("id_cuenta", madreId)
                 .eq("ocupado", false)
                 .order("n_perfil", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+                .limit(40);
               if (perfErr) throw perfErr;
-              perfilId = perf?.id_perfil || null;
-              if (!perfilId) {
-                const msg = document.querySelector(`.madre-stock-msg[data-plat="${idPlataforma}"]`);
-                if (msg) msg.classList.remove("hidden");
+              const perfilLibre = (perfilesMadre || []).find((perfil) => {
+                const pid = toPositiveId(perfil?.id_perfil);
+                return !!pid && !reemplazosBloqueados.perfiles.has(pid);
+              });
+              if (perfilLibre?.id_perfil) {
+                cuentaMadreId = madreId;
+                perfilId = perfilLibre.id_perfil;
+                break;
               }
-              if (perfilId) {
-                const { error: occErr } = await supabase
-                  .from("perfiles")
-                  .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
-                  .eq("id_perfil", perfilId);
-                if (occErr) throw occErr;
-              }
+            }
+            if (!perfilId) {
+              const msg = document.querySelector(`.madre-stock-msg[data-plat="${idPlataforma}"]`);
+              if (msg) msg.classList.remove("hidden");
+            } else {
+              const { error: occErr } = await supabase
+                .from("perfiles")
+                .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
+                .eq("id_perfil", perfilId);
+              if (occErr) throw occErr;
             }
           }
         }
@@ -1045,7 +1106,10 @@
         const cuentaMiembroId = Number(btn.dataset.idCuentaMiembro || "");
         if (!idVenta || !idPlataforma || !currentMadreId || !cuentaMiembroId) return;
         try {
-          const { data: nextMadre, error: madreErr } = await supabase
+          const { data: reemplazosBloqueados, error: replErr } =
+            await loadReemplazosBloqueados(true);
+          if (replErr) throw replErr;
+          const { data: nextMadres, error: madreErr } = await supabase
             .from("cuentas")
             .select("id_cuenta")
             .eq("id_plataforma", idPlataforma)
@@ -1053,29 +1117,39 @@
             .or("inactiva.is.null,inactiva.eq.false")
             .gt("id_cuenta", currentMadreId)
             .order("id_cuenta", { ascending: true })
-            .limit(1)
-            .maybeSingle();
+            .limit(120);
           if (madreErr) throw madreErr;
-          if (!nextMadre?.id_cuenta) {
+          let nextMadreId = null;
+          let nextPerfilId = null;
+          const madresDisponibles = (nextMadres || []).filter((madre) => {
+            const madreId = toPositiveId(madre?.id_cuenta);
+            return !!madreId && !reemplazosBloqueados.cuentas.has(madreId);
+          });
+          for (const madre of madresDisponibles) {
+            const madreId = toPositiveId(madre?.id_cuenta);
+            if (!madreId) continue;
+            const { data: perfilesMadre, error: perfErr } = await supabase
+              .from("perfiles")
+              .select("id_perfil")
+              .eq("id_cuenta", madreId)
+              .eq("ocupado", false)
+              .order("n_perfil", { ascending: true })
+              .limit(40);
+            if (perfErr) throw perfErr;
+            const perfilLibre = (perfilesMadre || []).find((perfil) => {
+              const pid = toPositiveId(perfil?.id_perfil);
+              return !!pid && !reemplazosBloqueados.perfiles.has(pid);
+            });
+            if (perfilLibre?.id_perfil) {
+              nextMadreId = madreId;
+              nextPerfilId = perfilLibre.id_perfil;
+              break;
+            }
+          }
+          if (!nextMadreId || !nextPerfilId) {
             alert("No hay mas cuentas validas");
             return;
           }
-          const nextMadreId = nextMadre.id_cuenta;
-          const { data: nextPerfil, error: perfErr } = await supabase
-            .from("perfiles")
-            .select("id_perfil")
-            .eq("id_cuenta", nextMadreId)
-            .eq("ocupado", false)
-            .order("n_perfil", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          if (perfErr) throw perfErr;
-          if (!nextPerfil?.id_perfil) {
-            alert("No hay mas cuentas validas");
-            return;
-          }
-
-          const nextPerfilId = nextPerfil.id_perfil;
 
           if (currentPerfilId) {
             const { error: oldPerfErr } = await supabase

@@ -4,6 +4,11 @@
 import { formatDDMMYYYY } from "./date-format.js";
 
 export const notificationTemplates = {
+  saldo_acreditado: ({ monto }) => ({
+    titulo: "Saldo acreditado",
+    mensaje: `Se ha agregado ${monto} al saldo de tu cuenta para poder comprar y renovar servicios.`,
+  }),
+
   pin_actualizado: ({ plataforma, correoCuenta, perfil, pin }) => ({
     titulo: "PIN actualizado",
     mensaje: `${plataforma ? `<strong>${plataforma}</strong><br>` : ""}Correo: ${correoCuenta}<br>Perfil: ${perfil}<br><br>Nuevo PIN: <strong>${pin}</strong>`,

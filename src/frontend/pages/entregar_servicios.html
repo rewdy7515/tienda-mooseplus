@@ -161,6 +161,8 @@
       const FORCE_CLIENT_INPUTS = false;
       let canAnnotateCliente = false;
       let activeClienteVentaId = null;
+      let reemplazosCache = null;
+      let reemplazosCachePromise = null;
 
       const params = new URLSearchParams(window.location.search);
       const idOrdenParam = params.get("id_orden");
@@ -173,6 +175,45 @@
       };
 
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const toPositiveId = (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return Math.trunc(parsed);
+      };
+      const loadReemplazosBloqueados = async (force = false) => {
+        if (force) {
+          reemplazosCache = null;
+          reemplazosCachePromise = null;
+        }
+        if (reemplazosCache) return { data: reemplazosCache };
+        if (!reemplazosCachePromise) {
+          reemplazosCachePromise = supabase
+            .from("reemplazos")
+            .select("id_cuenta, id_perfil")
+            .then(({ data, error }) => {
+              if (error) throw error;
+              const cuentas = new Set();
+              const perfiles = new Set();
+              (data || []).forEach((row) => {
+                const cuentaId = toPositiveId(row?.id_cuenta);
+                const perfilId = toPositiveId(row?.id_perfil);
+                if (cuentaId) cuentas.add(cuentaId);
+                if (perfilId) perfiles.add(perfilId);
+              });
+              reemplazosCache = { cuentas, perfiles };
+              return reemplazosCache;
+            })
+            .finally(() => {
+              reemplazosCachePromise = null;
+            });
+        }
+        try {
+          const data = await reemplazosCachePromise;
+          return { data };
+        } catch (error) {
+          return { error };
+        }
+      };
 
       const copyToClipboard = async (text, anchor) => {
         if (!text) return;
@@ -696,6 +737,9 @@
             alert("Selecciona el tipo de cuenta.");
             return;
           }
+          const { data: reemplazosBloqueados, error: replErr } =
+            await loadReemplazosBloqueados();
+          if (replErr) throw replErr;
           const needsMadre = platInfo.cuenta_madre === true;
           const requireMadreActiva = platIdNum === 9;
           let assignCuenta = null;
@@ -714,7 +758,10 @@
 
           if (needsMadre) {
             clientCuentaId = cuentaExist?.id_cuenta || null;
-            let motherFromClient = cuentaExist?.id_cuenta_madre || null;
+            let motherFromClient = toPositiveId(cuentaExist?.id_cuenta_madre);
+            if (motherFromClient && reemplazosBloqueados.cuentas.has(motherFromClient)) {
+              motherFromClient = null;
+            }
 
             if (motherFromClient && requireMadreActiva) {
               const { data: madreActiva, error: madreActivaErr } = await supabase
@@ -731,18 +778,21 @@
             }
 
             if (motherFromClient) {
-              const { data: perfPref, error: pErr } = await supabase
+              const { data: perfPrefs, error: pErr } = await supabase
                 .from("perfiles")
                 .select("id_perfil, id_cuenta, n_perfil")
                 .eq("id_cuenta", motherFromClient)
                 .eq("ocupado", false)
                 .order("n_perfil", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+                .limit(40);
               if (pErr) throw pErr;
-              if (perfPref?.id_perfil) {
-                assignPerfil = perfPref.id_perfil;
-                assignCuenta = perfPref.id_cuenta;
+              const perfilPreferido = (perfPrefs || []).find((perfil) => {
+                const perfilId = toPositiveId(perfil?.id_perfil);
+                return !!perfilId && !reemplazosBloqueados.perfiles.has(perfilId);
+              });
+              if (perfilPreferido?.id_perfil) {
+                assignPerfil = perfilPreferido.id_perfil;
+                assignCuenta = perfilPreferido.id_cuenta;
               }
             }
 
@@ -759,11 +809,21 @@
                   foreignTable: "cuentas",
                 });
               }
-              const { data: perfAlt, error: pAltErr } = await perfAltQuery.limit(1).maybeSingle();
+              const { data: perfAlt, error: pAltErr } = await perfAltQuery.limit(160);
               if (pAltErr) throw pAltErr;
-              if (perfAlt?.id_perfil) {
-                assignPerfil = perfAlt.id_perfil;
-                assignCuenta = perfAlt.id_cuenta;
+              const perfilAlterno = (perfAlt || []).find((perfil) => {
+                const perfilId = toPositiveId(perfil?.id_perfil);
+                const cuentaId = toPositiveId(perfil?.id_cuenta);
+                return (
+                  !!perfilId &&
+                  !!cuentaId &&
+                  !reemplazosBloqueados.perfiles.has(perfilId) &&
+                  !reemplazosBloqueados.cuentas.has(cuentaId)
+                );
+              });
+              if (perfilAlterno?.id_perfil) {
+                assignPerfil = perfilAlterno.id_perfil;
+                assignCuenta = perfilAlterno.id_cuenta;
               }
             }
           }

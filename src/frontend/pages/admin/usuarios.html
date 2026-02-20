@@ -56,6 +56,40 @@
         color: #166534;
         font-weight: 700;
       }
+      .saldo-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .saldo-text {
+        font-weight: 700;
+      }
+      .btn-add-saldo {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        padding: 0;
+        line-height: 1;
+        font-size: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .saldo-modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .saldo-modal-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+      }
+      .saldo-modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
     </style>
   </head>
   <body>
@@ -75,6 +109,7 @@
                 <th>Cliente</th>
                 <th>Teléfono</th>
                 <th>Email</th>
+                <th>Saldo</th>
                 <th>Registrado</th>
               </tr>
             </thead>
@@ -84,20 +119,149 @@
       </div>
     </main>
 
+    <div id="saldo-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <button class="modal-close" id="saldo-modal-close" aria-label="Cerrar">×</button>
+        <div class="modal-body saldo-modal-body">
+          <p class="saldo-modal-title">¿Cuánto saldo deseas agregar?</p>
+          <input
+            type="number"
+            id="saldo-input"
+            class="form-input"
+            placeholder="0.00"
+            min="0"
+            step="0.01"
+            inputmode="decimal"
+          />
+          <div class="saldo-modal-actions">
+            <button type="button" class="btn-outline" id="saldo-cancel-btn">Cancelar</button>
+            <button type="button" class="btn-primary" id="saldo-add-btn">Agregar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
-      import { requireSession, attachLogoHome, attachLogout } from "../../scripts/session.js";
-      import { clearServerSession, supabase } from "../../scripts/api.js";
+      import {
+        requireSession,
+        getSessionRoles,
+        setSessionRoles,
+        attachLogoHome,
+        attachLogout,
+      } from "../../scripts/session.js";
+      import {
+        clearServerSession,
+        ensureServerSession,
+        loadCurrentUser,
+        supabase,
+      } from "../../scripts/api.js";
+      import { buildNotificationPayload } from "../../scripts/notification-templates.js";
 
       requireSession();
       attachLogoHome();
       attachLogout(clearServerSession);
+      const isTrue = (v) =>
+        v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const statusEl = document.querySelector("#usuarios-status");
       const tbodyEl = document.querySelector("#usuarios-body");
       const phoneStatEl = document.querySelector("#usuarios-phone-stat");
+      const saldoModal = document.querySelector("#saldo-modal");
+      const saldoInput = document.querySelector("#saldo-input");
+      const saldoCancelBtn = document.querySelector("#saldo-cancel-btn");
+      const saldoAddBtn = document.querySelector("#saldo-add-btn");
+      const saldoModalCloseBtn = document.querySelector("#saldo-modal-close");
+      let saldoTargetUserId = null;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const formatSaldo = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? `$${n.toFixed(2)}` : "$0.00";
+      };
+
+      const openSaldoModal = (userId) => {
+        saldoTargetUserId = Number(userId) || null;
+        if (!saldoTargetUserId) return;
+        if (saldoInput) saldoInput.value = "";
+        saldoModal?.classList.remove("hidden");
+        if (saldoInput) {
+          saldoInput.focus();
+          saldoInput.select();
+        }
+      };
+
+      const closeSaldoModal = () => {
+        saldoModal?.classList.add("hidden");
+        saldoTargetUserId = null;
+        if (saldoInput) saldoInput.value = "";
+      };
+
+      const updateSaldoInRow = (userId, saldoVal) => {
+        const rowWrap = tbodyEl?.querySelector(`.saldo-wrap[data-id="${userId}"]`);
+        if (!rowWrap) return;
+        rowWrap.dataset.saldo = String(saldoVal);
+        const saldoTextEl = rowWrap.querySelector(".saldo-text");
+        if (saldoTextEl) saldoTextEl.textContent = formatSaldo(saldoVal);
+        const addBtn = rowWrap.querySelector(".btn-add-saldo");
+        if (addBtn) addBtn.dataset.saldo = String(saldoVal);
+      };
+
+      const agregarSaldo = async () => {
+        if (!saldoTargetUserId) return;
+        const raw = String(saldoInput?.value || "").trim().replace(",", ".");
+        const monto = Number(raw);
+        if (!Number.isFinite(monto) || monto <= 0) {
+          alert("Ingresa un monto válido.");
+          saldoInput?.focus();
+          return;
+        }
+        if (saldoAddBtn) saldoAddBtn.disabled = true;
+        try {
+          const { data: userRow, error: userErr } = await supabase
+            .from("usuarios")
+            .select("saldo")
+            .eq("id_usuario", saldoTargetUserId)
+            .maybeSingle();
+          if (userErr) throw userErr;
+          const saldoActual = Number(userRow?.saldo);
+          const base = Number.isFinite(saldoActual) ? saldoActual : 0;
+          const saldoNuevo = Number((base + monto).toFixed(2));
+          const { error: updErr } = await supabase
+            .from("usuarios")
+            .update({ saldo: saldoNuevo })
+            .eq("id_usuario", saldoTargetUserId);
+          if (updErr) throw updErr;
+          let notifErr = null;
+          try {
+            const notif = buildNotificationPayload("saldo_acreditado", {
+              monto: formatSaldo(monto),
+            });
+            const { error } = await supabase.from("notificaciones").insert({
+              ...notif,
+              id_usuario: saldoTargetUserId,
+            });
+            if (error) notifErr = error;
+          } catch (errNotif) {
+            notifErr = errNotif;
+          }
+          if (notifErr) {
+            console.error("notificacion saldo_acreditado error", notifErr);
+          }
+          updateSaldoInRow(saldoTargetUserId, saldoNuevo);
+          closeSaldoModal();
+          if (notifErr) {
+            alert("Saldo agregado, pero no se pudo enviar la notificación.");
+          }
+        } catch (err) {
+          console.error("agregar saldo error", err);
+          alert("No se pudo agregar saldo.");
+        } finally {
+          if (saldoAddBtn) saldoAddBtn.disabled = false;
+        }
       };
 
       const formatCliente = (row) => {
@@ -109,9 +273,21 @@
 
       const init = async () => {
         try {
+          await ensureServerSession();
+          const user = await loadCurrentUser();
+          setSessionRoles(user || {});
+          const roles = getSessionRoles();
+          const isSuperadmin =
+            isTrue(roles?.permiso_superadmin) ||
+            isTrue(user?.permiso_superadmin);
+          if (!isSuperadmin) {
+            window.location.href = "../index.html";
+            return;
+          }
+
           const { data, error } = await supabase
             .from("usuarios")
-            .select("id_usuario, nombre, apellido, telefono, correo, fecha_registro")
+            .select("id_usuario, nombre, apellido, telefono, correo, saldo, fecha_registro")
             .order("nombre", { ascending: true })
             .order("apellido", { ascending: true });
           if (error) throw error;
@@ -136,6 +312,9 @@
               const cliente = formatCliente(u);
               const tel = String(u.telefono || "").trim();
               const email = String(u.correo || "").trim();
+              const saldoNum = Number(u?.saldo);
+              const saldoVal = Number.isFinite(saldoNum) ? saldoNum : 0;
+              const saldoTxt = formatSaldo(saldoVal);
               const phoneIsValid = !!tel && /^\d+$/.test(tel);
               const telefonoQuickEdit = phoneIsValid ? "0" : "1";
               const correoQuickEdit = email ? "0" : "1";
@@ -154,6 +333,18 @@
                     <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="correo" data-quick-edit="${correoQuickEdit}">
                       <span class="usuarios-text">${email || "-"}</span>
                       <button type="button" class="btn-outline btn-edit">✏️</button>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="saldo-wrap" data-id="${u.id_usuario}" data-saldo="${saldoVal}">
+                      <span class="saldo-text">${saldoTxt}</span>
+                      <button
+                        type="button"
+                        class="btn-outline btn-add-saldo"
+                        data-id="${u.id_usuario}"
+                        data-saldo="${saldoVal}"
+                        title="Agregar saldo"
+                      >+</button>
                     </div>
                   </td>
                   <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">${registrado}</td>
@@ -236,6 +427,12 @@
       };
 
       document.addEventListener("click", async (e) => {
+        const addSaldoBtn = e.target.closest(".btn-add-saldo");
+        if (addSaldoBtn) {
+          openSaldoModal(addSaldoBtn.dataset.id);
+          return;
+        }
+
         const saveBtn = e.target.closest(".usuarios-edit-wrap .btn-save");
         if (saveBtn) {
           const wrap = saveBtn.closest(".usuarios-edit-wrap");
@@ -261,7 +458,30 @@
         }
       });
 
+      saldoModal?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) {
+          closeSaldoModal();
+        }
+      });
+      saldoCancelBtn?.addEventListener("click", closeSaldoModal);
+      saldoModalCloseBtn?.addEventListener("click", closeSaldoModal);
+      saldoAddBtn?.addEventListener("click", agregarSaldo);
+
       document.addEventListener("keydown", async (e) => {
+        if (e.key === "Escape" && saldoModal && !saldoModal.classList.contains("hidden")) {
+          closeSaldoModal();
+          return;
+        }
+        if (
+          e.key === "Enter" &&
+          saldoModal &&
+          !saldoModal.classList.contains("hidden") &&
+          document.activeElement?.id === "saldo-input"
+        ) {
+          e.preventDefault();
+          await agregarSaldo();
+          return;
+        }
         if (e.key !== "Enter") return;
         const input = e.target.closest(".usuarios-edit-input");
         if (!input) return;

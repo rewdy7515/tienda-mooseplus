@@ -208,6 +208,13 @@ if (!window.__headerActionsInit) {
 
       // Bloqueo de acceso a páginas admin si no tiene permisos
       const isAdminPath = window.location.pathname.includes("/pages/admin/");
+      const isUsuariosPath = window.location.pathname.includes(
+        "/pages/admin/usuarios.html"
+      );
+      if (isUsuariosPath && !isSuper) {
+        window.location.href = `${pagesRoot}index.html`;
+        return;
+      }
       if (isAdminPath && !isAdmin) {
         window.location.href = `${pagesRoot}index.html`;
         return;

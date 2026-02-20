@@ -1624,6 +1624,20 @@ input[type="number"].input-inline {
   align-items: center;
   line-height: 1.1;
 }
+.plan-encargo-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+}
 .plan-titulo .stock-line {
   font-weight: 400;
   color: #9ca3af;
@@ -1652,6 +1666,11 @@ input[type="number"].input-inline {
 #platform-modal .plan-bloque.selected .stock-line,
 #platform-modal .plan-bloque.selected .plan-price-line,
 #platform-modal .plan-bloque.selected .plan-name {
+  color: #fff;
+}
+#platform-modal .plan-bloque.selected .plan-encargo-tag {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.2);
   color: #fff;
 }
 

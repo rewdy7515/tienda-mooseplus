@@ -401,6 +401,22 @@ const renderPrecios = (plataformaId, flags) => {
         titleEl.appendChild(stockEl);
       }
     };
+    const appendPlanNameHeader = (titleEl) => {
+      if (!planName) return;
+      const nameEl = document.createElement("span");
+      nameEl.className = "plan-name";
+      nameEl.textContent = planName;
+      titleEl.appendChild(nameEl);
+      if (onlyComplete) {
+        const tagEl = document.createElement("span");
+        tagEl.className = "plan-encargo-tag";
+        tagEl.textContent = "Por encargo";
+        titleEl.appendChild(tagEl);
+      }
+      const infoWrap = createPlanInfo(planName, planDesc);
+      if (infoWrap) titleEl.appendChild(infoWrap);
+      titleEl.appendChild(document.createElement("br"));
+    };
 
     if (showStock) {
       const stockLabel = onlyComplete
@@ -411,38 +427,20 @@ const renderPrecios = (plataformaId, flags) => {
       const stockLine = `${stockLabel}: ${stockPlan}`;
       const titleEl = document.createElement("p");
       titleEl.className = "plan-titulo";
-      if (planName) {
-        const nameEl = document.createElement("span");
-        nameEl.className = "plan-name";
-        nameEl.textContent = planName;
-        titleEl.appendChild(nameEl);
-        const infoWrap = createPlanInfo(planName, planDesc);
-        if (infoWrap) titleEl.appendChild(infoWrap);
-        titleEl.appendChild(document.createElement("br"));
-      }
+      appendPlanNameHeader(titleEl);
       appendPriceAndStock(titleEl, stockLine);
       wrapper.appendChild(titleEl);
     } else if (planName) {
       const titleEl = document.createElement("p");
       titleEl.className = "plan-titulo";
-      const nameEl = document.createElement("span");
-      nameEl.className = "plan-name";
-      nameEl.textContent = planName;
-      titleEl.appendChild(nameEl);
-      const infoWrap = createPlanInfo(planName, planDesc);
-      if (infoWrap) titleEl.appendChild(infoWrap);
+      appendPlanNameHeader(titleEl);
       appendPriceAndStock(titleEl, null);
       wrapper.appendChild(titleEl);
     }
     if (!wrapper.querySelector(".plan-titulo")) {
       const titleEl = document.createElement("p");
       titleEl.className = "plan-titulo";
-      const nameEl = document.createElement("span");
-      nameEl.className = "plan-name";
-      nameEl.textContent = planName || "";
-      titleEl.appendChild(nameEl);
-      const infoWrap = createPlanInfo(planName, planDesc);
-      if (infoWrap) titleEl.appendChild(infoWrap);
+      appendPlanNameHeader(titleEl);
       appendPriceAndStock(titleEl, null);
       wrapper.appendChild(titleEl);
     }
