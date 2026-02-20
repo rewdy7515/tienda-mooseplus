@@ -183,6 +183,27 @@ export async function submitCheckout(payload) {
   }
 }
 
+export async function fetchCheckoutDraft() {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/checkout/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("checkout/draft response", res.status, text);
+      return { error: text || "No se pudo obtener la orden de checkout" };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("fetchCheckoutDraft error", err);
+    return { error: err.message };
+  }
+}
+
 export async function procesarOrden(id_orden) {
   await ensureServerSession();
   try {

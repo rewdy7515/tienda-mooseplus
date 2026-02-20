@@ -3,6 +3,7 @@ import {
   fetchCart,
   loadCatalog,
   submitCheckout,
+  fetchCheckoutDraft,
   updateCartMontos,
   uploadComprobantes,
   fetchP2PRate,
@@ -20,6 +21,8 @@ const saldoOrderId = Number(urlParams.get("id_orden"));
 const saldoFrom = urlParams.get("from") === "saldo";
 let isSaldoCheckout = false;
 let saldoOrder = null;
+let checkoutOrderId =
+  Number.isFinite(saldoOrderId) && saldoOrderId > 0 ? saldoOrderId : null;
 
 const metodoDetalle = document.querySelector("#metodo-detalle");
 const metodoSelect = document.querySelector("#metodo-select");
@@ -29,6 +32,7 @@ const inputFiles = document.querySelector("#input-files");
 const filePreview = document.querySelector("#file-preview");
 const dropzone = document.querySelector("#dropzone");
 const totalEl = document.querySelector("#checkout-total");
+const orderTitleEl = document.querySelector("#checkout-order-title");
 const btnSendPayment = document.querySelector("#btn-send-payment");
 const refInput = document.querySelector("#input-ref");
 const btnVerifyPayment = document.querySelector("#btn-verify-payment");
@@ -54,6 +58,7 @@ let montoRefreshTimer = null;
 let countdownTimer = null;
 let saldoWatcher = null;
 let lastSaldoValue = null;
+const MONTO_REFRESH_MS = 60 * 60 * 1000;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
@@ -75,6 +80,19 @@ const getCaracasNow = () => {
   };
 };
 
+const setCheckoutOrderId = (orderId, { updateUrl = true } = {}) => {
+  const parsed = Number(orderId);
+  checkoutOrderId = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  if (!updateUrl || !checkoutOrderId) return;
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("id_orden", String(checkoutOrderId));
+    window.history.replaceState({}, "", url.toString());
+  } catch (_err) {
+    // noop
+  }
+};
+
 const parseCaracasDate = (fechaStr, horaStr) => {
   if (!fechaStr || !horaStr) return null;
   const fecha = String(fechaStr).trim();
@@ -88,7 +106,7 @@ const parseCaracasDate = (fechaStr, horaStr) => {
 const shouldRefreshMonto = (fechaStr, horaStr) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return true;
-  return Date.now() - dt.getTime() >= 30 * 60 * 1000;
+  return Date.now() - dt.getTime() >= MONTO_REFRESH_MS;
 };
 
 const formatCountdown = (msLeft) => {
@@ -104,7 +122,7 @@ const getCountdownMs = (fechaStr, horaStr) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return null;
   const elapsed = Date.now() - dt.getTime();
-  const remaining = 30 * 60 * 1000 - elapsed;
+  const remaining = MONTO_REFRESH_MS - elapsed;
   return remaining > 0 ? remaining : 0;
 };
 
@@ -126,7 +144,7 @@ const scheduleMontoRefresh = (fechaStr, horaStr, totalUsdVal, tasaVal) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return;
   const elapsed = Date.now() - dt.getTime();
-  const waitMs = 30 * 60 * 1000 - elapsed;
+  const waitMs = MONTO_REFRESH_MS - elapsed;
   if (waitMs <= 0) return;
   montoRefreshTimer = setTimeout(async () => {
     try {
@@ -415,6 +433,15 @@ dropzone?.addEventListener("drop", (e) => {
 
 const renderTotal = () => {
   if (!totalEl) return;
+  if (orderTitleEl) {
+    if (checkoutOrderId) {
+      orderTitleEl.textContent = `N. Orden: #${checkoutOrderId}`;
+      orderTitleEl.style.display = "block";
+    } else {
+      orderTitleEl.textContent = "";
+      orderTitleEl.style.display = "none";
+    }
+  }
   const metodo = seleccionado !== null ? metodos[seleccionado] : null;
   const metodoId = metodo?.id_metodo_de_pago ?? metodo?.id;
   const onlyMetodoBs =
@@ -659,6 +686,9 @@ async function init() {
       if (!ordenErr && ordenData && !ordenData.id_carrito) {
         isSaldoCheckout = true;
         saldoOrder = ordenData;
+        if (ordenData?.id_orden) {
+          setCheckoutOrderId(ordenData.id_orden, { updateUrl: false });
+        }
         if (Number.isFinite(Number(ordenData.tasa_bs))) {
           tasaBs = Number(ordenData.tasa_bs);
         }
@@ -712,6 +742,15 @@ async function init() {
         await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
       } catch (syncErr) {
         console.warn("checkout sync cart montos error", syncErr);
+      }
+      if (!checkoutOrderId) {
+        const draftResp = await fetchCheckoutDraft();
+        if (!draftResp?.error) {
+          const draftId = Number(draftResp?.id_orden);
+          if (Number.isFinite(draftId) && draftId > 0) {
+            setCheckoutOrderId(draftId);
+          }
+        }
       }
     }
 
@@ -872,6 +911,7 @@ btnSendPayment?.addEventListener("click", async () => {
           pago_verificado: false,
           monto_completo: null,
           orden_cancelada: null,
+          checkout_finalizado: true,
           fecha,
           hora_orden: hora,
           hora_confirmacion: hora,
@@ -884,6 +924,7 @@ btnSendPayment?.addEventListener("click", async () => {
       return;
     }
     const payload = {
+      id_orden: checkoutOrderId,
       id_metodo_de_pago: metodo.id_metodo_de_pago ?? metodo.id,
       referencia: refInput.value.trim(),
       comprobantes,
@@ -894,6 +935,9 @@ btnSendPayment?.addEventListener("click", async () => {
     if (resp?.error) {
       alert(`Error en checkout: ${resp.error}`);
       return;
+    }
+    if (resp?.id_orden) {
+      setCheckoutOrderId(resp.id_orden, { updateUrl: false });
     }
     if (resp?.id_orden) {
       try {

@@ -229,8 +229,8 @@ if (!window.__headerActionsInit) {
         historialLink.style.display = isSuperHist ? "block" : "none";
       }
       if (reportesLink) {
-        reportesLink.classList.toggle("hidden", !isSuper);
-        reportesLink.style.display = isSuper ? "block" : "none";
+        reportesLink.classList.remove("hidden");
+        reportesLink.style.display = "block";
       }
       if (adminHeaderBtn) {
         adminHeaderBtn.classList.toggle("hidden", !isAdmin);

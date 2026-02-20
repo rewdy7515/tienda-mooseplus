@@ -49,7 +49,18 @@
           </button>
         </div>
         <section class="categorias-dinamicas">
+          <div id="active-order-wrap" class="status hidden">
+            <span>Tienes una orden activa. </span>
+            <a id="active-order-link" href="#">¿Continuar al checkout?</a>
+          </div>
           <p id="tasa-actual" class="status tasa-actual hidden"></p>
+          <div id="recordatorios-pendientes-wrap" class="status hidden">
+            <strong>Fechas faltantes por recordar:</strong>
+            <ul id="recordatorios-pendientes-list"></ul>
+            <p id="recordatorios-pendientes-empty" class="status hidden">
+              Sin fechas pendientes.
+            </p>
+          </div>
           <p id="categorias-status" class="status"></p>
           <div id="categorias-container" class="categorias-grid"></div>
         </section>

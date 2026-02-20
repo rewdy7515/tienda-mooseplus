@@ -156,6 +156,11 @@
         const start = new Date(now.getFullYear(), now.getMonth(), 1);
         return start.toISOString().slice(0, 10);
       };
+      const getTodayLocal = () => {
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      };
       const getNextMonthStart = () => {
         const now = new Date();
         const start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -186,14 +191,15 @@
 
       async function loadCounts() {
         try {
-          const today = new Date().toISOString().slice(0, 10);
+          const today = getTodayLocal();
           const monthStart = getMonthStart();
           const nextMonthStart = getNextMonthStart();
           const [
-            { count: repCount },
-            { count: cortesCount },
-            { count: pedidosCount },
-            { count: tareasCount },
+            { count: repCount, error: repErr },
+            { count: cortesVentasCount, error: cortesVentasErr },
+            { count: cortesReemplazosCount, error: cortesReemplazosErr },
+            { count: pedidosCount, error: pedidosErr },
+            { count: tareasCount, error: tareasErr },
           ] = await Promise.all([
             supabase
               .from("reportes")
@@ -201,9 +207,20 @@
               .eq("solucionado", false),
             supabase
               .from("ventas")
-              .select("id_venta, cuentas!ventas_id_cuenta_fkey!inner(inactiva)", { count: "exact", head: true })
+              .select("id_venta, cuentas:cuentas!ventas_id_cuenta_fkey!inner(inactiva)", {
+                count: "exact",
+                head: true,
+              })
               .lte("fecha_corte", today)
+              .eq("recordatorio_enviado", true)
               .or("suspendido.is.null,suspendido.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
+            supabase
+              .from("reemplazos")
+              .select("id_reemplazo, cuentas:cuentas!inner(inactiva)", {
+                count: "exact",
+                head: true,
+              })
               .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
             supabase
               .from("ventas")
@@ -213,6 +230,12 @@
               .from("tareas_asignadas")
               .select("id_tarea_asignada", { count: "exact", head: true }),
           ]);
+          if (repErr) throw repErr;
+          if (cortesVentasErr) throw cortesVentasErr;
+          if (cortesReemplazosErr) throw cortesReemplazosErr;
+          if (pedidosErr) throw pedidosErr;
+          if (tareasErr) throw tareasErr;
+          const cortesCount = (cortesVentasCount ?? 0) + (cortesReemplazosCount ?? 0);
           if (countReportesEl) countReportesEl.textContent = repCount ?? 0;
           if (countCortesEl) countCortesEl.textContent = cortesCount ?? 0;
           if (countPedidosEl) countPedidosEl.textContent = pedidosCount ?? 0;

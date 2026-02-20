@@ -45,6 +45,11 @@
         box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
         transform: translateY(-1px);
       }
+      .rec-card:disabled {
+        cursor: default;
+        opacity: 0.72;
+        transform: none;
+      }
       .rec-card h4 {
         margin: 0 0 6px;
         font-size: 15px;
@@ -97,6 +102,8 @@
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
       };
+      const SEND_DELAY_MIN_MS = 8000;
+      const SEND_DELAY_MAX_MS = 15000;
 
       const getCaracasDateStr = (offsetDays = 0) => {
         const now = new Date();
@@ -127,6 +134,90 @@
         }
       };
 
+      const sleep = (ms) =>
+        new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+
+      const randomSendDelayMs = () =>
+        SEND_DELAY_MIN_MS +
+        Math.floor(Math.random() * (SEND_DELAY_MAX_MS - SEND_DELAY_MIN_MS + 1));
+
+      const sendWhatsappRecordatorio = async ({ phone, message, ventaIds = [] }) => {
+        const resp = await fetch("/api/whatsapp/send-recordatorio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, message, ventaIds }),
+        });
+        let body = null;
+        try {
+          body = await resp.json();
+        } catch (_) {
+          body = null;
+        }
+        if (!resp.ok) {
+          throw new Error(body?.error || `HTTP ${resp.status}`);
+        }
+        return body;
+      };
+
+      const ensureWhatsappReady = async () => {
+        const resp = await fetch("/api/whatsapp/status");
+        let body = null;
+        try {
+          body = await resp.json();
+        } catch (_) {
+          body = null;
+        }
+        if (!resp.ok || !body?.ready) {
+          throw new Error(body?.error || "WhatsApp no está listo");
+        }
+      };
+
+      const sendGeneratedMessages = async (messages = []) => {
+        await ensureWhatsappReady();
+        let sent = 0;
+        let failed = 0;
+        let skippedNoPhone = 0;
+        let updatedVentas = 0;
+        const sendableCount = (messages || []).filter((msg) =>
+          Boolean(String(msg?.telefono || "").trim()),
+        ).length;
+        let sendableProcessed = 0;
+
+        for (const msg of messages || []) {
+          const phone = String(msg.telefono || "").trim();
+          if (!phone) {
+            skippedNoPhone += 1;
+            continue;
+          }
+          try {
+            const resp = await sendWhatsappRecordatorio({
+              phone,
+              message: msg.plain,
+              ventaIds: msg.ventaIds || [],
+            });
+            sent += 1;
+            updatedVentas += Number(resp?.updatedVentas || 0);
+          } catch (err) {
+            failed += 1;
+            console.error("recordatorios send error", {
+              idUsuario: msg.idUsuario,
+              phone,
+              error: err,
+            });
+          }
+
+          sendableProcessed += 1;
+          if (sendableProcessed < sendableCount) {
+            const delayMs = randomSendDelayMs();
+            await sleep(delayMs);
+          }
+        }
+
+        return { total: messages.length, sent, failed, skippedNoPhone, updatedVentas };
+      };
+
       const renderCards = (items) => {
         if (!resultsEl) return;
         if (!items.length) {
@@ -136,26 +227,56 @@
         resultsEl.innerHTML = items
           .map(
             (msg) => `
-              <button class="rec-card" type="button" data-copy="${encodeURIComponent(msg.plain)}">
+              <button
+                class="rec-card"
+                type="button"
+                data-copy="${encodeURIComponent(msg.plain)}"
+              >
                 ${msg.html}
               </button>
             `
           )
           .join("");
         resultsEl.querySelectorAll(".rec-card").forEach((btn) => {
-          btn.addEventListener("click", () => {
+          btn.addEventListener("click", async () => {
             const txt = btn.dataset.copy ? decodeURIComponent(btn.dataset.copy) : "";
-            if (txt) copyToClipboard(txt);
+            if (!txt) return;
+            try {
+              await copyToClipboard(txt);
+              setStatus("Mensaje copiado.");
+            } catch (err) {
+              console.error("copiar recordatorios error", err);
+              setStatus("No se pudo copiar el mensaje.");
+            }
           });
         });
       };
 
       const buildMessagesFromGrouped = (grouped) =>
         Object.values(grouped || {}).map((g) => {
-          const bloques = g.bloques.join("\n\n");
+          const bloques = Object.values(g.plataformas || {})
+            .map((plat) => {
+              const detalles = (plat.detalles || []).join("\n\n");
+              return `*${plat.nombre || "-"}*\n${detalles}`;
+            })
+            .join("\n\n");
           const plain = `¡Hola ${g.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-          const html = `<pre>${plain}</pre>`;
-          return { html, plain };
+          const html = `<h4>${g.cliente || "Cliente"}</h4><p>Teléfono: ${g.telefono || "-"}</p><pre>${plain}</pre>`;
+          const ventaIds = Array.from(
+            new Set(
+              (g.ventaIds || [])
+                .map((id) => Number(id))
+                .filter((id) => Number.isFinite(id) && id > 0),
+            ),
+          );
+          return {
+            idUsuario: g.idUsuario || null,
+            cliente: g.cliente || "Cliente",
+            telefono: g.telefono || "",
+            html,
+            plain,
+            ventaIds,
+          };
         });
 
       const fetchMessages = async () => {
@@ -165,7 +286,8 @@
           .select(
             "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado",
           )
-          .or(`fecha_corte.eq.${fechaManana},recordatorio_enviado.eq.false`);
+          .lte("fecha_corte", fechaManana)
+          .or("recordatorio_enviado.eq.false,recordatorio_enviado.is.null");
         if (ventErr) throw ventErr;
 
           const cuentasIds = Array.from(new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)));
@@ -186,7 +308,10 @@
               ? supabase.from("precios").select("id_precio, id_plataforma").in("id_precio", precioIds)
               : Promise.resolve({ data: [], error: null }),
             userIds.length
-              ? supabase.from("usuarios").select("id_usuario, nombre, apellido").in("id_usuario", userIds)
+              ? supabase
+                  .from("usuarios")
+                  .select("id_usuario, nombre, apellido, telefono")
+                  .in("id_usuario", userIds)
               : Promise.resolve({ data: [], error: null }),
             perfilIds.length
               ? supabase.from("perfiles").select("id_perfil, n_perfil, perfil_hogar").in("id_perfil", perfilIds)
@@ -224,7 +349,12 @@
             return acc;
           }, {});
           const mapUser = (users || []).reduce((acc, u) => {
-            acc[u.id_usuario] = [u.nombre, u.apellido].filter(Boolean).join(" ").trim() || `Usuario ${u.id_usuario}`;
+            acc[u.id_usuario] = {
+              cliente:
+                [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
+                `Usuario ${u.id_usuario}`,
+              telefono: String(u.telefono || "").trim(),
+            };
             return acc;
           }, {});
           const mapPerf = (perfiles || []).reduce((acc, p) => {
@@ -232,14 +362,16 @@
             return acc;
           }, {});
 
-          // Construir mensajes agrupados por usuario
+          // Construir mensajes agrupados por usuario y por plataforma
           const grouped = (ventas || []).reduce((acc, v) => {
             const cuenta = mapCuenta[v.id_cuenta] || {};
             const precio = mapPrecio[v.id_precio] || {};
             const platId = cuenta.id_plataforma || precio.id_plataforma || null;
             const platInfo = platId ? mapPlat[platId] || {} : {};
             const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
-            const cliente = mapUser[v.id_usuario] || "Cliente";
+            const userInfo = mapUser[v.id_usuario] || {};
+            const cliente = userInfo.cliente || "Cliente";
+            const telefono = userInfo.telefono || "";
             const useCorreoCliente =
               platInfo.correo_cliente === true ||
               platInfo.correo_cliente === "true" ||
@@ -253,11 +385,20 @@
             const hogarTxt = isNetflixPlan2 ? " (HOGAR ACTUALIZADO)" : "";
             const key = v.id_usuario || "sin_usuario";
             if (!acc[key]) {
-              acc[key] = { cliente, bloques: [] };
+              acc[key] = { idUsuario: v.id_usuario || null, cliente, telefono, plataformas: {}, ventaIds: [] };
             }
+            const platDisplayName = `${platNombre}${hogarTxt}`;
+            const platformKey = `${String(platId || platNombre || "-")}::${hogarTxt ? "hogar" : "normal"}`;
+            if (!acc[key].plataformas[platformKey]) {
+              acc[key].plataformas[platformKey] = {
+                nombre: platDisplayName,
+                detalles: [],
+              };
+            }
+            if (v.id_venta) acc[key].ventaIds.push(v.id_venta);
             const fechaPago = v.fecha_corte ? formatDDMMYYYY(v.fecha_corte) : "-";
-            acc[key].bloques.push(
-              `*${platNombre}${hogarTxt}* \`ID VENTA: #${v.id_venta}\`
+            acc[key].plataformas[platformKey].detalles.push(
+              `\`ID VENTA: #${v.id_venta}\`
 Correo: ${correo}
 ${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
             );
@@ -271,13 +412,25 @@ ${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
       const loadRecordatorios = async () => {
         setStatus("Generando recordatorios...");
         resultsEl.innerHTML = "";
+        if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = true;
         try {
           const { messages } = await fetchMessages();
           renderCards(messages);
-          setStatus(messages.length ? "" : "Sin resultados.");
+          if (!messages.length) {
+            setStatus("Sin resultados.");
+            return;
+          }
+
+          setStatus(`Enviando ${messages.length} recordatorio(s) por WhatsApp...`);
+          const stats = await sendGeneratedMessages(messages);
+          setStatus(
+            `Proceso completado. Enviados: ${stats.sent}, sin teléfono: ${stats.skippedNoPhone}, fallidos: ${stats.failed}, ventas marcadas: ${stats.updatedVentas}.`,
+          );
         } catch (err) {
           console.error("recordatorios generar error", err);
-          setStatus("No se pudieron generar los recordatorios.");
+          setStatus(err?.message || "No se pudieron generar los recordatorios.");
+        } finally {
+          if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = false;
         }
       };
 

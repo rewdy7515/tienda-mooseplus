@@ -2,6 +2,7 @@ node_modules
 .env
 .next
 dist
+.wwebjs_auth/
 node_modules
 .env
 .next

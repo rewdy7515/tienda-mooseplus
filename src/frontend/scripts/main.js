@@ -43,6 +43,11 @@ const testingBtn = document.querySelector("#btn-testing-toggle");
 const missingDataWrap = document.querySelector("#missing-data-wrap");
 const missingDataBtn = document.querySelector("#missing-data-btn");
 const tasaActualEl = document.querySelector("#tasa-actual");
+const activeOrderWrap = document.querySelector("#active-order-wrap");
+const activeOrderLink = document.querySelector("#active-order-link");
+const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
+const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
+const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -73,6 +78,29 @@ const searchResults = document.querySelector("#search-results");
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+const getCaracasDateStr = (offsetDays = 0) => {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = Number(parts.find((p) => p.type === "year")?.value || 0);
+  const month = Number(parts.find((p) => p.type === "month")?.value || 0);
+  const day = Number(parts.find((p) => p.type === "day")?.value || 0);
+  const base = new Date(Date.UTC(year, month - 1, day));
+  base.setUTCDate(base.getUTCDate() + offsetDays);
+  return base.toISOString().slice(0, 10);
+};
+
+const formatToDDMMYYYY = (value) => {
+  const str = String(value || "").trim().slice(0, 10);
+  const [year, month, day] = str.split("-");
+  if (!year || !month || !day) return str;
+  return `${day}-${month}-${year}`;
+};
 
 const buildPreciosMap = (precios) =>
   (precios || []).reduce((acc, precio) => {
@@ -344,6 +372,85 @@ const checkMissingDataNotice = async (currentUser) => {
   }
 };
 
+const loadActiveOrderNotice = async (currentUser) => {
+  if (!activeOrderWrap || !activeOrderLink) return;
+  const userId = Number(currentUser?.id_usuario);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    activeOrderWrap.classList.add("hidden");
+    activeOrderLink.removeAttribute("href");
+    return;
+  }
+  try {
+    const { data, error } = await supabase
+      .from("ordenes")
+      .select("id_orden, id_carrito, recargar_saldo, checkout_finalizado")
+      .eq("id_usuario", userId)
+      .eq("checkout_finalizado", false)
+      .or("orden_cancelada.is.null,orden_cancelada.eq.false")
+      .order("id_orden", { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    const orden = Array.isArray(data) && data.length ? data[0] : null;
+    const idOrden = Number(orden?.id_orden);
+    if (!Number.isFinite(idOrden) || idOrden <= 0) {
+      activeOrderWrap.classList.add("hidden");
+      activeOrderLink.removeAttribute("href");
+      return;
+    }
+    const isSaldoOrder = isTrue(orden?.recargar_saldo) && !orden?.id_carrito;
+    const href = isSaldoOrder
+      ? `checkout.html?id_orden=${encodeURIComponent(idOrden)}&from=saldo`
+      : `checkout.html?id_orden=${encodeURIComponent(idOrden)}`;
+    activeOrderLink.href = href;
+    activeOrderWrap.classList.remove("hidden");
+  } catch (err) {
+    console.error("active order notice error", err);
+    activeOrderWrap.classList.add("hidden");
+    activeOrderLink.removeAttribute("href");
+  }
+};
+
+const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
+  if (!recordatoriosPendientesWrap || !recordatoriosPendientesList || !recordatoriosPendientesEmpty) return;
+  if (!isSuperadmin) {
+    recordatoriosPendientesList.innerHTML = "";
+    recordatoriosPendientesWrap.classList.add("hidden");
+    return;
+  }
+
+  try {
+    const fechaManana = getCaracasDateStr(1);
+    const { data, error } = await supabase
+      .from("ventas")
+      .select("fecha_corte")
+      .lte("fecha_corte", fechaManana)
+      .or("recordatorio_enviado.eq.false,recordatorio_enviado.is.null");
+    if (error) throw error;
+
+    const uniqueDates = Array.from(
+      new Set(
+        (data || [])
+          .map((row) => String(row?.fecha_corte || "").trim().slice(0, 10))
+          .filter(Boolean),
+      ),
+    ).sort();
+
+    recordatoriosPendientesList.innerHTML = "";
+    uniqueDates.forEach((dateStr) => {
+      const li = document.createElement("li");
+      li.textContent = formatToDDMMYYYY(dateStr);
+      recordatoriosPendientesList.appendChild(li);
+    });
+
+    const hasDates = uniqueDates.length > 0;
+    recordatoriosPendientesEmpty.classList.toggle("hidden", hasDates);
+    recordatoriosPendientesWrap.classList.remove("hidden");
+  } catch (err) {
+    console.error("recordatorios pendientes error", err);
+    recordatoriosPendientesWrap.classList.add("hidden");
+  }
+};
+
 async function init() {
   setEstado("Cargando categorias y plataformas...");
   initModal(modalEls);
@@ -417,7 +524,9 @@ async function init() {
       testingBtn.classList.toggle("hidden", !isSuper);
       testingBtn.style.display = isSuper ? "inline-flex" : "none";
     }
+    await loadActiveOrderNotice(currentUser);
     await checkMissingDataNotice(currentUser);
+    await loadPendingReminderDates({ isSuperadmin: isSuper });
 
     const cachedCart = getCachedCart();
     const cartData = await fetchCart();

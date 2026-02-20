@@ -348,11 +348,10 @@
                     : "Cliente";
                   const accountSource = v.id_cuenta_miembro ? v.cuentas_miembro : v.cuentas;
                   const correo = accountSource?.correo || "-";
-                  const showDot =
-                    v.cuentas?.venta_miembro === true ||
-                    v.cuentas?.venta_miembro === "true" ||
-                    v.perfiles?.perfil_hogar === true ||
-                    v.perfiles?.perfil_hogar === "true";
+                  const showDot = shouldShowOrangeDot({
+                    ventaMiembro: v.cuentas?.venta_miembro,
+                    perfilHogar: v.perfiles?.perfil_hogar,
+                  });
                   const platNombre = v.cuentas?.plataformas?.nombre || "Plataforma";
                   return `
                     <tr data-id-venta="${v.id_venta}">
@@ -439,6 +438,10 @@
       let platMaxMap = {};
       let platCorteClaveMap = {};
       let platCorteDirectoMap = {};
+      const isTruthy = (value) =>
+        value === true || value === "true" || value === 1 || value === "1" || value === "t";
+      const shouldShowOrangeDot = ({ ventaMiembro, perfilHogar }) =>
+        isTruthy(ventaMiembro) || isTruthy(perfilHogar);
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -454,12 +457,7 @@
           v.cuentas?.venta_perfil === "true" ||
           v.cuentas?.venta_perfil === 1 ||
           v.cuentas?.venta_perfil === "1";
-        const ventaMiembro =
-          v.cuentas?.venta_miembro === true ||
-          v.cuentas?.venta_miembro === "true" ||
-          v.cuentas?.venta_miembro === 1 ||
-          v.cuentas?.venta_miembro === "1" ||
-          Number.isFinite(Number(v.id_cuenta_miembro));
+        const ventaMiembro = isTruthy(v.cuentas?.venta_miembro);
         const cliente = v.usuarios
           ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() || `Usuario ${v.usuarios.id_usuario}`
           : "-";
@@ -467,9 +465,10 @@
         const correo = accountSource?.correo || "-";
         const clave = accountSource?.clave || "";
         const perfil = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "-";
-        const showDot =
-          plataforma.id_plataforma === 1 &&
-          ((ventaPerfil === true && v.perfiles?.perfil_hogar === true) || ventaMiembro === true);
+        const showDot = shouldShowOrangeDot({
+          ventaMiembro,
+          perfilHogar: v.perfiles?.perfil_hogar,
+        });
         const perfilCell = `${perfil}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
         const pin = v.perfiles?.pin ?? "";
         const ventaId = v.id_venta != null ? String(v.id_venta).padStart(4, "0") : "";
@@ -520,10 +519,10 @@
         const corteClave = !!platCorteClaveMap[plataforma.id_plataforma];
         const corteDirecto = !!platCorteDirectoMap[plataforma.id_plataforma];
         const perfilLabel = v.perfil ? `M${v.perfil}` : "-";
-        const showDot =
-          plataforma.id_plataforma === 1 &&
-          ((v.cuentas?.venta_perfil === true && v.perfil_hogar === true) ||
-            v.cuentas?.venta_miembro === true);
+        const showDot = shouldShowOrangeDot({
+          ventaMiembro: v.cuentas?.venta_miembro,
+          perfilHogar: v.perfil_hogar,
+        });
         const perfilCell = `${perfilLabel}${showDot ? '<span class="perfil-dot"></span>' : ""}`;
         const cuentaId = v.id_cuenta || "";
         const perfilId = v.id_perfil || "";
@@ -684,6 +683,7 @@
               "id_venta, fecha_corte, aviso_corte, id_cuenta_miembro, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, correo, clave, link_codigo, id_plataforma, inactiva, venta_perfil, venta_miembro, cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, link_codigo), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
             )
             .lte("fecha_corte", today)
+            .eq("recordatorio_enviado", true)
             .or("suspendido.is.null,suspendido.eq.false")
             .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
           if (error) throw error;

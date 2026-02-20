@@ -5,6 +5,11 @@ const path = require("path");
 const fs = require("fs/promises");
 const { supabaseAdmin } = require("../database/db");
 const { port } = require("../../config/config");
+const {
+  startWhatsappClient,
+  getWhatsappClient,
+  isWhatsappReady,
+} = require("../../whatsapp web/client");
 
 const app = express();
 app.use(
@@ -15,12 +20,533 @@ app.use(
 );
 const jsonParser = express.json({ limit: "25mb" });
 
+const shouldStartWhatsapp =
+  process.env.ENABLE_WHATSAPP === "true" && process.env.VERCEL !== "1";
+
+if (shouldStartWhatsapp) {
+  startWhatsappClient().catch((err) => {
+    console.error("[WhatsApp] init error:", err);
+  });
+}
+
 const clearCorsHeaders = (res) => {
   res.removeHeader("Access-Control-Allow-Origin");
   res.removeHeader("Access-Control-Allow-Credentials");
   res.removeHeader("Access-Control-Allow-Headers");
   res.removeHeader("Access-Control-Allow-Methods");
 };
+
+const WHATSAPP_AUTO_RECORDATORIOS_ENABLED =
+  process.env.WHATSAPP_AUTO_RECORDATORIOS !== "false";
+const WHATSAPP_AUTO_RECORDATORIOS_HOUR = 10;
+const WHATSAPP_SEND_DELAY_MIN_MS = 8000;
+const WHATSAPP_SEND_DELAY_MAX_MS = 15000;
+const WHATSAPP_RESET_HOUR = 0;
+let lastAutoRecordatoriosRunDate = null;
+let autoRecordatoriosRetryPending = false;
+let autoRecordatoriosRunInProgress = false;
+let recordatoriosSendInProgress = false;
+let recordatoriosEnviados = false;
+let recordatoriosEnviadosDate = null;
+let lastAutoRecordatoriosState = {
+  date: null,
+  status: "idle",
+  attemptedAt: null,
+  completedAt: null,
+  total: 0,
+  sent: 0,
+  failed: 0,
+  skippedNoPhone: 0,
+  skippedInvalidPhone: 0,
+  updatedVentas: 0,
+  recordatoriosEnviados: false,
+  error: null,
+};
+
+const uniqPositiveIds = (values = []) =>
+  Array.from(
+    new Set(
+      (values || [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0),
+    ),
+  );
+
+const getCaracasDateStr = (offsetDays = 0) => {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = Number(parts.find((part) => part.type === "year")?.value || 0);
+  const month = Number(parts.find((part) => part.type === "month")?.value || 0);
+  const day = Number(parts.find((part) => part.type === "day")?.value || 0);
+  const base = new Date(Date.UTC(year, month - 1, day));
+  base.setUTCDate(base.getUTCDate() + offsetDays);
+  return base.toISOString().slice(0, 10);
+};
+
+const getCaracasClock = () => {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value || "0000";
+  const month = parts.find((part) => part.type === "month")?.value || "00";
+  const day = parts.find((part) => part.type === "day")?.value || "00";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  return { dateStr: `${year}-${month}-${day}`, hour, minute };
+};
+
+const formatDDMMYYYY = (value) => {
+  const str = String(value || "").trim().slice(0, 10);
+  const [year, month, day] = str.split("-");
+  if (!year || !month || !day) return str || "-";
+  return `${day}/${month}/${year}`;
+};
+
+const normalizeWhatsappPhone = (rawPhone) => {
+  const digits = String(rawPhone || "").replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("58") && digits.length >= 11) return digits;
+  if (digits.length === 11 && digits.startsWith("0")) return `58${digits.slice(1)}`;
+  if (digits.length === 10 && digits.startsWith("4")) return `58${digits}`;
+  return digits.length >= 10 ? digits : null;
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const randomWhatsappDelayMs = () => {
+  return (
+    WHATSAPP_SEND_DELAY_MIN_MS +
+    Math.floor(
+      Math.random() * (WHATSAPP_SEND_DELAY_MAX_MS - WHATSAPP_SEND_DELAY_MIN_MS + 1),
+    )
+  );
+};
+
+const didSendAllRecordatorios = (result = {}) => {
+  const total = Number(result.total || 0);
+  if (total <= 0) return false;
+  return (
+    Number(result.sent || 0) === total &&
+    Number(result.failed || 0) === 0 &&
+    Number(result.skippedNoPhone || 0) === 0 &&
+    Number(result.skippedInvalidPhone || 0) === 0
+  );
+};
+
+const ensureDailyRecordatoriosState = (dateStr) => {
+  if (!dateStr) return;
+  if (recordatoriosEnviadosDate === dateStr) return;
+  recordatoriosEnviadosDate = dateStr;
+  recordatoriosEnviados = false;
+  lastAutoRecordatoriosRunDate = null;
+  autoRecordatoriosRetryPending = false;
+  lastAutoRecordatoriosState = {
+    date: dateStr,
+    status: "idle",
+    attemptedAt: null,
+    completedAt: null,
+    total: 0,
+    sent: 0,
+    failed: 0,
+    skippedNoPhone: 0,
+    skippedInvalidPhone: 0,
+    updatedVentas: 0,
+    recordatoriosEnviados: false,
+    error: null,
+  };
+  console.log(
+    `[WhatsApp] Reset diario ${dateStr} ${String(WHATSAPP_RESET_HOUR).padStart(2, "0")}:00 America/Caracas: recordatorios_enviados=false`,
+  );
+};
+
+const buildWhatsappRecordatorioItems = async () => {
+  const fechaManana = getCaracasDateStr(1);
+  const { data: ventas, error: ventErr } = await supabaseAdmin
+    .from("ventas")
+    .select(
+      "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado",
+    )
+    .lte("fecha_corte", fechaManana)
+    .or("recordatorio_enviado.eq.false,recordatorio_enviado.is.null");
+  if (ventErr) throw ventErr;
+
+  const ventasList = Array.isArray(ventas) ? ventas : [];
+  if (!ventasList.length) return [];
+
+  const cuentasIds = uniqPositiveIds(ventasList.map((venta) => venta.id_cuenta));
+  const precioIds = uniqPositiveIds(ventasList.map((venta) => venta.id_precio));
+  const userIds = uniqPositiveIds(ventasList.map((venta) => venta.id_usuario));
+  const perfilIds = uniqPositiveIds(ventasList.map((venta) => venta.id_perfil));
+
+  const [
+    { data: cuentas, error: cErr },
+    { data: precios, error: pErr },
+    { data: users, error: uErr },
+    { data: perfiles, error: perfErr },
+  ] = await Promise.all([
+    cuentasIds.length
+      ? supabaseAdmin
+          .from("cuentas")
+          .select("id_cuenta, correo, id_plataforma")
+          .in("id_cuenta", cuentasIds)
+      : Promise.resolve({ data: [], error: null }),
+    precioIds.length
+      ? supabaseAdmin
+          .from("precios")
+          .select("id_precio, id_plataforma")
+          .in("id_precio", precioIds)
+      : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? supabaseAdmin
+          .from("usuarios")
+          .select("id_usuario, nombre, apellido, telefono")
+          .in("id_usuario", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    perfilIds.length
+      ? supabaseAdmin
+          .from("perfiles")
+          .select("id_perfil, n_perfil, perfil_hogar")
+          .in("id_perfil", perfilIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (cErr) throw cErr;
+  if (pErr) throw pErr;
+  if (uErr) throw uErr;
+  if (perfErr) throw perfErr;
+
+  const platIds = uniqPositiveIds([
+    ...(cuentas || []).map((cuenta) => cuenta.id_plataforma),
+    ...(precios || []).map((precio) => precio.id_plataforma),
+  ]);
+  const { data: plats, error: platErr } = platIds.length
+    ? await supabaseAdmin
+        .from("plataformas")
+        .select("id_plataforma, nombre, correo_cliente")
+        .in("id_plataforma", platIds)
+    : { data: [], error: null };
+  if (platErr) throw platErr;
+
+  const mapCuenta = (cuentas || []).reduce((acc, cuenta) => {
+    acc[cuenta.id_cuenta] = cuenta;
+    return acc;
+  }, {});
+  const mapPrecio = (precios || []).reduce((acc, precio) => {
+    acc[precio.id_precio] = precio;
+    return acc;
+  }, {});
+  const mapPlat = (plats || []).reduce((acc, plat) => {
+    acc[plat.id_plataforma] = plat;
+    return acc;
+  }, {});
+  const mapUser = (users || []).reduce((acc, user) => {
+    const userId = Number(user.id_usuario);
+    if (!Number.isFinite(userId) || userId <= 0) return acc;
+    acc[userId] = {
+      cliente: [user.nombre, user.apellido].filter(Boolean).join(" ").trim() || `Usuario ${userId}`,
+      telefono: String(user.telefono || "").trim(),
+    };
+    return acc;
+  }, {});
+  const mapPerf = (perfiles || []).reduce((acc, perf) => {
+    acc[perf.id_perfil] = { n: perf.n_perfil, hogar: perf.perfil_hogar === true };
+    return acc;
+  }, {});
+
+  const grouped = ventasList.reduce((acc, venta) => {
+    const userId = Number(venta.id_usuario);
+    if (!Number.isFinite(userId) || userId <= 0) return acc;
+
+    const userInfo = mapUser[userId] || {};
+    const cuenta = mapCuenta[venta.id_cuenta] || {};
+    const precio = mapPrecio[venta.id_precio] || {};
+    const platId = cuenta.id_plataforma || precio.id_plataforma || null;
+    const platInfo = platId ? mapPlat[platId] || {} : {};
+    const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
+    const useCorreoCliente =
+      platInfo.correo_cliente === true ||
+      platInfo.correo_cliente === "true" ||
+      platInfo.correo_cliente === "1";
+    const correo = useCorreoCliente ? venta.correo_miembro || "-" : cuenta.correo || "-";
+    const perfInfo = venta.id_perfil ? mapPerf[venta.id_perfil] : null;
+    const perfilTxt = perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
+    const isNetflix = Number(platId) === 1;
+    const isPlan2Precio = Number(venta.id_precio) === 4 || Number(venta.id_precio) === 5;
+    const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfInfo?.hogar);
+    const hogarTxt = isNetflixPlan2 ? " (HOGAR ACTUALIZADO)" : "";
+
+    if (!acc[userId]) {
+      acc[userId] = {
+        idUsuario: userId,
+        cliente: userInfo.cliente || `Usuario ${userId}`,
+        telefono: userInfo.telefono || "",
+        plataformas: {},
+        ventaIds: [],
+      };
+    }
+
+    const platDisplayName = `${platNombre}${hogarTxt}`;
+    const platformKey = `${String(platId || platNombre || "-")}::${hogarTxt ? "hogar" : "normal"}`;
+    if (!acc[userId].plataformas[platformKey]) {
+      acc[userId].plataformas[platformKey] = {
+        nombre: platDisplayName,
+        detalles: [],
+      };
+    }
+
+    if (venta.id_venta) acc[userId].ventaIds.push(venta.id_venta);
+
+    const fechaPago = venta.fecha_corte ? formatDDMMYYYY(venta.fecha_corte) : "-";
+    const detalle = [
+      `\`ID VENTA: #${venta.id_venta}\``,
+      `Correo: ${correo}`,
+      perfilTxt || null,
+      `Fecha de pago: ${fechaPago}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    acc[userId].plataformas[platformKey].detalles.push(detalle);
+    return acc;
+  }, {});
+
+  return Object.values(grouped).map((group) => {
+    const bloques = Object.values(group.plataformas || {})
+      .map((plat) => {
+        const detalles = (plat.detalles || []).join("\n\n");
+        return `*${plat.nombre || "-"}*\n${detalles}`;
+      })
+      .join("\n\n");
+    const plain = `¡Hola ${group.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+    return {
+      idUsuario: group.idUsuario,
+      cliente: group.cliente,
+      telefonoRaw: group.telefono,
+      phone: normalizeWhatsappPhone(group.telefono),
+      plain,
+      ventaIds: uniqPositiveIds(group.ventaIds),
+    };
+  });
+};
+
+const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
+  if (recordatoriosSendInProgress) {
+    const lockErr = new Error("Ya hay un envío de recordatorios en progreso");
+    lockErr.code = "RECORDATORIOS_SEND_IN_PROGRESS";
+    throw lockErr;
+  }
+
+  recordatoriosSendInProgress = true;
+  try {
+    const items = await buildWhatsappRecordatorioItems();
+    if (!items.length) {
+      return {
+        source,
+        total: 0,
+        sent: 0,
+        failed: 0,
+        skippedNoPhone: 0,
+        skippedInvalidPhone: 0,
+        updatedVentas: 0,
+        items: [],
+      };
+    }
+
+    if (!isWhatsappReady()) {
+      const notReadyErr = new Error("WhatsApp no listo");
+      notReadyErr.code = "WHATSAPP_NOT_READY";
+      throw notReadyErr;
+    }
+
+    const client = getWhatsappClient();
+    const updatedVentaIds = new Set();
+    const processedItems = [];
+    const sendableItemsCount = items.filter((item) => {
+      const hasRawPhone = Boolean(String(item?.telefonoRaw || "").trim());
+      return hasRawPhone && Boolean(item?.phone);
+    }).length;
+    let sendableProcessed = 0;
+    let sent = 0;
+    let failed = 0;
+    let skippedNoPhone = 0;
+    let skippedInvalidPhone = 0;
+
+    for (const item of items) {
+      const hasRawPhone = Boolean(String(item.telefonoRaw || "").trim());
+      if (!hasRawPhone) {
+        skippedNoPhone += 1;
+        processedItems.push({ ...item, status: "skipped_no_phone" });
+        continue;
+      }
+      if (!item.phone) {
+        skippedInvalidPhone += 1;
+        processedItems.push({ ...item, status: "skipped_invalid_phone" });
+        continue;
+      }
+
+      try {
+        await client.sendMessage(`${item.phone}@c.us`, item.plain, { linkPreview: false });
+        const ventaIdsItem = uniqPositiveIds(item.ventaIds || []);
+        if (ventaIdsItem.length) {
+          const { error: updateErr } = await supabaseAdmin
+            .from("ventas")
+            .update({ recordatorio_enviado: true })
+            .in("id_venta", ventaIdsItem);
+          if (updateErr) throw updateErr;
+          ventaIdsItem.forEach((id) => updatedVentaIds.add(id));
+        }
+        sent += 1;
+        processedItems.push({ ...item, status: "sent" });
+      } catch (err) {
+        failed += 1;
+        processedItems.push({
+          ...item,
+          status: "failed",
+          error: err?.message || "No se pudo enviar",
+        });
+      }
+
+      sendableProcessed += 1;
+      if (sendableProcessed < sendableItemsCount) {
+        const delayMs = randomWhatsappDelayMs();
+        await sleep(delayMs);
+      }
+    }
+
+    return {
+      source,
+      total: items.length,
+      sent,
+      failed,
+      skippedNoPhone,
+      skippedInvalidPhone,
+      updatedVentas: updatedVentaIds.size,
+      items: processedItems,
+    };
+  } finally {
+    recordatoriosSendInProgress = false;
+  }
+};
+
+const runAutoWhatsappRecordatoriosIfNeeded = async () => {
+  if (!shouldStartWhatsapp || !WHATSAPP_AUTO_RECORDATORIOS_ENABLED) return;
+  if (autoRecordatoriosRunInProgress) return;
+  const { dateStr, hour } = getCaracasClock();
+  ensureDailyRecordatoriosState(dateStr);
+  if (hour < WHATSAPP_AUTO_RECORDATORIOS_HOUR) return;
+  if (lastAutoRecordatoriosRunDate === dateStr) return;
+  autoRecordatoriosRunInProgress = true;
+
+  const attemptedAt = new Date().toISOString();
+  lastAutoRecordatoriosState = {
+    date: dateStr,
+    status: "running",
+    attemptedAt,
+    completedAt: null,
+    total: 0,
+    sent: 0,
+    failed: 0,
+    skippedNoPhone: 0,
+    skippedInvalidPhone: 0,
+    updatedVentas: 0,
+    recordatoriosEnviados,
+    error: null,
+  };
+
+  try {
+    const result = await sendWhatsappRecordatorios({ source: "auto" });
+    const sentAll = didSendAllRecordatorios(result);
+    recordatoriosEnviados = sentAll;
+    lastAutoRecordatoriosRunDate = dateStr;
+    autoRecordatoriosRetryPending = false;
+    lastAutoRecordatoriosState = {
+      date: dateStr,
+      status: result.total > 0 ? "completed" : "no_pending",
+      attemptedAt,
+      completedAt: new Date().toISOString(),
+      total: Number(result.total || 0),
+      sent: Number(result.sent || 0),
+      failed: Number(result.failed || 0),
+      skippedNoPhone: Number(result.skippedNoPhone || 0),
+      skippedInvalidPhone: Number(result.skippedInvalidPhone || 0),
+      updatedVentas: Number(result.updatedVentas || 0),
+      recordatoriosEnviados,
+      error: null,
+    };
+    console.log(
+      `[WhatsApp] Recordatorios auto ${dateStr}: total=${result.total}, sent=${result.sent}, failed=${result.failed}, skipped_no_phone=${result.skippedNoPhone}, skipped_invalid_phone=${result.skippedInvalidPhone}, recordatorios_enviados=${recordatoriosEnviados}`,
+    );
+  } catch (err) {
+    if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
+      console.warn(
+        `[WhatsApp] Recordatorios auto ${dateStr}: ya hay un envío en progreso, se espera próximo ciclo.`,
+      );
+      return;
+    }
+    if (err?.code === "WHATSAPP_NOT_READY") {
+      autoRecordatoriosRetryPending = true;
+      lastAutoRecordatoriosState = {
+        date: dateStr,
+        status: "not_ready",
+        attemptedAt,
+        completedAt: new Date().toISOString(),
+        total: 0,
+        sent: 0,
+        failed: 0,
+        skippedNoPhone: 0,
+        skippedInvalidPhone: 0,
+        updatedVentas: 0,
+        recordatoriosEnviados,
+        error: "WhatsApp no listo",
+      };
+      console.warn(
+        `[WhatsApp] Recordatorios auto ${dateStr}: cliente no listo, se reintentará en la próxima verificación hasta conectar sesión.`,
+      );
+      return;
+    }
+    autoRecordatoriosRetryPending = false;
+    lastAutoRecordatoriosRunDate = dateStr;
+    lastAutoRecordatoriosState = {
+      date: dateStr,
+      status: "error",
+      attemptedAt,
+      completedAt: new Date().toISOString(),
+      total: 0,
+      sent: 0,
+      failed: 0,
+      skippedNoPhone: 0,
+      skippedInvalidPhone: 0,
+      updatedVentas: 0,
+      recordatoriosEnviados,
+      error: err?.message || "Error desconocido",
+    };
+    console.error("[WhatsApp] Recordatorios auto error", err);
+  } finally {
+    autoRecordatoriosRunInProgress = false;
+  }
+};
+
+if (shouldStartWhatsapp && WHATSAPP_AUTO_RECORDATORIOS_ENABLED) {
+  console.log("[WhatsApp] Recordatorios automáticos activos (10:00 America/Caracas).");
+  setInterval(() => {
+    runAutoWhatsappRecordatoriosIfNeeded().catch((err) => {
+      console.error("[WhatsApp] Scheduler de recordatorios error", err);
+    });
+  }, 60 * 1000);
+  runAutoWhatsappRecordatoriosIfNeeded().catch((err) => {
+    console.error("[WhatsApp] Scheduler de recordatorios init error", err);
+  });
+}
 
 app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async (req, res) => {
   clearCorsHeaders(res);
@@ -92,6 +618,132 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
 });
 
 app.use(jsonParser);
+
+app.get("/api/whatsapp/status", (req, res) => {
+  res.json({ ready: isWhatsappReady() });
+});
+
+app.get("/api/whatsapp/recordatorios/auto-status", async (req, res) => {
+  const { dateStr } = getCaracasClock();
+  ensureDailyRecordatoriosState(dateStr);
+  let pendingMessages = null;
+  let pendingError = null;
+  try {
+    const pending = await buildWhatsappRecordatorioItems();
+    pendingMessages = Array.isArray(pending) ? pending.length : 0;
+  } catch (err) {
+    pendingError = err?.message || "No se pudo calcular pendientes";
+  }
+
+  res.json({
+    enabled: shouldStartWhatsapp && WHATSAPP_AUTO_RECORDATORIOS_ENABLED,
+    schedule: {
+      sendHour: WHATSAPP_AUTO_RECORDATORIOS_HOUR,
+      resetHour: WHATSAPP_RESET_HOUR,
+      timezone: "America/Caracas",
+    },
+    recordatorios_enviados: recordatoriosEnviados,
+    recordatorios_enviados_date: recordatoriosEnviadosDate,
+    autoRecordatoriosRetryPending,
+    autoRecordatoriosRunInProgress,
+    recordatoriosSendInProgress,
+    pendingMessages,
+    pendingError,
+    lastAutoRecordatoriosRunDate,
+    lastAutoRecordatoriosState,
+  });
+});
+
+app.post("/api/whatsapp/send", async (req, res) => {
+  try {
+    if (!isWhatsappReady()) {
+      return res.status(503).json({ error: "WhatsApp no listo" });
+    }
+
+    const rawPhone = req.body?.phone;
+    const message = req.body?.message;
+
+    if (!rawPhone || !message) {
+      return res.status(400).json({ error: "phone y message son requeridos" });
+    }
+
+    const phone = normalizeWhatsappPhone(rawPhone);
+    if (!phone) {
+      return res.status(400).json({ error: "phone invalido" });
+    }
+
+    const chatId = `${phone}@c.us`;
+    const client = getWhatsappClient();
+    await client.sendMessage(chatId, String(message), { linkPreview: false });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[whatsapp/send] error", err);
+    return res.status(500).json({ error: err.message || "No se pudo enviar el mensaje" });
+  }
+});
+
+app.post("/api/whatsapp/send-recordatorio", async (req, res) => {
+  try {
+    if (!isWhatsappReady()) {
+      return res.status(503).json({ error: "WhatsApp no listo" });
+    }
+
+    const rawPhone = req.body?.phone;
+    const message = req.body?.message;
+    const ventaIds = uniqPositiveIds(req.body?.ventaIds || []);
+
+    if (!rawPhone || !message) {
+      return res.status(400).json({ error: "phone y message son requeridos" });
+    }
+
+    const phone = normalizeWhatsappPhone(rawPhone);
+    if (!phone) {
+      return res.status(400).json({ error: "phone invalido" });
+    }
+
+    const client = getWhatsappClient();
+    await client.sendMessage(`${phone}@c.us`, String(message), { linkPreview: false });
+
+    if (ventaIds.length) {
+      const { error: updateErr } = await supabaseAdmin
+        .from("ventas")
+        .update({ recordatorio_enviado: true })
+        .in("id_venta", ventaIds);
+      if (updateErr) throw updateErr;
+    }
+
+    return res.json({ ok: true, updatedVentas: ventaIds.length });
+  } catch (err) {
+    console.error("[whatsapp/send-recordatorio] error", err);
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudo enviar el recordatorio" });
+  }
+});
+
+app.post("/api/whatsapp/recordatorios/enviar", async (req, res) => {
+  try {
+    const result = await sendWhatsappRecordatorios({ source: "manual" });
+    const { dateStr } = getCaracasClock();
+    ensureDailyRecordatoriosState(dateStr);
+    if (didSendAllRecordatorios(result)) {
+      recordatoriosEnviados = true;
+    }
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
+      return res.status(409).json({ error: "Ya hay un envío de recordatorios en progreso" });
+    }
+    if (err?.code === "WHATSAPP_NOT_READY") {
+      return res.status(503).json({ error: "WhatsApp no listo" });
+    }
+    console.error("[whatsapp/recordatorios/enviar] error", err);
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudieron enviar los recordatorios" });
+  }
+});
 
 const INDEX_HTML_PATH = path.join(__dirname, "..", "frontend", "pages", "index.html");
 const DEFAULT_LOGO_URL =
@@ -1262,6 +1914,87 @@ app.post("/api/cart/flags", async (req, res) => {
   }
 });
 
+// Obtiene o crea una orden borrador para el carrito activo
+app.post("/api/checkout/draft", async (req, res) => {
+  try {
+    const idUsuario = await getOrCreateUsuario(req);
+    const carritoId = await getCurrentCarrito(idUsuario);
+    if (!carritoId) {
+      return res.status(400).json({ error: "No hay carrito activo" });
+    }
+
+    const { data: items, error: itemsErr } = await supabaseAdmin
+      .from("carrito_items")
+      .select("id_item")
+      .eq("id_carrito", carritoId)
+      .limit(1);
+    if (itemsErr) throw itemsErr;
+    if (!items?.length) {
+      return res.status(400).json({ error: "El carrito está vacío" });
+    }
+
+    const { data: existingRows, error: existingErr } = await supabaseAdmin
+      .from("ordenes")
+      .select("id_orden")
+      .eq("id_usuario", idUsuario)
+      .eq("id_carrito", carritoId)
+      .or("orden_cancelada.is.null,orden_cancelada.eq.false")
+      .order("id_orden", { ascending: false })
+      .limit(1);
+    if (existingErr) throw existingErr;
+
+    const existingId = Number(existingRows?.[0]?.id_orden || 0);
+    if (existingId > 0) {
+      return res.json({ ok: true, id_orden: existingId, existing: true });
+    }
+
+    const { data: carritoData, error: carritoErr } = await supabaseAdmin
+      .from("carritos")
+      .select("monto_usd, tasa_bs, monto_bs")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (carritoErr) throw carritoErr;
+
+    const total = Number(carritoData?.monto_usd);
+    const tasaBs = Number(carritoData?.tasa_bs);
+    const montoBsRaw = Number(carritoData?.monto_bs);
+    const montoBs = Number.isFinite(montoBsRaw)
+      ? montoBsRaw
+      : Number.isFinite(total) && Number.isFinite(tasaBs)
+        ? Math.round(total * tasaBs * 100) / 100
+        : null;
+
+    const { data: created, error: createErr } = await supabaseAdmin
+      .from("ordenes")
+      .insert({
+        id_usuario: idUsuario,
+        id_carrito: carritoId,
+        total: Number.isFinite(total) ? total : null,
+        tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+        monto_bs: Number.isFinite(montoBs) ? montoBs : null,
+        en_espera: true,
+        pago_verificado: false,
+        orden_cancelada: false,
+        checkout_finalizado: false,
+      })
+      .select("id_orden")
+      .single();
+    if (createErr) throw createErr;
+
+    return res.json({
+      ok: true,
+      id_orden: created?.id_orden || null,
+      existing: false,
+    });
+  } catch (err) {
+    console.error("[checkout:draft] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Sube comprobantes al bucket usando la clave de servicio (evita RLS en cliente)
 app.post("/api/checkout/upload", async (req, res) => {
   const files = req.body?.files;
@@ -2293,6 +3026,7 @@ app.post("/api/admin/import-contactos", async (req, res) => {
 // Checkout: crea orden (y procesa ventas si ya está verificado)
 app.post("/api/checkout", async (req, res) => {
   const {
+    id_orden,
     id_metodo_de_pago,
     referencia,
     comprobantes,
@@ -2394,30 +3128,64 @@ app.post("/api/checkout", async (req, res) => {
       en_espera,
     });
 
-    const { data: orden, error: ordErr } = await supabaseAdmin
-      .from("ordenes")
-      .insert({
-        id_usuario: idUsuarioVentas,
-        total,
-        tasa_bs: tasaBs,
-        monto_bs,
-        id_metodo_de_pago,
-        referencia,
-        comprobante: archivos,
-        en_espera,
-        hora_orden,
-        id_carrito: carritoId,
-        pago_verificado: bypassVerificacion ? true : false,
-        monto_completo: null,
-      })
-      .select("id_orden")
-      .single();
-    if (ordErr) throw ordErr;
-    console.log("[checkout] orden creada", {
-      id_orden: orden.id_orden,
+    const parsedOrderId = Number(id_orden);
+    const checkoutOrderPayload = {
+      id_usuario: idUsuarioVentas,
+      total,
+      tasa_bs: tasaBs,
+      monto_bs,
+      id_metodo_de_pago,
+      referencia,
+      comprobante: archivos,
       en_espera,
+      hora_orden,
+      id_carrito: carritoId,
       pago_verificado: bypassVerificacion ? true : false,
-    });
+      monto_completo: null,
+      checkout_finalizado: true,
+    };
+    let ordenId = null;
+    if (Number.isFinite(parsedOrderId) && parsedOrderId > 0) {
+      const { data: existingOrder, error: existingOrderErr } = await supabaseAdmin
+        .from("ordenes")
+        .select("id_orden, id_usuario, id_carrito, orden_cancelada")
+        .eq("id_orden", parsedOrderId)
+        .maybeSingle();
+      if (existingOrderErr) throw existingOrderErr;
+      const canReuseOrder =
+        Number(existingOrder?.id_orden) > 0 &&
+        Number(existingOrder?.id_usuario) === Number(idUsuarioVentas) &&
+        Number(existingOrder?.id_carrito) === Number(carritoId) &&
+        existingOrder?.orden_cancelada !== true;
+      if (canReuseOrder) {
+        const { data: updatedOrder, error: updOrderErr } = await supabaseAdmin
+          .from("ordenes")
+          .update(checkoutOrderPayload)
+          .eq("id_orden", parsedOrderId)
+          .select("id_orden")
+          .single();
+        if (updOrderErr) throw updOrderErr;
+        ordenId = Number(updatedOrder?.id_orden || 0);
+        console.log("[checkout] orden reutilizada", { id_orden: ordenId });
+      }
+    }
+    if (!ordenId) {
+      const { data: orden, error: ordErr } = await supabaseAdmin
+        .from("ordenes")
+        .insert(checkoutOrderPayload)
+        .select("id_orden")
+        .single();
+      if (ordErr) throw ordErr;
+      ordenId = Number(orden?.id_orden || 0);
+      console.log("[checkout] orden creada", {
+        id_orden: ordenId,
+        en_espera,
+        pago_verificado: bypassVerificacion ? true : false,
+      });
+    }
+    if (!ordenId) {
+      throw new Error("No se pudo crear/actualizar la orden");
+    }
 
     if (requiereVerificacion) {
       try {
@@ -2427,11 +3195,11 @@ app.post("/api/checkout", async (req, res) => {
       } catch (cartErr) {
         console.error("[checkout] crear carrito nuevo error", cartErr);
       }
-      return res.json({ ok: true, id_orden: orden.id_orden, total, ventas: 0, pendiente_verificacion: true });
+      return res.json({ ok: true, id_orden: ordenId, total, ventas: 0, pendiente_verificacion: true });
     }
 
     const result = await processOrderFromItems({
-      ordenId: orden.id_orden,
+      ordenId,
       idUsuarioSesion,
       idUsuarioVentas,
       items,
@@ -2445,7 +3213,7 @@ app.post("/api/checkout", async (req, res) => {
       carritoId,
     });
     console.log("[checkout] procesado", {
-      id_orden: orden.id_orden,
+      id_orden: ordenId,
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
     });
@@ -2453,11 +3221,11 @@ app.post("/api/checkout", async (req, res) => {
     await supabaseAdmin
       .from("ordenes")
       .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
-      .eq("id_orden", orden.id_orden);
+      .eq("id_orden", ordenId);
 
     res.json({
       ok: true,
-      id_orden: orden.id_orden,
+      id_orden: ordenId,
       total,
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
