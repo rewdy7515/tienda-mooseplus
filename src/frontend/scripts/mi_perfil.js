@@ -24,7 +24,6 @@ const apellidoInputEl = document.querySelector("#perfil-apellido-input");
 const correoInputEl = document.querySelector("#perfil-correo-input");
 const telefonoInputEl = document.querySelector("#perfil-telefono-input");
 const avatarModalEl = document.querySelector("#avatar-modal");
-const avatarModalBodyEl = avatarModalEl?.querySelector(".modal-body");
 const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
 const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
 const avatarModalStatusEl = document.querySelector("#avatar-modal-status");
@@ -82,9 +81,13 @@ const updateSelectionStyles = () => {
 const applyAvatarPreview = ({ url, color } = {}) => {
   const nextUrl = String(url || "").trim() || EMPTY_AVATAR_DATA_URL;
   const nextColor = normalizeColor(color) || DEFAULT_BG_COLOR;
-  if (avatarModalBodyEl) {
-    avatarModalBodyEl.style.setProperty("--avatar-modal-bg", nextColor);
-    avatarModalBodyEl.style.backgroundColor = nextColor;
+  document.querySelectorAll(".avatar-option").forEach((btn) => {
+    btn.style.setProperty("--avatar-bg", nextColor);
+  });
+  if (nextUrl) {
+    avatarModalEl?.querySelectorAll(".avatar-option img").forEach((img) => {
+      if (!img.getAttribute("src")) img.setAttribute("src", nextUrl);
+    });
   }
   updateSelectionStyles();
 };
@@ -194,8 +197,12 @@ const saveAvatarProfile = async () => {
       .eq("id_usuario", currentUserId);
     if (error) throw error;
 
-    savedAvatarUrl = payload.foto_perfil;
-    savedBgColor = payload.fondo_perfil;
+    const refreshedUser = await loadCurrentUser();
+    savedAvatarUrl = String(refreshedUser?.foto_perfil || payload.foto_perfil || "").trim();
+    savedBgColor =
+      normalizeColor(refreshedUser?.fondo_perfil) ||
+      normalizeColor(payload.fondo_perfil) ||
+      DEFAULT_BG_COLOR;
     applyAvatarSavedState({ url: savedAvatarUrl, color: savedBgColor });
     setAvatarModalStatus("Foto guardada correctamente.");
     closeAvatarModal(false);

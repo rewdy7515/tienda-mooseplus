@@ -58,7 +58,6 @@ const loaderAvatarLayerEl = document.querySelector(".page-loader__avatar-layer")
 const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
 const loaderAvatarEl = document.querySelector("#page-loader-avatar");
 const avatarModalEl = document.querySelector("#avatar-modal");
-const avatarModalBodyEl = avatarModalEl?.querySelector(".modal-body");
 const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
 const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
 const avatarModalStatusEl = document.querySelector("#avatar-modal-status");
@@ -145,15 +144,14 @@ const updateAvatarModalSelectionStyles = () => {
 const applyAvatarModalPreview = ({ url, color } = {}) => {
   const nextUrl = String(url || "").trim();
   const nextColor = normalizeHexColor(color) || AVATAR_MODAL_DEFAULT_COLOR;
-  if (avatarModalBodyEl) {
-    avatarModalBodyEl.style.setProperty("--avatar-modal-bg", nextColor);
-    avatarModalBodyEl.style.backgroundColor = nextColor;
-  }
   if (nextUrl) {
     avatarModalEl?.querySelectorAll(".avatar-option img").forEach((img) => {
       if (!img.getAttribute("src")) img.setAttribute("src", nextUrl);
     });
   }
+  avatarModalEl?.querySelectorAll(".avatar-option").forEach((btn) => {
+    btn.style.setProperty("--avatar-bg", nextColor);
+  });
   updateAvatarModalSelectionStyles();
 };
 
@@ -266,10 +264,21 @@ const saveAvatarModalProfile = async () => {
       .eq("id_usuario", avatarModalUserId);
     if (error) throw error;
 
-    avatarModalSavedUrl = payload.foto_perfil;
-    avatarModalSavedColor = payload.fondo_perfil;
+    const refreshedUser = await loadCurrentUser();
+    const refreshedAvatar = await resolveAvatarForDisplay({
+      user: refreshedUser || payload,
+      idUsuario: avatarModalUserId,
+    });
+    avatarModalSavedUrl =
+      String(refreshedUser?.foto_perfil || payload.foto_perfil || refreshedAvatar?.url || "").trim();
+    avatarModalSavedColor =
+      normalizeHexColor(refreshedUser?.fondo_perfil) ||
+      normalizeHexColor(payload.fondo_perfil) ||
+      normalizeHexColor(refreshedAvatar?.color) ||
+      AVATAR_MODAL_DEFAULT_COLOR;
+
     document.querySelectorAll(".avatar").forEach((img) => {
-      img.src = avatarModalSavedUrl;
+      if (avatarModalSavedUrl) img.src = avatarModalSavedUrl;
       img.style.backgroundColor = avatarModalSavedColor;
     });
     await applyLoaderAvatar(
