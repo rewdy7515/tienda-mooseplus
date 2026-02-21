@@ -54,6 +54,7 @@ const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pend
 const recordatoriosSinTelefonoWrap = document.querySelector("#recordatorios-sin-telefono-wrap");
 const recordatoriosSinTelefonoList = document.querySelector("#recordatorios-sin-telefono-list");
 const recordatoriosSinTelefonoEmpty = document.querySelector("#recordatorios-sin-telefono-empty");
+const loaderAvatarLayerEl = document.querySelector(".page-loader__avatar-layer");
 const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
 const loaderAvatarEl = document.querySelector("#page-loader-avatar");
 const avatarModalEl = document.querySelector("#avatar-modal");
@@ -333,11 +334,22 @@ avatarModalCloseEl?.addEventListener("click", () => closeAvatarModal(true));
 btnAvatarSaveEl?.addEventListener("click", saveAvatarModalProfile);
 
 const applyLoaderAvatar = async (user = null, idUsuario = null) => {
-  if (!loaderAvatarEl && !loaderAvatarBgEl) return;
-  const avatar = await resolveAvatarForDisplay({ user, idUsuario });
-  const photo = String(avatar?.url || "").trim();
-  const bgColor = String(avatar?.color || "").trim();
-  if (loaderAvatarEl && photo) loaderAvatarEl.src = photo;
+  if (!loaderAvatarLayerEl && !loaderAvatarEl && !loaderAvatarBgEl) return;
+
+  const hasSession = Number(idUsuario || user?.id_usuario) > 0;
+  const fotoPerfil = String(user?.foto_perfil || "").trim();
+  const shouldShow = hasSession && !!fotoPerfil;
+  if (loaderAvatarLayerEl) {
+    loaderAvatarLayerEl.classList.toggle("hidden", !shouldShow);
+  }
+  if (!shouldShow) return;
+
+  const fallbackAvatar = await resolveAvatarForDisplay({ user, idUsuario });
+  const bgColor =
+    normalizeHexColor(user?.fondo_perfil) ||
+    normalizeHexColor(fallbackAvatar?.color) ||
+    AVATAR_MODAL_DEFAULT_COLOR;
+  if (loaderAvatarEl) loaderAvatarEl.src = fotoPerfil;
   if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = bgColor;
 };
 
