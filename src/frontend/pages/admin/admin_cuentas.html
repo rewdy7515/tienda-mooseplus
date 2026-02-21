@@ -1140,17 +1140,18 @@
         try {
           const { data, error } = await supabase
             .from("usuarios")
-            .select("id_usuario, nombre, apellido")
+            .select("id_usuario, nombre, apellido, correo")
             .or(
               lastToken && lastToken !== firstToken
-                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
-                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%,correo.ilike.%${txt}%`
+                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%,correo.ilike.%${txt}%`,
             )
             .limit(20);
           if (error) throw error;
           const norm = normalizeText(txt);
           const match = (data || []).find((u) =>
-            normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm)
+            normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm) ||
+            normalizeText(u.correo || "").includes(norm)
           );
           return match || data?.[0] || null;
         } catch (err) {
@@ -1660,51 +1661,21 @@
 
       btnBuscar?.addEventListener("click", (e) => {
         e.preventDefault();
-        const term = inputCuenta?.value || "";
-        setSearchMsg(cuentaSearchMsg, "");
-        buscarCuentas(term, false).then((results) => {
-          if (Array.isArray(results) && results.length === 0) {
-            setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
-          }
-        });
-        // si solo hay un match con id, carga detalle directamente
-        setTimeout(() => {
-          if (inputCuenta?.value) {
-            loadCuentaDetalleByCorreo(inputCuenta.value);
-          }
-        }, 50);
-        renderSugerencias([], true);
+        runCuentaSearch(false);
       });
 
       inputCuenta?.addEventListener("keydown", async (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          const term = inputCuenta?.value || "";
-          setSearchMsg(cuentaSearchMsg, "");
-          const results = await buscarCuentas(term, true);
-          loadCuentaDetalleByCorreo(term);
-          renderSugerencias([], true);
-          if (Array.isArray(results) && results.length === 0) {
-            setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
-          }
+          await runCuentaSearch(true);
         }
       });
 
-      // Fallback: disparar búsqueda en keyup Enter también
-      inputCuenta?.addEventListener("keyup", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          const term = inputCuenta?.value || "";
-          setSearchMsg(cuentaSearchMsg, "");
-          buscarCuentas(term, true).then((results) => {
-            if (Array.isArray(results) && results.length === 0) {
-              setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
-            }
-          });
-          loadCuentaDetalleByCorreo(term);
-          renderSugerencias([], true);
-        }
+      inputCuenta?.addEventListener("search", async () => {
+        await runCuentaSearch(true);
       });
+
+      // nota: keydown Enter cubre el caso; evitamos keyup para no duplicar búsqueda.
 
       const renderSugerenciasClientes = (items, forceHide = false) => {
         if (!sugsClientes) return;
@@ -1744,15 +1715,16 @@
             .select("id_usuario, nombre, apellido, correo")
             .or(
               lastToken && lastToken !== firstToken
-                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%`
-                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%`,
+                ? `nombre.ilike.%${firstToken}%,apellido.ilike.%${lastToken}%,correo.ilike.%${term}%`
+                : `nombre.ilike.%${firstToken}%,apellido.ilike.%${firstToken}%,correo.ilike.%${term}%`,
             );
           const dataLimited = (data || []).slice(0, 20);
           if (current !== fetchCounterClientes) return;
           if (error) throw error;
           const parsed = (dataLimited || [])
             .filter((u) =>
-              normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm)
+              normalizeText(`${u.nombre || ""} ${u.apellido || ""}`).includes(norm) ||
+              normalizeText(u.correo || "").includes(norm)
             )
             .map((u) => ({
               id_usuario: u.id_usuario,
@@ -1793,6 +1765,29 @@
           inputCliente.dataset.selectedId = found.id_usuario;
         }
         loadVentasByCliente(found.id_usuario);
+      };
+
+      const runCuentaSearch = async (forceHideSugs = true) => {
+        const term = (inputCuenta?.value || "").trim();
+        setSearchMsg(cuentaSearchMsg, "");
+        const results = await buscarCuentas(term, forceHideSugs);
+        if (term) {
+          const normalizedTerm = term.toLowerCase();
+          const exactMatch = (results || []).find(
+            (r) => String(r?.correo || "").trim().toLowerCase() === normalizedTerm,
+          );
+          const correoToLoad = String(
+            exactMatch?.correo || results?.[0]?.correo || term,
+          ).trim();
+          if (correoToLoad) {
+            if (inputCuenta) inputCuenta.value = correoToLoad;
+            loadCuentaDetalleByCorreo(correoToLoad);
+          }
+        }
+        if (Array.isArray(results) && results.length === 0) {
+          setSearchMsg(cuentaSearchMsg, "No se encontraron coincidencias");
+        }
+        if (forceHideSugs) renderSugerencias([], true);
       };
 
       const renderVentaResultado = (ventaData, notFound = false) => {

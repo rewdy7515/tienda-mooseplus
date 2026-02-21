@@ -626,6 +626,9 @@ const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
       const hasRawPhone = Boolean(String(item?.telefonoRaw || "").trim());
       return hasRawPhone && Boolean(item?.phone);
     }).length;
+    console.log(
+      `[WhatsApp] Recordatorios ${source}: inicio procesamiento total=${items.length}, enviables=${sendableItemsCount}`,
+    );
     let sendableProcessed = 0;
     let sent = 0;
     let failed = 0;
@@ -637,14 +640,22 @@ const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
       if (!hasRawPhone) {
         skippedNoPhone += 1;
         processedItems.push({ ...item, status: "skipped_no_phone" });
+        console.log(
+          `[WhatsApp] Recordatorios ${source}: omitido_sin_telefono cliente="${item.cliente || "Cliente"}"`,
+        );
         continue;
       }
       if (!item.phone) {
         skippedInvalidPhone += 1;
         processedItems.push({ ...item, status: "skipped_invalid_phone" });
+        console.log(
+          `[WhatsApp] Recordatorios ${source}: omitido_telefono_invalido cliente="${item.cliente || "Cliente"}" telefono="${item.telefonoRaw || ""}"`,
+        );
         continue;
       }
 
+      const progressIndex = sendableProcessed + 1;
+      const progressTag = `${progressIndex}/${sendableItemsCount}`;
       try {
         await client.sendMessage(`${item.phone}@c.us`, item.plain, { linkPreview: false });
         const ventaIdsItem = uniqPositiveIds(item.ventaIds || []);
@@ -658,6 +669,9 @@ const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
         }
         sent += 1;
         processedItems.push({ ...item, status: "sent" });
+        console.log(
+          `[WhatsApp] Recordatorios ${source}: ${progressTag} enviado cliente="${item.cliente || "Cliente"}" phone="${item.phone}" ventas=${ventaIdsItem.length}`,
+        );
       } catch (err) {
         failed += 1;
         processedItems.push({
@@ -665,11 +679,17 @@ const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
           status: "failed",
           error: err?.message || "No se pudo enviar",
         });
+        console.warn(
+          `[WhatsApp] Recordatorios ${source}: ${progressTag} fallido cliente="${item.cliente || "Cliente"}" phone="${item.phone}" error="${err?.message || "No se pudo enviar"}"`,
+        );
       }
 
       sendableProcessed += 1;
       if (sendableProcessed < sendableItemsCount) {
         const delayMs = randomWhatsappDelayMs();
+        console.log(
+          `[WhatsApp] Recordatorios ${source}: espera ${Math.round(delayMs / 1000)}s antes del siguiente envío`,
+        );
         await sleep(delayMs);
       }
     }
