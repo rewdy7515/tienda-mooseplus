@@ -6,11 +6,13 @@ import {
   supabase,
 } from "./api.js";
 import { attachLogoHome, attachLogout, requireSession } from "./session.js";
+import { AVATAR_RANDOM_COLORS, resolveAvatarForDisplay } from "./avatar-fallback.js";
 
 const sessionUserId = requireSession();
-const DEFAULT_AVATAR_URL =
-  "https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/default-icono-perfil.png";
-const DEFAULT_BG_COLOR = "#f3f4f6";
+const EMPTY_AVATAR_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+const DEFAULT_BG_COLOR = AVATAR_RANDOM_COLORS[0] || "#ffa4a4";
+const AVATAR_PALETTE_COLORS = AVATAR_RANDOM_COLORS;
+const DEFAULT_MODAL_COLOR = AVATAR_PALETTE_COLORS[0];
 
 const statusEl = document.querySelector("#perfil-status");
 const cardEl = document.querySelector("#perfil-card");
@@ -28,9 +30,9 @@ const avatarModalStatusEl = document.querySelector("#avatar-modal-status");
 const btnAvatarSaveEl = document.querySelector("#btn-avatar-save");
 
 let currentUserId = null;
-let savedAvatarUrl = DEFAULT_AVATAR_URL;
+let savedAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let savedBgColor = DEFAULT_BG_COLOR;
-let pendingAvatarUrl = DEFAULT_AVATAR_URL;
+let pendingAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let pendingBgColor = DEFAULT_BG_COLOR;
 
 const setInput = (el, value) => {
@@ -77,7 +79,7 @@ const updateSelectionStyles = () => {
 };
 
 const applyAvatarPreview = ({ url, color } = {}) => {
-  const nextUrl = String(url || "").trim() || DEFAULT_AVATAR_URL;
+  const nextUrl = String(url || "").trim() || EMPTY_AVATAR_DATA_URL;
   const nextColor = normalizeColor(color) || DEFAULT_BG_COLOR;
   if (avatarBgEl) {
     avatarBgEl.style.backgroundColor = nextColor;
@@ -107,9 +109,9 @@ const closeAvatarModal = (revert = true) => {
 
 const openAvatarModal = () => {
   pendingAvatarUrl = savedAvatarUrl;
-  pendingBgColor = savedBgColor;
+  pendingBgColor = DEFAULT_MODAL_COLOR;
   avatarModalEl?.classList.remove("hidden");
-  updateSelectionStyles();
+  applyAvatarPreview({ url: pendingAvatarUrl, color: pendingBgColor });
 };
 
 const renderAvatarOptions = (items = []) => {
@@ -208,8 +210,15 @@ const init = async () => {
     }
 
     currentUserId = Number(user.id_usuario) || null;
-    savedAvatarUrl = String(user.foto_perfil || "").trim() || DEFAULT_AVATAR_URL;
-    savedBgColor = normalizeColor(user.fondo_perfil) || DEFAULT_BG_COLOR;
+    const resolvedAvatar = await resolveAvatarForDisplay({
+      user,
+      idUsuario: currentUserId || sessionUserId,
+    });
+    savedAvatarUrl = String(resolvedAvatar?.url || "").trim() || EMPTY_AVATAR_DATA_URL;
+    savedBgColor =
+      normalizeColor(user.fondo_perfil) ||
+      normalizeColor(resolvedAvatar?.color) ||
+      DEFAULT_BG_COLOR;
     pendingAvatarUrl = savedAvatarUrl;
     pendingBgColor = savedBgColor;
 

@@ -14,6 +14,7 @@ import { initCart } from "./cart.js";
 import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
 import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
+import { resolveAvatarForDisplay } from "./avatar-fallback.js";
 import {
   attachLogout,
   getCachedCart,
@@ -52,6 +53,8 @@ const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pend
 const recordatoriosSinTelefonoWrap = document.querySelector("#recordatorios-sin-telefono-wrap");
 const recordatoriosSinTelefonoList = document.querySelector("#recordatorios-sin-telefono-list");
 const recordatoriosSinTelefonoEmpty = document.querySelector("#recordatorios-sin-telefono-empty");
+const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
+const loaderAvatarEl = document.querySelector("#page-loader-avatar");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -82,6 +85,15 @@ const searchResults = document.querySelector("#search-results");
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+const applyLoaderAvatar = async (user = null, idUsuario = null) => {
+  if (!loaderAvatarEl && !loaderAvatarBgEl) return;
+  const avatar = await resolveAvatarForDisplay({ user, idUsuario });
+  const photo = String(avatar?.url || "").trim();
+  const bgColor = String(avatar?.color || "").trim();
+  if (loaderAvatarEl && photo) loaderAvatarEl.src = photo;
+  if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = bgColor;
+};
 
 const getCaracasDateStr = (offsetDays = 0) => {
   const now = new Date();
@@ -510,6 +522,7 @@ const loadPendingReminderNoPhoneClients = async ({ isSuperadmin = false } = {}) 
 async function init() {
   setEstado("Cargando categorias y plataformas...");
   initModal(modalEls);
+  await applyLoaderAvatar(null, requireSession());
 
   try {
     try {
@@ -524,6 +537,7 @@ async function init() {
     }
 
     const currentUser = await loadCurrentUser();
+    await applyLoaderAvatar(currentUser || null, currentUser?.id_usuario || requireSession());
     console.log("[user] currentUser", currentUser);
     const btnAssign = document.querySelector("#btn-assign-client");
     if (usernameEl && currentUser) {

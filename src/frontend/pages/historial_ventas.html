@@ -121,7 +121,8 @@
             .select(
               "id_historial_ventas, id_venta, id_plataforma, id_usuario_cliente, id_metodo_de_pago, referencia, monto, fecha_pago, hora_pago"
             )
-            .order("fecha_pago", { ascending: false });
+            .order("id_venta", { ascending: false })
+            .order("id_historial_ventas", { ascending: false });
           if (error) throw error;
 
           const rows = historial || [];

@@ -34,7 +34,18 @@
 
   <body>
     <div id="page-loader" class="page-loader">
-      <div class="page-loader__logo" aria-label="Cargando"></div>
+      <div class="page-loader__content">
+        <div class="page-loader__avatar-layer" aria-hidden="true">
+          <div id="page-loader-avatar-bg" class="page-loader__avatar-bg"></div>
+          <img
+            id="page-loader-avatar"
+            class="page-loader__avatar"
+            src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+            alt="Avatar de perfil"
+          />
+        </div>
+        <div class="page-loader__logo" aria-label="Cargando"></div>
+      </div>
     </div>
 
     <div id="app-shell" class="app-shell hidden">

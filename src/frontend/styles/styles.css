@@ -233,11 +233,15 @@ main {
 }
 
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid #fff;
+  border: none;
+}
+
+.username {
+  font-weight: 700;
 }
 
 .user-dropdown {
@@ -574,6 +578,39 @@ main {
   transition:
     opacity 0.2s ease,
     visibility 0.2s ease;
+}
+
+.page-loader__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.page-loader__avatar-layer {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.page-loader__avatar-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #f3f4f6;
+}
+
+.page-loader__avatar {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 50%;
+  background: transparent;
 }
 
 .page-loader__logo {

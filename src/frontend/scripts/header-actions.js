@@ -16,12 +16,10 @@ import {
   setDeliverySeen,
 } from "./session.js";
 import { loadCurrentUser, supabase } from "./api.js";
+import { resolveAvatarForDisplay } from "./avatar-fallback.js";
 
 if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
-  const DEFAULT_AVATAR_URL =
-    "https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/default-icono-perfil.png";
-  const DEFAULT_AVATAR_BG = "#f3f4f6";
   const pagesRoot = window.__headerPages || "";
   const basePagesUrl = (() => {
     try {
@@ -39,19 +37,12 @@ if (!window.__headerActionsInit) {
     }
   };
 
-  const normalizeColor = (value) => {
-    const raw = String(value || "").trim();
-    if (!raw) return "";
-    const withHash = raw.startsWith("#") ? raw : `#${raw}`;
-    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash.toLowerCase();
-    return "";
-  };
-
-  const applyHeaderAvatar = (user = null) => {
-    const foto = String(user?.foto_perfil || "").trim() || DEFAULT_AVATAR_URL;
-    const fondo = normalizeColor(user?.fondo_perfil) || DEFAULT_AVATAR_BG;
+  const applyHeaderAvatar = async (user = null, idUsuario = null) => {
+    const avatar = await resolveAvatarForDisplay({ user, idUsuario });
+    const foto = String(avatar?.url || "").trim();
+    const fondo = String(avatar?.color || "").trim();
     document.querySelectorAll(".avatar").forEach((img) => {
-      img.src = foto;
+      if (foto) img.src = foto;
       img.style.backgroundColor = fondo;
     });
   };
@@ -185,7 +176,7 @@ if (!window.__headerActionsInit) {
         }
       };
       if (!userId) {
-        applyHeaderAvatar(null);
+        await applyHeaderAvatar(null, null);
         showLogin();
         bindCartFallback();
         return;
@@ -202,7 +193,7 @@ if (!window.__headerActionsInit) {
       await ensureServerSession();
       const user = await loadCurrentUser();
       setSessionRoles(user || {});
-      applyHeaderAvatar(user || null);
+      await applyHeaderAvatar(user || null, userId);
       const roles = getSessionRoles();
       const usernameEl = document.querySelector(".username");
       if (user && usernameEl) {
