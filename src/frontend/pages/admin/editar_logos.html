@@ -111,6 +111,39 @@
       .preview-toggle {
         width: 100%;
       }
+      .iconos-gallery {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        gap: 10px;
+        width: 100%;
+        max-height: 360px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      .icono-item {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .icono-item img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: cover;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+      }
+      .icono-item figcaption {
+        font-size: 11px;
+        color: #4b5563;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .icono-empty {
+        margin: 0;
+      }
       @media (max-width: 720px) {
         .logo-editor {
           flex-direction: column;
@@ -187,12 +220,48 @@
             </div>
           </div>
         </div>
+
+        <div class="preview-section">
+          <button type="button" class="btn-outline preview-toggle" id="btn-iconos-toggle">
+            Editar iconos
+          </button>
+          <div id="iconos-editor" class="logo-editor hidden">
+            <div class="logo-upload">
+              <p class="logo-label">Importar iconos (carpeta o múltiples)</p>
+              <input
+                type="file"
+                id="iconos-files"
+                accept="image/*"
+                multiple
+                webkitdirectory
+                directory
+              />
+              <button type="button" class="btn-primary" id="btn-iconos-upload">
+                Subir iconos
+              </button>
+              <p id="iconos-status" class="status logo-status"></p>
+            </div>
+            <div class="logo-current">
+              <p class="logo-label">Iconos en public_assets/icono-perfil</p>
+              <div id="iconos-gallery" class="iconos-gallery">
+                <p class="status icono-empty">Sin iconos cargados.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase, uploadPlatformLogos, startSession } from "../../scripts/api.js";
+      import {
+        API_BASE,
+        clearServerSession,
+        loadCurrentUser,
+        supabase,
+        uploadPlatformLogos,
+        startSession,
+      } from "../../scripts/api.js";
 
       const sessionId = requireSession();
       console.log("[editar_logos] location", window.location.href);
@@ -224,6 +293,12 @@
       const previewInput = document.querySelector("#preview-file");
       const btnPreviewUpdate = document.querySelector("#btn-preview-update");
       const previewStatusEl = document.querySelector("#preview-status");
+      const iconosToggleBtn = document.querySelector("#btn-iconos-toggle");
+      const iconosEditor = document.querySelector("#iconos-editor");
+      const iconosFilesInput = document.querySelector("#iconos-files");
+      const btnIconosUpload = document.querySelector("#btn-iconos-upload");
+      const iconosStatusEl = document.querySelector("#iconos-status");
+      const iconosGalleryEl = document.querySelector("#iconos-gallery");
 
       let plataformasMap = {};
       let selectedId = null;
@@ -249,6 +324,29 @@
         previewStatusEl.classList.toggle("is-error", isError);
         previewStatusEl.classList.toggle("is-success", !isError && !!msg);
       };
+
+      const setIconosStatus = (msg, isError = false) => {
+        if (!iconosStatusEl) return;
+        iconosStatusEl.textContent = msg || "";
+        iconosStatusEl.classList.toggle("is-error", isError);
+        iconosStatusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const isImageFile = (file) => {
+        if (!file) return false;
+        if (String(file.type || "").startsWith("image/")) return true;
+        return /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(file.name || ""));
+      };
+
+      const isImageName = (name) => /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || ""));
 
       // Exporta a 3x para mejor nitidez en el display 148x185
       const resizeImageIfNeeded = (file, targetW = 444, targetH = 555, maxBytes = 150000) => {
@@ -486,6 +584,50 @@
         }
       };
 
+      const renderIconosGallery = (items = []) => {
+        if (!iconosGalleryEl) return;
+        const rows = Array.isArray(items)
+          ? items
+              .filter((it) => it?.publicUrl)
+              .filter((it) => !String(it?.name || "").startsWith("."))
+              .filter((it) => isImageName(it?.name))
+          : [];
+        if (!rows.length) {
+          iconosGalleryEl.innerHTML = '<p class="status icono-empty">Sin iconos cargados.</p>';
+          return;
+        }
+        iconosGalleryEl.innerHTML = rows
+          .map(
+            (item) => `
+              <figure class="icono-item" title="${escapeHtml(item.name || "")}">
+                <img src="${escapeHtml(item.publicUrl)}" alt="${escapeHtml(item.name || "icono")}" loading="lazy" decoding="async" />
+                <figcaption>${escapeHtml(item.name || "")}</figcaption>
+              </figure>
+            `,
+          )
+          .join("");
+      };
+
+      const loadIconos = async () => {
+        try {
+          const url = new URL(`${API_BASE}/api/logos/list`);
+          url.searchParams.set("folder", "icono-perfil");
+          if (sessionId) url.searchParams.set("id_usuario", String(sessionId));
+          const res = await fetch(url.toString(), {
+            credentials: "include",
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data?.error || "No se pudo listar iconos.");
+          }
+          renderIconosGallery(data?.items || []);
+        } catch (err) {
+          console.error("load iconos error", err);
+          renderIconosGallery([]);
+          setIconosStatus("No se pudieron cargar los iconos.", true);
+        }
+      };
+
       const loadPlataformas = async () => {
         try {
           const { data, error } = await supabase
@@ -525,6 +667,52 @@
       previewToggleBtn?.addEventListener("click", () => {
         if (!previewEditor) return;
         previewEditor.classList.toggle("hidden");
+      });
+
+      iconosToggleBtn?.addEventListener("click", async () => {
+        if (!iconosEditor) return;
+        const willOpen = iconosEditor.classList.contains("hidden");
+        iconosEditor.classList.toggle("hidden");
+        if (willOpen) {
+          setIconosStatus("");
+          await loadIconos();
+        }
+      });
+
+      btnIconosUpload?.addEventListener("click", async () => {
+        const selected = Array.from(iconosFilesInput?.files || []);
+        if (!selected.length) {
+          setIconosStatus("Selecciona una carpeta o varias imágenes.", true);
+          return;
+        }
+        const files = selected.filter((file) => isImageFile(file));
+        if (!files.length) {
+          setIconosStatus("No se encontraron imágenes válidas en la selección.", true);
+          return;
+        }
+        try {
+          const batchSize = 20;
+          let uploadedCount = 0;
+          for (let i = 0; i < files.length; i += batchSize) {
+            const chunk = files.slice(i, i + batchSize);
+            const processed = Math.min(i + chunk.length, files.length);
+            setIconosStatus(`Subiendo iconos (${processed}/${files.length})...`);
+            const { urls, error: uploadErr } = await uploadPlatformLogos(chunk, {
+              folder: "icono-perfil",
+            });
+            if (uploadErr) throw uploadErr;
+            uploadedCount += Array.isArray(urls) ? urls.length : 0;
+          }
+          if (!uploadedCount) throw new Error("No se subieron iconos.");
+          const skipped = selected.length - files.length;
+          const extraText = skipped > 0 ? ` Se omitieron ${skipped} archivos no válidos.` : "";
+          setIconosStatus(`Se subieron ${uploadedCount} iconos correctamente.${extraText}`);
+          if (iconosFilesInput) iconosFilesInput.value = "";
+          await loadIconos();
+        } catch (err) {
+          console.error("subir iconos error", err);
+          setIconosStatus("No se pudieron subir los iconos.", true);
+        }
       });
 
       btnUpdate?.addEventListener("click", async () => {

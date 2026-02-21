@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mi perfil</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+    <style>
+      .perfil-wrap {
+        max-width: 640px;
+      }
+      .perfil-card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      .perfil-top {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .perfil-avatar-layer {
+        width: 84px;
+        height: 84px;
+        border-radius: 999px;
+        border: 1px solid #d1d5db;
+        overflow: hidden;
+        position: relative;
+      }
+      .perfil-avatar-bg {
+        position: absolute;
+        inset: 0;
+        background: #f3f4f6;
+      }
+      .perfil-avatar {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: transparent;
+      }
+      .perfil-form {
+        display: grid;
+        gap: 8px;
+      }
+      .avatar-modal-card {
+        width: min(500px, calc(100vw - 24px));
+        max-width: none;
+        padding: 14px;
+      }
+      .avatar-modal-card .modal-body {
+        display: block;
+        overflow-y: auto;
+      }
+      .avatar-modal-content {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+      }
+      .avatar-picker-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        width: 100%;
+      }
+      .avatar-modal-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(84px, 1fr));
+        gap: 8px;
+        max-height: min(55vh, 380px);
+        overflow: auto;
+        padding-right: 2px;
+        width: 100%;
+      }
+      .avatar-option {
+        border: none;
+        border-radius: 10px;
+        background: transparent;
+        padding: 0;
+        cursor: pointer;
+        overflow: hidden;
+      }
+      .avatar-option:hover {
+        border-color: #111;
+      }
+      .avatar-option img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: contain;
+        display: block;
+        background: var(--avatar-bg, #ffffff);
+      }
+      .avatar-option.selected {
+        border-color: #111;
+        box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.2);
+      }
+      .avatar-palette {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding-top: 2px;
+      }
+      .avatar-palette-dot {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid rgba(17, 24, 39, 0.18);
+        padding: 0;
+        cursor: pointer;
+      }
+      .avatar-palette-dot.selected {
+        box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.28);
+      }
+      .avatar-modal-actions {
+        display: flex;
+        justify-content: flex-end;
+      }
+      @media (max-width: 720px) {
+        .avatar-picker-row {
+          gap: 8px;
+        }
+        .avatar-palette {
+          gap: 8px;
+        }
+        .avatar-modal-grid {
+          grid-template-columns: repeat(3, minmax(72px, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../" data-header-pages=""></div>
+    <script src="../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas perfil-wrap">
+      <h2>Mi perfil</h2>
+      <p id="perfil-status" class="status">Cargando perfil...</p>
+
+      <section id="perfil-card" class="perfil-card hidden">
+        <div class="perfil-top">
+          <div class="perfil-avatar-layer">
+            <div id="perfil-avatar-bg" class="perfil-avatar-bg"></div>
+            <img
+              id="perfil-avatar"
+              class="perfil-avatar"
+              src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/default-icono-perfil.png"
+              alt="Foto de perfil"
+            />
+          </div>
+          <button type="button" id="btn-editar-foto" class="btn-outline">
+            Editar foto de perfil
+          </button>
+        </div>
+
+        <div class="perfil-form">
+          <label for="perfil-nombre-input" class="form-label">Nombre</label>
+          <input
+            id="perfil-nombre-input"
+            type="text"
+            class="form-input"
+            placeholder="Nombre"
+          />
+
+          <label for="perfil-apellido-input" class="form-label">Apellido</label>
+          <input
+            id="perfil-apellido-input"
+            type="text"
+            class="form-input"
+            placeholder="Apellido"
+          />
+
+          <label for="perfil-correo-input" class="form-label">Correo</label>
+          <input
+            id="perfil-correo-input"
+            type="email"
+            class="form-input"
+            placeholder="correo@ejemplo.com"
+          />
+
+          <label for="perfil-telefono-input" class="form-label"
+            >Numero de telefono</label
+          >
+          <input
+            id="perfil-telefono-input"
+            type="tel"
+            class="form-input"
+            placeholder="0412..."
+          />
+        </div>
+      </section>
+    </main>
+
+    <div id="avatar-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card avatar-modal-card">
+        <button id="avatar-modal-close" class="modal-close" aria-label="Cerrar">
+          ×
+        </button>
+        <div class="modal-body">
+          <h3>Selecciona tu foto de perfil</h3>
+          <p id="avatar-modal-status" class="status">Cargando iconos...</p>
+          <div class="avatar-modal-content">
+            <div class="avatar-picker-row">
+              <div id="avatar-modal-grid" class="avatar-modal-grid"></div>
+              <div class="avatar-palette" aria-label="Paleta de colores">
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#ffa4a4"
+                  style="background: #ffa4a4"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#ffd5a4"
+                  style="background: #ffd5a4"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#75cd7e"
+                  style="background: #75cd7e"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#8cdbf4"
+                  style="background: #8cdbf4"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#bab6ff"
+                  style="background: #bab6ff"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#f7b6ff"
+                  style="background: #f7b6ff"
+                ></button>
+              </div>
+            </div>
+            <div class="avatar-modal-actions">
+              <button type="button" id="btn-avatar-save" class="btn-primary">
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="../scripts/mi_perfil.js"></script>
+  </body>
+</html>

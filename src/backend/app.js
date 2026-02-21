@@ -2182,7 +2182,7 @@ app.get("/api/cart", async (_req, res) => {
 // Actualizar montos fijos del carrito (USD y BS)
 app.post("/api/cart/montos", async (req, res) => {
   try {
-    const idUsuario = await getOrCreateUsuario(req);
+    await getOrCreateUsuario(req);
     const carritoId = await getCurrentCarrito(idUsuario);
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
@@ -2375,7 +2375,26 @@ app.post("/api/checkout/upload", async (req, res) => {
   }
 });
 
-// Sube logos de plataformas al bucket público (public_assets/logos)
+const normalizePublicAssetsFolder = (rawFolder = "") => {
+  const cleaned = String(rawFolder || "logos")
+    .trim()
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/[^a-z0-9/_-]/g, "")
+    .replace(/\/{2,}/g, "/");
+  return cleaned || "logos";
+};
+
+const isAllowedPublicAssetsFolder = (folder = "") => {
+  const allowed = new Set(["logos", "icono-perfil"]);
+  return allowed.has(folder);
+};
+
+const isImageFileName = (name = "") =>
+  /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || "").trim());
+
+// Sube logos de plataformas al bucket público (public_assets/logos por defecto)
 app.post("/api/logos/upload", async (req, res) => {
   const files = req.body?.files;
   if (!Array.isArray(files) || !files.length) {
@@ -2384,6 +2403,12 @@ app.post("/api/logos/upload", async (req, res) => {
 
   try {
     const idUsuario = await getOrCreateUsuario(req);
+    const folder = normalizePublicAssetsFolder(req.body?.folder);
+    if (!isAllowedPublicAssetsFolder(folder)) {
+      return res
+        .status(400)
+        .json({ error: "folder no permitido. Usa logos o icono-perfil." });
+    }
     const urls = [];
 
     const sanitizeFileName = (name = "file") => {
@@ -2404,7 +2429,7 @@ app.post("/api/logos/upload", async (req, res) => {
       }
       const buffer = Buffer.from(content, "base64");
       const safeName = sanitizeFileName(name);
-      const path = `logos/${Date.now()}-${Math.random()
+      const path = `${folder}/${Date.now()}-${Math.random()
         .toString(36)
         .slice(2)}-${safeName}`;
 
@@ -2421,6 +2446,54 @@ app.post("/api/logos/upload", async (req, res) => {
     res.json({ urls });
   } catch (err) {
     console.error("[logos:upload] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lista archivos en carpetas permitidas del bucket público (public_assets)
+app.get("/api/logos/list", async (req, res) => {
+  try {
+    await getOrCreateUsuario(req);
+    const folder = normalizePublicAssetsFolder(req.query?.folder);
+    if (!isAllowedPublicAssetsFolder(folder)) {
+      return res
+        .status(400)
+        .json({ error: "folder no permitido. Usa logos o icono-perfil." });
+    }
+
+    const { data, error } = await supabaseAdmin.storage
+      .from("public_assets")
+      .list(folder, {
+        limit: 500,
+        sortBy: { column: "name", order: "asc" },
+      });
+    if (error) throw error;
+
+    const items = (data || [])
+      .filter((row) => row?.name && !row.name.endsWith("/"))
+      .filter((row) => !String(row.name).startsWith("."))
+      .filter((row) => isImageFileName(row.name))
+      .map((row) => {
+        const path = `${folder}/${row.name}`;
+        const { data: publicData } = supabaseAdmin.storage
+          .from("public_assets")
+          .getPublicUrl(path);
+        return {
+          name: row.name,
+          path,
+          publicUrl: publicData?.publicUrl || null,
+          created_at: row.created_at || null,
+          updated_at: row.updated_at || null,
+        };
+      })
+      .filter((row) => !!row.publicUrl);
+
+    res.json({ folder, items });
+  } catch (err) {
+    console.error("[logos:list] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
