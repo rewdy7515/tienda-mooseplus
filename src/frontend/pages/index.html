@@ -165,6 +165,67 @@
       </div>
     </div>
 
+    <div id="avatar-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card avatar-modal-card">
+        <button id="avatar-modal-close" class="modal-close" aria-label="Cerrar">
+          ×
+        </button>
+        <div class="modal-body">
+          <h3>Selecciona tu foto de perfil</h3>
+          <p id="avatar-modal-status" class="status">Cargando iconos...</p>
+          <div class="avatar-modal-content">
+            <div class="avatar-picker-row">
+              <div id="avatar-modal-grid" class="avatar-modal-grid"></div>
+              <div class="avatar-palette" aria-label="Paleta de colores">
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#ffa4a4"
+                  style="background: #ffa4a4"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#ffd5a4"
+                  style="background: #ffd5a4"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#75cd7e"
+                  style="background: #75cd7e"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#8cdbf4"
+                  style="background: #8cdbf4"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#bab6ff"
+                  style="background: #bab6ff"
+                ></button>
+                <button
+                  type="button"
+                  class="avatar-palette-dot"
+                  data-color="#f7b6ff"
+                  style="background: #f7b6ff"
+                ></button>
+              </div>
+            </div>
+            <div class="avatar-modal-actions">
+              <button type="button" id="btn-avatar-save" class="btn-primary">
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="../scripts/main.js"></script>
   </body>
 </html>

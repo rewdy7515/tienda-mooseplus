@@ -1,4 +1,5 @@
 import {
+  API_BASE,
   loadCatalog,
   fetchCart,
   clearServerSession,
@@ -14,7 +15,7 @@ import { initCart } from "./cart.js";
 import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
 import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
-import { resolveAvatarForDisplay } from "./avatar-fallback.js";
+import { AVATAR_RANDOM_COLORS, resolveAvatarForDisplay } from "./avatar-fallback.js";
 import {
   attachLogout,
   getCachedCart,
@@ -55,6 +56,11 @@ const recordatoriosSinTelefonoList = document.querySelector("#recordatorios-sin-
 const recordatoriosSinTelefonoEmpty = document.querySelector("#recordatorios-sin-telefono-empty");
 const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
 const loaderAvatarEl = document.querySelector("#page-loader-avatar");
+const avatarModalEl = document.querySelector("#avatar-modal");
+const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
+const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
+const avatarModalStatusEl = document.querySelector("#avatar-modal-status");
+const btnAvatarSaveEl = document.querySelector("#btn-avatar-save");
 
 const modalEls = {
   modal: document.querySelector("#platform-modal"),
@@ -76,8 +82,8 @@ const modalEls = {
   btnMonthsMinus: document.querySelector("#qty-months-minus"),
   btnMonthsPlus: document.querySelector("#qty-months-plus"),
   btnAdd: document.querySelector("#add-cart"),
-  closeBtn: document.querySelector(".modal-close"),
-  backdrop: document.querySelector(".modal-backdrop"),
+  closeBtn: document.querySelector("#platform-modal .modal-close"),
+  backdrop: document.querySelector("#platform-modal .modal-backdrop"),
 };
 
 const searchInput = document.querySelector("#search-input");
@@ -85,6 +91,246 @@ const searchResults = document.querySelector("#search-results");
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const AVATAR_MODAL_DEFAULT_COLOR = AVATAR_RANDOM_COLORS[0] || "#ffa4a4";
+let avatarModalUserId = null;
+let avatarModalSavedUrl = "";
+let avatarModalSavedColor = AVATAR_MODAL_DEFAULT_COLOR;
+let avatarModalPendingUrl = "";
+let avatarModalPendingColor = AVATAR_MODAL_DEFAULT_COLOR;
+let avatarModalWasPrompted = false;
+
+const normalizeHexColor = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash.toLowerCase();
+  return "";
+};
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const isImageName = (name) =>
+  /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || ""));
+
+const setAvatarModalStatus = (msg, isError = false) => {
+  if (!avatarModalStatusEl) return;
+  avatarModalStatusEl.textContent = msg || "";
+  avatarModalStatusEl.classList.toggle("is-error", isError);
+  avatarModalStatusEl.classList.toggle("is-success", !isError && !!msg);
+};
+
+const updateAvatarModalSelectionStyles = () => {
+  const selectedUrl = String(avatarModalPendingUrl || "");
+  avatarModalEl?.querySelectorAll(".avatar-option[data-avatar-url]").forEach((btn) => {
+    btn.classList.toggle("selected", btn.dataset.avatarUrl === selectedUrl);
+  });
+
+  const selectedColor = normalizeHexColor(avatarModalPendingColor);
+  avatarModalEl?.querySelectorAll(".avatar-palette-dot[data-color]").forEach((dot) => {
+    const dotColor = normalizeHexColor(dot.dataset.color);
+    dot.classList.toggle("selected", !!selectedColor && dotColor === selectedColor);
+  });
+};
+
+const applyAvatarModalPreview = ({ url, color } = {}) => {
+  const nextUrl = String(url || "").trim();
+  const nextColor = normalizeHexColor(color) || AVATAR_MODAL_DEFAULT_COLOR;
+
+  if (nextUrl && loaderAvatarEl) loaderAvatarEl.src = nextUrl;
+  if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = nextColor;
+  document.querySelectorAll(".avatar").forEach((img) => {
+    if (nextUrl) img.src = nextUrl;
+    img.style.backgroundColor = nextColor;
+  });
+  avatarModalEl?.querySelectorAll(".avatar-option").forEach((btn) => {
+    btn.style.setProperty("--avatar-bg", nextColor);
+  });
+  updateAvatarModalSelectionStyles();
+};
+
+const closeAvatarModal = (revert = true) => {
+  if (!avatarModalEl) return;
+  if (revert) {
+    avatarModalPendingUrl = avatarModalSavedUrl;
+    avatarModalPendingColor = avatarModalSavedColor;
+    applyAvatarModalPreview({
+      url: avatarModalSavedUrl,
+      color: avatarModalSavedColor,
+    });
+  }
+  avatarModalEl.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+};
+
+const openAvatarModal = () => {
+  if (!avatarModalEl) return;
+  avatarModalPendingUrl = avatarModalSavedUrl;
+  avatarModalPendingColor = avatarModalSavedColor || AVATAR_MODAL_DEFAULT_COLOR;
+  avatarModalEl.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  applyAvatarModalPreview({
+    url: avatarModalPendingUrl,
+    color: avatarModalPendingColor,
+  });
+};
+
+const renderAvatarModalOptions = (items = []) => {
+  if (!avatarModalGridEl) return;
+  const rows = Array.isArray(items)
+    ? items
+        .filter((it) => it?.publicUrl)
+        .filter((it) => !String(it?.name || "").startsWith("."))
+        .filter((it) => isImageName(it?.name))
+    : [];
+
+  if (!rows.length) {
+    avatarModalGridEl.innerHTML = '<p class="status">Sin iconos disponibles.</p>';
+    return;
+  }
+
+  avatarModalGridEl.innerHTML = rows
+    .map(
+      (item) => `
+        <button
+          type="button"
+          class="avatar-option"
+          data-avatar-url="${escapeHtml(item.publicUrl || "")}"
+          title="${escapeHtml(item.name || "Icono")}"
+        >
+          <img src="${escapeHtml(item.publicUrl || "")}" alt="${escapeHtml(item.name || "Icono")}" loading="lazy" decoding="async" />
+        </button>
+      `,
+    )
+    .join("");
+
+  const hasCurrent = rows.some(
+    (item) => String(item?.publicUrl || "").trim() === String(avatarModalPendingUrl || "").trim(),
+  );
+  if (!hasCurrent) {
+    avatarModalPendingUrl = String(rows[0]?.publicUrl || "").trim();
+  }
+  applyAvatarModalPreview({
+    url: avatarModalPendingUrl,
+    color: avatarModalPendingColor,
+  });
+};
+
+const loadAvatarModalOptions = async () => {
+  if (!avatarModalEl) return;
+  try {
+    setAvatarModalStatus("Cargando iconos...");
+    const url = new URL(`${API_BASE}/api/logos/list`);
+    url.searchParams.set("folder", "icono-perfil");
+    if (avatarModalUserId) url.searchParams.set("id_usuario", String(avatarModalUserId));
+    const res = await fetch(url.toString(), { credentials: "include" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || "No se pudo cargar la lista de iconos.");
+
+    renderAvatarModalOptions(data?.items || []);
+    setAvatarModalStatus("");
+  } catch (err) {
+    console.error("avatar modal load options error", err);
+    renderAvatarModalOptions([]);
+    setAvatarModalStatus("No se pudieron cargar los iconos.", true);
+  }
+};
+
+const saveAvatarModalProfile = async () => {
+  if (!avatarModalUserId) {
+    setAvatarModalStatus("No se pudo identificar el usuario.", true);
+    return;
+  }
+  if (!avatarModalPendingUrl) {
+    setAvatarModalStatus("Selecciona una imagen de perfil.", true);
+    return;
+  }
+  try {
+    if (btnAvatarSaveEl) btnAvatarSaveEl.disabled = true;
+    setAvatarModalStatus("Guardando...");
+    const payload = {
+      foto_perfil: avatarModalPendingUrl,
+      fondo_perfil: normalizeHexColor(avatarModalPendingColor) || AVATAR_MODAL_DEFAULT_COLOR,
+    };
+    const { error } = await supabase
+      .from("usuarios")
+      .update(payload)
+      .eq("id_usuario", avatarModalUserId);
+    if (error) throw error;
+
+    avatarModalSavedUrl = payload.foto_perfil;
+    avatarModalSavedColor = payload.fondo_perfil;
+    applyAvatarModalPreview({
+      url: avatarModalSavedUrl,
+      color: avatarModalSavedColor,
+    });
+    setAvatarModalStatus("Foto guardada correctamente.");
+    closeAvatarModal(false);
+  } catch (err) {
+    console.error("avatar modal save error", err);
+    setAvatarModalStatus("No se pudo guardar la foto de perfil.", true);
+  } finally {
+    if (btnAvatarSaveEl) btnAvatarSaveEl.disabled = false;
+  }
+};
+
+const maybePromptAvatarProfileSetup = async (currentUser) => {
+  if (!avatarModalEl || avatarModalWasPrompted) return;
+  const userId = Number(currentUser?.id_usuario) || null;
+  if (!userId) return;
+
+  const foto = String(currentUser?.foto_perfil || "").trim();
+  const fondo = normalizeHexColor(currentUser?.fondo_perfil);
+  if (foto && fondo) return;
+
+  avatarModalWasPrompted = true;
+  avatarModalUserId = userId;
+  const fallbackAvatar = await resolveAvatarForDisplay({
+    user: currentUser || null,
+    idUsuario: userId,
+  });
+  avatarModalSavedUrl = foto || String(fallbackAvatar?.url || "").trim();
+  avatarModalSavedColor =
+    fondo || normalizeHexColor(fallbackAvatar?.color) || AVATAR_MODAL_DEFAULT_COLOR;
+
+  openAvatarModal();
+  await loadAvatarModalOptions();
+};
+
+avatarModalEl?.addEventListener("click", (e) => {
+  const option = e.target.closest(".avatar-option[data-avatar-url]");
+  if (option) {
+    avatarModalPendingUrl = String(option.dataset.avatarUrl || "").trim() || avatarModalPendingUrl;
+    applyAvatarModalPreview({
+      url: avatarModalPendingUrl,
+      color: avatarModalPendingColor,
+    });
+    return;
+  }
+
+  const colorDot = e.target.closest(".avatar-palette-dot[data-color]");
+  if (colorDot) {
+    avatarModalPendingColor =
+      normalizeHexColor(colorDot.dataset.color) || avatarModalPendingColor;
+    applyAvatarModalPreview({
+      url: avatarModalPendingUrl,
+      color: avatarModalPendingColor,
+    });
+    return;
+  }
+
+  if (e.target.classList.contains("modal-backdrop")) {
+    closeAvatarModal(true);
+  }
+});
+
+avatarModalCloseEl?.addEventListener("click", () => closeAvatarModal(true));
+btnAvatarSaveEl?.addEventListener("click", saveAvatarModalProfile);
 
 const applyLoaderAvatar = async (user = null, idUsuario = null) => {
   if (!loaderAvatarEl && !loaderAvatarBgEl) return;
@@ -548,6 +794,9 @@ async function init() {
       usernameEl.textContent = fullName || currentUser.correo || "Usuario";
     }
     setSessionRoles(currentUser || {});
+    maybePromptAvatarProfileSetup(currentUser).catch((err) => {
+      console.error("avatar onboarding prompt error", err);
+    });
     const sessionRoles = getSessionRoles();
     const isClienteRate =
       isTrue(sessionRoles?.acceso_cliente) || isTrue(currentUser?.acceso_cliente);
