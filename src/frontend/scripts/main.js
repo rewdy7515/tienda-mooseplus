@@ -58,6 +58,7 @@ const loaderAvatarLayerEl = document.querySelector(".page-loader__avatar-layer")
 const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
 const loaderAvatarEl = document.querySelector("#page-loader-avatar");
 const avatarModalEl = document.querySelector("#avatar-modal");
+const avatarModalBodyEl = avatarModalEl?.querySelector(".modal-body");
 const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
 const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
 const avatarModalStatusEl = document.querySelector("#avatar-modal-status");
@@ -92,6 +93,8 @@ const searchResults = document.querySelector("#search-results");
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const isExplicitFalse = (v) =>
+  v === false || v === 0 || v === "0" || v === "false" || v === "f";
 const AVATAR_MODAL_DEFAULT_COLOR = AVATAR_RANDOM_COLORS[0] || "#ffa4a4";
 let avatarModalUserId = null;
 let avatarModalSavedUrl = "";
@@ -142,16 +145,15 @@ const updateAvatarModalSelectionStyles = () => {
 const applyAvatarModalPreview = ({ url, color } = {}) => {
   const nextUrl = String(url || "").trim();
   const nextColor = normalizeHexColor(color) || AVATAR_MODAL_DEFAULT_COLOR;
-
-  if (nextUrl && loaderAvatarEl) loaderAvatarEl.src = nextUrl;
-  if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = nextColor;
-  document.querySelectorAll(".avatar").forEach((img) => {
-    if (nextUrl) img.src = nextUrl;
-    img.style.backgroundColor = nextColor;
-  });
-  avatarModalEl?.querySelectorAll(".avatar-option").forEach((btn) => {
-    btn.style.setProperty("--avatar-bg", nextColor);
-  });
+  if (avatarModalBodyEl) {
+    avatarModalBodyEl.style.setProperty("--avatar-modal-bg", nextColor);
+    avatarModalBodyEl.style.backgroundColor = nextColor;
+  }
+  if (nextUrl) {
+    avatarModalEl?.querySelectorAll(".avatar-option img").forEach((img) => {
+      if (!img.getAttribute("src")) img.setAttribute("src", nextUrl);
+    });
+  }
   updateAvatarModalSelectionStyles();
 };
 
@@ -266,10 +268,18 @@ const saveAvatarModalProfile = async () => {
 
     avatarModalSavedUrl = payload.foto_perfil;
     avatarModalSavedColor = payload.fondo_perfil;
-    applyAvatarModalPreview({
-      url: avatarModalSavedUrl,
-      color: avatarModalSavedColor,
+    document.querySelectorAll(".avatar").forEach((img) => {
+      img.src = avatarModalSavedUrl;
+      img.style.backgroundColor = avatarModalSavedColor;
     });
+    await applyLoaderAvatar(
+      {
+        id_usuario: avatarModalUserId,
+        foto_perfil: avatarModalSavedUrl,
+        fondo_perfil: avatarModalSavedColor,
+      },
+      avatarModalUserId,
+    );
     setAvatarModalStatus("Foto guardada correctamente.");
     closeAvatarModal(false);
   } catch (err) {
@@ -810,10 +820,9 @@ async function init() {
       console.error("avatar onboarding prompt error", err);
     });
     const sessionRoles = getSessionRoles();
-    const isClienteRate =
-      isTrue(sessionRoles?.acceso_cliente) || isTrue(currentUser?.acceso_cliente);
+    const canSeeRate = !!currentUser && isExplicitFalse(currentUser?.acceso_cliente);
     if (tasaActualEl) {
-      if (!currentUser || isClienteRate) {
+      if (!canSeeRate) {
         tasaActualEl.classList.add("hidden");
       } else {
         fetchP2PRate()

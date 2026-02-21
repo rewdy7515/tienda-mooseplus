@@ -24,6 +24,7 @@ const apellidoInputEl = document.querySelector("#perfil-apellido-input");
 const correoInputEl = document.querySelector("#perfil-correo-input");
 const telefonoInputEl = document.querySelector("#perfil-telefono-input");
 const avatarModalEl = document.querySelector("#avatar-modal");
+const avatarModalBodyEl = avatarModalEl?.querySelector(".modal-body");
 const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
 const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
 const avatarModalStatusEl = document.querySelector("#avatar-modal-status");
@@ -81,6 +82,16 @@ const updateSelectionStyles = () => {
 const applyAvatarPreview = ({ url, color } = {}) => {
   const nextUrl = String(url || "").trim() || EMPTY_AVATAR_DATA_URL;
   const nextColor = normalizeColor(color) || DEFAULT_BG_COLOR;
+  if (avatarModalBodyEl) {
+    avatarModalBodyEl.style.setProperty("--avatar-modal-bg", nextColor);
+    avatarModalBodyEl.style.backgroundColor = nextColor;
+  }
+  updateSelectionStyles();
+};
+
+const applyAvatarSavedState = ({ url, color } = {}) => {
+  const nextUrl = String(url || "").trim() || EMPTY_AVATAR_DATA_URL;
+  const nextColor = normalizeColor(color) || DEFAULT_BG_COLOR;
   if (avatarBgEl) {
     avatarBgEl.style.backgroundColor = nextColor;
   }
@@ -92,10 +103,6 @@ const applyAvatarPreview = ({ url, color } = {}) => {
     img.src = nextUrl;
     img.style.backgroundColor = nextColor;
   });
-  document.querySelectorAll(".avatar-option").forEach((btn) => {
-    btn.style.setProperty("--avatar-bg", nextColor);
-  });
-  updateSelectionStyles();
 };
 
 const closeAvatarModal = (revert = true) => {
@@ -189,7 +196,7 @@ const saveAvatarProfile = async () => {
 
     savedAvatarUrl = payload.foto_perfil;
     savedBgColor = payload.fondo_perfil;
-    applyAvatarPreview({ url: savedAvatarUrl, color: savedBgColor });
+    applyAvatarSavedState({ url: savedAvatarUrl, color: savedBgColor });
     setAvatarModalStatus("Foto guardada correctamente.");
     closeAvatarModal(false);
   } catch (err) {
@@ -227,7 +234,7 @@ const init = async () => {
     setInput(correoInputEl, user.correo);
     setInput(telefonoInputEl, user.telefono);
 
-    applyAvatarPreview({ url: savedAvatarUrl, color: savedBgColor });
+    applyAvatarSavedState({ url: savedAvatarUrl, color: savedBgColor });
 
     cardEl?.classList.remove("hidden");
     if (statusEl) statusEl.textContent = "";
