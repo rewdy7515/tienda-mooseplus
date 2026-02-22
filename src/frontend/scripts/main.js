@@ -860,14 +860,16 @@ const syncHomeBannersViewportSize = () => {
 const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []) => {
   if (!homeBannersWrap || !homeBannersTrack || !homeBannersViewport) return;
   const useMobileBannerImage =
-    typeof window !== "undefined" && window.matchMedia?.("(max-width: 700px)")?.matches;
+    typeof window !== "undefined" &&
+    (window.matchMedia?.("(max-width: 700px)")?.matches ||
+      window.matchMedia?.("(pointer: coarse)")?.matches);
 
   const source = Array.isArray(plataformas) ? plataformas : [];
   const customRows = Array.isArray(customBanners)
     ? customBanners
         .map((row) => {
-          const desktopImage = String(row?.image_url || "").trim();
-          const mobileImage = String(row?.image_url_mobile || "").trim();
+          const desktopImage = String(row?.image_url ?? row?.imagen ?? "").trim();
+          const mobileImage = String(row?.image_url_mobile ?? row?.imagen_movil ?? "").trim();
           const pickedImage = String(
             useMobileBannerImage ? mobileImage || desktopImage : desktopImage || mobileImage,
           ).trim();
