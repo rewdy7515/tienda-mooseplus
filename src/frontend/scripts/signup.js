@@ -1,5 +1,6 @@
 import { supabase } from "./api.js";
 import { attachLogoHome } from "./session.js";
+import { loadPaginaBranding } from "./branding.js";
 
 const form = document.getElementById("signup-form");
 const fields = {
@@ -211,6 +212,9 @@ async function handleSubmit(e) {
 
 function init() {
   attachLogoHome();
+  loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
+    console.warn("signup branding load error", err);
+  });
   if (fields.telefono && window.intlTelInput) {
     iti = window.intlTelInput(fields.telefono, {
       initialCountry: "ve",

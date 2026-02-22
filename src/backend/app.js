@@ -179,6 +179,14 @@ const isMissingTableError = (err, tableName) => {
   return message.includes("does not exist") && message.includes(String(tableName).toLowerCase());
 };
 
+const isMissingColumnError = (err, columnName = "") => {
+  const code = String(err?.code || "").trim();
+  const message = String(err?.message || "").toLowerCase();
+  if (code === "42703") return true;
+  if (!columnName) return false;
+  return message.includes("does not exist") && message.includes(String(columnName).toLowerCase());
+};
+
 const SUPABASE_TRANSIENT_RETRIES = 2;
 const SUPABASE_TRANSIENT_RETRY_BASE_MS = 150;
 
@@ -1236,6 +1244,46 @@ const buildReemplazosBlocklist = (rows) => {
   return { cuentas, perfiles };
 };
 
+const orderSpotifyProfilesByPriority = (profiles = [], preferredMotherId = null) => {
+  const groups = new Map();
+  (profiles || []).forEach((profile) => {
+    const perfilId = toPositiveInt(profile?.id_perfil);
+    const cuentaId = toPositiveInt(profile?.id_cuenta);
+    if (!perfilId || !cuentaId) return;
+    if (!groups.has(cuentaId)) groups.set(cuentaId, []);
+    groups.get(cuentaId).push(profile);
+  });
+  if (!groups.size) return [];
+
+  const sortProfileList = (list = []) =>
+    [...list].sort((a, b) => {
+      const na = Number.isFinite(Number(a?.n_perfil)) ? Number(a.n_perfil) : Number.MAX_SAFE_INTEGER;
+      const nb = Number.isFinite(Number(b?.n_perfil)) ? Number(b.n_perfil) : Number.MAX_SAFE_INTEGER;
+      if (na !== nb) return na - nb;
+      const ida = toPositiveInt(a?.id_perfil) || Number.MAX_SAFE_INTEGER;
+      const idb = toPositiveInt(b?.id_perfil) || Number.MAX_SAFE_INTEGER;
+      return ida - idb;
+    });
+
+  const preferredId = toPositiveInt(preferredMotherId);
+  const sortedMotherIds = Array.from(groups.keys()).sort((a, b) => {
+    const freeA = groups.get(a)?.length || 0;
+    const freeB = groups.get(b)?.length || 0;
+    if (freeA !== freeB) return freeA - freeB;
+    return a - b;
+  });
+
+  const ordered = [];
+  if (preferredId && groups.has(preferredId)) {
+    ordered.push(...sortProfileList(groups.get(preferredId)));
+  }
+  sortedMotherIds.forEach((motherId) => {
+    if (preferredId && motherId === preferredId) return;
+    ordered.push(...sortProfileList(groups.get(motherId)));
+  });
+  return ordered;
+};
+
 const normalizeFilesArray = (value) => {
   if (Array.isArray(value)) return value;
   if (value == null) return [];
@@ -1408,6 +1456,45 @@ const processOrderFromItems = async ({
     .select("id_cuenta, id_perfil");
   if (reemplazosErr) throw reemplazosErr;
   const reemplazosBloqueados = buildReemplazosBlocklist(reemplazosRows);
+  let spotifyPreferredMotherId = null;
+  let spotifyPreferredMotherResolved = false;
+  const resolveSpotifyPreferredMotherId = async () => {
+    if (spotifyPreferredMotherResolved) return spotifyPreferredMotherId;
+    spotifyPreferredMotherResolved = true;
+    const usuarioId = toPositiveInt(idUsuarioVentas);
+    if (!usuarioId) return spotifyPreferredMotherId;
+
+    const { data: rows, error } = await supabaseAdmin
+      .from("ventas")
+      .select(
+        "id_venta, id_cuenta, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, id_plataforma, cuenta_madre, inactiva), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_cuenta_madre)"
+      )
+      .eq("id_usuario", usuarioId)
+      .order("id_venta", { ascending: false })
+      .limit(180);
+    if (error) throw error;
+
+    for (const row of rows || []) {
+      const madreDirectaId = toPositiveInt(row?.cuentas?.id_cuenta);
+      const madreDirectaValida =
+        madreDirectaId &&
+        Number(row?.cuentas?.id_plataforma) === 9 &&
+        isTrue(row?.cuentas?.cuenta_madre) &&
+        !isInactive(row?.cuentas?.inactiva) &&
+        !reemplazosBloqueados.cuentas.has(madreDirectaId);
+      if (madreDirectaValida) {
+        spotifyPreferredMotherId = madreDirectaId;
+        return spotifyPreferredMotherId;
+      }
+
+      const madreDesdeMiembroId = toPositiveInt(row?.cuentas_miembro?.id_cuenta_madre);
+      if (madreDesdeMiembroId && !reemplazosBloqueados.cuentas.has(madreDesdeMiembroId)) {
+        spotifyPreferredMotherId = madreDesdeMiembroId;
+        return spotifyPreferredMotherId;
+      }
+    }
+    return spotifyPreferredMotherId;
+  };
   const stockScanLimit = (cantidadReq) => {
     const qty = Number.isFinite(Number(cantidadReq)) ? Number(cantidadReq) : 1;
     return Math.max(40, qty * 10);
@@ -1580,7 +1667,7 @@ const processOrderFromItems = async ({
       let perfilesQuery = supabaseAdmin
         .from("perfiles")
         .select(
-          "id_perfil, id_cuenta, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil, cuenta_madre)"
+          "id_perfil, id_cuenta, n_perfil, perfil_hogar, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, venta_perfil, cuenta_madre)"
         )
         .eq("cuentas.id_plataforma", platId)
         .eq("cuentas.venta_perfil", isSpotify ? false : true)
@@ -1627,23 +1714,29 @@ const processOrderFromItems = async ({
           !reemplazosBloqueados.perfiles.has(perfilId)
         );
       });
+      const preferredMotherId = isSpotify ? await resolveSpotifyPreferredMotherId() : null;
+      const disponiblesPriorizados = isSpotify
+        ? orderSpotifyProfilesByPriority(disponibles, preferredMotherId)
+        : disponibles;
       console.log("[checkout] perfiles libres disponibles", {
         platId,
-        count: disponibles.length,
-        first: disponibles[0] || null,
+        count: disponiblesPriorizados.length,
+        first: disponiblesPriorizados[0] || null,
+        preferredMotherId: preferredMotherId || null,
       });
       if (platId === 1 || platId === 9) {
-        const dispSample = disponibles.slice(0, 5).map((p) => ({
+        const dispSample = disponiblesPriorizados.slice(0, 5).map((p) => ({
           id_perfil: p.id_perfil,
           id_cuenta: p.id_cuenta,
+          n_perfil: p.n_perfil,
           perfil_hogar: p.perfil_hogar,
           ocupado: p.ocupado,
           cuenta_inactiva: p.cuentas?.inactiva,
         }));
         console.log("[checkout][stock] disponibles sample", dispSample);
       }
-      const faltantes = Math.max(0, cantidad - disponibles.length);
-      disponibles.slice(0, cantidad).forEach((p) => {
+      const faltantes = Math.max(0, cantidad - disponiblesPriorizados.length);
+      disponiblesPriorizados.slice(0, cantidad).forEach((p) => {
         asignaciones.push({
           id_precio: price.id_precio,
           monto: pickPrecio(price),
@@ -2499,12 +2592,90 @@ const normalizePublicAssetsFolder = (rawFolder = "") => {
 };
 
 const isAllowedPublicAssetsFolder = (folder = "") => {
-  const allowed = new Set(["logos", "icono-perfil", "banners-index"]);
+  const allowed = new Set([
+    "logos",
+    "logos/mooseplus",
+    "logos/plataformas/tarjeta",
+    "logos/plataformas/banner",
+    "icono-perfil",
+    "banners-index",
+  ]);
   return allowed.has(folder);
 };
 
 const isImageFileName = (name = "") =>
   /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || "").trim());
+
+const imageMimeFromExt = (ext = "") => {
+  const normalized = String(ext || "").trim().toLowerCase();
+  if (normalized === "png") return "image/png";
+  if (normalized === "jpg" || normalized === "jpeg") return "image/jpeg";
+  if (normalized === "webp") return "image/webp";
+  if (normalized === "gif") return "image/gif";
+  if (normalized === "bmp") return "image/bmp";
+  if (normalized === "avif") return "image/avif";
+  if (normalized === "svg") return "image/svg+xml";
+  return "";
+};
+
+const imageExtFromMime = (mime = "") => {
+  const normalized = String(mime || "").trim().toLowerCase();
+  if (normalized === "image/png") return "png";
+  if (normalized === "image/jpeg") return "jpg";
+  if (normalized === "image/webp") return "webp";
+  if (normalized === "image/gif") return "gif";
+  if (normalized === "image/bmp") return "bmp";
+  if (normalized === "image/avif") return "avif";
+  if (normalized === "image/svg+xml") return "svg";
+  return "";
+};
+
+const getFileExt = (name = "") => {
+  const match = String(name || "")
+    .trim()
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/);
+  return match?.[1] || "";
+};
+
+const normalizePublicAssetFileMeta = (rawName = "file", rawType = "") => {
+  const sanitizeFileName = (name = "file") => {
+    const cleaned = String(name)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9._-]/g, "");
+    return cleaned || "file";
+  };
+
+  let safeName = sanitizeFileName(rawName);
+  const extFromName = getFileExt(safeName);
+  const mimeFromName = imageMimeFromExt(extFromName);
+  const normalizedType = String(rawType || "").trim().toLowerCase();
+
+  let contentType = "application/octet-stream";
+  if (normalizedType === "image/webp" || mimeFromName === "image/webp") {
+    contentType = "image/webp";
+  } else if (normalizedType.startsWith("image/")) {
+    contentType = normalizedType;
+  } else if (mimeFromName) {
+    contentType = mimeFromName;
+  }
+
+  const targetExt = imageExtFromMime(contentType);
+  if (targetExt) {
+    if (extFromName) {
+      safeName = safeName.replace(/\.[a-z0-9]+$/i, `.${targetExt}`);
+    } else {
+      safeName = `${safeName}.${targetExt}`;
+    }
+  }
+
+  return {
+    safeName,
+    contentType,
+  };
+};
 
 const normalizePublicAssetsPath = (rawPath = "") =>
   String(rawPath || "")
@@ -2551,18 +2722,13 @@ app.post("/api/logos/upload", async (req, res) => {
     if (!isAllowedPublicAssetsFolder(folder)) {
       return res
         .status(400)
-        .json({ error: "folder no permitido. Usa logos, icono-perfil o banners-index." });
+        .json({
+          error:
+            "folder no permitido. Usa logos/mooseplus, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
+        });
     }
+    const overwriteByName = isTrue(req.body?.overwrite_by_name);
     const urls = [];
-
-    const sanitizeFileName = (name = "file") => {
-      const cleaned = String(name)
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, "-")
-        .replace(/[^a-z0-9._-]/g, "");
-      return cleaned || "file";
-    };
 
     for (const file of files) {
       const { name, content, type } = file || {};
@@ -2572,15 +2738,22 @@ app.post("/api/logos/upload", async (req, res) => {
           .json({ error: "Cada archivo necesita name y content en base64" });
       }
       const buffer = Buffer.from(content, "base64");
-      const safeName = sanitizeFileName(name);
-      const path = `${folder}/${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}-${safeName}`;
+      const { safeName, contentType } = normalizePublicAssetFileMeta(name, type);
+      const path = overwriteByName
+        ? `${folder}/${safeName}`
+        : `${folder}/${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}-${safeName}`;
+
+      if (overwriteByName) {
+        await supabaseAdmin.storage.from("public_assets").remove([path]);
+      }
 
       const { error } = await supabaseAdmin.storage
         .from("public_assets")
         .upload(path, buffer, {
-          contentType: type || "application/octet-stream",
+          contentType,
+          upsert: overwriteByName,
         });
       if (error) throw error;
       const { data } = supabaseAdmin.storage.from("public_assets").getPublicUrl(path);
@@ -2613,7 +2786,8 @@ app.post("/api/logos/delete", jsonParser, async (req, res) => {
     const uniquePaths = [...new Set(normalized)];
     if (!uniquePaths.length) {
       return res.status(400).json({
-        error: "Debes enviar paths/public_urls válidos de logos, icono-perfil o banners-index.",
+        error:
+          "Debes enviar paths/public_urls válidos de logos, logos/mooseplus, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
       });
     }
 
@@ -2647,7 +2821,10 @@ app.get("/api/logos/list", async (req, res) => {
     if (!isAllowedPublicAssetsFolder(folder)) {
       return res
         .status(400)
-        .json({ error: "folder no permitido. Usa logos, icono-perfil o banners-index." });
+        .json({
+          error:
+            "folder no permitido. Usa logos/mooseplus, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
+        });
     }
 
     const { data, error } = await supabaseAdmin.storage
@@ -2701,17 +2878,26 @@ app.get("/api/home-banners", async (req, res) => {
       }
     }
 
-    let query = supabaseAdmin
-      .from(HOME_BANNERS_TABLE)
-      .select("id_banner, imagen, redireccion, oculto, posicion")
-      .order("posicion", { ascending: true })
-      .order("id_banner", { ascending: true });
+    const runBannersListQuery = async (selectClause = "") => {
+      let query = supabaseAdmin
+        .from(HOME_BANNERS_TABLE)
+        .select(selectClause)
+        .order("posicion", { ascending: true })
+        .order("id_banner", { ascending: true });
+      if (!includeInactive) {
+        query = query.eq("oculto", false);
+      }
+      return await query;
+    };
 
-    if (!includeInactive) {
-      query = query.eq("oculto", false);
+    let supportsExtendedColumns = true;
+    let { data, error } = await runBannersListQuery(
+      "id_banner, titulo, imagen, imagen_movil, redireccion, oculto, posicion",
+    );
+    if (error && (isMissingColumnError(error, "titulo") || isMissingColumnError(error, "imagen_movil"))) {
+      supportsExtendedColumns = false;
+      ({ data, error } = await runBannersListQuery("id_banner, imagen, redireccion, oculto, posicion"));
     }
-
-    const { data, error } = await query;
     if (error) {
       if (isMissingTableError(error, HOME_BANNERS_TABLE)) {
         return res.json({ items: [], tableMissing: true });
@@ -2721,7 +2907,9 @@ app.get("/api/home-banners", async (req, res) => {
 
     const items = (data || []).map((row) => ({
       id_banner: Number(row?.id_banner) || 0,
+      title: supportsExtendedColumns ? String(row?.titulo || "").trim() : "",
       image_url: String(row?.imagen || "").trim(),
+      image_url_mobile: supportsExtendedColumns ? String(row?.imagen_movil || "").trim() : "",
       redirect_url: String(row?.redireccion || "").trim(),
       oculto: row?.oculto === true,
       posicion: Number.isFinite(Number(row?.posicion))
@@ -2741,6 +2929,8 @@ app.post("/api/home-banners", jsonParser, async (req, res) => {
   try {
     await requireAdminSession(req);
     const imageUrl = String(req.body?.image_url || "").trim();
+    const imageUrlMobile = String(req.body?.image_url_mobile || "").trim();
+    const title = String(req.body?.title ?? req.body?.titulo ?? "").trim();
     const redirectUrl = String(req.body?.redirect_url || "").trim();
     const activoRaw = req.body?.activo;
     const ocultoRaw = req.body?.oculto;
@@ -2772,7 +2962,9 @@ app.post("/api/home-banners", jsonParser, async (req, res) => {
     }
 
     const payload = {
+      titulo: title || null,
       imagen: imageUrl,
+      imagen_movil: imageUrlMobile || imageUrl,
       redireccion: redirectUrl,
       oculto:
         ocultoRaw == null
@@ -2786,7 +2978,7 @@ app.post("/api/home-banners", jsonParser, async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from(HOME_BANNERS_TABLE)
       .insert(payload)
-      .select("id_banner, imagen, redireccion, oculto, posicion")
+      .select("id_banner, titulo, imagen, imagen_movil, redireccion, oculto, posicion")
       .single();
     if (error) {
       if (isMissingTableError(error, HOME_BANNERS_TABLE)) {
@@ -2799,7 +2991,9 @@ app.post("/api/home-banners", jsonParser, async (req, res) => {
     res.json({
       item: {
         id_banner: Number(data?.id_banner) || 0,
+        title: String(data?.titulo || "").trim(),
         image_url: String(data?.imagen || "").trim(),
+        image_url_mobile: String(data?.imagen_movil || "").trim(),
         redirect_url: String(data?.redireccion || "").trim(),
         oculto: data?.oculto === true,
         posicion: Number.isFinite(Number(data?.posicion))
@@ -2858,6 +3052,19 @@ app.put("/api/home-banners/:id_banner", jsonParser, async (req, res) => {
       }
       payload.imagen = imageUrl;
     }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "image_url_mobile")) {
+      const imageUrlMobile = String(req.body?.image_url_mobile || "").trim();
+      if (!imageUrlMobile) {
+        return res.status(400).json({ error: "image_url_mobile no puede estar vacío." });
+      }
+      payload.imagen_movil = imageUrlMobile;
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(req.body || {}, "title") ||
+      Object.prototype.hasOwnProperty.call(req.body || {}, "titulo")
+    ) {
+      payload.titulo = String(req.body?.title ?? req.body?.titulo ?? "").trim() || null;
+    }
 
     if (!Object.keys(payload).length) {
       return res.status(400).json({ error: "Sin campos para actualizar." });
@@ -2866,7 +3073,7 @@ app.put("/api/home-banners/:id_banner", jsonParser, async (req, res) => {
       .from(HOME_BANNERS_TABLE)
       .update(payload)
       .eq("id_banner", idBanner)
-      .select("id_banner, imagen, redireccion, oculto, posicion")
+      .select("id_banner, titulo, imagen, imagen_movil, redireccion, oculto, posicion")
       .maybeSingle();
     if (error) {
       if (isMissingTableError(error, HOME_BANNERS_TABLE)) {
@@ -2883,7 +3090,9 @@ app.put("/api/home-banners/:id_banner", jsonParser, async (req, res) => {
     res.json({
       item: {
         id_banner: Number(data?.id_banner) || 0,
+        title: String(data?.titulo || "").trim(),
         image_url: String(data?.imagen || "").trim(),
+        image_url_mobile: String(data?.imagen_movil || "").trim(),
         redirect_url: String(data?.redireccion || "").trim(),
         oculto: data?.oculto === true,
         posicion: Number.isFinite(Number(data?.posicion))

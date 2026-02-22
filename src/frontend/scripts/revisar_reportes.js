@@ -26,6 +26,7 @@ const modalPerfil = document.querySelector("#modal-perfil");
 const modalPin = document.querySelector("#modal-pin");
 const btnCopyClave = document.querySelector("#btn-copy-clave");
 const btnCopyPin = document.querySelector("#btn-copy-pin");
+const btnOpenAdminCuenta = document.querySelector("#btn-open-admin-cuenta");
 const perfilRows = document.querySelectorAll(".perfil-row");
 const modalImagenWrapper = document.querySelector("#modal-imagen-wrapper");
 const modalImagen = document.querySelector("#modal-imagen");
@@ -52,6 +53,8 @@ let oldClave = "";
 let oldPin = "";
 let cambioClave = false;
 let cambioPin = false;
+let currentImageDownloadUrl = "";
+let currentImageDownloadName = "";
 const reportesById = new Map();
 
 const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
@@ -84,8 +87,7 @@ const buttonStyleForColor = (color) => {
 const tableStyleForColor = (color) => {
   const c = normalizeHexColor(color);
   if (!c) return "";
-  const textColor = isDarkHex(c) ? "#fff" : "#111";
-  return ` style="--table-header-bg:${c};--table-header-color:${textColor};"`;
+  return ` style="--table-header-bg:${c};"`;
 };
 
 const escapeHtml = (value) =>
@@ -106,6 +108,21 @@ const copyValue = (value, toastText) => {
   const text = normalizeCopyValue(value);
   if (!text) return;
   copyTextNotify(text, toastText);
+};
+
+const normalizePlatformLink = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw.replace(/^\/+/, "")}`;
+};
+
+const openAdminCuentasByCorreo = (rawCorreo) => {
+  const correo = normalizeCopyValue(rawCorreo);
+  if (!correo) return;
+  const targetUrl = new URL("../admin/admin_cuentas.html", window.location.href);
+  targetUrl.searchParams.set("correo", correo);
+  window.open(targetUrl.toString(), "_blank", "noopener");
 };
 
 const getDescripcion = (row) => {
@@ -176,7 +193,10 @@ const renderReportesList = (plataformas = []) => {
           const correoText = escapeHtml(correo);
           const correoCopyAttr = escapeHtml(correo);
           const correoCell = normalizeCopyValue(correo)
-            ? `<span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>`
+            ? `<span class="correo-actions-inline">
+                <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
+                <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
+              </span>`
             : correoText;
           const motivo = getDescripcion(r);
           const fecha = formatDate(r.fecha_creacion || null);
@@ -190,7 +210,6 @@ const renderReportesList = (plataformas = []) => {
               <td>
                 <div class="actions-inline">
                   <button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle">Más detalles</button>
-                  <button class="btn-primary btn-small" data-id="${r.id_reporte}" data-action="cerrar">Cerrar reporte</button>
                 </div>
               </td>
             </tr>
@@ -237,19 +256,85 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion"
+      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
   return data || [];
 }
 
+const resetImageFrame = () => {
+  modalImagenWrapper?.style.removeProperty("--report-image-ratio");
+};
+
+const applyImageFrame = (imgEl) => {
+  const width = Number(imgEl?.naturalWidth) || 0;
+  const height = Number(imgEl?.naturalHeight) || 0;
+  if (width <= 0 || height <= 0) {
+    resetImageFrame();
+    return;
+  }
+  const ratio = width / height;
+  const boundedRatio = Math.min(2.1, Math.max(0.56, ratio));
+  modalImagenWrapper?.style.setProperty("--report-image-ratio", String(boundedRatio));
+};
+
+const buildImageDownloadName = (row, imageUrl) => {
+  const reportId = Number(row?.id_reporte);
+  const idPart = Number.isFinite(reportId) && reportId > 0
+    ? String(reportId).padStart(4, "0")
+    : "evidencia";
+  let ext = "jpg";
+  try {
+    const parsed = new URL(String(imageUrl || ""), window.location.href);
+    const match = (parsed.pathname || "").match(/\.([a-z0-9]+)$/i);
+    if (match?.[1]) ext = String(match[1]).toLowerCase();
+  } catch (_err) {
+    const match = String(imageUrl || "").match(/\.([a-z0-9]+)(?:$|[?#])/i);
+    if (match?.[1]) ext = String(match[1]).toLowerCase();
+  }
+  return `reporte-${idPart}.${ext}`;
+};
+
+const triggerImageDownload = async () => {
+  const url = String(currentImageDownloadUrl || "").trim();
+  if (!url) return;
+  const fileName = String(currentImageDownloadName || "evidencia.jpg");
+  try {
+    const resp = await fetch(url, { credentials: "omit" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (_err) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.target = "_blank";
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+};
+
 function closeModal() {
   modal?.classList.add("hidden");
   modalImagenWrapper?.classList.add("hidden");
   modalImagenWrapper?.classList.remove("no-image");
+  modalImagenWrapper?.classList.remove("downloadable");
+  modalImagenWrapper?.removeAttribute("title");
   modalSinImagen?.classList.add("hidden");
   if (modalImagen) modalImagen.src = "";
+  resetImageFrame();
+  currentImageDownloadUrl = "";
+  currentImageDownloadName = "";
   currentRow = null;
   cambioClave = false;
   cambioPin = false;
@@ -258,8 +343,24 @@ function closeModal() {
 async function openModal(row) {
   if (!modal) return;
   const platName = row.plataformas?.nombre || "-";
+  const platColor = normalizeHexColor(row.plataformas?.color_1) || "#111";
+  const platLink = normalizePlatformLink(row.plataformas?.link_pagina);
   modalPlatTitle.textContent = platName;
-  modalCorreo.textContent = row.cuentas?.correo || "-";
+  modalPlatTitle.style.color = platColor;
+  if (platLink) {
+    modalPlatTitle.classList.add("is-link");
+    modalPlatTitle.dataset.href = platLink;
+    modalPlatTitle.setAttribute("title", "Abrir página de la plataforma");
+    modalPlatTitle.setAttribute("role", "link");
+    modalPlatTitle.setAttribute("tabindex", "0");
+  } else {
+    modalPlatTitle.classList.remove("is-link");
+    delete modalPlatTitle.dataset.href;
+    modalPlatTitle.removeAttribute("title");
+    modalPlatTitle.removeAttribute("role");
+    modalPlatTitle.removeAttribute("tabindex");
+  }
+  if (modalCorreo) modalCorreo.value = row.cuentas?.correo || "-";
   oldClave = row.cuentas?.clave || "";
   const rawPin = row.perfiles?.pin ?? row.pin ?? "";
   oldPin = rawPin === null || rawPin === undefined ? "" : String(rawPin);
@@ -280,24 +381,37 @@ async function openModal(row) {
     if (modalImagen) modalImagen.src = "";
     modalImagenWrapper?.classList.remove("hidden");
     modalImagenWrapper?.classList.add("no-image");
+    modalImagenWrapper?.classList.remove("downloadable");
+    modalImagenWrapper?.removeAttribute("title");
     modalSinImagen?.classList.add("hidden");
+    resetImageFrame();
+    currentImageDownloadUrl = "";
+    currentImageDownloadName = "";
   };
 
   if (row.imagen) {
     const url = await getImageUrl(row.imagen);
     if (url && modalImagen) {
-      modalImagen.src = url;
-      modalImagenWrapper?.classList.remove("hidden");
-      modalImagenWrapper?.classList.remove("no-image");
-      modalSinImagen?.classList.add("hidden");
       modalImagen.onload = () => {
         modalImagenWrapper?.classList.remove("hidden");
         modalImagenWrapper?.classList.remove("no-image");
         modalSinImagen?.classList.add("hidden");
+        applyImageFrame(modalImagen);
       };
       modalImagen.onerror = () => {
         showNoImageBox();
       };
+      modalImagen.src = url;
+      modalImagenWrapper?.classList.remove("hidden");
+      modalImagenWrapper?.classList.remove("no-image");
+      modalImagenWrapper?.classList.add("downloadable");
+      modalImagenWrapper?.setAttribute("title", "Presiona para descargar imagen");
+      modalSinImagen?.classList.add("hidden");
+      currentImageDownloadUrl = url;
+      currentImageDownloadName = buildImageDownloadName(row, url);
+      if (modalImagen.complete) {
+        applyImageFrame(modalImagen);
+      }
     } else {
       showNoImageBox();
     }
@@ -363,6 +477,14 @@ async function init() {
     if (statusEl) statusEl.textContent = "";
 
     listEl?.addEventListener("click", (e) => {
+      const openAdminTarget = e.target.closest("[data-open-admin-correo]");
+      if (openAdminTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        openAdminCuentasByCorreo(openAdminTarget.dataset.openAdminCorreo || "");
+        return;
+      }
+
       const copyTarget = e.target.closest("[data-copy]");
       if (copyTarget) {
         e.preventDefault();
@@ -452,7 +574,26 @@ async function init() {
   });
 
   modalCorreo?.addEventListener("click", () => {
-    copyValue(modalCorreo.textContent || "", "Correo copiado");
+    if (modalCorreo?.select) modalCorreo.select();
+    copyValue(modalCorreo?.value || "", "Correo copiado");
+  });
+
+  modalPlatTitle?.addEventListener("click", () => {
+    const href = String(modalPlatTitle?.dataset?.href || "").trim();
+    if (!href) return;
+    window.location.href = href;
+  });
+
+  modalPlatTitle?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const href = String(modalPlatTitle?.dataset?.href || "").trim();
+    if (!href) return;
+    e.preventDefault();
+    window.location.href = href;
+  });
+
+  btnOpenAdminCuenta?.addEventListener("click", () => {
+    openAdminCuentasByCorreo(modalCorreo?.value || "");
   });
 
   btnCopyClave?.addEventListener("click", () => {
@@ -461,6 +602,11 @@ async function init() {
 
   btnCopyPin?.addEventListener("click", () => {
     copyValue(modalPin?.value || "", "PIN copiado");
+  });
+
+  modalImagenWrapper?.addEventListener("click", () => {
+    if (!modalImagenWrapper.classList.contains("downloadable")) return;
+    triggerImageDownload();
   });
 } catch (err) {
     console.error("revisar reportes error", err);

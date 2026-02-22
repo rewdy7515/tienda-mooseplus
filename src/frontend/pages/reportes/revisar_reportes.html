@@ -94,9 +94,10 @@
         margin-top: 0;
       }
       #modal-imagen-wrapper {
-        width: 260px;
+        width: min(100%, 520px);
         max-width: 100%;
         min-height: 200px;
+        aspect-ratio: var(--report-image-ratio, 4 / 3);
         border-radius: 8px;
         border: 1px solid #e5e7eb;
         overflow: hidden;
@@ -104,6 +105,30 @@
         align-items: center;
         justify-content: center;
         background: #fff;
+      }
+      #modal-imagen-wrapper.downloadable {
+        position: relative;
+        cursor: pointer;
+      }
+      #modal-imagen-wrapper.downloadable::after {
+        content: "Presiona para descargar imagen";
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.52);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      #modal-imagen-wrapper.downloadable:hover::after {
+        opacity: 1;
       }
       #modal-imagen-wrapper.no-image {
         background: #e5e7eb;
@@ -119,9 +144,13 @@
       }
       #modal-imagen-wrapper #modal-imagen {
         width: 100%;
-        max-width: 100%;
-        max-height: 200px;
+        height: 100%;
+        max-width: none;
+        max-height: none;
         object-fit: contain;
+      }
+      #modal-detalle .modal-evidencia {
+        width: 100%;
       }
       #modal-sin-imagen {
         display: none;
@@ -136,8 +165,51 @@
         align-items: center;
         gap: 8px;
       }
+      .correo-actions-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
       .btn-copy-inline {
         white-space: nowrap;
+      }
+      .btn-copy-icon {
+        width: 34px;
+        min-width: 34px;
+        height: 34px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #111;
+        border-color: #111;
+        color: #fff;
+      }
+      .btn-copy-icon:hover,
+      .btn-copy-icon:focus-visible {
+        background: #000;
+        border-color: #000;
+        color: #fff;
+      }
+      .btn-copy-icon .copy-icon {
+        width: 14px;
+        height: 14px;
+        object-fit: contain;
+        filter: brightness(0) invert(1);
+        pointer-events: none;
+      }
+      .btn-admin-inline {
+        min-width: 34px;
+        padding: 6px 8px;
+      }
+      #modal-correo {
+        cursor: pointer;
+      }
+      #modal-plat-title {
+        font-weight: 800;
+      }
+      #modal-plat-title.is-link {
+        cursor: pointer;
       }
     </style>
   </head>
@@ -159,12 +231,31 @@
               <h3 id="modal-plat-title" class="plat-title"></h3>
               <div class="modal-info-grid">
                 <div class="label">Correo:</div>
-                <div class="value copyable-field" id="modal-correo" title="Copiar correo"></div>
+                <div class="value">
+                  <div class="modal-inline-actions">
+                    <input type="text" id="modal-correo" class="form-input input-inline" readonly title="Copiar correo" />
+                    <button
+                      type="button"
+                      class="btn-outline btn-copy-inline btn-admin-inline"
+                      id="btn-open-admin-cuenta"
+                      title="Abrir en Admin Cuentas"
+                      aria-label="Abrir en Admin Cuentas"
+                    >
+                      ↗
+                    </button>
+                  </div>
+                </div>
                 <div class="label">Contraseña:</div>
                 <div class="value">
                   <div class="modal-inline-actions">
                     <input type="text" id="modal-clave" class="form-input input-inline" />
-                    <button type="button" class="btn-outline btn-copy-inline" id="btn-copy-clave">Copiar</button>
+                    <button type="button" class="btn-outline btn-copy-inline btn-copy-icon" id="btn-copy-clave" title="Copiar contraseña" aria-label="Copiar contraseña">
+                      <img
+                        class="copy-icon"
+                        src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png"
+                        alt="Copiar"
+                      />
+                    </button>
                   </div>
                 </div>
                 <div class="label perfil-row">Perfil:</div>
@@ -173,7 +264,13 @@
                 <div class="value perfil-row">
                   <div class="modal-inline-actions">
                     <input type="number" id="modal-pin" class="form-input input-inline" inputmode="numeric" min="0" step="1" />
-                    <button type="button" class="btn-outline btn-copy-inline perfil-row" id="btn-copy-pin">Copiar</button>
+                    <button type="button" class="btn-outline btn-copy-inline btn-copy-icon perfil-row" id="btn-copy-pin" title="Copiar PIN" aria-label="Copiar PIN">
+                      <img
+                        class="copy-icon"
+                        src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png"
+                        alt="Copiar"
+                      />
+                    </button>
                   </div>
                 </div>
                 <div class="label">Motivo:</div>

@@ -55,6 +55,35 @@ const bufferToBase64 = (buffer) => {
   return btoa(binary);
 };
 
+const IMAGE_MIME_BY_EXT = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+};
+
+const getImageMimeFromName = (name = "") => {
+  const match = String(name || "")
+    .trim()
+    .toLowerCase()
+    .match(/\.([a-z0-9]+)$/);
+  const ext = match?.[1] || "";
+  return IMAGE_MIME_BY_EXT[ext] || "";
+};
+
+const normalizeImageUploadType = (type = "", fileName = "") => {
+  const rawType = String(type || "").trim().toLowerCase();
+  const mimeFromName = getImageMimeFromName(fileName);
+  if (rawType === "image/webp" || mimeFromName === "image/webp") return "image/webp";
+  if (rawType.startsWith("image/")) return rawType;
+  if (mimeFromName) return mimeFromName;
+  return "application/octet-stream";
+};
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const isTransientCartBackendError = (status, bodyText = "") => {
@@ -79,7 +108,7 @@ export async function loadCatalog() {
     supabase
       .from("plataformas")
       .select(
-        "id_plataforma, id_categoria, nombre, imagen, banner, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos"
+        "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos"
       )
       .order("nombre"),
     supabase
@@ -420,10 +449,11 @@ export async function uploadPlatformLogos(files = [], options = {}) {
   try {
     const id_usuario = requireSession();
     const folder = String(options?.folder || "").trim();
+    const overwriteByName = !!options?.overwriteByName;
     const payloadFiles = await Promise.all(
       files.map(async (file) => ({
         name: file.name,
-        type: file.type,
+        type: normalizeImageUploadType(file.type, file.name),
         content: bufferToBase64(await file.arrayBuffer()),
       }))
     );
@@ -438,6 +468,7 @@ export async function uploadPlatformLogos(files = [], options = {}) {
         files: payloadFiles,
         id_usuario,
         ...(folder ? { folder } : {}),
+        ...(overwriteByName ? { overwrite_by_name: true } : {}),
       }),
     });
 

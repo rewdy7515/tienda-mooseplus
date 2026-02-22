@@ -166,6 +166,8 @@ main {
   .logo {
     order: 1;
     justify-self: start;
+    width: clamp(108px, 34vw, 138px);
+    height: clamp(20px, 5.4vw, 24px);
   }
   .header .header-user {
     display: contents;
@@ -175,6 +177,35 @@ main {
     margin: 0;
     margin-left: auto;
     gap: 6px;
+    min-width: 0;
+    max-width: calc(100% - 120px);
+  }
+  .header .user-menu {
+    min-width: 0;
+    max-width: 100%;
+    padding-left: 6px;
+    gap: 6px;
+  }
+  .header .avatar {
+    width: clamp(32px, 8.8vw, 38px);
+    height: clamp(32px, 8.8vw, 38px);
+    flex: 0 0 auto;
+  }
+  .header .username {
+    display: block;
+    min-width: 0;
+    max-width: clamp(92px, 35vw, 170px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: clamp(13px, 3.8vw, 16px);
+    line-height: 1.1;
+  }
+  .header #btn-login {
+    font-size: 13px;
+    padding: 6px 10px;
+    line-height: 1;
+    white-space: nowrap;
   }
   .header #btn-admin-header {
     order: 4;
@@ -2146,7 +2177,7 @@ input[type="number"].input-inline {
 }
 .table-base th {
   background: var(--table-header-bg, #2c2f36);
-  color: var(--table-header-color, #fff);
+  color: #fff;
   padding: 5px 10px;
   font-size: 17px;
   font-weight: 800;
@@ -2322,7 +2353,7 @@ input[type="number"].input-inline {
 }
 
 .home-banners {
-  margin: 12px 20px 8px;
+  margin: -1px 0 8px;
 }
 
 .home-banners-viewport {
@@ -2332,7 +2363,7 @@ input[type="number"].input-inline {
   width: 100%;
   aspect-ratio: 1650 / 828;
   margin: 0 auto;
-  border-radius: 14px;
+  border-radius: 0;
   background: #111827;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2);
   touch-action: pan-y;
@@ -2353,6 +2384,7 @@ input[type="number"].input-inline {
 
 .home-banner-card {
   flex: 0 0 100%;
+  position: relative;
   width: 100%;
   height: 100%;
   aspect-ratio: 1650 / 828;
@@ -2363,6 +2395,21 @@ input[type="number"].input-inline {
   padding: 0;
   cursor: pointer;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2);
+}
+
+.home-banner-card::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 20%;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.68) 0%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
 }
 
 .home-banner-card img {
@@ -2395,7 +2442,10 @@ input[type="number"].input-inline {
   height: 8px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.86);
-  transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease,
+    background-color 0.2s ease;
   opacity: 0.8;
 }
 
@@ -2490,6 +2540,7 @@ input[type="number"].input-inline {
 }
 
 .plataforma-thumb {
+  position: relative;
   width: 100%;
   aspect-ratio: 4 / 5;
   background: transparent;
@@ -2500,6 +2551,17 @@ input[type="number"].input-inline {
   justify-content: center;
   overflow: hidden;
   margin-bottom: 8px;
+}
+
+.plataforma-thumb::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0));
+  pointer-events: none;
 }
 
 .plataforma-thumb img {
@@ -2729,7 +2791,15 @@ input[type="number"].input-inline {
 
 @media (max-width: 700px) {
   .home-banners {
-    margin: 10px 12px 8px;
+    margin: -1px 0 8px;
+  }
+
+  .home-banners-viewport {
+    aspect-ratio: 16 / 11;
+  }
+
+  .home-banner-card {
+    aspect-ratio: 16 / 11;
   }
 
   /* Quitar cajas de categorías en móvil */

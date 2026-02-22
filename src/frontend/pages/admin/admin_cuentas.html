@@ -1131,6 +1131,35 @@
           el.style.display = "none";
         }
       };
+      const cleanClienteName = (value) => {
+        const text = (value || "")
+          .toString()
+          .replace(/<[^>]*>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!text) return "";
+        const norm = normalizeText(text);
+        if (norm === "vacio" || norm === "reemplazado" || text === "-") {
+          return "";
+        }
+        return text;
+      };
+      const getClienteNameForReemplazoBtn = (btnRepl) => {
+        if (!btnRepl) return "este usuario";
+        const encoded = (btnRepl.dataset.cliente || "").trim();
+        if (encoded) {
+          try {
+            const decoded = decodeURIComponent(encoded);
+            const cleaned = cleanClienteName(decoded);
+            if (cleaned) return cleaned;
+          } catch (_err) {
+            const cleaned = cleanClienteName(encoded);
+            if (cleaned) return cleaned;
+          }
+        }
+        const selected = cleanClienteName(inputCliente?.value || "");
+        return selected || "este usuario";
+      };
       const findClienteByTerm = async (term) => {
         const txt = (term || "").trim();
         if (!txt) return null;
@@ -1451,6 +1480,18 @@
       let isSuperadmin = false;
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
       const modalMiembroAdd = document.querySelector("#modal-miembro-add");
+      const modalReemplazoConfirm = document.querySelector(
+        "#modal-reemplazo-confirm",
+      );
+      const modalReemplazoConfirmMsg = document.querySelector(
+        "#modal-reemplazo-confirm-msg",
+      );
+      const btnReemplazoConfirmSi = document.querySelector(
+        "#btn-reemplazo-confirm-si",
+      );
+      const btnReemplazoConfirmNo = document.querySelector(
+        "#btn-reemplazo-confirm-no",
+      );
       const modalReemplazarCuenta = document.querySelector(
         "#modal-reemplazar-cuenta",
       );
@@ -1502,6 +1543,7 @@
       let tareasCuentaId = null;
       let reemplazarCuentaTargetId = null;
       let reemplazoRelacionadosContext = null;
+      let pendingReemplazoBtn = null;
 
       (async () => {
         try {
@@ -1582,6 +1624,28 @@
         const displayVal = showBusqueda ? "" : "none";
         if (detalleEl) detalleEl.style.display = showBusqueda ? "block" : "none";
         if (clienteVentasEl) clienteVentasEl.style.display = displayVal;
+      };
+      const isCanvaDetalleActivo = () => {
+        const title = detalleEl?.querySelector(".cuenta-title")?.textContent || "";
+        return title.trim().toLowerCase() === "cuenta canva";
+      };
+      const refreshDetalleConDatosReales = async () => {
+        if (!detalleEl) return;
+        if (isCanvaDetalleActivo()) {
+          await loadCuentaCanva();
+          return;
+        }
+        const cuentaId = Number(currentCuentaDetalle?.id_cuenta || currentCuentaId || 0);
+        if (cuentaId > 0) {
+          await loadCuentaDetalle(cuentaId);
+        }
+      };
+      const safeRefreshDetalleConDatosReales = async () => {
+        try {
+          await refreshDetalleConDatosReales();
+        } catch (err) {
+          console.error("refresh detalle error", err);
+        }
       };
 
       const loadPlataformasSelect = async () => {
@@ -2448,6 +2512,9 @@
           const showPerfil = flags.showPerfil ?? true;
           const showClave = flags.showClave ?? true;
           const perfilHeader = getPerfilHeaderLabel(flags);
+          const clienteSeleccionadoEncoded = encodeURIComponent(
+            cleanClienteName(inputCliente?.value || ""),
+          );
           const trs = rows
             .map((r) => {
               const correo = r.correo || "";
@@ -2483,6 +2550,7 @@
                     data-cuenta="${r.id_cuenta ?? ""}"
                     data-perfil="${r.id_perfil ?? ""}"
                     data-idventa="${r.id_venta ?? ""}"
+                    data-cliente="${clienteSeleccionadoEncoded}"
                   >Reemplazar</button>
                   <button class="btn-copy" data-copy="${encodeURIComponent(
                     buildServiceCopyText({
@@ -2720,18 +2788,7 @@
         }
         const replBtn = e.target.closest(".btn-reemplazar-row");
         if (replBtn) {
-          const cuentaId = replBtn.dataset.cuenta || "";
-          if (
-            cuentaId &&
-            (!currentCuentaDetalle ||
-              String(currentCuentaDetalle.id_cuenta) !== String(cuentaId))
-          ) {
-            loadCuentaDetalle(cuentaId).then(() => {
-              handleReemplazoClick(replBtn);
-            });
-          } else {
-            handleReemplazoClick(replBtn);
-          }
+          openReemplazoConfirmModal(replBtn);
           return;
         }
         const btn = e.target.closest(".btn-copy");
@@ -3130,6 +3187,10 @@
             const ocupadoRaw = p.ocupadoPor || "";
             const ocupadoEmpty =
               !ocupadoRaw || ocupadoRaw === "Vacío" || ocupadoRaw === "-";
+            const clienteNombre = cleanClienteName(
+              p.reemplazado ? "" : ocupadoRaw,
+            );
+            const clienteNombreEncoded = encodeURIComponent(clienteNombre);
             const ocupadoCell = ocupadoEmpty
               ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
               : ocupadoRaw;
@@ -3275,6 +3336,7 @@
                   data-plat="${info.plataformaNombre || ""}"
                   data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
                   data-idventa="${p.id_venta || ""}"
+                  data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
@@ -3338,6 +3400,7 @@
                   data-plat="${info.plataformaNombre || ""}"
                   data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
                   data-idventa="${p.id_venta || ""}"
+                  data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
@@ -3388,6 +3451,7 @@
                 data-plat="${info.plataformaNombre || ""}"
                 data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
                 data-idventa="${p.id_venta || ""}"
+                data-cliente="${clienteNombreEncoded}"
               >Reemplazar</button>
                 <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                 <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
@@ -3697,6 +3761,9 @@
                             idPlataforma: m.id_plataforma ?? info.plataformaId,
                           })
                         : "";
+                      const clienteNombreEncoded = encodeURIComponent(
+                        cleanClienteName(m.ocupado || ""),
+                      );
                       return `
                         <tr>
                           <td><span class="correo-copy" data-clipboard="${m.correo || ""}">${m.correo || "-"}</span></td>
@@ -3719,6 +3786,7 @@
                               data-idventa="${m.id_venta || ""}"
                               data-venta-miembro="${m.venta_miembro ? "true" : "false"}"
                               data-venta-perfil="${m.venta_perfil ? "true" : "false"}"
+                              data-cliente="${clienteNombreEncoded}"
                             >Reemplazar</button>
                             <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
                             ${
@@ -3786,6 +3854,7 @@
                 ?.querySelector(".toggle-text");
               if (labelText)
                 labelText.textContent = checked ? "Inactivada" : "Activa";
+              await safeRefreshDetalleConDatosReales();
             } catch (err) {
               console.error("toggle inactiva error", err);
               e.target.checked = !checked;
@@ -4328,6 +4397,7 @@
             .update({ perfil_hogar: checked })
             .eq("id_perfil", idPerfil);
           if (error) throw error;
+          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("toggle hogar error", err);
           hog.checked = !checked;
@@ -4594,6 +4664,7 @@
             detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
               btn.dataset.corte = newDate;
             });
+            await safeRefreshDetalleConDatosReales();
           } catch (err) {
             console.error("update fecha corte cuenta error", err);
             alert("No se pudo actualizar la fecha.");
@@ -4753,6 +4824,7 @@
               if (editBtn) editBtn.classList.remove("hidden");
               if (cancelBtn) cancelBtn.classList.add("hidden");
               saveEditBtn.classList.add("hidden");
+              await safeRefreshDetalleConDatosReales();
             } catch (err) {
               console.error("update fecha corte error", err);
               alert("No se pudo actualizar la fecha.");
@@ -4797,6 +4869,7 @@
               if (editBtn) editBtn.classList.remove("hidden");
               if (cancelBtn) cancelBtn.classList.add("hidden");
               saveEditBtn.classList.add("hidden");
+              await safeRefreshDetalleConDatosReales();
             } catch (err) {
               console.error("update correo miembro error", err);
               alert("No se pudo actualizar el correo.");
@@ -4850,6 +4923,7 @@
               if (editBtn) editBtn.classList.remove("hidden");
               if (cancelBtn) cancelBtn.classList.add("hidden");
               saveEditBtn.classList.add("hidden");
+              await safeRefreshDetalleConDatosReales();
             } catch (err) {
               console.error("update cliente error", err);
               alert("No se pudo actualizar el cliente.");
@@ -5449,6 +5523,7 @@
             }
             input.classList.remove("show");
             input.classList.add("hidden");
+            await safeRefreshDetalleConDatosReales();
           } catch (err) {
             console.error("update fecha corte error", err);
             alert("No se pudo actualizar la fecha.");
@@ -5477,6 +5552,7 @@
             }
             input.classList.remove("show");
             input.classList.add("hidden");
+            await safeRefreshDetalleConDatosReales();
           } catch (err) {
             console.error("update correo miembro error", err);
             alert("No se pudo actualizar el correo.");
@@ -5570,6 +5646,7 @@
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
           });
+          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("renovar cuenta error", err);
           alert("No se pudo renovar la cuenta.");
@@ -5620,6 +5697,7 @@
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
           });
+          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("recargar cuenta error", err);
           alert("No se pudo recargar la cuenta.");
@@ -5889,15 +5967,55 @@
         if (modalPinTitle) modalPinTitle.textContent = "Cambiar";
       };
 
+      const closeReemplazoConfirmModal = () => {
+        if (!modalReemplazoConfirm) return;
+        modalReemplazoConfirm.classList.add("hidden");
+        modalReemplazoConfirm.setAttribute("aria-hidden", "true");
+        if (modalReemplazoConfirmMsg) modalReemplazoConfirmMsg.textContent = "";
+        pendingReemplazoBtn = null;
+      };
+
+      const openReemplazoConfirmModal = (btnRepl) => {
+        if (!btnRepl || btnRepl.disabled) return;
+        const clienteNombre = getClienteNameForReemplazoBtn(btnRepl);
+        if (!modalReemplazoConfirm) {
+          handleReemplazoClick(btnRepl);
+          return;
+        }
+        pendingReemplazoBtn = btnRepl;
+        if (modalReemplazoConfirmMsg) {
+          modalReemplazoConfirmMsg.textContent =
+            `¿Quieres reemplazar a ${clienteNombre} de cuenta?`;
+        }
+        modalReemplazoConfirm.classList.remove("hidden");
+        modalReemplazoConfirm.setAttribute("aria-hidden", "false");
+      };
+
       const handleReemplazoClick = async (btnRepl) => {
+        if (!btnRepl || btnRepl.disabled) return;
+        const labelInicial = btnRepl.textContent || "Reemplazar";
+        const fromClienteTable = !!btnRepl.closest("#cliente-ventas");
+        const fromDetalleTable = !!btnRepl.closest("#cuenta-detalle");
+        const cuentaDetalleInicial = Number(currentCuentaDetalle?.id_cuenta || 0);
+        btnRepl.disabled = true;
+        btnRepl.classList.add("btn-disabled");
+        btnRepl.textContent = "Reemplazando...";
         try {
+          const cuentaIdFromBtn = btnRepl.dataset.cuenta || "";
+          if (
+            fromClienteTable &&
+            cuentaIdFromBtn &&
+            (!currentCuentaDetalle ||
+              String(currentCuentaDetalle.id_cuenta) !== String(cuentaIdFromBtn))
+          ) {
+            await loadCuentaDetalle(cuentaIdFromBtn);
+          }
           if (!currentCuentaDetalle) {
             alert("No se pudo obtener la cuenta actual.");
             return;
           }
           const plataformaId = currentCuentaDetalle.plataformaId;
-          const cuentaId =
-            btnRepl.dataset.cuenta || currentCuentaDetalle.id_cuenta;
+          const cuentaId = cuentaIdFromBtn || currentCuentaDetalle.id_cuenta;
           const rowPerfil = currentCuentaDetalle.perfiles?.find(
             (p) => String(p.id_perfil) === String(btnRepl.dataset.perfil || ""),
           );
@@ -6099,9 +6217,36 @@
           if (copyBtn) copyBtn.dataset.copy = msgLines;
           if (copyContent) copyContent.textContent = msgLines;
           modalReemplazo.classList.remove("hidden");
+
+          try {
+            if (fromDetalleTable) {
+              const refreshCuentaId = Number(
+                cuentaDetalleInicial || currentCuentaDetalle?.id_cuenta || cuentaId || 0,
+              );
+              if (refreshCuentaId > 0) {
+                await loadCuentaDetalle(refreshCuentaId);
+              }
+            }
+            if (fromClienteTable) {
+              const selectedClienteId = Number(
+                inputCliente?.dataset?.selectedId || 0,
+              );
+              if (selectedClienteId > 0) {
+                await loadVentasByCliente(selectedClienteId);
+              }
+            }
+          } catch (refreshErr) {
+            console.error("refresh reemplazo fila error", refreshErr);
+          }
         } catch (err) {
           console.error("reemplazo admin error", err);
           alert("No se pudo reemplazar.");
+        } finally {
+          if (btnRepl.isConnected) {
+            btnRepl.disabled = false;
+            btnRepl.classList.remove("btn-disabled");
+            btnRepl.textContent = labelInicial;
+          }
         }
       };
 
@@ -6438,7 +6583,7 @@
 
         const btnRepl = e.target.closest(".btn-reemplazar-row");
         if (btnRepl) {
-          await handleReemplazoClick(btnRepl);
+          openReemplazoConfirmModal(btnRepl);
           return;
         }
         const btnCambiarMadre = e.target.closest(".btn-cambiar-madre");
@@ -6492,6 +6637,31 @@
       modalPinClose?.addEventListener("click", closePinModal);
       modalPin?.addEventListener("click", (e) => {
         if (e.target.classList.contains("modal-backdrop")) closePinModal();
+      });
+      modalReemplazoConfirm?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) {
+          closeReemplazoConfirmModal();
+        }
+      });
+      btnReemplazoConfirmNo?.addEventListener(
+        "click",
+        closeReemplazoConfirmModal,
+      );
+      btnReemplazoConfirmSi?.addEventListener("click", async () => {
+        const targetBtn = pendingReemplazoBtn;
+        if (!targetBtn) {
+          closeReemplazoConfirmModal();
+          return;
+        }
+        if (btnReemplazoConfirmSi) btnReemplazoConfirmSi.disabled = true;
+        if (btnReemplazoConfirmNo) btnReemplazoConfirmNo.disabled = true;
+        closeReemplazoConfirmModal();
+        try {
+          await handleReemplazoClick(targetBtn);
+        } finally {
+          if (btnReemplazoConfirmSi) btnReemplazoConfirmSi.disabled = false;
+          if (btnReemplazoConfirmNo) btnReemplazoConfirmNo.disabled = false;
+        }
       });
 
       btnReemplazarCuentaClose?.addEventListener(
@@ -7031,6 +7201,17 @@
               .update({ pin: newPin || null })
               .eq("id_perfil", modalState.targetId);
             if (error) throw error;
+            const pinBtn = detalleEl?.querySelector(
+              `.btn-pin[data-perfil="${modalState.targetId}"]`,
+            );
+            const pinSpan = pinBtn
+              ?.closest(".pin-cell")
+              ?.querySelector(".pin-copy");
+            if (pinSpan) {
+              pinSpan.textContent = newPin || "";
+              pinSpan.dataset.clipboard = newPin || "";
+            }
+            if (pinBtn) pinBtn.dataset.pin = newPin || "";
 
             // Notificar cambio de PIN al usuario de la venta del perfil
             const { data: ventaPerfil, error: ventaErr } = await supabase
@@ -7150,14 +7331,8 @@
               if (notifErr) throw notifErr;
             }
           }
-          if (modalState.type === "clave") {
-            const btn = detalleEl?.querySelector(
-              `.btn-clave[data-cuenta="${modalState.targetId}"]`,
-            );
-            const span = btn?.previousElementSibling;
-            if (span) span.textContent = newPin || "-";
-          }
           closePinModal();
+          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("update pin/clave error", err);
           alert("No se pudo actualizar.");
@@ -7218,6 +7393,21 @@
             >
               Reemplazar
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-reemplazo-confirm" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen" style="max-width: 360px; text-align: center">
+        <div class="modal-body">
+          <p id="modal-reemplazo-confirm-msg" style="margin: 0 0 14px 0; font-weight: 700">
+            ¿Quieres reemplazar este servicio?
+          </p>
+          <div style="display: flex; gap: 10px; justify-content: center">
+            <button type="button" class="btn-primary" id="btn-reemplazo-confirm-si">Sí</button>
+            <button type="button" class="btn-outline" id="btn-reemplazo-confirm-no">No</button>
           </div>
         </div>
       </div>

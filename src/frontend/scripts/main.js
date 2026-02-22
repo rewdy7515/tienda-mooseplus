@@ -16,7 +16,7 @@ import { initCart } from "./cart.js";
 import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
 import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
-import { AVATAR_RANDOM_COLORS, resolveAvatarForDisplay } from "./avatar-fallback.js";
+import { AVATAR_RANDOM_COLORS, applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
 import {
   attachLogout,
   getCachedCart,
@@ -49,6 +49,7 @@ const missingDataBtn = document.querySelector("#missing-data-btn");
 const tasaActualEl = document.querySelector("#tasa-actual");
 const activeOrderWrap = document.querySelector("#active-order-wrap");
 const activeOrderLink = document.querySelector("#active-order-link");
+const pageLoaderLogoEl = document.querySelector(".page-loader__logo");
 const homeBannersWrap = document.querySelector("#home-banners");
 const homeBannersViewport = document.querySelector(".home-banners-viewport");
 const homeBannersTrack = document.querySelector("#home-banners-track");
@@ -64,6 +65,10 @@ const HOME_BANNERS_WHEEL_MIN_DELTA = 28;
 const HOME_BANNERS_WHEEL_AXIS_RATIO = 0.85;
 const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
 const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 190;
+const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
+const PAGINA_TARGET_ID = 2;
+const PAGE_LOADER_LOGO_FALLBACK =
+  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 let homeBannersSliderTimer = null;
 let homeBannersSliderRunId = 0;
 let homeBannersCurrentIndex = 0;
@@ -139,6 +144,28 @@ const normalizeHexColor = (value) => {
   return "";
 };
 
+const applyPageLoaderLogo = (url = "") => {
+  if (!pageLoaderLogoEl) return;
+  const logoUrl = String(url || "").trim() || PAGE_LOADER_LOGO_FALLBACK;
+  pageLoaderLogoEl.style.backgroundImage = `url(${JSON.stringify(logoUrl)})`;
+};
+
+const loadPageLoaderLogo = async () => {
+  try {
+    const { data, error } = await supabase
+      .from("pagina")
+      .select("logo")
+      .eq("id", PAGINA_TARGET_ID)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error(`No existe pagina.id = ${PAGINA_TARGET_ID}`);
+    applyPageLoaderLogo(data?.logo || "");
+  } catch (err) {
+    console.error("page loader logo load error", err);
+    applyPageLoaderLogo("");
+  }
+};
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -196,6 +223,30 @@ const closeAvatarModal = (revert = true) => {
   }
   avatarModalEl.classList.add("hidden");
   document.body.classList.remove("modal-open");
+};
+
+const isAvatarImageUrlValid = async (url, timeoutMs = 2500) => {
+  const candidate = String(url || "").trim();
+  if (!candidate) return false;
+  return await new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      resolve(!!value);
+    };
+    const img = new Image();
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    img.onload = () => {
+      clearTimeout(timer);
+      finish(true);
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      finish(false);
+    };
+    img.src = candidate;
+  });
 };
 
 const openAvatarModal = () => {
@@ -307,7 +358,7 @@ const saveAvatarModalProfile = async () => {
       AVATAR_MODAL_DEFAULT_COLOR;
 
     document.querySelectorAll(".avatar").forEach((img) => {
-      if (avatarModalSavedUrl) img.src = avatarModalSavedUrl;
+      applyAvatarImage(img, avatarModalSavedUrl);
       img.style.backgroundColor = avatarModalSavedColor;
     });
     await applyLoaderAvatar(
@@ -335,7 +386,8 @@ const maybePromptAvatarProfileSetup = async (currentUser) => {
 
   const foto = String(currentUser?.foto_perfil || "").trim();
   const fondo = normalizeHexColor(currentUser?.fondo_perfil);
-  if (foto && fondo) return;
+  const fotoValida = await isAvatarImageUrlValid(foto);
+  if (fotoValida) return;
 
   avatarModalWasPrompted = true;
   avatarModalUserId = userId;
@@ -343,7 +395,7 @@ const maybePromptAvatarProfileSetup = async (currentUser) => {
     user: currentUser || null,
     idUsuario: userId,
   });
-  avatarModalSavedUrl = foto || String(fallbackAvatar?.url || "").trim();
+  avatarModalSavedUrl = String(fallbackAvatar?.url || "").trim();
   avatarModalSavedColor =
     fondo || normalizeHexColor(fallbackAvatar?.color) || AVATAR_MODAL_DEFAULT_COLOR;
 
@@ -386,18 +438,31 @@ const applyLoaderAvatar = async (user = null, idUsuario = null) => {
 
   const hasSession = Number(idUsuario || user?.id_usuario) > 0;
   const fotoPerfil = String(user?.foto_perfil || "").trim();
-  const shouldShow = hasSession && !!fotoPerfil;
-  if (loaderAvatarLayerEl) {
-    loaderAvatarLayerEl.classList.toggle("hidden", !shouldShow);
+  if (!hasSession || !fotoPerfil) {
+    if (loaderAvatarLayerEl) loaderAvatarLayerEl.classList.add("hidden");
+    if (loaderAvatarEl) applyAvatarImage(loaderAvatarEl, "");
+    if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = "";
+    return;
   }
-  if (!shouldShow) return;
+
+  const fotoValida = await isAvatarImageUrlValid(fotoPerfil);
+  if (!fotoValida) {
+    if (loaderAvatarLayerEl) loaderAvatarLayerEl.classList.add("hidden");
+    if (loaderAvatarEl) applyAvatarImage(loaderAvatarEl, "");
+    if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = "";
+    return;
+  }
+
+  if (loaderAvatarLayerEl) {
+    loaderAvatarLayerEl.classList.remove("hidden");
+  }
 
   const fallbackAvatar = await resolveAvatarForDisplay({ user, idUsuario });
   const bgColor =
     normalizeHexColor(user?.fondo_perfil) ||
     normalizeHexColor(fallbackAvatar?.color) ||
     AVATAR_MODAL_DEFAULT_COLOR;
-  if (loaderAvatarEl) loaderAvatarEl.src = fotoPerfil;
+  if (loaderAvatarEl) applyAvatarImage(loaderAvatarEl, fotoPerfil);
   if (loaderAvatarBgEl) loaderAvatarBgEl.style.backgroundColor = bgColor;
 };
 
@@ -425,9 +490,41 @@ const formatToDDMMYYYY = (value) => {
 };
 
 const normalizeBannerRedirect = (value = "") => {
-  const raw = String(value || "").trim();
+  let raw = String(value || "").trim();
   if (!raw) return "";
-  if (/^(https?:\/\/|mailto:|tel:)/i.test(raw)) return raw;
+
+  // Los banners del admin guardan rutas con este prefijo interno.
+  // En producción las páginas cuelgan del root (ej. /checkout.html).
+  const toRootRoute = (pathLike = "") => {
+    const txt = String(pathLike || "").trim();
+    if (txt.startsWith(HOME_BANNER_ROUTE_PREFIX)) {
+      return `/${txt.slice(HOME_BANNER_ROUTE_PREFIX.length)}`;
+    }
+    if (txt.startsWith("src/frontend/pages/")) {
+      return `/${txt.slice("src/frontend/pages/".length)}`;
+    }
+    return txt;
+  };
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      const mappedPath = toRootRoute(parsed.pathname || "");
+      if (
+        mappedPath !== parsed.pathname &&
+        typeof window !== "undefined" &&
+        parsed.origin === window.location.origin
+      ) {
+        return `${mappedPath}${parsed.search || ""}${parsed.hash || ""}`;
+      }
+      return raw;
+    } catch (_err) {
+      return raw;
+    }
+  }
+  if (/^(mailto:|tel:)/i.test(raw)) return raw;
+
+  raw = toRootRoute(raw);
   if (raw.startsWith("/")) return raw;
   if (raw.startsWith("./") || raw.startsWith("../")) {
     try {
@@ -436,7 +533,22 @@ const normalizeBannerRedirect = (value = "") => {
       return raw;
     }
   }
-  if (!/\s/.test(raw) && raw.includes(".")) return `https://${raw}`;
+
+  const pathPart = raw.split(/[?#]/, 1)[0] || raw;
+
+  // Si parece ruta local (ej: "checkout.html", "admin/ordenes.html"), mantenerla como ruta del sitio.
+  const localPathLike =
+    pathPart.includes("/") ||
+    pathPart.endsWith(".html") ||
+    pathPart.endsWith(".htm") ||
+    pathPart.endsWith(".php") ||
+    pathPart.startsWith("index");
+  if (localPathLike) return `/${raw.replace(/^\/+/, "")}`;
+
+  // Solo tratar como dominio externo si tiene formato de host real.
+  const looksLikeDomain = /^[a-z0-9.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(raw);
+  if (!/\s/.test(raw) && looksLikeDomain) return `https://${raw}`;
+
   return raw;
 };
 
@@ -747,18 +859,26 @@ const syncHomeBannersViewportSize = () => {
 
 const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []) => {
   if (!homeBannersWrap || !homeBannersTrack || !homeBannersViewport) return;
+  const useMobileBannerImage =
+    typeof window !== "undefined" && window.matchMedia?.("(max-width: 700px)")?.matches;
 
   const source = Array.isArray(plataformas) ? plataformas : [];
   const customRows = Array.isArray(customBanners)
     ? customBanners
-        .filter((row) => row?.image_url)
-        .map((row) => ({
-          id: Number(row?.id_banner) || 0,
-          nombre: "Banner",
-          image: String(row?.image_url || "").trim(),
-          redirect: String(row?.redirect_url || "").trim(),
-          sourceType: "custom",
-        }))
+        .map((row) => {
+          const desktopImage = String(row?.image_url || "").trim();
+          const mobileImage = String(row?.image_url_mobile || "").trim();
+          const pickedImage = String(
+            useMobileBannerImage ? mobileImage || desktopImage : desktopImage || mobileImage,
+          ).trim();
+          return {
+            id: Number(row?.id_banner) || 0,
+            nombre: String(row?.title || "Banner"),
+            image: pickedImage,
+            redirect: String(row?.redirect_url || "").trim(),
+            sourceType: "custom",
+          };
+        })
         .filter((row) => !!row.image)
     : [];
 
@@ -836,8 +956,7 @@ const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []
     card.addEventListener("click", () => {
       if (Date.now() < homeBannersSuppressClickUntil) return;
       const redirectRaw = String(card.dataset.redirectUrl || "").trim();
-      const sourceType = String(card.dataset.sourceType || "").trim();
-      if (sourceType === "custom" && redirectRaw) {
+      if (redirectRaw) {
         if (navigateBannerRedirect(redirectRaw)) {
           return;
         }
@@ -1265,6 +1384,7 @@ const loadPendingReminderNoPhoneClients = async ({ isSuperadmin = false } = {}) 
 async function init() {
   setEstado("Cargando categorias y plataformas...");
   initModal(modalEls);
+  await loadPageLoaderLogo();
   await applyLoaderAvatar(null, requireSession());
 
   try {
@@ -1386,10 +1506,16 @@ async function init() {
     }, {});
     Object.keys(plataformasPorCategoria).forEach((catId) => {
       plataformasPorCategoria[catId].sort((a, b) => {
+        const pa = Number(a?.posicion);
+        const pb = Number(b?.posicion);
+        const hasPa = Number.isFinite(pa) && pa > 0;
+        const hasPb = Number.isFinite(pb) && pb > 0;
+        if (hasPa && hasPb && pa !== pb) return pa - pb;
+        if (hasPa !== hasPb) return hasPa ? -1 : 1;
         const ia = Number(a.id_plataforma);
         const ib = Number(b.id_plataforma);
         if (Number.isFinite(ia) && Number.isFinite(ib)) return ia - ib;
-        return 0;
+        return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es");
       });
     });
 

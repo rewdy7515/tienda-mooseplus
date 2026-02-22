@@ -1,5 +1,6 @@
 import { supabase, startSession, fetchCart } from "./api.js";
 import { setSessionUserId, setCachedCart, setSessionRoles, attachLogoHome } from "./session.js";
+import { loadPaginaBranding } from "./branding.js";
 
 const form = document.querySelector(".auth-form");
 const emailInput = document.getElementById("login-user");
@@ -168,6 +169,9 @@ function init() {
     form.addEventListener("submit", handleLogin);
   }
   attachLogoHome();
+  loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
+    console.warn("login branding load error", err);
+  });
 }
 
 init();

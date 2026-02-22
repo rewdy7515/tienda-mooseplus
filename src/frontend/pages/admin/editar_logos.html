@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Editar logos</title>
+    <link rel="icon" href="data:," />
+    <link rel="shortcut icon" href="data:," />
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
       main.categorias-dinamicas {
@@ -58,6 +60,72 @@
         display: flex;
         flex-direction: column;
         gap: 10px;
+        position: relative;
+      }
+      .logo-current.is-import-target::after {
+        content: "Suelta para importar";
+        position: absolute;
+        inset: 0;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.58);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 4;
+        pointer-events: none;
+      }
+      .logo-current.is-busy::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 5;
+        pointer-events: none;
+      }
+      .store-assets-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .store-asset-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #f8fafc;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .store-asset-title {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .store-asset-card input[type="file"] {
+        padding: 0;
+      }
+      .store-asset-card .btn-primary {
+        width: 100%;
+      }
+      .store-asset-card .btn-outline {
+        width: 100%;
       }
       .logo-frame {
         width: 100%;
@@ -69,6 +137,39 @@
         justify-content: center;
         overflow: hidden;
         background: #fafafa;
+        position: relative;
+      }
+      .logo-frame.is-drop-target::after {
+        content: "Suelta para reemplazar";
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.54);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 3;
+      }
+      .logo-frame.is-busy::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 4;
       }
       .banner-frame {
         width: 100%;
@@ -81,6 +182,7 @@
         justify-content: center;
         overflow: hidden;
         background: #fafafa;
+        position: relative;
       }
       .logo-frame img {
         max-width: 100%;
@@ -104,6 +206,65 @@
         flex-direction: column;
         gap: 12px;
       }
+      #home-banners-editor .logo-upload {
+        flex: 0 1 260px;
+        max-width: 300px;
+      }
+      .banner-upload-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+        gap: 12px;
+        align-items: start;
+      }
+      .banner-upload-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .banner-upload-preview-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #f8fafc;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+      .banner-upload-preview-name {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 700;
+        color: #111827;
+        word-break: break-word;
+      }
+      .banner-inline-frame {
+        position: relative;
+      }
+      .banner-inline-frame img {
+        display: none;
+      }
+      .banner-inline-frame.has-image img {
+        display: block;
+      }
+      .banner-inline-frame:not(.has-image) .asset-ext-badge {
+        display: none;
+      }
+      .banner-inline-empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: #64748b;
+        padding: 8px;
+      }
+      .banner-inline-frame.has-image .banner-inline-empty {
+        display: none;
+      }
       .logo-label {
         font-weight: 700;
         margin: 0;
@@ -122,6 +283,200 @@
       .logo-status {
         margin: 0;
       }
+      .platform-logos-list {
+        width: 100%;
+        max-height: 420px;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding-right: 4px;
+      }
+      .platform-logo-row {
+        display: grid;
+        grid-template-columns: 74px 34px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 8px;
+        background: #fff;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background-color 0.15s ease;
+        position: relative;
+      }
+      .platform-logo-row:hover {
+        border-color: #94a3b8;
+        background: #f8fafc;
+      }
+      .platform-logo-row.is-selected {
+        border-color: #0f172a;
+        background: #e2e8f0;
+      }
+      .platform-logo-row.is-dragging {
+        opacity: 0.68;
+      }
+      .platform-logo-row.is-drop-target::after {
+        content: "Suelta para reemplazar";
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.54);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+      .platform-logo-row.is-busy::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 3;
+      }
+      .platform-logo-thumb {
+        width: 74px;
+        height: 74px;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+      .platform-logo-thumb::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 20%;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0));
+        pointer-events: none;
+        z-index: 1;
+      }
+      .platform-logo-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+      .platform-logo-card-row {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+      }
+      .platform-logo-main {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .platform-logo-card-row .platform-logo-drag-col {
+        justify-content: center;
+        align-items: flex-start;
+      }
+      .platform-logo-card-row .platform-logo-thumb {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 4 / 5;
+      }
+      .platform-logo-drag-col {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .platform-logo-drag-handle {
+        width: 24px;
+        height: 24px;
+      }
+      .platform-logo-name {
+        margin: 0;
+        font-size: 14px;
+        color: #111827;
+        word-break: break-word;
+      }
+      .platform-logo-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-width: 0;
+      }
+      .platform-banner-row {
+        grid-template-columns: 110px minmax(0, 1fr);
+      }
+      .platform-banner-thumb {
+        width: 110px;
+        height: 62px;
+      }
+      .platform-banner-thumb img {
+        object-fit: cover;
+      }
+      .platform-logo-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .platform-group-title {
+        margin: 2px 2px 0;
+        font-size: 13px;
+        font-weight: 800;
+        color: #1f2937;
+        letter-spacing: 0.2px;
+      }
+      .platform-group-items {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 10px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 2px;
+      }
+      .platform-group-items .platform-logo-row {
+        flex: 0 0 170px;
+      }
+      .asset-ext-badge {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        z-index: 2;
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.2;
+        letter-spacing: 0.2px;
+        text-transform: lowercase;
+        pointer-events: none;
+        border: 1px solid transparent;
+      }
+      .asset-ext-badge.is-webp {
+        background: #bbf7d0;
+        border-color: #86efac;
+        color: #166534;
+      }
+      .asset-ext-badge.is-other {
+        background: #fecaca;
+        border-color: #fca5a5;
+        color: #991b1b;
+      }
       .preview-section {
         margin-top: 10px;
       }
@@ -136,12 +491,65 @@
         max-height: 360px;
         overflow: auto;
         padding-right: 4px;
+        position: relative;
+      }
+      .iconos-gallery.is-busy::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 4;
       }
       .icono-item {
         margin: 0;
         display: flex;
         flex-direction: column;
         gap: 6px;
+        position: relative;
+      }
+      .icono-item.is-drop-target::after {
+        content: "Suelta para reemplazar";
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.58);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 4;
+      }
+      .icono-item.is-busy::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 5;
       }
       .icono-item img {
         width: 100%;
@@ -150,6 +558,9 @@
         border-radius: 10px;
         border: 1px solid #e5e7eb;
         background: #f9fafb;
+      }
+      .icono-thumb {
+        position: relative;
       }
       .icono-item figcaption {
         font-size: 11px;
@@ -169,16 +580,60 @@
         flex-direction: column;
         gap: 10px;
         padding-right: 4px;
+        position: relative;
+      }
+      .home-banners-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .home-banners-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .home-banners-group .logo-label {
+        font-size: 13px;
+      }
+      .home-banners-list.is-busy::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        z-index: 4;
       }
       .home-banner-item {
         display: grid;
-        grid-template-columns: 34px 52px minmax(150px, 210px) minmax(0, 1fr);
+        grid-template-columns: 34px 52px minmax(180px, 240px) minmax(0, 1fr);
         gap: 10px;
         align-items: center;
         border: 1px solid #e5e7eb;
         border-radius: 12px;
         padding: 10px;
         background: #fff;
+      }
+      .home-banner-media-col {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .home-banner-title {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 700;
+        color: #111827;
+        overflow-wrap: anywhere;
       }
       .home-banner-item.is-dragging {
         opacity: 0.65;
@@ -280,11 +735,52 @@
         text-align: center;
         padding: 8px;
       }
+      .home-banner-item.is-busy .home-banner-thumb::after {
+        content: attr(data-busy-label);
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        text-align: center;
+        padding: 8px;
+        z-index: 4;
+      }
       .home-banner-meta {
         display: flex;
         flex-direction: column;
         gap: 6px;
         min-width: 0;
+      }
+      .home-banner-mobile-item {
+        display: block;
+        padding: 8px;
+      }
+      #home-banners-mobile-list {
+        gap: 8px;
+      }
+      .home-banner-mobile-item .home-banner-media-col {
+        max-width: 190px;
+      }
+      .home-banner-mobile-item .home-banner-title {
+        font-size: 12px;
+      }
+      .home-banner-mobile-item .home-banner-thumb {
+        width: 100%;
+        min-height: 72px;
+        aspect-ratio: 16 / 7;
+      }
+      .home-banner-mobile-empty {
+        margin: 0;
+        font-size: 11px;
+        color: #6b7280;
+        text-align: center;
+        padding: 4px;
       }
       .home-banner-meta-label {
         font-size: 12px;
@@ -334,8 +830,14 @@
         .logo-editor {
           flex-direction: column;
         }
+        .store-assets-grid {
+          grid-template-columns: 1fr;
+        }
         .logo-upload {
           max-width: none;
+        }
+        .banner-upload-layout {
+          grid-template-columns: 1fr;
         }
         .home-banner-item {
           grid-template-columns: 1fr;
@@ -348,6 +850,9 @@
           grid-template-columns: 1fr;
           gap: 4px;
         }
+        .platform-group-items .platform-logo-row {
+          flex-basis: 150px;
+        }
       }
     </style>
   </head>
@@ -358,76 +863,104 @@
     <main class="categorias-dinamicas">
       <h2>Editar logos</h2>
       <div class="logos-wrapper">
-        <div class="logos-field">
-          <label for="logo-plataforma"><strong>Plataforma</strong></label>
-          <select id="logo-plataforma">
-            <option value="">Seleccione una plataforma</option>
-          </select>
-        </div>
-
-        <div id="logo-editor" class="logo-editor hidden">
-          <div class="logo-current" id="logo-current">
-            <p class="logo-label">Logo actual</p>
-            <div class="logo-frame">
-              <img id="logo-preview" src="" alt="Logo actual" />
+        <div class="preview-section">
+          <button type="button" class="btn-outline preview-toggle" id="btn-platform-logos-toggle">
+            Logos de plataformas
+          </button>
+          <div id="logo-editor" class="logo-editor hidden">
+            <div class="logo-current" id="platform-logos-current">
+              <p class="logo-label">Logos actuales: public_assets/logos/plataformas/tarjeta</p>
+              <p class="status logo-status">
+                Arrastra y suelta una imagen sobre la plataforma para reemplazarla. Suelta carpeta o múltiples imágenes aquí para importar.
+              </p>
+              <div id="platform-logos-list" class="platform-logos-list">
+                <p class="status icono-empty">Sin plataformas cargadas.</p>
+              </div>
+              <p id="platform-selected-status" class="status logo-status">
+                Plataforma: -
+              </p>
+              <p id="logo-status" class="status logo-status"></p>
             </div>
-          </div>
-          <div class="logo-upload">
-            <p class="logo-label">Nuevo logo</p>
-            <input type="file" id="logo-file" accept="image/*" />
-            <button type="button" class="btn-primary" id="btn-logo-update">
-              Actualizar logo
-            </button>
-            <p id="logo-status" class="status logo-status"></p>
-          </div>
-        </div>
-
-        <div id="banner-editor" class="logo-editor hidden">
-          <div class="logo-current banner-current" id="banner-current">
-            <p class="logo-label">Banner actual</p>
-            <div class="banner-frame">
-              <img id="banner-preview" src="" alt="Banner actual" />
-            </div>
-          </div>
-          <div class="logo-upload">
-            <p class="logo-label">Nuevo banner</p>
-            <input type="file" id="banner-file" accept="image/*" />
-            <button type="button" class="btn-primary" id="btn-banner-update">
-              Actualizar banner
-            </button>
-            <p id="banner-status" class="status logo-status"></p>
           </div>
         </div>
 
         <div class="preview-section">
-          <button type="button" class="btn-outline preview-toggle" id="btn-preview-toggle">
-            Editar preview
+          <button type="button" class="btn-outline preview-toggle" id="btn-store-logo-toggle">
+            Logo tienda
           </button>
-          <div id="preview-editor" class="logo-editor hidden">
-            <div class="logo-current preview-current" id="preview-current">
-              <p class="logo-label">Preview actual</p>
-              <div class="banner-frame">
-                <img id="preview-image" src="" alt="Preview actual" />
+          <div id="store-logo-editor" class="logo-editor hidden">
+            <div class="logo-current">
+              <p class="logo-label">Archivos de tienda: <code>public_assets/logos/mooseplus</code></p>
+              <div class="store-assets-grid">
+                <article class="store-asset-card">
+                  <p class="store-asset-title">Logo (<code>pagina.logo</code>)</p>
+                  <div class="logo-frame" id="store-logo-frame">
+                    <img id="store-logo-preview" src="" alt="Logo tienda actual" />
+                    <span class="asset-ext-badge is-other hidden" id="store-logo-badge"></span>
+                  </div>
+                  <input type="file" id="store-logo-input" accept="image/*" />
+                  <button type="button" class="btn-primary" id="btn-store-logo-upload">
+                    Guardar logo
+                  </button>
+                </article>
+                <article class="store-asset-card">
+                  <p class="store-asset-title">Icono pestaña (<code>pagina.icono_pestana</code>)</p>
+                  <div class="logo-frame" id="store-icon-frame">
+                    <img id="store-icon-preview" src="" alt="Icono pestaña actual" />
+                    <span class="asset-ext-badge is-other hidden" id="store-icon-badge"></span>
+                  </div>
+                  <input type="file" id="store-icon-input" accept="image/*" />
+                  <button type="button" class="btn-primary" id="btn-store-icon-upload">
+                    Guardar icono
+                  </button>
+                  <button type="button" class="btn-outline" id="btn-store-icon-refresh">
+                    Refrescar favicon
+                  </button>
+                </article>
+                <article class="store-asset-card">
+                  <p class="store-asset-title">Preview (<code>pagina.preview</code>)</p>
+                  <div class="logo-frame" id="store-preview-frame">
+                    <img id="store-preview-preview" src="" alt="Preview actual" />
+                    <span class="asset-ext-badge is-other hidden" id="store-preview-badge"></span>
+                  </div>
+                  <input type="file" id="store-preview-input" accept="image/*" />
+                  <button type="button" class="btn-primary" id="btn-store-preview-upload">
+                    Guardar preview
+                  </button>
+                </article>
               </div>
+              <p class="status logo-status">
+                Puedes arrastrar y soltar una imagen en cada cuadro o usar su input.
+              </p>
+              <p id="store-logo-status" class="status logo-status"></p>
             </div>
-            <div class="logo-upload">
-              <p class="logo-label">Nuevo preview</p>
-              <input type="file" id="preview-file" accept="image/*" />
-              <button type="button" class="btn-primary" id="btn-preview-update">
-                Subir preview
-              </button>
-              <p id="preview-status" class="status logo-status"></p>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <button type="button" class="btn-outline preview-toggle" id="btn-platform-banners-toggle">
+            Banners de plataformas
+          </button>
+          <div id="banner-editor" class="logo-editor hidden">
+            <div class="logo-current banner-current" id="banner-current">
+              <p class="logo-label">Banners actuales: public_assets/logos/plataformas/banner</p>
+              <p class="logo-label">Plataformas</p>
+              <div id="platform-banners-list" class="platform-logos-list">
+                <p class="status icono-empty">Sin plataformas cargadas.</p>
+              </div>
+              <p id="banner-selected-status" class="status logo-status">Plataforma: -</p>
+              <p id="banner-status" class="status logo-status"></p>
             </div>
           </div>
         </div>
 
         <div class="preview-section">
           <button type="button" class="btn-outline preview-toggle" id="btn-iconos-toggle">
-            Editar iconos
+            Iconos de perfil
           </button>
           <div id="iconos-editor" class="logo-editor hidden">
             <div class="logo-upload">
-              <p class="logo-label">Importar iconos (carpeta o múltiples)</p>
+              <p class="logo-label">Importar iconos de perfil (carpeta o múltiples)</p>
               <input
                 type="file"
                 id="iconos-files"
@@ -452,12 +985,18 @@
 
         <div class="preview-section">
           <button type="button" class="btn-outline preview-toggle" id="btn-home-banners-toggle">
-            Añadir banners
+            Banners
           </button>
           <div id="home-banners-editor" class="logo-editor hidden">
             <div class="logo-upload">
-              <p class="logo-label">Nuevo banner</p>
+              <p class="logo-label">Nuevo banner (public_assets/banners-index)</p>
               <input type="file" id="home-banner-file" accept="image/*" />
+              <input
+                type="text"
+                id="home-banner-title"
+                class="form-input"
+                placeholder="Título del banner"
+              />
               <input
                 type="text"
                 id="home-banner-redirect"
@@ -473,9 +1012,20 @@
               <p id="home-banners-status" class="status logo-status"></p>
             </div>
             <div class="logo-current">
-              <p class="logo-label">Banners actuales y dirección</p>
-              <div id="home-banners-list" class="home-banners-list">
-                <p class="status icono-empty">Sin banners cargados.</p>
+              <p class="logo-label">Banners actuales (public_assets/banners-index)</p>
+              <div class="home-banners-groups">
+                <section class="home-banners-group">
+                  <p class="logo-label">banner.imagen</p>
+                  <div id="home-banners-list" class="home-banners-list">
+                    <p class="status icono-empty">Sin banners cargados.</p>
+                  </div>
+                </section>
+                <section class="home-banners-group">
+                  <p class="logo-label">banner.imagen_movil</p>
+                  <div id="home-banners-mobile-list" class="home-banners-list">
+                    <p class="status icono-empty">Sin banners móviles cargados.</p>
+                  </div>
+                </section>
               </div>
             </div>
           </div>
@@ -508,25 +1058,53 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
-      const selectPlataforma = document.querySelector("#logo-plataforma");
+      const platformLogosToggleBtn = document.querySelector("#btn-platform-logos-toggle");
+      const platformBannersToggleBtn = document.querySelector("#btn-platform-banners-toggle");
+      const storeLogoToggleBtn = document.querySelector("#btn-store-logo-toggle");
       const editor = document.querySelector("#logo-editor");
+      const platformLogosCurrentEl = document.querySelector("#platform-logos-current");
       const bannerEditor = document.querySelector("#banner-editor");
-      const currentWrap = document.querySelector("#logo-current");
-      const previewImg = document.querySelector("#logo-preview");
+      const storeLogoEditor = document.querySelector("#store-logo-editor");
+      const platformLogosListEl = document.querySelector("#platform-logos-list");
+      const platformSelectedStatusEl = document.querySelector("#platform-selected-status");
       const fileInput = document.querySelector("#logo-file");
       const btnUpdate = document.querySelector("#btn-logo-update");
       const statusEl = document.querySelector("#logo-status");
+      const storeLogoInput = document.querySelector("#store-logo-input");
+      const btnStoreLogoUpdate = document.querySelector("#btn-store-logo-upload");
+      const storeIconInput = document.querySelector("#store-icon-input");
+      const btnStoreIconUpdate = document.querySelector("#btn-store-icon-upload");
+      const btnStoreIconRefresh = document.querySelector("#btn-store-icon-refresh");
+      const storePreviewInput = document.querySelector("#store-preview-input");
+      const btnStorePreviewUpdate = document.querySelector("#btn-store-preview-upload");
+      const storeLogoStatusEl = document.querySelector("#store-logo-status");
+      const storeLogoFrameEl = document.querySelector("#store-logo-frame");
+      const storeLogoPreviewEl = document.querySelector("#store-logo-preview");
+      const storeLogoBadgeEl = document.querySelector("#store-logo-badge");
+      const storeIconFrameEl = document.querySelector("#store-icon-frame");
+      const storeIconPreviewEl = document.querySelector("#store-icon-preview");
+      const storeIconBadgeEl = document.querySelector("#store-icon-badge");
+      const storePreviewFrameEl = document.querySelector("#store-preview-frame");
+      const storePreviewPreviewEl = document.querySelector("#store-preview-preview");
+      const storePreviewBadgeEl = document.querySelector("#store-preview-badge");
       const bannerCurrentWrap = document.querySelector("#banner-current");
       const bannerPreview = document.querySelector("#banner-preview");
+      const platformBannersListEl = document.querySelector("#platform-banners-list");
+      const bannerSelectedStatusEl = document.querySelector("#banner-selected-status");
       const bannerInput = document.querySelector("#banner-file");
       const btnBannerUpdate = document.querySelector("#btn-banner-update");
+      const bannerInlineFrame = document.querySelector("#banner-inline-frame");
+      const bannerInlinePreview = document.querySelector("#banner-inline-preview");
+      const bannerInlineBadge = document.querySelector("#banner-inline-badge");
+      const bannerInlinePlatformNameEl = document.querySelector("#banner-inline-platform-name");
+      const bannerPreviewBadge = document.querySelector("#banner-preview-badge");
+      const bannerTargetStatusEl = document.querySelector("#banner-target-status");
       const bannerStatusEl = document.querySelector("#banner-status");
       const previewToggleBtn = document.querySelector("#btn-preview-toggle");
       const previewEditor = document.querySelector("#preview-editor");
       const previewCurrentWrap = document.querySelector("#preview-current");
       const previewPageImg = document.querySelector("#preview-image");
-      const previewInput = document.querySelector("#preview-file");
-      const btnPreviewUpdate = document.querySelector("#btn-preview-update");
+      const previewImageBadge = document.querySelector("#preview-image-badge");
       const previewStatusEl = document.querySelector("#preview-status");
       const iconosToggleBtn = document.querySelector("#btn-iconos-toggle");
       const iconosEditor = document.querySelector("#iconos-editor");
@@ -537,24 +1115,42 @@
       const homeBannersToggleBtn = document.querySelector("#btn-home-banners-toggle");
       const homeBannersEditor = document.querySelector("#home-banners-editor");
       const homeBannerFileInput = document.querySelector("#home-banner-file");
+      const homeBannerTitleInput = document.querySelector("#home-banner-title");
       const homeBannerRedirectInput = document.querySelector("#home-banner-redirect");
       const homeBannerRedirectPreview = document.querySelector("#home-banner-redirect-preview");
       const btnHomeBannerAdd = document.querySelector("#btn-home-banner-add");
       const homeBannersStatusEl = document.querySelector("#home-banners-status");
       const homeBannersListEl = document.querySelector("#home-banners-list");
+      const homeBannersMobileListEl = document.querySelector("#home-banners-mobile-list");
       const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
+      const PLATFORM_CARD_LOGOS_FOLDER = "logos/plataformas/tarjeta";
+      const PLATFORM_MODAL_BANNERS_FOLDER = "logos/plataformas/banner";
+      const STORE_LOGO_FOLDER = "logos/mooseplus";
+      const PAGINA_TARGET_ID = 2;
 
       let plataformasMap = {};
       let selectedId = null;
       let paginaPreview = null;
       let draggingHomeBannerRow = null;
       let homeBannerOrderSaving = false;
+      let isPlatformBannersEditorOpen = false;
+      let draggingPlatformLogoRow = null;
+      let draggingPlatformLogoGroup = null;
+      let platformLogoOrderSaving = false;
+      let platformLogoOrderDirty = false;
+      let platformLogosImporting = false;
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
         statusEl.textContent = msg || "";
         statusEl.classList.toggle("is-error", isError);
         statusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+      const setStoreLogoStatus = (msg, isError = false) => {
+        if (!storeLogoStatusEl) return;
+        storeLogoStatusEl.textContent = msg || "";
+        storeLogoStatusEl.classList.toggle("is-error", isError);
+        storeLogoStatusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
       const setBannerStatus = (msg, isError = false) => {
@@ -598,6 +1194,75 @@
         if (String(file.type || "").startsWith("image/")) return true;
         return /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(file.name || ""));
       };
+      const isWebpFile = (file) =>
+        String(file?.type || "").toLowerCase() === "image/webp" ||
+        /\.webp$/i.test(String(file?.name || ""));
+
+      const normalizeNameKey = (value = "") =>
+        String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/\.[^.]+$/, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      const getImageExtensionFromUrl = (value = "") => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const fromPathname = (pathname = "") => {
+          const clean = String(pathname || "").split("/").pop() || "";
+          let decoded = clean;
+          try {
+            decoded = decodeURIComponent(clean);
+          } catch (_err) {
+            decoded = clean;
+          }
+          const match = decoded.match(/\.([a-z0-9]+)$/i);
+          return match?.[1] ? String(match[1]).toLowerCase() : "";
+        };
+        try {
+          const parsed = new URL(raw, window.location.origin);
+          return fromPathname(parsed.pathname || "");
+        } catch (_err) {
+          const noQuery = raw.split(/[?#]/)[0] || "";
+          return fromPathname(noQuery);
+        }
+      };
+      const extensionFromMimeType = (mime = "", fallback = "jpg") => {
+        const normalized = String(mime || "").trim().toLowerCase();
+        if (normalized === "image/webp") return "webp";
+        if (normalized === "image/jpeg") return "jpg";
+        if (normalized === "image/png") return "png";
+        if (normalized === "image/gif") return "gif";
+        if (normalized === "image/bmp") return "bmp";
+        if (normalized === "image/avif") return "avif";
+        if (normalized === "image/svg+xml") return "svg";
+        return fallback;
+      };
+      const getExtensionMeta = (value = "") => {
+        const ext = getImageExtensionFromUrl(value);
+        const normalized = ext ? `.${ext}` : ".?";
+        const badgeClass = ext === "webp" ? "is-webp" : "is-other";
+        return { label: normalized, badgeClass };
+      };
+      const getExtensionBadgeHtml = (value = "") => {
+        const meta = getExtensionMeta(value);
+        return `<span class="asset-ext-badge ${meta.badgeClass}">${escapeHtml(meta.label)}</span>`;
+      };
+      const setExtensionBadge = (el, value = "") => {
+        if (!el) return;
+        const raw = String(value || "").trim();
+        if (!raw) {
+          el.textContent = "";
+          el.classList.add("hidden");
+          return;
+        }
+        const meta = getExtensionMeta(value);
+        el.textContent = meta.label;
+        el.classList.remove("is-webp", "is-other");
+        el.classList.add(meta.badgeClass);
+        el.classList.remove("hidden");
+      };
 
       const isImageName = (name) => /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || ""));
       const isFileDragEvent = (event) => {
@@ -606,10 +1271,56 @@
       };
 
       const clearHomeBannerDropTargets = () => {
-        if (!homeBannersListEl) return;
-        homeBannersListEl
-          .querySelectorAll(".home-banner-item.is-file-drop-target")
-          .forEach((row) => row.classList.remove("is-file-drop-target"));
+        [homeBannersListEl, homeBannersMobileListEl]
+          .filter(Boolean)
+          .forEach((listEl) => {
+            listEl
+              .querySelectorAll(".home-banner-item.is-file-drop-target")
+              .forEach((row) => row.classList.remove("is-file-drop-target"));
+          });
+      };
+      const clearIconoDropTargets = () => {
+        if (!iconosGalleryEl) return;
+        iconosGalleryEl
+          .querySelectorAll(".icono-item.is-drop-target")
+          .forEach((row) => row.classList.remove("is-drop-target"));
+      };
+
+      const clearPlatformDropTargets = () => {
+        [platformLogosListEl, platformBannersListEl]
+          .filter(Boolean)
+          .forEach((listEl) => {
+            listEl
+              .querySelectorAll(".platform-logo-row.is-drop-target")
+              .forEach((row) => row.classList.remove("is-drop-target"));
+          });
+      };
+      const clearStoreAssetDropTargets = () => {
+        [storeLogoFrameEl, storeIconFrameEl, storePreviewFrameEl]
+          .filter(Boolean)
+          .forEach((el) => el.classList.remove("is-drop-target"));
+      };
+      const clearPlatformLogosImportTarget = () => {
+        platformLogosCurrentEl?.classList.remove("is-import-target");
+      };
+
+      const getPlatformCategoryName = (row = {}) => {
+        const rel = row?.categorias;
+        const nameFromRel = Array.isArray(rel) ? rel?.[0]?.nombre : rel?.nombre;
+        const name = String(row?.categoria_nombre || nameFromRel || "").trim();
+        return name || "Sin categoría";
+      };
+
+      const setBusyOverlay = (el, label = "Procesando") => {
+        if (!el) return;
+        el.dataset.busyLabel = label;
+        el.classList.add("is-busy");
+      };
+
+      const clearBusyOverlay = (el) => {
+        if (!el) return;
+        el.classList.remove("is-busy");
+        delete el.dataset.busyLabel;
       };
 
       const normalizeRouteSuffix = (value = "") => {
@@ -639,8 +1350,9 @@
 
       // Exporta a 3x para mejor nitidez en el display 148x185
       const resizeImageIfNeeded = (file, targetW = 444, targetH = 555, maxBytes = 150000) => {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
+          const sourceIsWebp = isWebpFile(file);
           const shouldResize = file.size > maxBytes;
           const img = new Image();
           const url = URL.createObjectURL(file);
@@ -667,27 +1379,37 @@
             const offsetY = Math.round((targetH - drawH) / 2);
             ctx.clearRect(0, 0, targetW, targetH);
             ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
-            const tryWebp = true;
-            const mime = tryWebp ? "image/webp" : "image/jpeg";
+
             const makeBlob = (type, quality) =>
               new Promise((res) => {
                 canvas.toBlob((blob) => res(blob), type, quality);
               });
+
             (async () => {
               let quality = 0.92;
-              let blob = await makeBlob(mime, quality);
+              let blob = await makeBlob("image/webp", quality);
               while (blob && blob.size > maxBytes && quality > 0.7) {
                 quality = Math.max(0.7, quality - 0.05);
-                blob = await makeBlob(mime, quality);
+                blob = await makeBlob("image/webp", quality);
               }
               if (blob) {
+                // Si el origen es WEBP y el navegador no lo respeta al exportar, conserva el archivo original.
+                if (sourceIsWebp && String(blob.type || "").toLowerCase() !== "image/webp") {
+                  resolve(file);
+                  return;
+                }
                 const baseName = file.name.replace(/\.[^.]+$/, "");
-                const ext = blob.type === "image/webp" ? "webp" : "jpg";
-                const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type });
+                const ext = extensionFromMimeType(blob.type, sourceIsWebp ? "webp" : "jpg");
+                const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type || file.type });
                 resolve(resized);
                 return;
               }
-              // Fallback a JPEG si WebP no está soportado
+
+              // Fallback a JPEG si WebP no está soportado (excepto cuando el origen ya era WEBP).
+              if (sourceIsWebp) {
+                resolve(file);
+                return;
+              }
               let jpegQuality = 0.9;
               let jpegBlob = await makeBlob("image/jpeg", jpegQuality);
               while (jpegBlob && jpegBlob.size > maxBytes && jpegQuality > 0.7) {
@@ -699,7 +1421,10 @@
                 return;
               }
               const baseName = file.name.replace(/\.[^.]+$/, "");
-              const resized = new File([jpegBlob], `${baseName}.jpg`, { type: jpegBlob.type });
+              const ext = extensionFromMimeType(jpegBlob.type, "jpg");
+              const resized = new File([jpegBlob], `${baseName}.${ext}`, {
+                type: jpegBlob.type || file.type,
+              });
               resolve(resized);
             })().catch(() => resolve(file));
           };
@@ -715,6 +1440,7 @@
       const resizeBannerIfNeeded = (file, targetW = 3300, targetH = 1656, maxBytes = 1800000) => {
         return new Promise((resolve) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
+          const sourceIsWebp = isWebpFile(file);
           const targetRatio = targetW / targetH;
           const img = new Image();
           const url = URL.createObjectURL(file);
@@ -754,23 +1480,29 @@
             const offsetY = Math.round((canvas.height - drawH) / 2);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
-            const tryWebp = true;
-            const mime = tryWebp ? "image/webp" : "image/jpeg";
             const makeBlob = (type, quality) =>
               new Promise((res) => {
                 canvas.toBlob((blob) => res(blob), type, quality);
               });
+
             (async () => {
               let quality = 0.96;
-              let blob = await makeBlob(mime, quality);
+              let blob = await makeBlob("image/webp", quality);
               while (blob && blob.size > maxBytes && quality > 0.82) {
                 quality = Math.max(0.82, quality - 0.03);
-                blob = await makeBlob(mime, quality);
+                blob = await makeBlob("image/webp", quality);
               }
               if (blob) {
+                // Si el origen es WEBP y el navegador no lo respeta al exportar, conserva el archivo original.
+                if (sourceIsWebp && String(blob.type || "").toLowerCase() !== "image/webp") {
+                  resolve(file);
+                  return;
+                }
                 const baseName = file.name.replace(/\.[^.]+$/, "");
-                const ext = blob.type === "image/webp" ? "webp" : "jpg";
-                const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type });
+                const ext = extensionFromMimeType(blob.type, sourceIsWebp ? "webp" : "jpg");
+                const resized = new File([blob], `${baseName}.${ext}`, {
+                  type: blob.type || file.type,
+                });
                 resolve(resized);
                 return;
               }
@@ -788,6 +1520,7 @@
       const resizePreviewIfNeeded = (file, targetW = 1200, targetH = 630, maxBytes = 280000) => {
         return new Promise((resolve) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
+          const sourceIsWebp = isWebpFile(file);
           const shouldResize = file.size > maxBytes;
           const img = new Image();
           const url = URL.createObjectURL(file);
@@ -817,19 +1550,27 @@
               new Promise((res) => {
                 canvas.toBlob((blob) => res(blob), type, quality);
               });
+
             (async () => {
               let quality = 0.92;
-              let blob = await makeBlob("image/jpeg", quality);
+              const targetMime = sourceIsWebp ? "image/webp" : "image/jpeg";
+              let blob = await makeBlob(targetMime, quality);
               while (blob && blob.size > maxBytes && quality > 0.7) {
                 quality = Math.max(0.7, quality - 0.05);
-                blob = await makeBlob("image/jpeg", quality);
+                blob = await makeBlob(targetMime, quality);
               }
               if (!blob) {
                 resolve(file);
                 return;
               }
+              // Si el origen es WEBP y el navegador no lo respeta al exportar, conserva el archivo original.
+              if (sourceIsWebp && String(blob.type || "").toLowerCase() !== "image/webp") {
+                resolve(file);
+                return;
+              }
               const baseName = file.name.replace(/\.[^.]+$/, "");
-              const resized = new File([blob], `${baseName}.jpg`, { type: blob.type });
+              const ext = extensionFromMimeType(blob.type, sourceIsWebp ? "webp" : "jpg");
+              const resized = new File([blob], `${baseName}.${ext}`, { type: blob.type || file.type });
               resolve(resized);
             })().catch(() => resolve(file));
           };
@@ -841,25 +1582,155 @@
         });
       };
 
-      const renderEditor = (plat) => {
-        if (!editor) return;
-        if (!plat) {
-          editor.classList.add("hidden");
-          bannerEditor?.classList.add("hidden");
+      const renderPlatformLogosList = () => {
+        if (!platformLogosListEl) return;
+        const rows = Object.values(plataformasMap || {}).filter((row) => row?.id_plataforma);
+        if (!rows.length) {
+          platformLogosListEl.innerHTML =
+            '<p class="status icono-empty">Sin plataformas cargadas.</p>';
           return;
         }
-        editor.classList.remove("hidden");
-        const hasLogo = !!plat.imagen;
-        editor.classList.toggle("no-logo", !hasLogo);
-        if (currentWrap) currentWrap.style.display = hasLogo ? "flex" : "none";
-        if (previewImg) previewImg.src = hasLogo ? plat.imagen : "";
+        const sortedRows = [...rows].sort((a, b) => {
+          const catA = getPlatformCategoryName(a);
+          const catB = getPlatformCategoryName(b);
+          const cmpCat = catA.localeCompare(catB, "es");
+          if (cmpCat !== 0) return cmpCat;
+          const posA = Number.isFinite(Number(a?.posicion))
+            ? Number(a.posicion)
+            : Number.MAX_SAFE_INTEGER;
+          const posB = Number.isFinite(Number(b?.posicion))
+            ? Number(b.posicion)
+            : Number.MAX_SAFE_INTEGER;
+          if (posA !== posB) return posA - posB;
+          return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es");
+        });
 
+        const grouped = sortedRows.reduce((acc, row) => {
+          const category = getPlatformCategoryName(row);
+          if (!acc.has(category)) acc.set(category, []);
+          acc.get(category).push(row);
+          return acc;
+        }, new Map());
+
+        platformLogosListEl.innerHTML = Array.from(grouped.entries())
+          .map(([category, categoryRows]) => {
+            const rowsHtml = categoryRows
+              .map((row) => {
+                const imgUrl = String(row?.imagen || "").trim();
+                const hasImg = !!imgUrl;
+                const rowId = Number(row?.id_plataforma || 0);
+                const isSelected = rowId > 0 && rowId === Number(selectedId || 0);
+                return `
+                  <article class="platform-logo-row platform-logo-card-row ${isSelected ? "is-selected" : ""}" data-id-plataforma="${rowId}">
+                    <div class="platform-logo-main">
+                      <div class="platform-logo-drag-col" title="Arrastrar para ordenar">
+                        <button
+                          type="button"
+                          class="home-banner-drag-handle platform-logo-drag-handle"
+                          draggable="true"
+                          aria-label="Arrastrar plataforma para ordenar"
+                        ></button>
+                      </div>
+                      <div class="platform-logo-thumb">
+                        ${
+                          hasImg
+                            ? `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(row?.nombre || "Logo")}" loading="lazy" decoding="async" />
+                               ${getExtensionBadgeHtml(imgUrl)}`
+                            : '<span class="status" style="font-size:11px; padding:4px; text-align:center;">Sin logo</span>'
+                        }
+                      </div>
+                      <p class="platform-logo-name">${escapeHtml(row?.nombre || "")}</p>
+                    </div>
+                  </article>
+                `;
+              })
+              .join("");
+            return `
+              <section class="platform-logo-group">
+                <p class="platform-group-title">${escapeHtml(category)}</p>
+                <div class="platform-group-items">
+                  ${rowsHtml}
+                </div>
+              </section>
+            `;
+          })
+          .join("");
+      };
+      const renderPlatformBannersList = () => {
+        if (!platformBannersListEl) return;
+        const rows = Object.values(plataformasMap || {})
+          .sort((a, b) => String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es"))
+          .filter((row) => row?.id_plataforma);
+        if (!rows.length) {
+          platformBannersListEl.innerHTML =
+            '<p class="status icono-empty">Sin plataformas cargadas.</p>';
+          return;
+        }
+        platformBannersListEl.innerHTML = rows
+          .map((row) => {
+            const imgUrl = String(row?.banner || "").trim();
+            const hasImg = !!imgUrl;
+            const rowId = Number(row?.id_plataforma || 0);
+            const isSelected = rowId > 0 && rowId === Number(selectedId || 0);
+            return `
+              <article class="platform-logo-row platform-banner-row ${isSelected ? "is-selected" : ""}" data-id-plataforma="${rowId}">
+                <div class="platform-logo-thumb platform-banner-thumb">
+                  ${
+                    hasImg
+                      ? `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(row?.nombre || "Banner")}" loading="lazy" decoding="async" />
+                         ${getExtensionBadgeHtml(imgUrl)}`
+                      : '<span class="status" style="font-size:11px; padding:4px; text-align:center;">Sin banner</span>'
+                  }
+                </div>
+                <div class="platform-logo-meta">
+                  <p class="platform-logo-name">${escapeHtml(row?.nombre || "")}</p>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+      };
+
+      const renderEditor = (plat) => {
+        const hasBanner = !!plat?.banner;
+        renderPlatformBannersList();
+        if (platformSelectedStatusEl) {
+          platformSelectedStatusEl.textContent = plat?.nombre
+            ? `Plataforma: ${plat.nombre}`
+            : "Plataforma: -";
+        }
+        if (bannerInlinePlatformNameEl) {
+          bannerInlinePlatformNameEl.textContent = plat?.nombre
+            ? `Plataforma: ${plat.nombre}`
+            : "Plataforma: -";
+        }
+        if (bannerInlinePreview) {
+          bannerInlinePreview.src = hasBanner ? plat?.banner : "";
+          bannerInlinePreview.alt = plat?.nombre ? `Banner de ${plat.nombre}` : "Banner cargado";
+        }
+        setExtensionBadge(bannerInlineBadge, plat?.banner || "");
+        setExtensionBadge(bannerPreviewBadge, plat?.banner || "");
+        if (bannerInlineFrame) {
+          bannerInlineFrame.classList.toggle("has-image", hasBanner);
+        }
+        if (bannerTargetStatusEl) {
+          bannerTargetStatusEl.textContent = plat?.nombre
+            ? `Plataforma: ${plat.nombre}`
+            : "Plataforma: -";
+        }
+        if (bannerSelectedStatusEl) {
+          bannerSelectedStatusEl.textContent = plat?.nombre
+            ? `Plataforma: ${plat.nombre}`
+            : "Plataforma: -";
+        }
         if (bannerEditor) {
+          if (!isPlatformBannersEditorOpen) {
+            bannerEditor.classList.add("hidden");
+            return;
+          }
           bannerEditor.classList.remove("hidden");
-          const hasBanner = !!plat.banner;
-          bannerEditor.classList.toggle("no-banner", !hasBanner);
-          if (bannerCurrentWrap) bannerCurrentWrap.style.display = hasBanner ? "flex" : "none";
-          if (bannerPreview) bannerPreview.src = hasBanner ? plat.banner : "";
+          if (bannerCurrentWrap) bannerCurrentWrap.style.display = "flex";
+          if (bannerPreview) bannerPreview.src = hasBanner ? plat?.banner : "";
         }
       };
 
@@ -869,6 +1740,48 @@
         previewEditor.classList.toggle("no-preview", !hasPreview);
         if (previewCurrentWrap) previewCurrentWrap.style.display = hasPreview ? "flex" : "none";
         if (previewPageImg) previewPageImg.src = hasPreview ? paginaPreview.preview : "";
+        setExtensionBadge(previewImageBadge, paginaPreview?.preview || "");
+      };
+      const applyFavicon = (url = "") => {
+        const iconUrl = String(url || "").trim();
+        if (!iconUrl) {
+          console.log("[editar_logos][favicon] icono_pestana vacío. Vista sin favicon.");
+        }
+        document
+          .querySelectorAll(
+            'link[rel="icon"], link[rel="shortcut icon"], link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]',
+          )
+          .forEach((el) => el.remove());
+        const iconLink = document.createElement("link");
+        iconLink.setAttribute("rel", "icon");
+        iconLink.setAttribute("href", "data:,");
+        document.head.appendChild(iconLink);
+        const shortcutLink = document.createElement("link");
+        shortcutLink.setAttribute("rel", "shortcut icon");
+        shortcutLink.setAttribute("href", "data:,");
+        document.head.appendChild(shortcutLink);
+        console.log(
+          "[editar_logos][favicon] favicon ocultado en esta vista. icono_pestana detectado =",
+          iconUrl || "(vacío)",
+        );
+      };
+      const renderStoreAssets = () => {
+        const logoUrl = String(paginaPreview?.logo || "").trim();
+        const iconUrl = String(paginaPreview?.icono_pestana || "").trim();
+        const previewUrl = String(paginaPreview?.preview || "").trim();
+        console.log("[editar_logos][favicon] fuente pagina.id =", PAGINA_TARGET_ID, {
+          icono_pestana: paginaPreview?.icono_pestana || null,
+          logo_pestana: paginaPreview?.logo_pestana || null,
+          icono: paginaPreview?.icono || null,
+        });
+        console.log("[editar_logos][favicon] url final usada =", iconUrl || "(vacía)");
+        if (storeLogoPreviewEl) storeLogoPreviewEl.src = logoUrl;
+        setExtensionBadge(storeLogoBadgeEl, logoUrl);
+        if (storeIconPreviewEl) storeIconPreviewEl.src = iconUrl;
+        setExtensionBadge(storeIconBadgeEl, iconUrl);
+        if (storePreviewPreviewEl) storePreviewPreviewEl.src = previewUrl;
+        setExtensionBadge(storePreviewBadgeEl, previewUrl);
+        applyFavicon(iconUrl);
       };
 
       const loadPreview = async () => {
@@ -876,15 +1789,52 @@
           const { data, error } = await supabase
             .from("pagina")
             .select("*")
-            .limit(1)
+            .eq("id", PAGINA_TARGET_ID)
             .maybeSingle();
           if (error) throw error;
+          if (!data) {
+            throw new Error(`No existe la fila pagina.id = ${PAGINA_TARGET_ID}.`);
+          }
+          console.log("[editar_logos][favicon] row cargada de pagina =", {
+            id: data?.id ?? null,
+            icono_pestana: data?.icono_pestana || null,
+            logo: data?.logo || null,
+          });
           paginaPreview = data || null;
           renderPreview();
+          renderStoreAssets();
         } catch (err) {
           console.error("load preview error", err);
           setPreviewStatus("No se pudo cargar el preview.", true);
+          setStoreLogoStatus(`No se encontró pagina.id = ${PAGINA_TARGET_ID}.`, true);
         }
+      };
+      const upsertPaginaFields = async (fields = {}) => {
+        const { data: row, error: selErr } = await supabase
+          .from("pagina")
+          .select("*")
+          .eq("id", PAGINA_TARGET_ID)
+          .maybeSingle();
+        if (selErr) throw selErr;
+        if (!row) {
+          throw new Error(`No existe la fila pagina.id = ${PAGINA_TARGET_ID}.`);
+        }
+        const payload = { ...fields };
+        if ("icono_pestana" in payload && !("icono_pestana" in row)) {
+          if ("logo_pestana" in row) {
+            payload.logo_pestana = payload.icono_pestana;
+            delete payload.icono_pestana;
+          } else if ("icono" in row) {
+            payload.icono = payload.icono_pestana;
+            delete payload.icono_pestana;
+          }
+        }
+        const { error: updErr } = await supabase
+          .from("pagina")
+          .update(payload)
+          .eq("id", PAGINA_TARGET_ID);
+        if (updErr) throw updErr;
+        paginaPreview = { ...row, ...payload };
       };
 
       const renderIconosGallery = (items = []) => {
@@ -902,8 +1852,16 @@
         iconosGalleryEl.innerHTML = rows
           .map(
             (item) => `
-              <figure class="icono-item" title="${escapeHtml(item.name || "")}">
-                <img src="${escapeHtml(item.publicUrl)}" alt="${escapeHtml(item.name || "icono")}" loading="lazy" decoding="async" />
+              <figure
+                class="icono-item"
+                data-public-url="${escapeHtml(item.publicUrl || "")}"
+                data-name="${escapeHtml(item.name || "")}"
+                title="${escapeHtml(item.name || "")}"
+              >
+                <div class="icono-thumb">
+                  <img src="${escapeHtml(item.publicUrl)}" alt="${escapeHtml(item.name || "icono")}" loading="lazy" decoding="async" />
+                  ${getExtensionBadgeHtml(item.name || item.publicUrl || "")}
+                </div>
                 <figcaption>${escapeHtml(item.name || "")}</figcaption>
               </figure>
             `,
@@ -931,76 +1889,151 @@
         }
       };
 
-      const renderHomeBannersList = (items = []) => {
-        if (!homeBannersListEl) return;
-        const rows = Array.isArray(items)
-          ? items.filter((row) => String(row?.image_url || "").trim())
-          : [];
-        if (!rows.length) {
-          homeBannersListEl.innerHTML =
-            '<p class="status icono-empty">Sin banners cargados.</p>';
-          return;
+      const replaceIconoImage = async (itemEl, file) => {
+        if (!isImageFile(file)) {
+          throw new Error("Solo se permiten archivos de imagen.");
+        }
+        const previousUrl = String(itemEl?.dataset?.publicUrl || "").trim();
+        const previousName = String(itemEl?.dataset?.name || "").trim();
+        const label = previousName || "icono";
+        setIconosStatus(`Reemplazando ${label}...`);
+
+        const { urls, error: uploadErr } = await uploadPlatformLogos([file], {
+          folder: "icono-perfil",
+        });
+        if (uploadErr) throw uploadErr;
+        const nextUrl = String(urls?.[0] || "").trim();
+        if (!nextUrl) throw new Error("No se obtuvo URL del icono.");
+
+        let deleteError = null;
+        if (previousUrl && previousUrl !== nextUrl) {
+          const deleted = await deletePublicAssets({
+            public_urls: [previousUrl],
+          });
+          if (deleted?.error) {
+            deleteError = deleted.error;
+          }
         }
 
-        homeBannersListEl.innerHTML = rows
-          .map(
-            (row) => {
-              const suffix = normalizeRouteSuffix(row?.redirect_url || "");
-              const routeValue = buildHomeBannerRoute(suffix);
-              const isVisible = row?.oculto !== true;
-              const toggleId = `banner-visible-${Number(row?.id_banner) || 0}`;
-              return `
-              <article class="home-banner-item" data-id-banner="${Number(row?.id_banner) || 0}">
-                <div class="home-banner-drag-col" title="Arrastrar para ordenar">
-                  <button
-                    type="button"
-                    class="home-banner-drag-handle"
-                    draggable="true"
-                    aria-label="Arrastrar banner para ordenar"
-                  ></button>
-                </div>
-                <div class="home-banner-toggle-col" title="Mostrar/Ocultar banner">
-                  <label class="home-banner-toggle-label" for="${toggleId}">
-                    <input
-                      id="${toggleId}"
-                      type="checkbox"
-                      class="home-banner-visibility-toggle"
-                      ${isVisible ? "checked" : ""}
-                    />
-                    <span class="home-banner-toggle-slider"></span>
-                  </label>
-                </div>
-                <figure class="banner-frame home-banner-thumb">
-                  <img
-                    src="${escapeHtml(row?.image_url || "")}"
-                    alt="Banner ${Number(row?.id_banner) || ""}"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </figure>
-                <div class="home-banner-meta">
-                  <span class="home-banner-meta-label">Dirección</span>
-                  <div class="home-banner-route-wrap">
-                    <span class="home-banner-route-prefix">${escapeHtml(HOME_BANNER_ROUTE_PREFIX)}</span>
-                    <input
-                      type="text"
-                      class="home-banner-link-input"
-                      value="${escapeHtml(suffix)}"
-                      placeholder="checkout.html"
-                    />
-                  </div>
-                  <p class="home-banner-route-preview">Ruta final: ${escapeHtml(routeValue)}</p>
-                  <div class="home-banner-actions">
-                    <button type="button" class="btn-outline btn-home-banner-save">
-                      Guardar dirección
-                    </button>
-                  </div>
-                </div>
-              </article>
-            `;
-            },
-          )
-          .join("");
+        return { nextUrl, deleteError, label };
+      };
+
+      const renderHomeBannersList = (items = []) => {
+        if (!homeBannersListEl && !homeBannersMobileListEl) return;
+        const rows = Array.isArray(items)
+          ? items.filter((row) => Number.isFinite(Number(row?.id_banner)) && Number(row?.id_banner) > 0)
+          : [];
+        const desktopRows = rows.filter((row) => String(row?.image_url || "").trim());
+        const getRowTitle = (row) =>
+          String(row?.title || "").trim() || `Banner #${Number(row?.id_banner) || 0}`;
+
+        if (homeBannersListEl) {
+          if (!desktopRows.length) {
+            homeBannersListEl.innerHTML =
+              '<p class="status icono-empty">Sin banners cargados.</p>';
+          } else {
+            homeBannersListEl.innerHTML = desktopRows
+              .map(
+                (row) => {
+                  const suffix = normalizeRouteSuffix(row?.redirect_url || "");
+                  const routeValue = buildHomeBannerRoute(suffix);
+                  const isVisible = row?.oculto !== true;
+                  const toggleId = `banner-visible-${Number(row?.id_banner) || 0}`;
+                  const title = getRowTitle(row);
+                  return `
+                  <article class="home-banner-item" data-id-banner="${Number(row?.id_banner) || 0}">
+                    <div class="home-banner-drag-col" title="Arrastrar para ordenar">
+                      <button
+                        type="button"
+                        class="home-banner-drag-handle"
+                        draggable="true"
+                        aria-label="Arrastrar banner para ordenar"
+                      ></button>
+                    </div>
+                    <div class="home-banner-toggle-col" title="Mostrar/Ocultar banner">
+                      <label class="home-banner-toggle-label" for="${toggleId}">
+                        <input
+                          id="${toggleId}"
+                          type="checkbox"
+                          class="home-banner-visibility-toggle"
+                          ${isVisible ? "checked" : ""}
+                        />
+                        <span class="home-banner-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="home-banner-media-col">
+                      <p class="home-banner-title">${escapeHtml(title)}</p>
+                      <figure class="banner-frame home-banner-thumb">
+                        <img
+                          src="${escapeHtml(row?.image_url || "")}"
+                          alt="${escapeHtml(title)}"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                        ${getExtensionBadgeHtml(row?.image_url || "")}
+                      </figure>
+                    </div>
+                    <div class="home-banner-meta">
+                      <span class="home-banner-meta-label">Dirección</span>
+                      <div class="home-banner-route-wrap">
+                        <span class="home-banner-route-prefix">${escapeHtml(HOME_BANNER_ROUTE_PREFIX)}</span>
+                        <input
+                          type="text"
+                          class="home-banner-link-input"
+                          value="${escapeHtml(suffix)}"
+                          placeholder="checkout.html"
+                        />
+                      </div>
+                      <p class="home-banner-route-preview">Ruta final: ${escapeHtml(routeValue)}</p>
+                      <div class="home-banner-actions">
+                        <button type="button" class="btn-outline btn-home-banner-save">
+                          Guardar dirección
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                `;
+                },
+              )
+              .join("");
+          }
+        }
+
+        if (homeBannersMobileListEl) {
+          if (!rows.length) {
+            homeBannersMobileListEl.innerHTML =
+              '<p class="status icono-empty">Sin banners móviles cargados.</p>';
+          } else {
+            homeBannersMobileListEl.innerHTML = rows
+              .map((row) => {
+                const title = getRowTitle(row);
+                const mobileImageUrl = String(row?.image_url_mobile || "").trim();
+                return `
+                  <article class="home-banner-item home-banner-mobile-item" data-id-banner="${Number(row?.id_banner) || 0}">
+                    <div class="home-banner-media-col">
+                      <p class="home-banner-title">${escapeHtml(title)}</p>
+                      <figure class="banner-frame home-banner-thumb">
+                        ${
+                          mobileImageUrl
+                            ? `
+                              <img
+                                src="${escapeHtml(mobileImageUrl)}"
+                                alt="${escapeHtml(`${title} (móvil)`)}"
+                                loading="lazy"
+                                decoding="async"
+                              />
+                              ${getExtensionBadgeHtml(mobileImageUrl)}
+                            `
+                            : '<p class="home-banner-mobile-empty">Sin imagen móvil. Arrastra y suelta una imagen aquí.</p>'
+                        }
+                      </figure>
+                    </div>
+                  </article>
+                `;
+              })
+              .join("");
+          }
+        }
       };
 
       const loadHomeBanners = async () => {
@@ -1021,6 +2054,51 @@
           console.error("load home banners error", err);
           renderHomeBannersList([]);
           setHomeBannersStatus("No se pudieron cargar los banners.", true);
+        }
+      };
+
+      const savePlatformLogosOrder = async () => {
+        if (platformLogoOrderSaving || !platformLogosListEl) return;
+        const rows = Array.from(
+          platformLogosListEl.querySelectorAll(".platform-logo-row[data-id-plataforma]"),
+        );
+        if (!rows.length) return;
+
+        const updates = rows
+          .map((row, idx) => ({
+            idPlataforma: Number(row.dataset.idPlataforma || 0),
+            posicion: idx + 1,
+          }))
+          .filter((row) => Number.isFinite(row.idPlataforma) && row.idPlataforma > 0);
+        if (!updates.length) return;
+
+        const changed = updates.filter((row) => {
+          const current = Number(plataformasMap[row.idPlataforma]?.posicion);
+          return current !== row.posicion;
+        });
+        if (!changed.length) return;
+
+        platformLogoOrderSaving = true;
+        try {
+          setStatus("Guardando posiciones...");
+          for (const row of changed) {
+            const { error } = await supabase
+              .from("plataformas")
+              .update({ posicion: row.posicion })
+              .eq("id_plataforma", row.idPlataforma);
+            if (error) throw error;
+            if (plataformasMap[row.idPlataforma]) {
+              plataformasMap[row.idPlataforma].posicion = row.posicion;
+            }
+          }
+          setStatus("Posiciones actualizadas.");
+          renderPlatformLogosList();
+        } catch (err) {
+          console.error("save platform logos order error", err);
+          setStatus("No se pudieron guardar posiciones.", true);
+          await loadPlataformas();
+        } finally {
+          platformLogoOrderSaving = false;
         }
       };
 
@@ -1058,12 +2136,20 @@
         }
       };
 
-      const replaceHomeBannerImage = async (idBanner, file, previousImageUrl = "") => {
+      const replaceHomeBannerImage = async (
+        idBanner,
+        file,
+        previousImageUrl = "",
+        targetField = "image_url",
+      ) => {
         if (!Number.isFinite(idBanner) || idBanner <= 0) {
           throw new Error("id_banner inválido.");
         }
         if (!isImageFile(file)) {
           throw new Error("Solo se permiten archivos de imagen.");
+        }
+        if (!["image_url", "image_url_mobile"].includes(String(targetField || ""))) {
+          throw new Error("Campo de imagen inválido.");
         }
 
         setHomeBannersStatus(`Reemplazando banner #${idBanner}...`);
@@ -1076,9 +2162,11 @@
         const imageUrl = String(urls?.[0] || "").trim();
         if (!imageUrl) throw new Error("No se obtuvo URL del banner.");
 
-        const updated = await updateHomeBanner(idBanner, {
-          image_url: imageUrl,
-        });
+        const updatePayload =
+          targetField === "image_url_mobile"
+            ? { image_url_mobile: imageUrl }
+            : { image_url: imageUrl };
+        const updated = await updateHomeBanner(idBanner, updatePayload);
         if (updated?.error) throw new Error(updated.error);
 
         let deleteError = null;
@@ -1098,46 +2186,627 @@
         };
       };
 
+      const replacePlatformLogoImage = async (
+        idPlataforma,
+        file,
+        previousImageUrl = "",
+      ) => {
+        if (!Number.isFinite(idPlataforma) || idPlataforma <= 0) {
+          throw new Error("id_plataforma inválido.");
+        }
+        if (!isImageFile(file)) {
+          throw new Error("Solo se permiten archivos de imagen.");
+        }
+
+        setStatus("Reemplazando logo...");
+        let optimized = file;
+        optimized = await resizeImageIfNeeded(optimized);
+        const { urls, error: uploadErr } = await uploadPlatformLogos([optimized], {
+          folder: PLATFORM_CARD_LOGOS_FOLDER,
+        });
+        if (uploadErr) throw uploadErr;
+        const imageUrl = String(urls?.[0] || "").trim();
+        if (!imageUrl) throw new Error("No se obtuvo URL del logo.");
+
+        const { error: updErr } = await supabase
+          .from("plataformas")
+          .update({ imagen: imageUrl })
+          .eq("id_plataforma", idPlataforma);
+        if (updErr) throw updErr;
+
+        let deleteError = null;
+        const prevUrl = String(previousImageUrl || "").trim();
+        if (prevUrl && prevUrl !== imageUrl) {
+          const deleted = await deletePublicAssets({
+            public_urls: [prevUrl],
+          });
+          if (deleted?.error) {
+            deleteError = deleted.error;
+          }
+        }
+
+        plataformasMap[idPlataforma] = {
+          ...(plataformasMap[idPlataforma] || {}),
+          id_plataforma: idPlataforma,
+          imagen: imageUrl,
+        };
+
+        return {
+          imageUrl,
+          deleteError,
+        };
+      };
+
+      const replacePlatformBannerImage = async (
+        idPlataforma,
+        file,
+        previousImageUrl = "",
+      ) => {
+        if (!Number.isFinite(idPlataforma) || idPlataforma <= 0) {
+          throw new Error("id_plataforma inválido.");
+        }
+        if (!isImageFile(file)) {
+          throw new Error("Solo se permiten archivos de imagen.");
+        }
+
+        setBannerStatus("Reemplazando banner...");
+        let optimized = file;
+        optimized = await resizeBannerIfNeeded(optimized);
+        const { urls, error: uploadErr } = await uploadPlatformLogos([optimized], {
+          folder: PLATFORM_MODAL_BANNERS_FOLDER,
+        });
+        if (uploadErr) throw uploadErr;
+        const imageUrl = String(urls?.[0] || "").trim();
+        if (!imageUrl) throw new Error("No se obtuvo URL del banner.");
+
+        const { error: updErr } = await supabase
+          .from("plataformas")
+          .update({ banner: imageUrl })
+          .eq("id_plataforma", idPlataforma);
+        if (updErr) throw updErr;
+
+        let deleteError = null;
+        const prevUrl = String(previousImageUrl || "").trim();
+        if (prevUrl && prevUrl !== imageUrl) {
+          const deleted = await deletePublicAssets({
+            public_urls: [prevUrl],
+          });
+          if (deleted?.error) {
+            deleteError = deleted.error;
+          }
+        }
+
+        plataformasMap[idPlataforma] = {
+          ...(plataformasMap[idPlataforma] || {}),
+          id_plataforma: idPlataforma,
+          banner: imageUrl,
+        };
+
+        return {
+          imageUrl,
+          deleteError,
+        };
+      };
+
+      const replaceStorePageAssetImage = async (file, field) => {
+        if (!isImageFile(file)) {
+          throw new Error("Solo se permiten archivos de imagen.");
+        }
+        if (!["logo", "icono_pestana", "preview"].includes(field)) {
+          throw new Error("Campo de pagina inválido.");
+        }
+
+        const actionName =
+          field === "logo"
+            ? "logo"
+            : field === "icono_pestana"
+              ? "icono de pestaña"
+              : "preview";
+        setStoreLogoStatus(`Reemplazando ${actionName}...`);
+
+        let optimized = file;
+        if (field === "preview") {
+          optimized = await resizePreviewIfNeeded(optimized);
+        } else if (field === "icono_pestana") {
+          optimized = await resizeImageIfNeeded(optimized, 256, 256, 120000);
+        } else {
+          optimized = await resizeImageIfNeeded(optimized, 900, 280, 220000);
+        }
+
+        const { urls, error: uploadErr } = await uploadPlatformLogos([optimized], {
+          folder: STORE_LOGO_FOLDER,
+        });
+        if (uploadErr) throw uploadErr;
+        const imageUrl = String(urls?.[0] || "").trim();
+        if (!imageUrl) throw new Error("No se obtuvo URL de la imagen.");
+
+        await upsertPaginaFields({ [field]: imageUrl });
+        renderStoreAssets();
+        renderPreview();
+        return imageUrl;
+      };
+
+      const importPlatformLogosByName = async (selectedFiles = []) => {
+        const imageFiles = Array.from(selectedFiles || []).filter((file) => isImageFile(file));
+        if (!imageFiles.length) {
+          setStatus("No se encontraron imágenes válidas para importar.", true);
+          return { ok: false };
+        }
+        if (platformLogosImporting) {
+          setStatus("Ya hay una importación en curso.", true);
+          return { ok: false };
+        }
+
+        platformLogosImporting = true;
+        clearPlatformLogosImportTarget();
+        setBusyOverlay(platformLogosCurrentEl, "Importando");
+        try {
+          const byName = new Map();
+          Object.values(plataformasMap || {}).forEach((plat) => {
+            const key = normalizeNameKey(plat?.nombre || "");
+            if (!key || byName.has(key)) return;
+            byName.set(key, plat);
+          });
+
+          const matched = [];
+          const skipped = [];
+          imageFiles.forEach((file) => {
+            const key = normalizeNameKey(file.name || "");
+            const plat = byName.get(key);
+            if (!plat?.id_plataforma) {
+              skipped.push(file.name || "sin-nombre");
+              return;
+            }
+            matched.push({ file, plat });
+          });
+
+          if (!matched.length) {
+            setStatus(
+              "No hubo coincidencias por nombre con plataformas. Usa archivos con el nombre exacto de la plataforma.",
+              true,
+            );
+            return { ok: false };
+          }
+
+          const chunkSize = 10;
+          let updatedCount = 0;
+          let deletedOldCount = 0;
+          for (let i = 0; i < matched.length; i += chunkSize) {
+            const chunk = matched.slice(i, i + chunkSize);
+            const processed = Math.min(i + chunk.length, matched.length);
+            setStatus(`Importando logos (${processed}/${matched.length})...`);
+            const optimizedChunk = await Promise.all(
+              chunk.map(async (row) => ({
+                ...row,
+                file: await resizeImageIfNeeded(row.file),
+              })),
+            );
+            const { urls, error: uploadErr } = await uploadPlatformLogos(
+              optimizedChunk.map((row) => row.file),
+              {
+                folder: PLATFORM_CARD_LOGOS_FOLDER,
+              },
+            );
+            if (uploadErr) throw uploadErr;
+            const updates = optimizedChunk
+              .map((row, idx) => ({
+                id_plataforma: row.plat.id_plataforma,
+                imagen: String(urls?.[idx] || "").trim(),
+              }))
+              .filter((row) => row.imagen);
+            for (const row of updates) {
+              const previousUrl = String(
+                plataformasMap[row.id_plataforma]?.imagen || "",
+              ).trim();
+              const { error: updErr } = await supabase
+                .from("plataformas")
+                .update({ imagen: row.imagen })
+                .eq("id_plataforma", row.id_plataforma);
+              if (updErr) throw updErr;
+              if (previousUrl && previousUrl !== row.imagen) {
+                const delRes = await deletePublicAssets({
+                  public_urls: [previousUrl],
+                });
+                if (!delRes?.error) {
+                  deletedOldCount += 1;
+                }
+              }
+              if (plataformasMap[row.id_plataforma]) {
+                plataformasMap[row.id_plataforma].imagen = row.imagen;
+              }
+              updatedCount += 1;
+            }
+          }
+
+          renderPlatformLogosList();
+          const skippedText = skipped.length
+            ? ` Se omitieron ${skipped.length} archivo(s) sin coincidencia.`
+            : "";
+          const deletedText = deletedOldCount
+            ? ` Se eliminaron ${deletedOldCount} logo(s) anterior(es) del bucket.`
+            : "";
+          setStatus(`Se actualizaron ${updatedCount} logo(s).${deletedText}${skippedText}`);
+          return { ok: true, updatedCount };
+        } catch (err) {
+          console.error("import platform logos error", err);
+          setStatus("No se pudieron importar los logos.", true);
+          return { ok: false };
+        } finally {
+          platformLogosImporting = false;
+          clearBusyOverlay(platformLogosCurrentEl);
+        }
+      };
+
       const loadPlataformas = async () => {
         try {
           const { data, error } = await supabase
             .from("plataformas")
-            .select("id_plataforma, nombre, imagen, banner")
+            .select("id_plataforma, nombre, imagen, banner, posicion, id_categoria, categorias(nombre)")
             .order("nombre", { ascending: true });
           if (error) throw error;
           plataformasMap = (data || []).reduce((acc, p) => {
-            acc[p.id_plataforma] = p;
+            acc[p.id_plataforma] = {
+              ...p,
+              categoria_nombre: getPlatformCategoryName(p),
+            };
             return acc;
           }, {});
-          if (selectPlataforma) {
-            selectPlataforma.innerHTML =
-              '<option value="">Seleccione una plataforma</option>' +
-              (data || [])
-                .map((p) => `<option value="${p.id_plataforma}">${p.nombre}</option>`)
-                .join("");
-          }
+          renderPlatformLogosList();
+          const selectedPlat = selectedId ? plataformasMap[selectedId] : null;
+          renderEditor(selectedPlat || null);
         } catch (err) {
           console.error("load plataformas error", err);
           setStatus("No se pudieron cargar las plataformas.", true);
         }
       };
 
-      selectPlataforma?.addEventListener("change", () => {
-        const val = selectPlataforma.value;
-        selectedId = val ? Number(val) : null;
-        setStatus("");
+      platformLogosToggleBtn?.addEventListener("click", () => {
+        if (!editor) return;
+        const willOpen = editor.classList.contains("hidden");
+        editor.classList.toggle("hidden");
+        if (willOpen) {
+          setStatus("");
+          renderPlatformLogosList();
+        }
+      });
+      storeLogoToggleBtn?.addEventListener("click", () => {
+        if (!storeLogoEditor) return;
+        const willOpen = storeLogoEditor.classList.contains("hidden");
+        storeLogoEditor.classList.toggle("hidden");
+        if (willOpen) {
+          setStoreLogoStatus("");
+          renderStoreAssets();
+        }
+      });
+      const bindStoreAssetDrop = (frameEl, field, successMsg) => {
+        frameEl?.addEventListener("dragenter", (e) => {
+          if (!isFileDragEvent(e)) return;
+          e.preventDefault();
+          frameEl.classList.add("is-drop-target");
+        });
+        frameEl?.addEventListener("dragleave", (e) => {
+          if (!isFileDragEvent(e)) return;
+          const nextTarget = e.relatedTarget;
+          if (nextTarget && frameEl.contains(nextTarget)) return;
+          frameEl.classList.remove("is-drop-target");
+        });
+        frameEl?.addEventListener("dragover", (e) => {
+          if (!isFileDragEvent(e)) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+          frameEl.classList.add("is-drop-target");
+        });
+        frameEl?.addEventListener("drop", async (e) => {
+          const droppedFile = Array.from(e.dataTransfer?.files || []).find((file) =>
+            isImageFile(file),
+          );
+          if (!droppedFile) return;
+          e.preventDefault();
+          clearStoreAssetDropTargets();
+          setBusyOverlay(frameEl, "Reemplazando");
+          try {
+            await replaceStorePageAssetImage(droppedFile, field);
+            setStoreLogoStatus(successMsg);
+          } catch (err) {
+            console.error(`replace store ${field} by drop error`, err);
+            setStoreLogoStatus("No se pudo actualizar el archivo.", true);
+          } finally {
+            clearBusyOverlay(frameEl);
+          }
+        });
+      };
+      bindStoreAssetDrop(
+        storeLogoFrameEl,
+        "logo",
+        "Logo de tienda actualizado correctamente en pagina.logo.",
+      );
+      bindStoreAssetDrop(
+        storeIconFrameEl,
+        "icono_pestana",
+        "Icono de pestaña actualizado correctamente en pagina.icono_pestana.",
+      );
+      bindStoreAssetDrop(
+        storePreviewFrameEl,
+        "preview",
+        "Preview actualizado correctamente en pagina.preview.",
+      );
+
+      platformBannersToggleBtn?.addEventListener("click", () => {
+        if (!bannerEditor) return;
+        isPlatformBannersEditorOpen = bannerEditor.classList.contains("hidden");
+        if (!isPlatformBannersEditorOpen) {
+          bannerEditor.classList.add("hidden");
+          return;
+        }
         setBannerStatus("");
-        setPreviewStatus("");
-        if (fileInput) fileInput.value = "";
-        if (bannerInput) bannerInput.value = "";
-        const plat = selectedId ? plataformasMap[selectedId] : null;
-        renderEditor(plat);
+        renderEditor(plataformasMap[selectedId] || null);
       });
 
       previewToggleBtn?.addEventListener("click", () => {
         if (!previewEditor) return;
         previewEditor.classList.toggle("hidden");
       });
+
+      platformLogosCurrentEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        if (e.target.closest(".platform-logo-row[data-id-plataforma]")) return;
+        e.preventDefault();
+        platformLogosCurrentEl.classList.add("is-import-target");
+      });
+      platformLogosCurrentEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && platformLogosCurrentEl.contains(nextTarget)) return;
+        clearPlatformLogosImportTarget();
+      });
+      platformLogosCurrentEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        if (e.target.closest(".platform-logo-row[data-id-plataforma]")) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        platformLogosCurrentEl.classList.add("is-import-target");
+      });
+      platformLogosCurrentEl?.addEventListener("drop", async (e) => {
+        const filesDropped = Array.from(e.dataTransfer?.files || []).filter((file) =>
+          isImageFile(file),
+        );
+        if (!filesDropped.length) return;
+        if (e.target.closest(".platform-logo-row[data-id-plataforma]")) return;
+        e.preventDefault();
+        clearPlatformLogosImportTarget();
+        await importPlatformLogosByName(filesDropped);
+      });
+
+      platformLogosListEl?.addEventListener("click", (e) => {
+        if (e.target.closest(".platform-logo-drag-handle")) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        const nextId = Number(row.dataset.idPlataforma || 0);
+        if (!Number.isFinite(nextId) || nextId <= 0) return;
+        selectedId = nextId;
+        setBannerStatus("");
+        setPreviewStatus("");
+        if (bannerInput) bannerInput.value = "";
+        renderPlatformLogosList();
+        const plat = plataformasMap[selectedId] || null;
+        renderEditor(plat);
+      });
+      platformLogosListEl?.addEventListener("dragstart", (e) => {
+        if (isFileDragEvent(e)) return;
+        const handle = e.target.closest(".platform-logo-drag-handle");
+        if (!handle) return;
+        const row = handle.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        draggingPlatformLogoRow = row;
+        draggingPlatformLogoGroup = row.closest(".platform-logo-group");
+        platformLogoOrderDirty = false;
+        row.classList.add("is-dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", String(row.dataset.idPlataforma || ""));
+        }
+      });
+      platformLogosListEl?.addEventListener("dragover", (e) => {
+        if (isFileDragEvent(e)) return;
+        if (!draggingPlatformLogoRow || !platformLogosListEl) return;
+        const targetRow = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!targetRow || targetRow === draggingPlatformLogoRow) return;
+        const targetGroup = targetRow.closest(".platform-logo-group");
+        if (!targetGroup || targetGroup !== draggingPlatformLogoGroup) return;
+        e.preventDefault();
+        const rect = targetRow.getBoundingClientRect();
+        const insertAfter = e.clientX > rect.left + rect.width / 2;
+        if (insertAfter) {
+          targetRow.after(draggingPlatformLogoRow);
+        } else {
+          targetRow.before(draggingPlatformLogoRow);
+        }
+        platformLogoOrderDirty = true;
+      });
+      platformLogosListEl?.addEventListener("dragend", async () => {
+        if (!draggingPlatformLogoRow) return;
+        draggingPlatformLogoRow.classList.remove("is-dragging");
+        draggingPlatformLogoRow = null;
+        draggingPlatformLogoGroup = null;
+        if (platformLogoOrderDirty) {
+          await savePlatformLogosOrder();
+        }
+        platformLogoOrderDirty = false;
+      });
+      platformBannersListEl?.addEventListener("click", (e) => {
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        const nextId = Number(row.dataset.idPlataforma || 0);
+        if (!Number.isFinite(nextId) || nextId <= 0) return;
+        selectedId = nextId;
+        setBannerStatus("");
+        setPreviewStatus("");
+        if (bannerInput) bannerInput.value = "";
+        renderPlatformLogosList();
+        const plat = plataformasMap[selectedId] || null;
+        renderEditor(plat);
+      });
+
+      platformLogosListEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        e.preventDefault();
+        clearPlatformLogosImportTarget();
+        clearPlatformDropTargets();
+        row.classList.add("is-drop-target");
+      });
+
+      platformLogosListEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && row.contains(nextTarget)) return;
+        row.classList.remove("is-drop-target");
+      });
+
+      platformLogosListEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        clearPlatformLogosImportTarget();
+        clearPlatformDropTargets();
+        row.classList.add("is-drop-target");
+      });
+
+      platformLogosListEl?.addEventListener("drop", async (e) => {
+        if (!isFileDragEvent(e)) {
+          if (draggingPlatformLogoRow) e.preventDefault();
+          return;
+        }
+        const filesDropped = Array.from(e.dataTransfer?.files || []).filter((file) =>
+          isImageFile(file),
+        );
+        if (!filesDropped.length) return;
+        e.preventDefault();
+        clearPlatformLogosImportTarget();
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        clearPlatformDropTargets();
+        if (!row || filesDropped.length > 1) {
+          await importPlatformLogosByName(filesDropped);
+          return;
+        }
+        const droppedFile = filesDropped[0];
+        const idPlataforma = Number(row.dataset.idPlataforma || 0);
+        if (!Number.isFinite(idPlataforma) || idPlataforma <= 0) {
+          setStatus("Plataforma inválida.", true);
+          return;
+        }
+        const previousImageUrl = String(plataformasMap[idPlataforma]?.imagen || "").trim();
+        const platformName =
+          String(plataformasMap[idPlataforma]?.nombre || "").trim() ||
+          `#${idPlataforma}`;
+        setBusyOverlay(row, "Reemplazando");
+        try {
+          const result = await replacePlatformLogoImage(
+            idPlataforma,
+            droppedFile,
+            previousImageUrl,
+          );
+          selectedId = idPlataforma;
+          renderPlatformLogosList();
+          renderEditor(plataformasMap[idPlataforma] || null);
+          if (result?.deleteError) {
+            setStatus(
+              `Logo de ${platformName} actualizado, pero no se pudo eliminar la imagen anterior.`,
+              true,
+            );
+          } else {
+            setStatus(`Logo de ${platformName} actualizado correctamente.`);
+          }
+        } catch (err) {
+          console.error("replace platform logo by drop error", err);
+          setStatus("No se pudo reemplazar el logo.", true);
+        } finally {
+          clearBusyOverlay(row);
+        }
+      });
+      platformBannersListEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        e.preventDefault();
+        clearPlatformDropTargets();
+        row.classList.add("is-drop-target");
+      });
+
+      platformBannersListEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && row.contains(nextTarget)) return;
+        row.classList.remove("is-drop-target");
+      });
+
+      platformBannersListEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        if (!row) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        clearPlatformDropTargets();
+        row.classList.add("is-drop-target");
+      });
+
+      platformBannersListEl?.addEventListener("drop", async (e) => {
+        const droppedFile = Array.from(e.dataTransfer?.files || []).find((file) =>
+          isImageFile(file),
+        );
+        if (!droppedFile) return;
+        e.preventDefault();
+        const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
+        clearPlatformDropTargets();
+        if (!row) {
+          setBannerStatus("Suelta la imagen sobre una plataforma para reemplazar el banner.", true);
+          return;
+        }
+        const idPlataforma = Number(row.dataset.idPlataforma || 0);
+        if (!Number.isFinite(idPlataforma) || idPlataforma <= 0) {
+          setBannerStatus("Plataforma inválida.", true);
+          return;
+        }
+        const previousImageUrl = String(plataformasMap[idPlataforma]?.banner || "").trim();
+        const platformName =
+          String(plataformasMap[idPlataforma]?.nombre || "").trim() ||
+          `#${idPlataforma}`;
+        setBusyOverlay(row, "Reemplazando");
+        try {
+          const result = await replacePlatformBannerImage(
+            idPlataforma,
+            droppedFile,
+            previousImageUrl,
+          );
+          selectedId = idPlataforma;
+          renderPlatformLogosList();
+          renderEditor(plataformasMap[idPlataforma] || null);
+          if (result?.deleteError) {
+            setBannerStatus(
+              `Banner de ${platformName} actualizado, pero no se pudo eliminar la imagen anterior.`,
+              true,
+            );
+          } else {
+            setBannerStatus(`Banner de ${platformName} actualizado correctamente.`);
+          }
+        } catch (err) {
+          console.error("replace platform banner by drop error", err);
+          setBannerStatus("No se pudo reemplazar el banner.", true);
+        } finally {
+          clearBusyOverlay(row);
+        }
+      });
+      document.addEventListener("dragend", clearPlatformDropTargets);
+      document.addEventListener("dragend", clearStoreAssetDropTargets);
+      document.addEventListener("dragend", clearPlatformLogosImportTarget);
+      document.addEventListener("dragend", clearIconoDropTargets);
 
       iconosToggleBtn?.addEventListener("click", async () => {
         if (!iconosEditor) return;
@@ -1146,6 +2815,62 @@
         if (willOpen) {
           setIconosStatus("");
           await loadIconos();
+        }
+      });
+      iconosGalleryEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const itemEl = e.target.closest(".icono-item[data-public-url]");
+        if (!itemEl) return;
+        e.preventDefault();
+        clearIconoDropTargets();
+        itemEl.classList.add("is-drop-target");
+      });
+      iconosGalleryEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const itemEl = e.target.closest(".icono-item[data-public-url]");
+        if (!itemEl) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && itemEl.contains(nextTarget)) return;
+        itemEl.classList.remove("is-drop-target");
+      });
+      iconosGalleryEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const itemEl = e.target.closest(".icono-item[data-public-url]");
+        if (!itemEl) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        clearIconoDropTargets();
+        itemEl.classList.add("is-drop-target");
+      });
+      iconosGalleryEl?.addEventListener("drop", async (e) => {
+        const droppedFile = Array.from(e.dataTransfer?.files || []).find((file) =>
+          isImageFile(file),
+        );
+        if (!droppedFile) return;
+        e.preventDefault();
+        const itemEl = e.target.closest(".icono-item[data-public-url]");
+        clearIconoDropTargets();
+        if (!itemEl) {
+          setIconosStatus("Suelta la imagen encima de un icono para reemplazarlo.", true);
+          return;
+        }
+        setBusyOverlay(itemEl, "Reemplazando");
+        try {
+          const result = await replaceIconoImage(itemEl, droppedFile);
+          await loadIconos();
+          if (result?.deleteError) {
+            setIconosStatus(
+              `${result.label} reemplazado, pero no se pudo eliminar la imagen anterior.`,
+              true,
+            );
+          } else {
+            setIconosStatus(`${result.label} reemplazado correctamente.`);
+          }
+        } catch (err) {
+          console.error("replace icono by drop error", err);
+          setIconosStatus("No se pudo reemplazar el icono.", true);
+        } finally {
+          clearBusyOverlay(itemEl);
         }
       });
 
@@ -1173,6 +2898,7 @@
           setIconosStatus("No se encontraron imágenes válidas en la selección.", true);
           return;
         }
+        setBusyOverlay(iconosGalleryEl, "Importando");
         try {
           const batchSize = 20;
           let uploadedCount = 0;
@@ -1195,11 +2921,14 @@
         } catch (err) {
           console.error("subir iconos error", err);
           setIconosStatus("No se pudieron subir los iconos.", true);
+        } finally {
+          clearBusyOverlay(iconosGalleryEl);
         }
       });
 
       btnHomeBannerAdd?.addEventListener("click", async () => {
         let file = homeBannerFileInput?.files?.[0];
+        const title = String(homeBannerTitleInput?.value || "").trim();
         const redirectSuffix = normalizeRouteSuffix(homeBannerRedirectInput?.value || "");
         const redirectUrl = buildHomeBannerRoute(redirectSuffix);
         if (!file) {
@@ -1217,6 +2946,7 @@
 
         try {
           if (btnHomeBannerAdd) btnHomeBannerAdd.disabled = true;
+          setBusyOverlay(homeBannersListEl, "Importando");
           setHomeBannersStatus("Optimizando imagen...");
           file = await resizeBannerIfNeeded(file);
           setHomeBannersStatus("Subiendo imagen...");
@@ -1229,7 +2959,9 @@
 
           setHomeBannersStatus("Guardando dirección...");
           const created = await createHomeBanner({
+            title: title || null,
             image_url: imageUrl,
+            image_url_mobile: imageUrl,
             redirect_url: redirectUrl,
             oculto: false,
           });
@@ -1237,6 +2969,7 @@
 
           setHomeBannersStatus("Banner agregado correctamente.");
           if (homeBannerFileInput) homeBannerFileInput.value = "";
+          if (homeBannerTitleInput) homeBannerTitleInput.value = "";
           if (homeBannerRedirectInput) homeBannerRedirectInput.value = "";
           updateNewRoutePreview();
           await loadHomeBanners();
@@ -1244,6 +2977,7 @@
           console.error("add home banner error", err);
           setHomeBannersStatus("No se pudo agregar el banner.", true);
         } finally {
+          clearBusyOverlay(homeBannersListEl);
           if (btnHomeBannerAdd) btnHomeBannerAdd.disabled = false;
         }
       });
@@ -1389,6 +3123,7 @@
           const idBanner = Number(rowEl.dataset.idBanner);
           const previousImageUrl =
             rowEl.querySelector(".home-banner-thumb img")?.getAttribute("src") || "";
+          setBusyOverlay(rowEl, "Reemplazando");
           try {
             const result = await replaceHomeBannerImage(idBanner, fileDropped, previousImageUrl);
             await loadHomeBanners();
@@ -1403,12 +3138,83 @@
           } catch (err) {
             console.error("replace home banner image error", err);
             setHomeBannersStatus("No se pudo reemplazar la imagen del banner.", true);
+          } finally {
+            clearBusyOverlay(rowEl);
           }
           return;
         }
 
         if (!draggingHomeBannerRow) return;
         e.preventDefault();
+      });
+
+      homeBannersMobileListEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        e.preventDefault();
+        clearHomeBannerDropTargets();
+        rowEl.classList.add("is-file-drop-target");
+      });
+
+      homeBannersMobileListEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && rowEl.contains(nextTarget)) return;
+        rowEl.classList.remove("is-file-drop-target");
+      });
+
+      homeBannersMobileListEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        clearHomeBannerDropTargets();
+        rowEl.classList.add("is-file-drop-target");
+      });
+
+      homeBannersMobileListEl?.addEventListener("drop", async (e) => {
+        const fileDropped = Array.from(e.dataTransfer?.files || []).find((file) =>
+          isImageFile(file),
+        );
+        if (!fileDropped) return;
+
+        e.preventDefault();
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        clearHomeBannerDropTargets();
+        if (!rowEl) {
+          setHomeBannersStatus("Suelta la imagen sobre un banner móvil para reemplazarlo.", true);
+          return;
+        }
+        const idBanner = Number(rowEl.dataset.idBanner);
+        const previousImageUrl =
+          rowEl.querySelector(".home-banner-thumb img")?.getAttribute("src") || "";
+        setBusyOverlay(rowEl, "Reemplazando");
+        try {
+          const result = await replaceHomeBannerImage(
+            idBanner,
+            fileDropped,
+            previousImageUrl,
+            "image_url_mobile",
+          );
+          await loadHomeBanners();
+          if (result?.deleteError) {
+            setHomeBannersStatus(
+              `Banner móvil #${idBanner} reemplazado, pero no se pudo eliminar la imagen anterior.`,
+              true,
+            );
+          } else {
+            setHomeBannersStatus(`Banner móvil #${idBanner} reemplazado correctamente.`);
+          }
+        } catch (err) {
+          console.error("replace home banner mobile image error", err);
+          setHomeBannersStatus("No se pudo reemplazar la imagen móvil del banner.", true);
+        } finally {
+          clearBusyOverlay(rowEl);
+        }
       });
 
       homeBannersListEl?.addEventListener("dragend", async () => {
@@ -1420,49 +3226,13 @@
       });
 
       btnUpdate?.addEventListener("click", async () => {
-        if (!selectedId) {
-          setStatus("Selecciona una plataforma.", true);
+        const selectedFiles = Array.from(fileInput?.files || []);
+        if (!selectedFiles.length) {
+          setStatus("Selecciona una carpeta o varias imágenes.", true);
           return;
         }
-        let file = fileInput?.files?.[0];
-        if (!file) {
-          setStatus("Selecciona una imagen.", true);
-          return;
-        }
-        if (!file.type?.startsWith("image/")) {
-          setStatus("Solo se permiten archivos de imagen.", true);
-          return;
-        }
-        try {
-          console.log("[editar_logos] selectedId", selectedId);
-          console.log("[editar_logos] file", { name: file.name, type: file.type, size: file.size });
-          setStatus("Optimizando imagen...");
-          file = await resizeImageIfNeeded(file);
-          console.log("[editar_logos] optimized file", { name: file.name, type: file.type, size: file.size });
-          setStatus("Subiendo logo...");
-          const { urls, error: uploadErr } = await uploadPlatformLogos([file]);
-          console.log("[editar_logos] upload response", { urls, uploadErr });
-          if (uploadErr) throw uploadErr;
-          const url = urls?.[0];
-          if (!url) throw new Error("No se obtuvo URL del logo.");
-          console.log("[editar_logos] updating plataforma imagen", { id_plataforma: selectedId, url });
-          const { error: updErr } = await supabase
-            .from("plataformas")
-            .update({ imagen: url })
-            .eq("id_plataforma", selectedId);
-          console.log("[editar_logos] update response", { updErr });
-          if (updErr) throw updErr;
-          plataformasMap[selectedId] = {
-            ...plataformasMap[selectedId],
-            imagen: url,
-          };
-          renderEditor(plataformasMap[selectedId]);
-          setStatus("Logo actualizado correctamente.");
-          if (fileInput) fileInput.value = "";
-        } catch (err) {
-          console.error("actualizar logo error", err);
-          setStatus("No se pudo actualizar el logo.", true);
-        }
+        await importPlatformLogosByName(selectedFiles);
+        if (fileInput) fileInput.value = "";
       });
 
       btnBannerUpdate?.addEventListener("click", async () => {
@@ -1486,7 +3256,9 @@
           file = await resizeBannerIfNeeded(file);
           console.log("[editar_logos] optimized banner file", { name: file.name, type: file.type, size: file.size });
           setBannerStatus("Subiendo banner...");
-          const { urls, error: uploadErr } = await uploadPlatformLogos([file]);
+          const { urls, error: uploadErr } = await uploadPlatformLogos([file], {
+            folder: PLATFORM_MODAL_BANNERS_FOLDER,
+          });
           console.log("[editar_logos] banner upload response", { urls, uploadErr });
           if (uploadErr) throw uploadErr;
           const url = urls?.[0];
@@ -1511,56 +3283,95 @@
         }
       });
 
-      btnPreviewUpdate?.addEventListener("click", async () => {
-        let file = previewInput?.files?.[0];
+      btnStoreLogoUpdate?.addEventListener("click", async () => {
+        let file = storeLogoInput?.files?.[0];
         if (!file) {
-          setPreviewStatus("Selecciona una imagen.", true);
-          return;
-        }
-        if (!file.type?.startsWith("image/")) {
-          setPreviewStatus("Solo se permiten archivos de imagen.", true);
+          setStoreLogoStatus("Selecciona una imagen.", true);
           return;
         }
         try {
-          setPreviewStatus("Optimizando imagen...");
-          file = await resizePreviewIfNeeded(file);
-          setPreviewStatus("Subiendo preview...");
-          const { urls, error: uploadErr } = await uploadPlatformLogos([file]);
-          if (uploadErr) throw uploadErr;
-          const url = urls?.[0];
-          if (!url) throw new Error("No se obtuvo URL del preview.");
-          const fallbackLogo =
-            document.querySelector(".logo")?.src ||
-            "https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png";
-          const row =
-            paginaPreview ||
-            (await supabase.from("pagina").select("*").limit(1).maybeSingle()).data;
-          if (!row) {
-            const { error: insErr } = await supabase
-              .from("pagina")
-              .insert({ preview: url, logo: fallbackLogo });
-            if (insErr) throw insErr;
-          } else {
-            let query = supabase.from("pagina").update({ preview: url });
-            const idKey = Object.keys(row).find(
-              (k) => k === "id" || k.startsWith("id_"),
-            );
-            if (idKey && row[idKey] != null) {
-              query = query.eq(idKey, row[idKey]);
-            } else {
-              // Fallback para tablas sin PK: aplica WHERE para evitar error 21000
-              query = query.or("preview.is.null,preview.not.is.null");
-            }
-            const { error: updErr } = await query;
-            if (updErr) throw updErr;
-          }
-          paginaPreview = { ...(row || {}), preview: url };
-          renderPreview();
-          setPreviewStatus("Preview actualizado correctamente.");
-          if (previewInput) previewInput.value = "";
+          setBusyOverlay(storeLogoFrameEl, "Importando");
+          await replaceStorePageAssetImage(file, "logo");
+          setStoreLogoStatus("Logo de tienda actualizado correctamente en pagina.logo.");
+          if (storeLogoInput) storeLogoInput.value = "";
         } catch (err) {
-          console.error("actualizar preview error", err);
-          setPreviewStatus("No se pudo actualizar el preview.", true);
+          console.error("actualizar logo tienda error", err);
+          setStoreLogoStatus("No se pudo actualizar el logo de tienda.", true);
+        } finally {
+          clearBusyOverlay(storeLogoFrameEl);
+        }
+      });
+
+      btnStoreIconUpdate?.addEventListener("click", async () => {
+        let file = storeIconInput?.files?.[0];
+        if (!file) {
+          setStoreLogoStatus("Selecciona una imagen de icono.", true);
+          return;
+        }
+        try {
+          setBusyOverlay(storeIconFrameEl, "Importando");
+          await replaceStorePageAssetImage(file, "icono_pestana");
+          setStoreLogoStatus("Icono de pestaña actualizado correctamente en pagina.icono_pestana.");
+          if (storeIconInput) storeIconInput.value = "";
+        } catch (err) {
+          console.error("actualizar icono pestaña error", err);
+          setStoreLogoStatus("No se pudo actualizar el icono de pestaña.", true);
+        } finally {
+          clearBusyOverlay(storeIconFrameEl);
+        }
+      });
+
+      btnStoreIconRefresh?.addEventListener("click", async () => {
+        try {
+          setStoreLogoStatus("Recargando favicon desde pagina.id = 2...");
+          const { data, error } = await supabase
+            .from("pagina")
+            .select("icono_pestana")
+            .eq("id", PAGINA_TARGET_ID)
+            .maybeSingle();
+          if (error) throw error;
+          if (!data) throw new Error(`No existe pagina.id = ${PAGINA_TARGET_ID}.`);
+
+          const iconUrl = String(data?.icono_pestana || "").trim();
+          if (!iconUrl) {
+            setStoreLogoStatus("pagina.icono_pestana está vacío en id = 2.", true);
+            return;
+          }
+
+          paginaPreview = {
+            ...(paginaPreview || {}),
+            id: PAGINA_TARGET_ID,
+            icono_pestana: iconUrl,
+          };
+          if (storeIconPreviewEl) storeIconPreviewEl.src = iconUrl;
+          setExtensionBadge(storeIconBadgeEl, iconUrl);
+          applyFavicon(iconUrl);
+          setStoreLogoStatus(
+            "Icono validado desde pagina.icono_pestana (id = 2). En esta vista el favicon está oculto.",
+          );
+        } catch (err) {
+          console.error("refresh favicon error", err);
+          setStoreLogoStatus("No se pudo refrescar el favicon.", true);
+        }
+      });
+
+      btnStorePreviewUpdate?.addEventListener("click", async () => {
+        let file = storePreviewInput?.files?.[0];
+        if (!file) {
+          setStoreLogoStatus("Selecciona una imagen de preview.", true);
+          return;
+        }
+        try {
+          setBusyOverlay(storePreviewFrameEl, "Importando");
+          await replaceStorePageAssetImage(file, "preview");
+          renderPreview();
+          setStoreLogoStatus("Preview actualizado correctamente en pagina.preview.");
+          if (storePreviewInput) storePreviewInput.value = "";
+        } catch (err) {
+          console.error("actualizar preview tienda error", err);
+          setStoreLogoStatus("No se pudo actualizar el preview.", true);
+        } finally {
+          clearBusyOverlay(storePreviewFrameEl);
         }
       });
 

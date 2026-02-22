@@ -87,6 +87,7 @@
                 <th></th>
                 <th>Correo</th>
                 <th>Fecha de corte</th>
+                <th>Espacios</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -298,6 +299,7 @@
           spotifyStatus.textContent = "";
           const cuentasIds = data.map((r) => r.id_cuenta).filter(Boolean);
           let libres = 0;
+          const libresByCuenta = new Map();
           if (cuentasIds.length) {
             const { data: perfiles, error: perfErr } = await supabase
               .from("perfiles")
@@ -306,6 +308,11 @@
               .eq("ocupado", false)
               .eq("perfil_hogar", false);
             if (perfErr) throw perfErr;
+            (perfiles || []).forEach((perfil) => {
+              const idCuenta = Number(perfil?.id_cuenta);
+              if (!Number.isFinite(idCuenta) || idCuenta <= 0) return;
+              libresByCuenta.set(idCuenta, (libresByCuenta.get(idCuenta) || 0) + 1);
+            });
             libres = (perfiles || []).length;
           }
           if (spotifyLibresEl) spotifyLibresEl.textContent = `Espacios libres: ${libres}`;
@@ -335,6 +342,7 @@
               <td><input type="checkbox" class="spotify-renovar-check" data-correo="${correoData}" data-clave="${claveData}" /></td>
               <td>${row.correo || "-"}</td>
               <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
+              <td>${libresByCuenta.get(Number(row.id_cuenta)) || 0}</td>
             `;
             spotifyTable.appendChild(tr);
           });

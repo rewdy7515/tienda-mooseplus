@@ -6,7 +6,7 @@ import {
   supabase,
 } from "./api.js";
 import { attachLogoHome, attachLogout, requireSession } from "./session.js";
-import { AVATAR_RANDOM_COLORS, resolveAvatarForDisplay } from "./avatar-fallback.js";
+import { AVATAR_RANDOM_COLORS, applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
 
 const sessionUserId = requireSession();
 const EMPTY_AVATAR_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
@@ -99,11 +99,11 @@ const applyAvatarSavedState = ({ url, color } = {}) => {
     avatarBgEl.style.backgroundColor = nextColor;
   }
   if (avatarEl) {
-    avatarEl.src = nextUrl;
+    applyAvatarImage(avatarEl, nextUrl);
     avatarEl.style.backgroundColor = "transparent";
   }
   document.querySelectorAll(".avatar").forEach((img) => {
-    img.src = nextUrl;
+    applyAvatarImage(img, nextUrl);
     img.style.backgroundColor = nextColor;
   });
 };

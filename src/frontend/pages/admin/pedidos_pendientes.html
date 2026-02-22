@@ -280,6 +280,41 @@
           return { error };
         }
       };
+      const pickPerfilMadreByPriority = (profiles = [], bloqueados = { cuentas: new Set(), perfiles: new Set() }) => {
+        const groups = new Map();
+        (profiles || []).forEach((perfil) => {
+          const perfilId = toPositiveId(perfil?.id_perfil);
+          const cuentaId = toPositiveId(perfil?.id_cuenta);
+          if (!perfilId || !cuentaId) return;
+          if (bloqueados?.perfiles?.has(perfilId)) return;
+          if (bloqueados?.cuentas?.has(cuentaId)) return;
+          if (!groups.has(cuentaId)) groups.set(cuentaId, []);
+          groups.get(cuentaId).push(perfil);
+        });
+        if (!groups.size) return null;
+
+        groups.forEach((list) => {
+          list.sort((a, b) => {
+            const na = Number.isFinite(Number(a?.n_perfil)) ? Number(a.n_perfil) : Number.MAX_SAFE_INTEGER;
+            const nb = Number.isFinite(Number(b?.n_perfil)) ? Number(b.n_perfil) : Number.MAX_SAFE_INTEGER;
+            if (na !== nb) return na - nb;
+            const ida = toPositiveId(a?.id_perfil) || Number.MAX_SAFE_INTEGER;
+            const idb = toPositiveId(b?.id_perfil) || Number.MAX_SAFE_INTEGER;
+            return ida - idb;
+          });
+        });
+
+        const orderedMotherIds = Array.from(groups.keys()).sort((a, b) => {
+          const freeA = groups.get(a)?.length || 0;
+          const freeB = groups.get(b)?.length || 0;
+          if (freeA !== freeB) return freeA - freeB;
+          return a - b;
+        });
+        const chosenMotherId = orderedMotherIds[0];
+        const chosenProfile = groups.get(chosenMotherId)?.[0] || null;
+        if (!chosenProfile?.id_perfil) return null;
+        return chosenProfile;
+      };
       const getVenezuelaToday = () => {
         const veDate = new Date().toLocaleDateString("en-CA", {
           timeZone: "America/Caracas",
@@ -855,25 +890,23 @@
               const madreId = toPositiveId(madre?.id_cuenta);
               return !!madreId && !reemplazosBloqueados.cuentas.has(madreId);
             });
-            for (const madre of madresDisponibles) {
-              const madreId = toPositiveId(madre?.id_cuenta);
-              if (!madreId) continue;
+            const madresIds = madresDisponibles
+              .map((madre) => toPositiveId(madre?.id_cuenta))
+              .filter(Boolean);
+            if (madresIds.length) {
               const { data: perfilesMadre, error: perfErr } = await supabase
                 .from("perfiles")
-                .select("id_perfil")
-                .eq("id_cuenta", madreId)
+                .select("id_perfil, id_cuenta, n_perfil")
+                .in("id_cuenta", madresIds)
                 .eq("ocupado", false)
+                .order("id_cuenta", { ascending: true })
                 .order("n_perfil", { ascending: true })
-                .limit(40);
+                .limit(500);
               if (perfErr) throw perfErr;
-              const perfilLibre = (perfilesMadre || []).find((perfil) => {
-                const pid = toPositiveId(perfil?.id_perfil);
-                return !!pid && !reemplazosBloqueados.perfiles.has(pid);
-              });
+              const perfilLibre = pickPerfilMadreByPriority(perfilesMadre || [], reemplazosBloqueados);
               if (perfilLibre?.id_perfil) {
-                cuentaMadreId = madreId;
-                perfilId = perfilLibre.id_perfil;
-                break;
+                cuentaMadreId = toPositiveId(perfilLibre?.id_cuenta);
+                perfilId = toPositiveId(perfilLibre?.id_perfil);
               }
             }
             if (!perfilId) {

@@ -63,8 +63,7 @@ const buttonStyleForColor = (color) => {
 const tableStyleForColor = (color) => {
   const c = normalizeHexColor(color);
   if (!c) return "";
-  const textColor = isDarkHex(c) ? "#fff" : "#111";
-  return ` style="--table-header-bg:${c};--table-header-color:${textColor};"`;
+  return ` style="--table-header-bg:${c};"`;
 };
 
 const escapeHtml = (value) =>

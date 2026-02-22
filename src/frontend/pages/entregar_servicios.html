@@ -214,6 +214,41 @@
           return { error };
         }
       };
+      const pickPerfilMadreByPriority = (profiles = [], bloqueados = { cuentas: new Set(), perfiles: new Set() }) => {
+        const groups = new Map();
+        (profiles || []).forEach((perfil) => {
+          const perfilId = toPositiveId(perfil?.id_perfil);
+          const cuentaId = toPositiveId(perfil?.id_cuenta);
+          if (!perfilId || !cuentaId) return;
+          if (bloqueados?.perfiles?.has(perfilId)) return;
+          if (bloqueados?.cuentas?.has(cuentaId)) return;
+          if (!groups.has(cuentaId)) groups.set(cuentaId, []);
+          groups.get(cuentaId).push(perfil);
+        });
+        if (!groups.size) return null;
+
+        groups.forEach((list) => {
+          list.sort((a, b) => {
+            const na = Number.isFinite(Number(a?.n_perfil)) ? Number(a.n_perfil) : Number.MAX_SAFE_INTEGER;
+            const nb = Number.isFinite(Number(b?.n_perfil)) ? Number(b.n_perfil) : Number.MAX_SAFE_INTEGER;
+            if (na !== nb) return na - nb;
+            const ida = toPositiveId(a?.id_perfil) || Number.MAX_SAFE_INTEGER;
+            const idb = toPositiveId(b?.id_perfil) || Number.MAX_SAFE_INTEGER;
+            return ida - idb;
+          });
+        });
+
+        const orderedMotherIds = Array.from(groups.keys()).sort((a, b) => {
+          const freeA = groups.get(a)?.length || 0;
+          const freeB = groups.get(b)?.length || 0;
+          if (freeA !== freeB) return freeA - freeB;
+          return a - b;
+        });
+        const chosenMotherId = orderedMotherIds[0];
+        const chosenProfile = groups.get(chosenMotherId)?.[0] || null;
+        if (!chosenProfile?.id_perfil) return null;
+        return chosenProfile;
+      };
 
       const copyToClipboard = async (text, anchor) => {
         if (!text) return;
@@ -803,6 +838,7 @@
                 .eq("cuentas.id_plataforma", platIdNum)
                 .eq("cuentas.cuenta_madre", true)
                 .eq("ocupado", false)
+                .order("id_cuenta", { ascending: true })
                 .order("n_perfil", { ascending: true });
               if (requireMadreActiva) {
                 perfAltQuery = perfAltQuery.or("inactiva.is.null,inactiva.eq.false", {
@@ -811,16 +847,7 @@
               }
               const { data: perfAlt, error: pAltErr } = await perfAltQuery.limit(160);
               if (pAltErr) throw pAltErr;
-              const perfilAlterno = (perfAlt || []).find((perfil) => {
-                const perfilId = toPositiveId(perfil?.id_perfil);
-                const cuentaId = toPositiveId(perfil?.id_cuenta);
-                return (
-                  !!perfilId &&
-                  !!cuentaId &&
-                  !reemplazosBloqueados.perfiles.has(perfilId) &&
-                  !reemplazosBloqueados.cuentas.has(cuentaId)
-                );
-              });
+              const perfilAlterno = pickPerfilMadreByPriority(perfAlt || [], reemplazosBloqueados);
               if (perfilAlterno?.id_perfil) {
                 assignPerfil = perfilAlterno.id_perfil;
                 assignCuenta = perfilAlterno.id_cuenta;

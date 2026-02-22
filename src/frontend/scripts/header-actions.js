@@ -16,7 +16,7 @@ import {
   setDeliverySeen,
 } from "./session.js";
 import { loadCurrentUser, supabase } from "./api.js";
-import { resolveAvatarForDisplay } from "./avatar-fallback.js";
+import { applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
 
 if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
@@ -45,6 +45,87 @@ if (!window.__headerActionsInit) {
     if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash.toLowerCase();
     return "";
   };
+  const HEADER_LOGO_FALLBACK =
+    "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+  const PAGINA_TARGET_ID = 2;
+  const isFaviconDisabledPage = () => {
+    const normalized = String(window.location.pathname || "")
+      .replace(/\/+$/g, "")
+      .toLowerCase();
+    return (
+      normalized === "" ||
+      normalized === "/" ||
+      normalized.endsWith("/index.html") ||
+      normalized.endsWith("/src/frontend/pages/index.html") ||
+      normalized.endsWith("/admin/editar_logos.html") ||
+      normalized.endsWith("/src/frontend/pages/admin/editar_logos.html")
+    );
+  };
+  const clearFavicon = () => {
+    document
+      .querySelectorAll(
+        'link[rel="icon"], link[rel="shortcut icon"], link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]',
+      )
+      .forEach((el) => el.remove());
+    const iconLink = document.createElement("link");
+    iconLink.setAttribute("rel", "icon");
+    iconLink.setAttribute("href", "data:,");
+    document.head.appendChild(iconLink);
+    const shortcutLink = document.createElement("link");
+    shortcutLink.setAttribute("rel", "shortcut icon");
+    shortcutLink.setAttribute("href", "data:,");
+    document.head.appendChild(shortcutLink);
+  };
+  const applyHeaderLogo = (url = "") => {
+    const logoUrl = String(url || "").trim() || HEADER_LOGO_FALLBACK;
+    document.querySelectorAll(".logo").forEach((img) => {
+      img.src = logoUrl;
+    });
+  };
+  const applyFavicon = (url = "") => {
+    const iconUrl = String(url || "").trim();
+    if (!iconUrl) return;
+    const cacheBustedUrl = `${iconUrl}${iconUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+    document
+      .querySelectorAll(
+        'link[rel="icon"], link[rel="shortcut icon"], link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]',
+      )
+      .forEach((el) => el.remove());
+    const iconLink = document.createElement("link");
+    iconLink.setAttribute("rel", "icon");
+    iconLink.setAttribute("type", "image/png");
+    iconLink.setAttribute("href", cacheBustedUrl);
+    document.head.appendChild(iconLink);
+    const shortcutLink = document.createElement("link");
+    shortcutLink.setAttribute("rel", "shortcut icon");
+    shortcutLink.setAttribute("type", "image/png");
+    shortcutLink.setAttribute("href", cacheBustedUrl);
+    document.head.appendChild(shortcutLink);
+  };
+  const loadHeaderLogo = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("pagina")
+        .select("logo, icono_pestana")
+        .eq("id", PAGINA_TARGET_ID)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error(`No existe pagina.id = ${PAGINA_TARGET_ID}`);
+      applyHeaderLogo(data?.logo || "");
+      if (!isFaviconDisabledPage()) {
+        const iconoPestana = String(data?.icono_pestana || "").trim();
+        applyFavicon(iconoPestana);
+      } else {
+        clearFavicon();
+      }
+    } catch (err) {
+      console.error("header logo load error", err);
+      applyHeaderLogo("");
+      if (isFaviconDisabledPage()) {
+        clearFavicon();
+      }
+    }
+  };
 
   const writeHeaderAvatarCache = (idUsuario = null, avatar = null) => {
     try {
@@ -60,14 +141,22 @@ if (!window.__headerActionsInit) {
   };
 
   const applyHeaderAvatar = async (user = null, idUsuario = null) => {
-    const avatar = await resolveAvatarForDisplay({ user, idUsuario });
-    const foto = String(avatar?.url || "").trim();
-    const fondo = normalizeColor(avatar?.color);
+    const rawFoto = String(user?.foto_perfil || "").trim();
+    let foto = "";
+    let fondo = "";
+    if (rawFoto) {
+      const avatar = await resolveAvatarForDisplay({ user, idUsuario });
+      foto = String(avatar?.url || rawFoto).trim();
+      fondo = normalizeColor(avatar?.color);
+    }
     const effectiveUserId = idUsuario || user?.id_usuario || null;
     writeHeaderAvatarCache(effectiveUserId, { url: foto, color: fondo });
     document.querySelectorAll(".avatar").forEach((img) => {
-      if (foto) img.src = foto;
-      img.style.backgroundColor = fondo;
+      applyAvatarImage(img, foto, {
+        hideOnInvalid: false,
+        emptyFrameColor: "#ffffff",
+      });
+      img.style.backgroundColor = foto ? fondo : "#ffffff";
     });
   };
 
@@ -307,6 +396,7 @@ if (!window.__headerActionsInit) {
     }
   };
   initUser();
+  loadHeaderLogo();
 
   attachLogoHome();
   normalizeHeaderLinks();

@@ -93,6 +93,51 @@ const buildRandomFallback = async (idUsuario = null) => {
   return { url, color };
 };
 
+const isImageElement = (node) =>
+  typeof HTMLImageElement !== "undefined" && node instanceof HTMLImageElement;
+
+const applyInvalidAvatarState = (img) => {
+  const shouldHide = String(img?.dataset?.avatarHideOnInvalid || "1") !== "0";
+  if (shouldHide) {
+    img.classList.add("hidden");
+  } else {
+    img.classList.remove("hidden");
+  }
+  const emptyFrameColor = String(img?.dataset?.avatarEmptyFrameColor || "").trim();
+  if (emptyFrameColor) {
+    img.style.backgroundColor = emptyFrameColor;
+  }
+  img.removeAttribute("src");
+};
+
+export const applyAvatarImage = (img, url = "", options = {}) => {
+  if (!isImageElement(img)) return;
+  const nextUrl = String(url || "").trim();
+  const hideOnInvalid = options?.hideOnInvalid !== false;
+  const emptyFrameColor = String(options?.emptyFrameColor || "").trim();
+
+  img.dataset.avatarHideOnInvalid = hideOnInvalid ? "1" : "0";
+  img.dataset.avatarEmptyFrameColor = emptyFrameColor;
+
+  if (!img.dataset.avatarHideOnErrorBound) {
+    img.addEventListener("error", () => {
+      applyInvalidAvatarState(img);
+    });
+    img.addEventListener("load", () => {
+      img.classList.remove("hidden");
+    });
+    img.dataset.avatarHideOnErrorBound = "1";
+  }
+
+  if (!nextUrl || nextUrl === EMPTY_AVATAR_DATA_URL) {
+    applyInvalidAvatarState(img);
+    return;
+  }
+
+  img.classList.remove("hidden");
+  img.src = nextUrl;
+};
+
 export async function resolveAvatarForDisplay({ user = null, idUsuario = null } = {}) {
   const effectiveUserId = idUsuario || user?.id_usuario || null;
   const foto = String(user?.foto_perfil || "").trim();
@@ -114,4 +159,3 @@ export async function resolveAvatarForDisplay({ user = null, idUsuario = null } 
   writeCachedFallback(effectiveUserId, fallback);
   return fallback;
 }
-

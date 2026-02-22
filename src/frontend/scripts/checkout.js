@@ -10,6 +10,7 @@ import {
   loadCurrentUser,
 } from "./api.js";
 import { requireSession, attachLogoHome } from "./session.js";
+import { loadPaginaBranding } from "./branding.js";
 import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
 import { TASA_MARKUP } from "./rate-config.js";
 
@@ -668,6 +669,9 @@ const calcularTotalTier = (items = [], preciosMap = {}, acceso = null) => {
 };
 
 async function init() {
+  loadPaginaBranding({ logoSelectors: [".logo"], applyFavicon: true }).catch((err) => {
+    console.warn("checkout branding load error", err);
+  });
   try {
     const [metodosResp, tasaResp, user] = await Promise.all([
       supabase

@@ -35,6 +35,28 @@
     }
   };
 
+  const applyAvatarImage = (img, url = "") => {
+    if (!img) return;
+    const nextUrl = String(url || "").trim();
+    if (!img.dataset.avatarHideOnErrorBound) {
+      img.addEventListener("error", () => {
+        img.classList.remove("hidden");
+        img.removeAttribute("src");
+        img.style.backgroundColor = "#ffffff";
+      });
+      img.addEventListener("load", () => img.classList.remove("hidden"));
+      img.dataset.avatarHideOnErrorBound = "1";
+    }
+    if (!nextUrl) {
+      img.classList.remove("hidden");
+      img.removeAttribute("src");
+      img.style.backgroundColor = "#ffffff";
+      return;
+    }
+    img.classList.remove("hidden");
+    img.src = nextUrl;
+  };
+
   const applyCachedHeaderAvatar = () => {
     try {
       const sessionId =
@@ -43,7 +65,7 @@
       const cached = readHeaderAvatarCache(sessionId);
       if (!cached?.url) return;
       container.querySelectorAll(".avatar").forEach((img) => {
-        img.src = cached.url;
+        applyAvatarImage(img, cached.url);
         img.style.backgroundColor = cached.color || "";
       });
     } catch (_err) {

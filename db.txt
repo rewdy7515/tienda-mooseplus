@@ -6,6 +6,7 @@ CREATE TABLE public.banners (
   imagen text NOT NULL,
   redireccion text,
   oculto boolean,
+  posicion smallint,
   CONSTRAINT banners_pkey PRIMARY KEY (id_banner)
 );
 CREATE TABLE public.carrito_items (
@@ -203,6 +204,7 @@ CREATE TABLE public.pagina (
   logo text,
   preview text,
   logo_pestana text,
+  icono_pestana text,
   CONSTRAINT pagina_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.pagomoviles (
@@ -264,6 +266,7 @@ CREATE TABLE public.plataformas (
   color_3 text,
   banner text,
   link_pagina text,
+  posicion smallint,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
   CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );

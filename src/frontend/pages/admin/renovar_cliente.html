@@ -174,6 +174,57 @@
       let fetchCounter = 0;
       let seleccionActual = [];
       let metodosPago = [];
+      let usersSearchCache = null;
+      let usersSearchCachePromise = null;
+
+      const normalizeSearchText = (value) =>
+        String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const buildUserSearchKey = (user = {}) =>
+        normalizeSearchText([user?.nombre, user?.apellido, user?.correo].filter(Boolean).join(" "));
+
+      const loadUsersSearchCache = async () => {
+        if (usersSearchCache) return usersSearchCache;
+        if (!usersSearchCachePromise) {
+          usersSearchCachePromise = (async () => {
+            const rows = [];
+            const pageSize = 1000;
+            let from = 0;
+            while (true) {
+              const to = from + pageSize - 1;
+              const { data, error } = await supabase
+                .from("usuarios")
+                .select("id_usuario, nombre, apellido, correo")
+                .order("id_usuario", { ascending: false })
+                .range(from, to);
+              if (error) throw error;
+              const chunk = Array.isArray(data) ? data : [];
+              rows.push(
+                ...chunk.map((u) => ({
+                  id_usuario: u.id_usuario,
+                  nombre: u.nombre,
+                  apellido: u.apellido,
+                  correo: u.correo,
+                  nombreCompleto: [u.nombre, u.apellido].filter(Boolean).join(" ").trim(),
+                  searchKey: buildUserSearchKey(u),
+                })),
+              );
+              if (chunk.length < pageSize) break;
+              from += pageSize;
+            }
+            usersSearchCache = rows;
+            return rows;
+          })().finally(() => {
+            usersSearchCachePromise = null;
+          });
+        }
+        return await usersSearchCachePromise;
+      };
 
       (async () => {
         try {
@@ -225,6 +276,19 @@
         return raw;
       };
 
+      const normalizeHeaderColor = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash;
+        return "";
+      };
+
+      const tableHeaderStyleAttr = (value) => {
+        const color = normalizeHeaderColor(value);
+        return color ? ` style="--table-header-bg:${color};"` : "";
+      };
+
       const resolveServicioPin = ({ cuentaBase = null, cuentaMiembro = null, perfil = null } = {}) => {
         const pinMiembro = normalizePin(cuentaMiembro?.pin);
         if (pinMiembro) return pinMiembro;
@@ -264,6 +328,8 @@
 
         const bloques = Object.entries(grouped)
           .map(([plat, rows]) => {
+            const groupColor = rows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+            const styleAttr = tableHeaderStyleAttr(groupColor);
             const showPerfilCol = rows.some((r) => r.showPerfil);
             const showHogarCol = rows.some((r) => r.showHogar);
             const head = [
@@ -312,6 +378,7 @@
                           data-entrega="${it.entrega_inmediata ? "true" : "false"}"
                           data-suspendido="${it.suspendido ? "true" : "false"}"
                           data-hogar="${it.hogar_actualizado ? "true" : "false"}"
+                          data-color-1="${it.color_1 || ""}"
                         />
                       </label>
                     </td>
@@ -324,7 +391,7 @@
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${plat}</h3>
                 <div class="proximas-table-wrap">
-                  <table class="proximas-table table-base">
+                  <table class="proximas-table table-base"${styleAttr}>
                     <thead>
                       <tr>${head}</tr>
                     </thead>
@@ -404,9 +471,11 @@
           `
           )
           .join("");
+        const firstColor = rows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+        const styleAttr = tableHeaderStyleAttr(firstColor);
         resultadoEl.innerHTML = `
           <div class="proximas-table-wrap">
-            <table class="proximas-table table-base">
+            <table class="proximas-table table-base"${styleAttr}>
               <thead><tr>${headCols}</tr></thead>
               <tbody>${body}</tbody>
             </table>
@@ -441,37 +510,28 @@
           return;
         }
 
-        // Primera palabra -> nombre, resto -> apellido
-        const parts = term.split(/\s+/);
-        const nombreTerm = parts.shift() || "";
-        const apellidoTerm = parts.join(" ").trim();
+        const normalizedTerm = normalizeSearchText(term);
+        const termParts = normalizedTerm.split(" ").filter(Boolean);
+        if (!termParts.length) {
+          limpiarSugerencias();
+          if (mostrarTabla) limpiarResultado();
+          return;
+        }
 
         const current = ++fetchCounter;
         try {
-          let query = supabase
-            .from("usuarios")
-            .select("id_usuario, nombre, apellido, correo")
-            .ilike("nombre", `%${nombreTerm}%`);
-          if (apellidoTerm) {
-            query = query.ilike("apellido", `%${apellidoTerm}%`);
-          }
-          const { data, error } = await query.limit(5);
           if (current !== fetchCounter) return;
-          if (error) {
-            console.error("buscar clientes error", error);
-            limpiarSugerencias();
-            if (mostrarTabla) limpiarResultado();
-            return;
-          }
-          const parsed = (data || []).map((u) => ({
-            id_usuario: u.id_usuario,
-            nombre: u.nombre,
-            apellido: u.apellido,
-            correo: u.correo,
-            nombreCompleto: [u.nombre, u.apellido].filter(Boolean).join(" ").trim(),
-          }));
+          const allUsers = await loadUsersSearchCache();
+          if (current !== fetchCounter) return;
+          const parsed = (allUsers || [])
+            .filter((u) => {
+              const key = String(u?.searchKey || "");
+              if (!key) return false;
+              return termParts.every((part) => key.includes(part));
+            })
+            .slice(0, 300);
           // Sugerencias solo cuando no es búsqueda por botón
-          renderSugerencias(parsed, mostrarTabla);
+          renderSugerencias(parsed.slice(0, 5), mostrarTabla);
           if (mostrarTabla) {
             // Buscar ventas por los ids encontrados
             const ids = parsed.map((u) => u.id_usuario).filter(Boolean);
@@ -516,7 +576,7 @@
                 if (platIds.length) {
                   const { data: plats, error: platErr } = await supabase
                     .from("plataformas")
-                    .select("id_plataforma, nombre, por_pantalla, entrega_inmediata")
+                    .select("id_plataforma, nombre, color_1, por_pantalla, entrega_inmediata")
                     .in("id_plataforma", platIds);
                   if (platErr) {
                     console.error("buscar plataformas error", platErr);
@@ -594,6 +654,7 @@
                 id_precio: v.id_precio || null,
                 plataforma: platInfo?.nombre || "",
                 plataforma_nombre: platInfo?.nombre || "",
+                color_1: platInfo?.color_1 || "",
                 id_plataforma: platId,
                 id_cuenta: memberId || v.id_cuenta || null,
                 id_usuario_cliente: v.id_usuario || null,
@@ -757,7 +818,7 @@
           const { data: plats, error: platErr } = platIds.length
             ? await supabase
                 .from("plataformas")
-              .select("id_plataforma, nombre, por_pantalla, por_acceso, entrega_inmediata")
+              .select("id_plataforma, nombre, color_1, por_pantalla, por_acceso, entrega_inmediata")
                 .in("id_plataforma", platIds)
             : { data: [], error: null };
           if (platErr) throw platErr;
@@ -788,6 +849,7 @@
               return {
                 plataforma: plat?.nombre || "",
                 plataforma_nombre: plat?.nombre || "",
+                color_1: plat?.color_1 || "",
                 id_venta: v.id_venta,
                 id_precio: v.id_precio || null,
                 id_plataforma: cuenta.id_plataforma || plat?.id_plataforma || null,
@@ -940,6 +1002,8 @@
         }, {});
         const bloques = Object.entries(grouped)
           .map(([plat, rows]) => {
+            const groupColor = rows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+            const styleAttr = tableHeaderStyleAttr(groupColor);
             const rowsHtml = rows
               .map(
                 (it) => `
@@ -961,7 +1025,7 @@
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${plat}</h3>
                 <div class="proximas-table-wrap">
-                  <table class="proximas-table table-base">
+                  <table class="proximas-table table-base"${styleAttr}>
                     <thead>
                       <tr>
                         <th>Correo</th>
@@ -990,6 +1054,7 @@
           n_perfil: chk.dataset.nperfil || "",
           pin: chk.dataset.pin || "",
           plataforma: chk.dataset.plataforma || "",
+          color_1: chk.dataset.color1 || "",
           id_plataforma: chk.dataset.idPlataforma || null,
           id_cuenta: chk.dataset.idCuenta || null,
           id_usuario_cliente: chk.dataset.idUsuario || null,
