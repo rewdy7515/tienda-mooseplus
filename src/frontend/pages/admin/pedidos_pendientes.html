@@ -745,7 +745,6 @@
         const isCompleta = btn?.dataset?.completa === "true";
         const cuentaMadreFlag = btn?.dataset?.cuentaMadre === "true" && !isCompleta;
         const mesesContratados = Number(btn?.dataset?.meses || 1);
-        const isReportado = btn?.dataset?.reportado === "true";
         const costoActivacion = Number(activationData?.costo);
         const proveedorId = Number(activationData?.idProveedor);
         const idPlataformaNum = Number(idPlataforma);
@@ -907,7 +906,7 @@
           id_perfil: perfilId || null,
           cuenta_nueva: false,
         };
-        if (ventaSinFechaCorte || !isReportado) {
+        if (ventaSinFechaCorte) {
           updateVenta.fecha_corte = nextIso;
         }
         const { error: updErr } = await supabase.from("ventas").update(updateVenta).eq("id_venta", idVenta);

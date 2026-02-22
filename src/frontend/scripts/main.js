@@ -10,6 +10,7 @@ import {
   fetchTestingFlag,
   updateTestingFlag,
   fetchP2PRate,
+  fetchHomeBanners,
 } from "./api.js";
 import { initCart } from "./cart.js";
 import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
@@ -48,6 +49,34 @@ const missingDataBtn = document.querySelector("#missing-data-btn");
 const tasaActualEl = document.querySelector("#tasa-actual");
 const activeOrderWrap = document.querySelector("#active-order-wrap");
 const activeOrderLink = document.querySelector("#active-order-link");
+const homeBannersWrap = document.querySelector("#home-banners");
+const homeBannersViewport = document.querySelector(".home-banners-viewport");
+const homeBannersTrack = document.querySelector("#home-banners-track");
+const homeBannersDots = document.querySelector("#home-banners-dots");
+const HOME_BANNERS_SLIDE_INTERVAL_MS = 5000;
+const HOME_BANNERS_DESIGN_WIDTH = 1650;
+const HOME_BANNERS_DESIGN_HEIGHT = 828;
+const HOME_BANNERS_MIN_RENDER_WIDTH = 480;
+const HOME_BANNERS_SWIPE_MIN_PX = 36;
+const HOME_BANNERS_SWIPE_RATIO = 0.12;
+const HOME_BANNERS_CLICK_SUPPRESS_MS = 320;
+const HOME_BANNERS_WHEEL_MIN_DELTA = 28;
+const HOME_BANNERS_WHEEL_AXIS_RATIO = 0.85;
+const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
+const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 190;
+let homeBannersSliderTimer = null;
+let homeBannersSliderRunId = 0;
+let homeBannersCurrentIndex = 0;
+let homeBannersTotalSlides = 0;
+let homeBannersSwipeActive = false;
+let homeBannersSwipePointerId = null;
+let homeBannersSwipeStartX = 0;
+let homeBannersSwipeDeltaX = 0;
+let homeBannersSuppressClickUntil = 0;
+let homeBannersWheelAccumX = 0;
+let homeBannersWheelResetTimer = null;
+let homeBannersWheelLastSlideAt = 0;
+let homeBannersWheelDidSlideInGesture = false;
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
@@ -393,6 +422,443 @@ const formatToDDMMYYYY = (value) => {
   const [year, month, day] = str.split("-");
   if (!year || !month || !day) return str;
   return `${day}-${month}-${year}`;
+};
+
+const normalizeBannerRedirect = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^(https?:\/\/|mailto:|tel:)/i.test(raw)) return raw;
+  if (raw.startsWith("/")) return raw;
+  if (raw.startsWith("./") || raw.startsWith("../")) {
+    try {
+      return new URL(raw, window.location.href).href;
+    } catch (_err) {
+      return raw;
+    }
+  }
+  if (!/\s/.test(raw) && raw.includes(".")) return `https://${raw}`;
+  return raw;
+};
+
+const normalizePathnameForCompare = (pathname = "") => {
+  const raw = String(pathname || "").trim();
+  if (!raw) return "/";
+  const normalized = raw.replace(/\/+$/g, "");
+  return normalized || "/";
+};
+
+const isIndexLikePath = (pathname = "") => {
+  const normalized = normalizePathnameForCompare(pathname).toLowerCase();
+  return (
+    normalized === "/" ||
+    normalized.endsWith("/index.html") ||
+    normalized.endsWith("/src/frontend/pages/index.html")
+  );
+};
+
+const applyInPageHashNavigation = (hashValue = "") => {
+  const hash = String(hashValue || "").trim();
+  if (!hash.startsWith("#")) return false;
+  try {
+    const el = document.querySelector(hash);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.history.replaceState(null, "", hash);
+      return true;
+    }
+  } catch (_err) {
+    // ignore and fallback below
+  }
+  window.location.hash = hash;
+  return true;
+};
+
+const navigateBannerRedirect = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  if (raw.startsWith("#")) {
+    return applyInPageHashNavigation(raw);
+  }
+
+  const redirectHref = normalizeBannerRedirect(raw);
+  if (!redirectHref) return false;
+
+  try {
+    const target = new URL(redirectHref, window.location.href);
+    const current = new URL(window.location.href);
+    const sameOrigin = target.origin === current.origin;
+    const samePath =
+      normalizePathnameForCompare(target.pathname) ===
+      normalizePathnameForCompare(current.pathname);
+    const bothIndex =
+      isIndexLikePath(target.pathname) && isIndexLikePath(current.pathname);
+    if (sameOrigin && target.hash && (samePath || bothIndex)) {
+      return applyInPageHashNavigation(target.hash);
+    }
+  } catch (_err) {
+    // fallback to normal navigation below
+  }
+
+  window.location.href = redirectHref;
+  return true;
+};
+
+const stopHomeBannersSlider = () => {
+  homeBannersSliderRunId += 1;
+  if (homeBannersSliderTimer) {
+    window.clearTimeout(homeBannersSliderTimer);
+    homeBannersSliderTimer = null;
+  }
+};
+
+const updateHomeBannersDots = (activeIndex = 0) => {
+  if (!homeBannersDots) return;
+  const safeIndex = Number.isFinite(Number(activeIndex))
+    ? Math.max(0, Math.trunc(Number(activeIndex)))
+    : 0;
+  homeBannersDots
+    .querySelectorAll(".home-banner-dot[data-index]")
+    .forEach((dotEl) => {
+      const dotIndex = Number(dotEl.dataset.index);
+      dotEl.classList.toggle("is-active", dotIndex === safeIndex);
+    });
+};
+
+const renderHomeBannersDots = (total = 0) => {
+  if (!homeBannersDots) return;
+  const count = Number.isFinite(Number(total)) ? Math.max(0, Math.trunc(Number(total))) : 0;
+  if (count <= 0) {
+    homeBannersDots.innerHTML = "";
+    homeBannersDots.classList.add("hidden");
+    return;
+  }
+  homeBannersDots.innerHTML = Array.from({ length: count }, (_, idx) => {
+    return `<span class="home-banner-dot" data-index="${idx}"></span>`;
+  }).join("");
+  homeBannersDots.classList.remove("hidden");
+  updateHomeBannersDots(0);
+};
+
+const setHomeBannersSlide = (index = 0) => {
+  if (!homeBannersTrack) return;
+  const total =
+    homeBannersTotalSlides > 0
+      ? homeBannersTotalSlides
+      : Math.max(0, homeBannersTrack.children?.length || 0);
+  let safeIndex = Number.isFinite(Number(index)) ? Math.trunc(Number(index)) : 0;
+  if (total > 0) {
+    safeIndex = ((safeIndex % total) + total) % total;
+  } else {
+    safeIndex = Math.max(0, safeIndex);
+  }
+  homeBannersCurrentIndex = safeIndex;
+  homeBannersTrack.style.transform = `translateX(-${safeIndex * 100}%)`;
+  updateHomeBannersDots(safeIndex);
+};
+
+const startHomeBannersSlider = (total = 0, startIndex = 0) => {
+  stopHomeBannersSlider();
+  if (!homeBannersTrack) return;
+
+  const count = Number.isFinite(Number(total)) ? Math.max(0, Math.trunc(Number(total))) : 0;
+  homeBannersTotalSlides = count;
+  const initialIndex = Number.isFinite(Number(startIndex))
+    ? Math.trunc(Number(startIndex))
+    : 0;
+  setHomeBannersSlide(initialIndex);
+  if (count <= 1) return;
+  const runId = homeBannersSliderRunId;
+
+  const scheduleNext = () => {
+    if (runId !== homeBannersSliderRunId) return;
+    if (homeBannersSliderTimer) {
+      window.clearTimeout(homeBannersSliderTimer);
+      homeBannersSliderTimer = null;
+    }
+    homeBannersSliderTimer = window.setTimeout(() => {
+      if (runId !== homeBannersSliderRunId) return;
+      if (!homeBannersTrack || homeBannersTotalSlides <= 1) {
+        stopHomeBannersSlider();
+        return;
+      }
+      homeBannersCurrentIndex = (homeBannersCurrentIndex + 1) % homeBannersTotalSlides;
+      setHomeBannersSlide(homeBannersCurrentIndex);
+      // Reinicia el contador en cada nueva posición.
+      scheduleNext();
+    }, HOME_BANNERS_SLIDE_INTERVAL_MS);
+  };
+
+  // Inicia el contador desde cero para la posición actual.
+  scheduleNext();
+};
+
+const attachHomeBannersSwipe = () => {
+  if (!homeBannersViewport || homeBannersViewport.dataset.swipeBound === "1") return;
+  homeBannersViewport.dataset.swipeBound = "1";
+
+  const resetSwipeState = () => {
+    homeBannersSwipeActive = false;
+    homeBannersSwipePointerId = null;
+    homeBannersSwipeStartX = 0;
+    homeBannersSwipeDeltaX = 0;
+  };
+
+  const finalizeSwipe = ({ cancelled = false } = {}) => {
+    if (!homeBannersSwipeActive) return;
+    const total = Math.max(0, homeBannersTotalSlides);
+    const threshold = Math.max(
+      HOME_BANNERS_SWIPE_MIN_PX,
+      Math.round((homeBannersViewport.clientWidth || 0) * HOME_BANNERS_SWIPE_RATIO),
+    );
+    const absDelta = Math.abs(homeBannersSwipeDeltaX);
+    if (!cancelled && total > 1 && absDelta >= threshold) {
+      if (homeBannersSwipeDeltaX < 0) {
+        homeBannersCurrentIndex = (homeBannersCurrentIndex + 1) % total;
+      } else {
+        homeBannersCurrentIndex = (homeBannersCurrentIndex - 1 + total) % total;
+      }
+      homeBannersSuppressClickUntil = Date.now() + HOME_BANNERS_CLICK_SUPPRESS_MS;
+    }
+
+    setHomeBannersSlide(homeBannersCurrentIndex);
+    if (total > 1) {
+      startHomeBannersSlider(total, homeBannersCurrentIndex);
+    }
+    resetSwipeState();
+  };
+
+  homeBannersViewport.addEventListener("pointerdown", (e) => {
+    const total = Math.max(0, homeBannersTotalSlides);
+    if (total <= 1) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    homeBannersSwipeActive = true;
+    homeBannersSwipePointerId = e.pointerId;
+    homeBannersSwipeStartX = e.clientX;
+    homeBannersSwipeDeltaX = 0;
+    stopHomeBannersSlider();
+    try {
+      homeBannersViewport.setPointerCapture(e.pointerId);
+    } catch (_err) {
+      // noop
+    }
+  });
+
+  homeBannersViewport.addEventListener("pointermove", (e) => {
+    if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
+    homeBannersSwipeDeltaX = e.clientX - homeBannersSwipeStartX;
+  });
+
+  homeBannersViewport.addEventListener("pointerup", (e) => {
+    if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
+    finalizeSwipe({ cancelled: false });
+    try {
+      homeBannersViewport.releasePointerCapture(e.pointerId);
+    } catch (_err) {
+      // noop
+    }
+  });
+
+  homeBannersViewport.addEventListener("pointercancel", (e) => {
+    if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
+    finalizeSwipe({ cancelled: true });
+    try {
+      homeBannersViewport.releasePointerCapture(e.pointerId);
+    } catch (_err) {
+      // noop
+    }
+  });
+
+  homeBannersViewport.addEventListener(
+    "wheel",
+    (e) => {
+      const total = Math.max(0, homeBannersTotalSlides);
+      if (total <= 1) return;
+
+      const deltaX = Number(e.deltaX) || 0;
+      const deltaY = Number(e.deltaY) || 0;
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+      const isHorizontalIntent = absX >= Math.max(8, absY * HOME_BANNERS_WHEEL_AXIS_RATIO);
+      if (!isHorizontalIntent) return;
+
+      e.preventDefault();
+      stopHomeBannersSlider();
+
+      homeBannersWheelAccumX += deltaX;
+      if (homeBannersWheelResetTimer) {
+        window.clearTimeout(homeBannersWheelResetTimer);
+      }
+      homeBannersWheelResetTimer = window.setTimeout(() => {
+        homeBannersWheelAccumX = 0;
+        homeBannersWheelResetTimer = null;
+        homeBannersWheelDidSlideInGesture = false;
+      }, HOME_BANNERS_WHEEL_GESTURE_RESET_MS);
+
+      if (Math.abs(homeBannersWheelAccumX) < HOME_BANNERS_WHEEL_MIN_DELTA) return;
+      if (homeBannersWheelDidSlideInGesture) return;
+      const now = Date.now();
+      if (now - homeBannersWheelLastSlideAt < HOME_BANNERS_WHEEL_COOLDOWN_MS) return;
+
+      if (homeBannersWheelAccumX > 0) {
+        homeBannersCurrentIndex = (homeBannersCurrentIndex + 1) % total;
+      } else {
+        homeBannersCurrentIndex = (homeBannersCurrentIndex - 1 + total) % total;
+      }
+      homeBannersWheelAccumX = 0;
+      homeBannersWheelLastSlideAt = now;
+      homeBannersWheelDidSlideInGesture = true;
+      homeBannersSuppressClickUntil = now + HOME_BANNERS_CLICK_SUPPRESS_MS;
+      setHomeBannersSlide(homeBannersCurrentIndex);
+      startHomeBannersSlider(total, homeBannersCurrentIndex);
+    },
+    { passive: false },
+  );
+};
+
+const syncHomeBannersViewportSize = () => {
+  if (!homeBannersViewport || !homeBannersTrack) return;
+  const imgs = Array.from(homeBannersTrack.querySelectorAll(".home-banner-card img"));
+  if (!imgs.length) {
+    homeBannersViewport.style.removeProperty("--home-banners-render-width");
+    homeBannersViewport.style.removeProperty("--home-banners-aspect-ratio");
+    return;
+  }
+
+  const loadedImgs = imgs.filter((img) => img.naturalWidth > 0 && img.naturalHeight > 0);
+  if (!loadedImgs.length) return;
+
+  const minNaturalWidth = loadedImgs.reduce(
+    (acc, img) => Math.min(acc, img.naturalWidth),
+    HOME_BANNERS_DESIGN_WIDTH,
+  );
+  const renderWidth = Math.min(
+    HOME_BANNERS_DESIGN_WIDTH,
+    Math.max(HOME_BANNERS_MIN_RENDER_WIDTH, Math.round(minNaturalWidth)),
+  );
+  homeBannersViewport.style.setProperty("--home-banners-render-width", `${renderWidth}px`);
+
+  const first = loadedImgs[0];
+  const aspectW = Number(first?.naturalWidth) || HOME_BANNERS_DESIGN_WIDTH;
+  const aspectH = Number(first?.naturalHeight) || HOME_BANNERS_DESIGN_HEIGHT;
+  if (aspectW > 0 && aspectH > 0) {
+    homeBannersViewport.style.setProperty("--home-banners-aspect-ratio", `${aspectW} / ${aspectH}`);
+  }
+};
+
+const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []) => {
+  if (!homeBannersWrap || !homeBannersTrack || !homeBannersViewport) return;
+
+  const source = Array.isArray(plataformas) ? plataformas : [];
+  const customRows = Array.isArray(customBanners)
+    ? customBanners
+        .filter((row) => row?.image_url)
+        .map((row) => ({
+          id: Number(row?.id_banner) || 0,
+          nombre: "Banner",
+          image: String(row?.image_url || "").trim(),
+          redirect: String(row?.redirect_url || "").trim(),
+          sourceType: "custom",
+        }))
+        .filter((row) => !!row.image)
+    : [];
+
+  const unique = [];
+  const seen = new Set();
+  if (customRows.length) {
+    customRows.forEach((row) => {
+      const key = `${row.id}|${row.image}|${row.redirect}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push(row);
+    });
+  } else {
+    source.forEach((plat) => {
+      const banner = String(plat?.banner || "").trim();
+      if (!banner) return;
+      const id = Number(plat?.id_plataforma) || 0;
+      const key = `${id}|${banner}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push({
+        id,
+        nombre: String(plat?.nombre || "Plataforma"),
+        image: banner,
+        redirect: "",
+        sourceType: "platform",
+      });
+    });
+  }
+
+  if (!unique.length) {
+    homeBannersTrack.innerHTML = "";
+    renderHomeBannersDots(0);
+    homeBannersTotalSlides = 0;
+    stopHomeBannersSlider();
+    syncHomeBannersViewportSize();
+    homeBannersWrap.classList.add("hidden");
+    return;
+  }
+
+  homeBannersTrack.innerHTML = unique
+    .map(
+      (item, idx) => `
+        <button
+          type="button"
+          class="home-banner-card"
+          data-id-plataforma="${item.id || ""}"
+          data-source-type="${item.sourceType || ""}"
+          data-redirect-url="${escapeHtml(item.redirect || "")}"
+          aria-label="Abrir ${escapeHtml(item.nombre)}"
+          title="${escapeHtml(item.nombre)}"
+        >
+          <img
+            src="${escapeHtml(item.image)}"
+            alt="${escapeHtml(item.nombre)}"
+            loading="${idx === 0 ? "eager" : "lazy"}"
+            fetchpriority="${idx === 0 ? "high" : "auto"}"
+            sizes="(max-width: 700px) calc(100vw - 24px), min(1650px, calc(100vw - 40px))"
+            decoding="async"
+          />
+        </button>
+      `,
+    )
+    .join("");
+
+  homeBannersTrack.querySelectorAll(".home-banner-card img").forEach((img) => {
+    if (img.complete) return;
+    img.addEventListener("load", syncHomeBannersViewportSize, { once: true });
+    img.addEventListener("error", syncHomeBannersViewportSize, { once: true });
+  });
+  syncHomeBannersViewportSize();
+  renderHomeBannersDots(unique.length);
+
+  homeBannersTrack.querySelectorAll(".home-banner-card[data-id-plataforma]").forEach((card) => {
+    card.addEventListener("click", () => {
+      if (Date.now() < homeBannersSuppressClickUntil) return;
+      const redirectRaw = String(card.dataset.redirectUrl || "").trim();
+      const sourceType = String(card.dataset.sourceType || "").trim();
+      if (sourceType === "custom" && redirectRaw) {
+        if (navigateBannerRedirect(redirectRaw)) {
+          return;
+        }
+      }
+      const id = Number(card.dataset.idPlataforma);
+      if (!Number.isFinite(id) || id <= 0) return;
+      const plataforma = source.find((plat) => Number(plat?.id_plataforma) === id);
+      if (!plataforma) return;
+      const categoria = (Array.isArray(categorias) ? categorias : []).find(
+        (cat) => Number(cat?.id_categoria) === Number(plataforma?.id_categoria),
+      )?.nombre;
+      openModal({
+        ...plataforma,
+        categoria: categoria || "",
+      });
+    });
+  });
+
+  startHomeBannersSlider(unique.length);
+  attachHomeBannersSwipe();
+  homeBannersWrap.classList.remove("hidden");
 };
 
 const buildPreciosMap = (precios) =>
@@ -881,11 +1347,19 @@ async function init() {
     const cachedCart = getCachedCart();
     const cartData = await fetchCart();
     setCachedCart(cartData);
-    const [catalog, stockMap] = await Promise.all([loadCatalog(), loadStockSummary(!!currentUser)]);
+    const [catalog, stockMap, homeBannersResp] = await Promise.all([
+      loadCatalog(),
+      loadStockSummary(!!currentUser),
+      fetchHomeBanners(),
+    ]);
     const { categorias, plataformas, precios, descuentos } = catalog;
     const plataformasDisponibles = (plataformas || []).filter(
       (plat) => !isTrue(plat?.no_disponible),
     );
+    const customHomeBanners = Array.isArray(homeBannersResp?.items)
+      ? homeBannersResp.items
+      : [];
+    renderHomeBanners(plataformasDisponibles, categorias, customHomeBanners);
     // Si no hay sesión, mostrar precios detal por defecto.
     const esCliente =
       !currentUser ||

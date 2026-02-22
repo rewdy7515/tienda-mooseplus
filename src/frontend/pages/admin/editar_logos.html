@@ -6,12 +6,16 @@
     <title>Editar logos</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
+      main.categorias-dinamicas {
+        max-width: none;
+        width: auto;
+      }
       .logos-wrapper {
         display: flex;
         flex-direction: column;
         gap: 16px;
         width: 100%;
-        max-width: 820px;
+        max-width: none;
       }
       .logos-field {
         display: flex;
@@ -19,6 +23,8 @@
         gap: 6px;
       }
       .logos-field select {
+        width: 100%;
+        box-sizing: border-box;
         padding: 8px 10px;
         border: 1px solid #d1d5db;
         border-radius: 10px;
@@ -28,6 +34,7 @@
         display: flex;
         gap: 20px;
         align-items: stretch;
+        width: 100%;
       }
       .logo-editor.hidden {
         display: none;
@@ -42,7 +49,8 @@
         display: none;
       }
       .logo-current {
-        flex: 1;
+        flex: 1.3 1 0;
+        min-width: 0;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-radius: 14px;
@@ -64,7 +72,7 @@
       }
       .banner-frame {
         width: 100%;
-        aspect-ratio: 3 / 1;
+        aspect-ratio: 1650 / 828;
         min-height: 120px;
         border: 1px dashed #d1d5db;
         border-radius: 12px;
@@ -85,7 +93,9 @@
         object-fit: cover;
       }
       .logo-upload {
-        flex: 1;
+        flex: 0.75 1 320px;
+        max-width: 440px;
+        min-width: 0;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-radius: 14px;
@@ -101,6 +111,13 @@
       }
       .logo-upload input[type="file"] {
         padding: 6px 0;
+      }
+      .logo-upload .form-input,
+      .logo-upload .form-select {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
       }
       .logo-status {
         margin: 0;
@@ -144,9 +161,192 @@
       .icono-empty {
         margin: 0;
       }
+      .home-banners-list {
+        width: 100%;
+        max-height: 420px;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding-right: 4px;
+      }
+      .home-banner-item {
+        display: grid;
+        grid-template-columns: 34px 52px minmax(150px, 210px) minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 10px;
+        background: #fff;
+      }
+      .home-banner-item.is-dragging {
+        opacity: 0.65;
+      }
+      .home-banner-item.is-file-drop-target {
+        border-color: #111827;
+      }
+      .home-banner-toggle-col {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .home-banner-drag-col {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .home-banner-drag-handle {
+        width: 26px;
+        height: 24px;
+        border: none;
+        background: transparent;
+        border-radius: 6px;
+        cursor: grab;
+        position: relative;
+      }
+      .home-banner-drag-handle::before,
+      .home-banner-drag-handle::after {
+        content: "";
+        position: absolute;
+        left: 5px;
+        right: 5px;
+        height: 2px;
+        background: #6b7280;
+        border-radius: 999px;
+      }
+      .home-banner-drag-handle::before {
+        top: 8px;
+      }
+      .home-banner-drag-handle::after {
+        top: 14px;
+      }
+      .home-banner-drag-handle:active {
+        cursor: grabbing;
+      }
+      .home-banner-toggle-label {
+        position: relative;
+        display: inline-flex;
+        width: 40px;
+        height: 24px;
+      }
+      .home-banner-visibility-toggle {
+        opacity: 0;
+        width: 0;
+        height: 0;
+        position: absolute;
+      }
+      .home-banner-toggle-slider {
+        position: absolute;
+        inset: 0;
+        background: #cfd4dc;
+        border-radius: 999px;
+        transition: background-color 0.15s ease;
+      }
+      .home-banner-toggle-slider::before {
+        content: "";
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        left: 3px;
+        top: 3px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        transition: transform 0.15s ease;
+      }
+      .home-banner-visibility-toggle:checked + .home-banner-toggle-slider {
+        background: #10b981;
+      }
+      .home-banner-visibility-toggle:checked + .home-banner-toggle-slider::before {
+        transform: translateX(16px);
+      }
+      .home-banner-thumb {
+        margin: 0;
+        position: relative;
+      }
+      .home-banner-item.is-file-drop-target .home-banner-thumb::after {
+        content: "Suelta para reemplazar";
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.52);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        text-align: center;
+        padding: 8px;
+      }
+      .home-banner-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .home-banner-meta-label {
+        font-size: 12px;
+        color: #4b5563;
+        font-weight: 700;
+      }
+      .home-banner-link-input {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .home-banner-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .home-banner-actions .btn-outline {
+        padding: 6px 10px;
+      }
+      .home-banner-route-wrap {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 6px;
+        align-items: center;
+      }
+      .home-banner-route-wrap > .home-banner-link-input {
+        min-width: 0;
+      }
+      .home-banner-route-prefix {
+        font-size: 12px;
+        font-weight: 700;
+        color: #374151;
+        white-space: nowrap;
+      }
+      .home-banner-route-preview {
+        margin: 0;
+        font-size: 12px;
+        color: #6b7280;
+        word-break: break-all;
+      }
       @media (max-width: 720px) {
         .logo-editor {
           flex-direction: column;
+        }
+        .logo-upload {
+          max-width: none;
+        }
+        .home-banner-item {
+          grid-template-columns: 1fr;
+        }
+        .home-banner-toggle-col,
+        .home-banner-drag-col {
+          justify-content: flex-start;
+        }
+        .home-banner-route-wrap {
+          grid-template-columns: 1fr;
+          gap: 4px;
         }
       }
     </style>
@@ -249,6 +449,37 @@
             </div>
           </div>
         </div>
+
+        <div class="preview-section">
+          <button type="button" class="btn-outline preview-toggle" id="btn-home-banners-toggle">
+            Añadir banners
+          </button>
+          <div id="home-banners-editor" class="logo-editor hidden">
+            <div class="logo-upload">
+              <p class="logo-label">Nuevo banner</p>
+              <input type="file" id="home-banner-file" accept="image/*" />
+              <input
+                type="text"
+                id="home-banner-redirect"
+                class="form-input"
+                placeholder="Ej: checkout.html o admin/ordenes.html"
+              />
+              <p class="home-banner-route-preview" id="home-banner-redirect-preview">
+                Ruta final: /src/frontend/pages/
+              </p>
+              <button type="button" class="btn-primary" id="btn-home-banner-add">
+                Añadir banner
+              </button>
+              <p id="home-banners-status" class="status logo-status"></p>
+            </div>
+            <div class="logo-current">
+              <p class="logo-label">Banners actuales y dirección</p>
+              <div id="home-banners-list" class="home-banners-list">
+                <p class="status icono-empty">Sin banners cargados.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -257,8 +488,12 @@
       import {
         API_BASE,
         clearServerSession,
+        createHomeBanner,
+        deletePublicAssets,
+        fetchHomeBanners,
         loadCurrentUser,
         supabase,
+        updateHomeBanner,
         uploadPlatformLogos,
         startSession,
       } from "../../scripts/api.js";
@@ -299,10 +534,21 @@
       const btnIconosUpload = document.querySelector("#btn-iconos-upload");
       const iconosStatusEl = document.querySelector("#iconos-status");
       const iconosGalleryEl = document.querySelector("#iconos-gallery");
+      const homeBannersToggleBtn = document.querySelector("#btn-home-banners-toggle");
+      const homeBannersEditor = document.querySelector("#home-banners-editor");
+      const homeBannerFileInput = document.querySelector("#home-banner-file");
+      const homeBannerRedirectInput = document.querySelector("#home-banner-redirect");
+      const homeBannerRedirectPreview = document.querySelector("#home-banner-redirect-preview");
+      const btnHomeBannerAdd = document.querySelector("#btn-home-banner-add");
+      const homeBannersStatusEl = document.querySelector("#home-banners-status");
+      const homeBannersListEl = document.querySelector("#home-banners-list");
+      const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
 
       let plataformasMap = {};
       let selectedId = null;
       let paginaPreview = null;
+      let draggingHomeBannerRow = null;
+      let homeBannerOrderSaving = false;
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
@@ -332,6 +578,13 @@
         iconosStatusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
+      const setHomeBannersStatus = (msg, isError = false) => {
+        if (!homeBannersStatusEl) return;
+        homeBannersStatusEl.textContent = msg || "";
+        homeBannersStatusEl.classList.toggle("is-error", isError);
+        homeBannersStatusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+
       const escapeHtml = (value) =>
         String(value ?? "")
           .replace(/&/g, "&amp;")
@@ -347,6 +600,42 @@
       };
 
       const isImageName = (name) => /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || ""));
+      const isFileDragEvent = (event) => {
+        const types = Array.from(event?.dataTransfer?.types || []);
+        return types.includes("Files");
+      };
+
+      const clearHomeBannerDropTargets = () => {
+        if (!homeBannersListEl) return;
+        homeBannersListEl
+          .querySelectorAll(".home-banner-item.is-file-drop-target")
+          .forEach((row) => row.classList.remove("is-file-drop-target"));
+      };
+
+      const normalizeRouteSuffix = (value = "") => {
+        let raw = String(value || "").trim();
+        if (!raw) return "";
+        raw = raw.replace(/^https?:\/\/[^/]+/i, "");
+        if (raw.startsWith(HOME_BANNER_ROUTE_PREFIX)) {
+          raw = raw.slice(HOME_BANNER_ROUTE_PREFIX.length);
+        }
+        raw = raw.replace(/^\/+/, "");
+        if (raw.startsWith("src/frontend/pages/")) {
+          raw = raw.slice("src/frontend/pages/".length);
+        }
+        return raw;
+      };
+
+      const buildHomeBannerRoute = (suffix = "") => {
+        const cleanSuffix = normalizeRouteSuffix(suffix);
+        return cleanSuffix ? `${HOME_BANNER_ROUTE_PREFIX}${cleanSuffix}` : HOME_BANNER_ROUTE_PREFIX;
+      };
+
+      const updateNewRoutePreview = () => {
+        if (!homeBannerRedirectPreview) return;
+        const suffix = normalizeRouteSuffix(homeBannerRedirectInput?.value || "");
+        homeBannerRedirectPreview.textContent = `Ruta final: ${buildHomeBannerRoute(suffix)}`;
+      };
 
       // Exporta a 3x para mejor nitidez en el display 148x185
       const resizeImageIfNeeded = (file, targetW = 444, targetH = 555, maxBytes = 150000) => {
@@ -422,34 +711,48 @@
         });
       };
 
-      // Banner 3x para 275x138 aprox (825x414)
-      const resizeBannerIfNeeded = (file, targetW = 825, targetH = 414, maxBytes = 220000) => {
+      // Banner para index en alta calidad (base 3300x1656, 2x de 1650x828).
+      const resizeBannerIfNeeded = (file, targetW = 3300, targetH = 1656, maxBytes = 1800000) => {
         return new Promise((resolve) => {
           if (!file || !file.type?.startsWith("image/")) return resolve(file);
-          const shouldResize = file.size > maxBytes;
+          const targetRatio = targetW / targetH;
           const img = new Image();
           const url = URL.createObjectURL(file);
           img.onload = () => {
             URL.revokeObjectURL(url);
             const { width, height } = img;
-            if (!shouldResize && width === targetW && height === targetH) {
+            const sourceRatio = width > 0 && height > 0 ? width / height : targetRatio;
+            const sameRatio = Math.abs(sourceRatio - targetRatio) < 0.01;
+            const isWithinTarget = width <= targetW && height <= targetH;
+            const shouldResize = file.size > maxBytes || !sameRatio || !isWithinTarget;
+            if (!shouldResize) {
               resolve(file);
               return;
             }
+
+            // No escalar por encima del tamaño original: mantiene nitidez real.
+            let outputW = Math.min(targetW, Math.max(1, width));
+            let outputH = Math.round(outputW / targetRatio);
+            if (outputH > height) {
+              outputH = Math.max(1, height);
+              outputW = Math.round(outputH * targetRatio);
+            }
             const canvas = document.createElement("canvas");
-            canvas.width = targetW;
-            canvas.height = targetH;
+            canvas.width = Math.max(1, outputW);
+            canvas.height = Math.max(1, outputH);
             const ctx = canvas.getContext("2d");
             if (!ctx) {
               resolve(file);
               return;
             }
-            const scale = Math.max(targetW / width, targetH / height);
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            const scale = Math.max(canvas.width / width, canvas.height / height);
             const drawW = Math.max(1, Math.round(width * scale));
             const drawH = Math.max(1, Math.round(height * scale));
-            const offsetX = Math.round((targetW - drawW) / 2);
-            const offsetY = Math.round((targetH - drawH) / 2);
-            ctx.clearRect(0, 0, targetW, targetH);
+            const offsetX = Math.round((canvas.width - drawW) / 2);
+            const offsetY = Math.round((canvas.height - drawH) / 2);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
             const tryWebp = true;
             const mime = tryWebp ? "image/webp" : "image/jpeg";
@@ -458,10 +761,10 @@
                 canvas.toBlob((blob) => res(blob), type, quality);
               });
             (async () => {
-              let quality = 0.92;
+              let quality = 0.96;
               let blob = await makeBlob(mime, quality);
-              while (blob && blob.size > maxBytes && quality > 0.7) {
-                quality = Math.max(0.7, quality - 0.05);
+              while (blob && blob.size > maxBytes && quality > 0.82) {
+                quality = Math.max(0.82, quality - 0.03);
                 blob = await makeBlob(mime, quality);
               }
               if (blob) {
@@ -628,6 +931,173 @@
         }
       };
 
+      const renderHomeBannersList = (items = []) => {
+        if (!homeBannersListEl) return;
+        const rows = Array.isArray(items)
+          ? items.filter((row) => String(row?.image_url || "").trim())
+          : [];
+        if (!rows.length) {
+          homeBannersListEl.innerHTML =
+            '<p class="status icono-empty">Sin banners cargados.</p>';
+          return;
+        }
+
+        homeBannersListEl.innerHTML = rows
+          .map(
+            (row) => {
+              const suffix = normalizeRouteSuffix(row?.redirect_url || "");
+              const routeValue = buildHomeBannerRoute(suffix);
+              const isVisible = row?.oculto !== true;
+              const toggleId = `banner-visible-${Number(row?.id_banner) || 0}`;
+              return `
+              <article class="home-banner-item" data-id-banner="${Number(row?.id_banner) || 0}">
+                <div class="home-banner-drag-col" title="Arrastrar para ordenar">
+                  <button
+                    type="button"
+                    class="home-banner-drag-handle"
+                    draggable="true"
+                    aria-label="Arrastrar banner para ordenar"
+                  ></button>
+                </div>
+                <div class="home-banner-toggle-col" title="Mostrar/Ocultar banner">
+                  <label class="home-banner-toggle-label" for="${toggleId}">
+                    <input
+                      id="${toggleId}"
+                      type="checkbox"
+                      class="home-banner-visibility-toggle"
+                      ${isVisible ? "checked" : ""}
+                    />
+                    <span class="home-banner-toggle-slider"></span>
+                  </label>
+                </div>
+                <figure class="banner-frame home-banner-thumb">
+                  <img
+                    src="${escapeHtml(row?.image_url || "")}"
+                    alt="Banner ${Number(row?.id_banner) || ""}"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <div class="home-banner-meta">
+                  <span class="home-banner-meta-label">Dirección</span>
+                  <div class="home-banner-route-wrap">
+                    <span class="home-banner-route-prefix">${escapeHtml(HOME_BANNER_ROUTE_PREFIX)}</span>
+                    <input
+                      type="text"
+                      class="home-banner-link-input"
+                      value="${escapeHtml(suffix)}"
+                      placeholder="checkout.html"
+                    />
+                  </div>
+                  <p class="home-banner-route-preview">Ruta final: ${escapeHtml(routeValue)}</p>
+                  <div class="home-banner-actions">
+                    <button type="button" class="btn-outline btn-home-banner-save">
+                      Guardar dirección
+                    </button>
+                  </div>
+                </div>
+              </article>
+            `;
+            },
+          )
+          .join("");
+      };
+
+      const loadHomeBanners = async () => {
+        try {
+          setHomeBannersStatus("Cargando banners...");
+          const data = await fetchHomeBanners({ includeInactive: true });
+          if (data?.error) throw new Error(data.error);
+          renderHomeBannersList(data?.items || []);
+          if (data?.tableMissing) {
+            setHomeBannersStatus(
+              "Falta tabla banners en Supabase.",
+              true,
+            );
+            return;
+          }
+          setHomeBannersStatus("");
+        } catch (err) {
+          console.error("load home banners error", err);
+          renderHomeBannersList([]);
+          setHomeBannersStatus("No se pudieron cargar los banners.", true);
+        }
+      };
+
+      const saveHomeBannersOrder = async () => {
+        if (homeBannerOrderSaving || !homeBannersListEl) return;
+        const rows = Array.from(
+          homeBannersListEl.querySelectorAll(".home-banner-item[data-id-banner]"),
+        );
+        if (rows.length <= 1) return;
+        const updates = rows
+          .map((row, idx) => ({
+            idBanner: Number(row.dataset.idBanner),
+            posicion: idx + 1,
+          }))
+          .filter((row) => Number.isFinite(row.idBanner) && row.idBanner > 0);
+        if (!updates.length) return;
+
+        homeBannerOrderSaving = true;
+        try {
+          setHomeBannersStatus("Guardando orden de banners...");
+          for (const row of updates) {
+            const updated = await updateHomeBanner(row.idBanner, {
+              posicion: row.posicion,
+            });
+            if (updated?.error) throw new Error(updated.error);
+          }
+          setHomeBannersStatus("Orden de banners actualizado.");
+          await loadHomeBanners();
+        } catch (err) {
+          console.error("save home banners order error", err);
+          setHomeBannersStatus("No se pudo guardar el orden.", true);
+          await loadHomeBanners();
+        } finally {
+          homeBannerOrderSaving = false;
+        }
+      };
+
+      const replaceHomeBannerImage = async (idBanner, file, previousImageUrl = "") => {
+        if (!Number.isFinite(idBanner) || idBanner <= 0) {
+          throw new Error("id_banner inválido.");
+        }
+        if (!isImageFile(file)) {
+          throw new Error("Solo se permiten archivos de imagen.");
+        }
+
+        setHomeBannersStatus(`Reemplazando banner #${idBanner}...`);
+        let optimized = file;
+        optimized = await resizeBannerIfNeeded(optimized);
+        const { urls, error: uploadErr } = await uploadPlatformLogos([optimized], {
+          folder: "banners-index",
+        });
+        if (uploadErr) throw uploadErr;
+        const imageUrl = String(urls?.[0] || "").trim();
+        if (!imageUrl) throw new Error("No se obtuvo URL del banner.");
+
+        const updated = await updateHomeBanner(idBanner, {
+          image_url: imageUrl,
+        });
+        if (updated?.error) throw new Error(updated.error);
+
+        let deleteError = null;
+        const prevUrl = String(previousImageUrl || "").trim();
+        if (prevUrl && prevUrl !== imageUrl) {
+          const deleted = await deletePublicAssets({
+            public_urls: [prevUrl],
+          });
+          if (deleted?.error) {
+            deleteError = deleted.error;
+          }
+        }
+
+        return {
+          imageUrl,
+          deleteError,
+        };
+      };
+
       const loadPlataformas = async () => {
         try {
           const { data, error } = await supabase
@@ -679,6 +1149,19 @@
         }
       });
 
+      homeBannersToggleBtn?.addEventListener("click", async () => {
+        if (!homeBannersEditor) return;
+        const willOpen = homeBannersEditor.classList.contains("hidden");
+        homeBannersEditor.classList.toggle("hidden");
+        if (willOpen) {
+          setHomeBannersStatus("");
+          updateNewRoutePreview();
+          await loadHomeBanners();
+        }
+      });
+
+      homeBannerRedirectInput?.addEventListener("input", updateNewRoutePreview);
+
       btnIconosUpload?.addEventListener("click", async () => {
         const selected = Array.from(iconosFilesInput?.files || []);
         if (!selected.length) {
@@ -713,6 +1196,227 @@
           console.error("subir iconos error", err);
           setIconosStatus("No se pudieron subir los iconos.", true);
         }
+      });
+
+      btnHomeBannerAdd?.addEventListener("click", async () => {
+        let file = homeBannerFileInput?.files?.[0];
+        const redirectSuffix = normalizeRouteSuffix(homeBannerRedirectInput?.value || "");
+        const redirectUrl = buildHomeBannerRoute(redirectSuffix);
+        if (!file) {
+          setHomeBannersStatus("Selecciona una imagen de banner.", true);
+          return;
+        }
+        if (!file.type?.startsWith("image/")) {
+          setHomeBannersStatus("Solo se permiten archivos de imagen.", true);
+          return;
+        }
+        if (!redirectSuffix) {
+          setHomeBannersStatus("Escribe una dirección de redirección.", true);
+          return;
+        }
+
+        try {
+          if (btnHomeBannerAdd) btnHomeBannerAdd.disabled = true;
+          setHomeBannersStatus("Optimizando imagen...");
+          file = await resizeBannerIfNeeded(file);
+          setHomeBannersStatus("Subiendo imagen...");
+          const { urls, error: uploadErr } = await uploadPlatformLogos([file], {
+            folder: "banners-index",
+          });
+          if (uploadErr) throw uploadErr;
+          const imageUrl = String(urls?.[0] || "").trim();
+          if (!imageUrl) throw new Error("No se obtuvo URL del banner.");
+
+          setHomeBannersStatus("Guardando dirección...");
+          const created = await createHomeBanner({
+            image_url: imageUrl,
+            redirect_url: redirectUrl,
+            oculto: false,
+          });
+          if (created?.error) throw new Error(created.error);
+
+          setHomeBannersStatus("Banner agregado correctamente.");
+          if (homeBannerFileInput) homeBannerFileInput.value = "";
+          if (homeBannerRedirectInput) homeBannerRedirectInput.value = "";
+          updateNewRoutePreview();
+          await loadHomeBanners();
+        } catch (err) {
+          console.error("add home banner error", err);
+          setHomeBannersStatus("No se pudo agregar el banner.", true);
+        } finally {
+          if (btnHomeBannerAdd) btnHomeBannerAdd.disabled = false;
+        }
+      });
+
+      homeBannersListEl?.addEventListener("click", async (e) => {
+        const saveBtn = e.target.closest(".btn-home-banner-save");
+        if (!saveBtn) return;
+        const rowEl = saveBtn.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        const idBanner = Number(rowEl.dataset.idBanner);
+        if (!Number.isFinite(idBanner) || idBanner <= 0) return;
+        const input = rowEl.querySelector(".home-banner-link-input");
+        const redirectSuffix = normalizeRouteSuffix(input?.value || "");
+        const redirectUrl = buildHomeBannerRoute(redirectSuffix);
+        if (!redirectSuffix) {
+          setHomeBannersStatus("La dirección no puede estar vacía.", true);
+          return;
+        }
+
+        try {
+          saveBtn.disabled = true;
+          setHomeBannersStatus("Guardando dirección...");
+          const updated = await updateHomeBanner(idBanner, {
+            redirect_url: redirectUrl,
+          });
+          if (updated?.error) throw new Error(updated.error);
+          setHomeBannersStatus("Dirección actualizada.");
+          await loadHomeBanners();
+        } catch (err) {
+          console.error("save home banner redirect error", err);
+          setHomeBannersStatus("No se pudo guardar la dirección.", true);
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      homeBannersListEl?.addEventListener("input", (e) => {
+        const input = e.target.closest(".home-banner-link-input");
+        if (!input) return;
+        const rowEl = input.closest(".home-banner-item");
+        if (!rowEl) return;
+        const previewEl = rowEl.querySelector(".home-banner-route-preview");
+        if (!previewEl) return;
+        const nextRoute = buildHomeBannerRoute(input.value || "");
+        previewEl.textContent = `Ruta final: ${nextRoute}`;
+      });
+
+      homeBannersListEl?.addEventListener("change", async (e) => {
+        const toggle = e.target.closest(".home-banner-visibility-toggle");
+        if (!toggle) return;
+        const rowEl = toggle.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        const idBanner = Number(rowEl.dataset.idBanner);
+        if (!Number.isFinite(idBanner) || idBanner <= 0) return;
+
+        const isVisible = toggle.checked === true;
+        try {
+          toggle.disabled = true;
+          setHomeBannersStatus("Actualizando visibilidad...");
+          const updated = await updateHomeBanner(idBanner, {
+            oculto: !isVisible,
+          });
+          if (updated?.error) throw new Error(updated.error);
+          setHomeBannersStatus("Visibilidad actualizada.");
+          await loadHomeBanners();
+        } catch (err) {
+          console.error("toggle home banner visibility error", err);
+          setHomeBannersStatus("No se pudo actualizar visibilidad.", true);
+          toggle.checked = !isVisible;
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+
+      homeBannersListEl?.addEventListener("dragstart", (e) => {
+        const handle = e.target.closest(".home-banner-drag-handle");
+        if (!handle) return;
+        const rowEl = handle.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        draggingHomeBannerRow = rowEl;
+        rowEl.classList.add("is-dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", String(rowEl.dataset.idBanner || ""));
+        }
+      });
+
+      homeBannersListEl?.addEventListener("dragover", (e) => {
+        if (isFileDragEvent(e)) return;
+        if (!draggingHomeBannerRow || !homeBannersListEl) return;
+        const targetRow = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!targetRow || targetRow === draggingHomeBannerRow) return;
+        e.preventDefault();
+        const rect = targetRow.getBoundingClientRect();
+        const insertAfter = e.clientY > rect.top + rect.height / 2;
+        if (insertAfter) {
+          targetRow.after(draggingHomeBannerRow);
+        } else {
+          targetRow.before(draggingHomeBannerRow);
+        }
+      });
+
+      homeBannersListEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        e.preventDefault();
+        clearHomeBannerDropTargets();
+        rowEl.classList.add("is-file-drop-target");
+      });
+
+      homeBannersListEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && rowEl.contains(nextTarget)) return;
+        rowEl.classList.remove("is-file-drop-target");
+      });
+
+      homeBannersListEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+        if (!rowEl) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        clearHomeBannerDropTargets();
+        rowEl.classList.add("is-file-drop-target");
+      });
+
+      homeBannersListEl?.addEventListener("drop", async (e) => {
+        const fileDropped = Array.from(e.dataTransfer?.files || []).find((file) =>
+          isImageFile(file),
+        );
+        if (fileDropped) {
+          e.preventDefault();
+          const rowEl = e.target.closest(".home-banner-item[data-id-banner]");
+          clearHomeBannerDropTargets();
+          if (!rowEl) {
+            setHomeBannersStatus("Suelta la imagen encima de un banner para reemplazarlo.", true);
+            return;
+          }
+          const idBanner = Number(rowEl.dataset.idBanner);
+          const previousImageUrl =
+            rowEl.querySelector(".home-banner-thumb img")?.getAttribute("src") || "";
+          try {
+            const result = await replaceHomeBannerImage(idBanner, fileDropped, previousImageUrl);
+            await loadHomeBanners();
+            if (result?.deleteError) {
+              setHomeBannersStatus(
+                `Banner #${idBanner} reemplazado, pero no se pudo eliminar la imagen anterior.`,
+                true,
+              );
+            } else {
+              setHomeBannersStatus(`Banner #${idBanner} reemplazado correctamente.`);
+            }
+          } catch (err) {
+            console.error("replace home banner image error", err);
+            setHomeBannersStatus("No se pudo reemplazar la imagen del banner.", true);
+          }
+          return;
+        }
+
+        if (!draggingHomeBannerRow) return;
+        e.preventDefault();
+      });
+
+      homeBannersListEl?.addEventListener("dragend", async () => {
+        if (!draggingHomeBannerRow) return;
+        draggingHomeBannerRow.classList.remove("is-dragging");
+        draggingHomeBannerRow = null;
+        clearHomeBannerDropTargets();
+        await saveHomeBannersOrder();
       });
 
       btnUpdate?.addEventListener("click", async () => {
@@ -887,6 +1591,7 @@
       init();
       loadPlataformas();
       loadPreview();
+      updateNewRoutePreview();
       attachLogout(clearServerSession);
     </script>
   </body>

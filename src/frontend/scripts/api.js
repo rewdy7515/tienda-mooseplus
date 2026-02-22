@@ -55,6 +55,19 @@ const bufferToBase64 = (buffer) => {
   return btoa(binary);
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientCartBackendError = (status, bodyText = "") => {
+  if (Number(status) < 500) return false;
+  const msg = String(bodyText || "").toLowerCase();
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("network request failed") ||
+    msg.includes("timeout") ||
+    msg.includes("econnreset")
+  );
+};
+
 export async function loadCatalog() {
   const [
     { data: categorias, error: errCat },
@@ -83,6 +96,82 @@ export async function loadCatalog() {
   }
 
   return { categorias, plataformas, precios, descuentos };
+}
+
+export async function fetchHomeBanners(options = {}) {
+  try {
+    const url = new URL(`${API_BASE}/api/home-banners`);
+    if (options?.includeInactive === true) {
+      url.searchParams.set("include_inactive", "true");
+    }
+    const res = await fetch(url.toString(), {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { error: text || "No se pudieron cargar banners", items: [] };
+    }
+    const data = await res.json().catch(() => ({}));
+    return {
+      items: Array.isArray(data?.items) ? data.items : [],
+      tableMissing: data?.tableMissing === true,
+    };
+  } catch (err) {
+    console.error("No se pudieron cargar los banners del home:", err);
+    return { error: err.message, items: [] };
+  }
+}
+
+export async function createHomeBanner(payload = {}) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const res = await fetch(`${API_BASE}/api/home-banners`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        ...payload,
+        id_usuario,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo crear el banner." };
+    }
+    return data;
+  } catch (err) {
+    console.error("No se pudo crear banner:", err);
+    return { error: err.message };
+  }
+}
+
+export async function updateHomeBanner(idBanner, payload = {}) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const res = await fetch(`${API_BASE}/api/home-banners/${encodeURIComponent(idBanner)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        ...payload,
+        id_usuario,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo actualizar el banner." };
+    }
+    return data;
+  } catch (err) {
+    console.error("No se pudo actualizar banner:", err);
+    return { error: err.message };
+  }
 }
 
 // Enviar delta de cantidad (+ agrega / - resta). Si la cantidad resultante es <= 0 se borra el item, y si no quedan items se elimina el carrito.
@@ -132,22 +221,47 @@ export async function fetchCart() {
     const url = `${API_BASE}/api/cart?id_usuario=${encodeURIComponent(id)}`;
     const startedAt = Date.now();
     console.log("[fetchCart] request", { url, apiBase: API_BASE, id_usuario: id });
-    const res = await fetch(url, {
-      credentials: "include",
-    });
-    const elapsedMs = Date.now() - startedAt;
-    console.log("[fetchCart] response", {
-      status: res.status,
-      ok: res.ok,
-      elapsedMs,
-      contentType: res.headers.get("content-type"),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("cart get response", res.status, text?.slice(0, 800));
+    let res = null;
+    let data = null;
+    let lastErrText = "";
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      res = await fetch(url, {
+        credentials: "include",
+      });
+      const elapsedMs = Date.now() - startedAt;
+      console.log("[fetchCart] response", {
+        attempt,
+        status: res.status,
+        ok: res.ok,
+        elapsedMs,
+        contentType: res.headers.get("content-type"),
+      });
+
+      if (res.ok) {
+        data = await res.json();
+        break;
+      }
+
+      lastErrText = await res.text();
+      const shouldRetry =
+        attempt < maxAttempts &&
+        isTransientCartBackendError(res.status, lastErrText);
+      if (!shouldRetry) break;
+
+      console.warn(
+        "[fetchCart] transient backend error, reintentando...",
+        { attempt, status: res.status, body: String(lastErrText || "").slice(0, 220) },
+      );
+      await wait(250 * attempt);
+    }
+
+    if (!res || !res.ok || !data) {
+      console.error("cart get response", res?.status, String(lastErrText || "").slice(0, 800));
       return { items: [] };
     }
-    const data = await res.json();
+
     console.log("[fetchCart] parsed", {
       hasCarrito: Boolean(data?.carrito),
       items: Array.isArray(data?.items) ? data.items.length : 0,
@@ -336,6 +450,41 @@ export async function uploadPlatformLogos(files = [], options = {}) {
     return res.json();
   } catch (err) {
     console.error("No se pudieron subir los logos:", err);
+    return { error: err.message };
+  }
+}
+
+export async function deletePublicAssets(payload = {}) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const paths = Array.isArray(payload?.paths)
+      ? payload.paths.map((row) => String(row || "").trim()).filter(Boolean)
+      : [];
+    const public_urls = Array.isArray(payload?.public_urls)
+      ? payload.public_urls.map((row) => String(row || "").trim()).filter(Boolean)
+      : [];
+
+    const res = await fetch(`${API_BASE}/api/logos/delete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        id_usuario,
+        paths,
+        public_urls,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudieron eliminar archivos." };
+    }
+    return data;
+  } catch (err) {
+    console.error("No se pudieron eliminar assets públicos:", err);
     return { error: err.message };
   }
 }

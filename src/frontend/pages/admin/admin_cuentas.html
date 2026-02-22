@@ -2502,6 +2502,13 @@
                       isSubCuenta: r.es_subcuenta,
                     }),
                   )}">Copiar</button>
+                  ${
+                    Number(r.id_plataforma) === 9 &&
+                    r.id_venta &&
+                    (r.venta_miembro === true || r.venta_perfil === true)
+                      ? `<button class="btn-outline btn-reactivar-venta" data-idventa="${r.id_venta}">Reactivar</button>`
+                      : ""
+                  }
                   <button class="btn-delete" data-id-venta="${r.id_venta ?? ""}">Eliminar</button>
                 </td>
               </tr>
@@ -2679,7 +2686,7 @@
         }
       };
 
-      clienteVentasEl?.addEventListener("click", (e) => {
+      clienteVentasEl?.addEventListener("click", async (e) => {
         const copyEl = e.target.closest(".copyable-text");
         if (copyEl) {
           copyWithToast(copyEl);
@@ -2690,6 +2697,24 @@
           const correo = alertBtn.dataset.correo || "";
           if (correo) {
             window.open(`admin_cuentas.html?correo=${encodeURIComponent(correo)}`, "_blank");
+          }
+          return;
+        }
+        const reactBtn = e.target.closest(".btn-reactivar-venta");
+        if (reactBtn) {
+          const ventaId = reactBtn.dataset.idventa || reactBtn.dataset.idVenta || "";
+          if (!ventaId) return;
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ pendiente: true })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            reactBtn.disabled = true;
+            reactBtn.textContent = "Reactivado";
+          } catch (err) {
+            console.error("reactivar venta cliente view error", err);
+            alert("No se pudo reactivar la venta.");
           }
           return;
         }
@@ -3162,6 +3187,11 @@
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
                     info.isPlat9 && p.id_venta
+                      ? `<button type="button" class="btn-outline btn-reactivar-venta" data-idventa="${p.id_venta || ""}">Reactivar</button>`
+                      : ""
+                  }
+                  ${
+                    info.isPlat9 && p.id_venta
                       ? `<button type="button" class="btn-outline btn-cambiar-madre" data-idventa="${p.id_venta || ""}" data-perfil="${p.id_perfil || ""}" data-cuenta="${info.id_cuenta || ""}">Cambiar cuenta madre</button>`
                       : ""
                   }
@@ -3247,6 +3277,11 @@
                   data-idventa="${p.id_venta || ""}"
                 >Reemplazar</button>
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
+                  ${
+                    info.isPlat9 && info.venta_miembro === true && p.id_venta
+                      ? `<button type="button" class="btn-outline btn-reactivar-venta" data-idventa="${p.id_venta || ""}">Reactivar</button>`
+                      : ""
+                  }
                   <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
                   >Registrar servicio</button>
@@ -3686,6 +3721,13 @@
                               data-venta-perfil="${m.venta_perfil ? "true" : "false"}"
                             >Reemplazar</button>
                             <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
+                            ${
+                              info.isPlat9 &&
+                              hasVenta &&
+                              (m.venta_miembro === true || info.cuenta_madre === true)
+                                ? `<button type="button" class="btn-outline btn-reactivar-venta" data-idventa="${m.id_venta || ""}">Reactivar</button>`
+                                : ""
+                            }
                             <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>
                             ${
                               isSuperadmin && hasVenta
@@ -4563,6 +4605,28 @@
           deleteTargetId = deleteBtn.dataset.idVenta || null;
           deleteTargetRow = deleteBtn.closest("tr");
           if (modalDelete) modalDelete.classList.remove("hidden");
+          return;
+        }
+        const reactivarBtn = e.target.closest(".btn-reactivar-venta");
+        if (reactivarBtn) {
+          const ventaId = reactivarBtn.dataset.idventa || reactivarBtn.dataset.idVenta || "";
+          if (!ventaId) {
+            alert("No se encontró la venta.");
+            return;
+          }
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ pendiente: true })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            if (currentCuentaId) {
+              await loadCuentaDetalle(currentCuentaId);
+            }
+          } catch (err) {
+            console.error("reactivar venta error", err);
+            alert("No se pudo reactivar la venta.");
+          }
           return;
         }
         const copyRowBtn = e.target.closest(".btn-copy-row");

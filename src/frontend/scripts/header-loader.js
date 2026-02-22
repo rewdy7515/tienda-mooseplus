@@ -1,6 +1,56 @@
 (function () {
   const container = document.getElementById("app-header");
   if (!container) return;
+  const HEADER_AVATAR_CACHE_PREFIX = "headerAvatarCache";
+
+  const getCookie = (name) => {
+    try {
+      const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+      return match ? decodeURIComponent(match[1]) : null;
+    } catch (_err) {
+      return null;
+    }
+  };
+
+  const normalizeColor = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash.toLowerCase();
+    return "";
+  };
+
+  const readHeaderAvatarCache = (idUsuario = null) => {
+    try {
+      const key = `${HEADER_AVATAR_CACHE_PREFIX}:${idUsuario ? String(idUsuario) : "anon"}`;
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const url = String(parsed?.url || "").trim();
+      const color = normalizeColor(parsed?.color);
+      if (!url || !color) return null;
+      return { url, color };
+    } catch (_err) {
+      return null;
+    }
+  };
+
+  const applyCachedHeaderAvatar = () => {
+    try {
+      const sessionId =
+        localStorage.getItem("sessionUserId") || getCookie("session_user_id") || null;
+      if (!sessionId) return;
+      const cached = readHeaderAvatarCache(sessionId);
+      if (!cached?.url) return;
+      container.querySelectorAll(".avatar").forEach((img) => {
+        img.src = cached.url;
+        img.style.backgroundColor = cached.color || "";
+      });
+    } catch (_err) {
+      // noop
+    }
+  };
+
   const root = container.dataset.headerRoot || "../";
   const pages = container.dataset.headerPages || "";
   const partialUrl = `${root}partials/header.html`;
@@ -24,6 +74,7 @@
         .replace(/__ROOT__/g, root)
         .replace(/__PAGES__/g, pages);
       container.innerHTML = html;
+      applyCachedHeaderAvatar();
 
       // Inicializa widget de carrito una sola vez
       if (!window.__cartWidgetScriptLoaded) {

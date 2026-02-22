@@ -1,6 +1,13 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
+CREATE TABLE public.banners (
+  id_banner bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  imagen text NOT NULL,
+  redireccion text,
+  oculto boolean,
+  CONSTRAINT banners_pkey PRIMARY KEY (id_banner)
+);
 CREATE TABLE public.carrito_items (
   id_item bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   id_carrito bigint,
@@ -77,6 +84,23 @@ CREATE TABLE public.descuentos (
   descuento_4 real,
   CONSTRAINT descuentos_pkey PRIMARY KEY (id_descuento)
 );
+CREATE TABLE public.eventos_notificacion_nuevo_servicio (
+  id_evento bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  id_venta bigint NOT NULL,
+  id_usuario bigint NOT NULL,
+  id_cuenta bigint,
+  id_plataforma bigint,
+  plataforma text,
+  correo_cuenta text,
+  perfil text,
+  fecha_corte date,
+  procesado boolean NOT NULL DEFAULT false,
+  procesado_en timestamp with time zone,
+  ultimo_error text,
+  creado_en timestamp with time zone NOT NULL DEFAULT now(),
+  actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT eventos_notificacion_nuevo_servicio_pkey PRIMARY KEY (id_evento)
+);
 CREATE TABLE public.historial_reemplazos (
   id_reemplazo bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   tipo_item timestamp with time zone NOT NULL DEFAULT now(),
@@ -127,6 +151,12 @@ CREATE TABLE public.metodos_de_pago (
   color_fondo text,
   CONSTRAINT metodos_de_pago_pkey PRIMARY KEY (id_metodo_de_pago)
 );
+CREATE TABLE public.notificacion_plantilla (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  titulo text NOT NULL,
+  mensaje text,
+  CONSTRAINT notificacion_plantilla_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.notificaciones (
   id_notificacion bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   titulo text NOT NULL,
@@ -161,6 +191,7 @@ CREATE TABLE public.ordenes (
   id_admin bigint,
   recargar_saldo boolean,
   hora_confirmacion time without time zone,
+  checkout_finalizado boolean,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
@@ -275,6 +306,7 @@ CREATE TABLE public.reemplazos (
 CREATE TABLE public.reporte_tipos (
   id_tipo_reporte bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   titulo text NOT NULL,
+  Solucion text,
   CONSTRAINT reporte_tipos_pkey PRIMARY KEY (id_tipo_reporte)
 );
 CREATE TABLE public.reportes (
@@ -288,7 +320,7 @@ CREATE TABLE public.reportes (
   en_revision boolean,
   solucionado boolean,
   fecha_creacion date,
-  hora_creacion date,
+  hora_creacion time without time zone,
   solucionado_por bigint,
   descripcion_solucion text,
   id_tipo_reporte bigint,
@@ -355,6 +387,9 @@ CREATE TABLE public.usuarios (
   claim_expires timestamp with time zone,
   notificacion_inventario boolean,
   saldo double precision,
+  recordatorio_dias_antes smallint,
+  foto_perfil text,
+  fondo_perfil text,
   CONSTRAINT usuarios_pkey PRIMARY KEY (id_usuario)
 );
 CREATE TABLE public.ventas (
@@ -387,13 +422,14 @@ CREATE TABLE public.ventas (
   completa boolean,
   cuenta_nueva boolean,
   nombre_cliente text,
+  recordatorio_enviado boolean,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT ventas_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),
   CONSTRAINT ventas_id_tarjeta_de_regalo_fkey FOREIGN KEY (id_tarjeta_de_regalo) REFERENCES public.tarjetas_de_regalo(id_tarjeta_de_regalo),
   CONSTRAINT ventas_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT ventas_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
-  CONSTRAINT ventas_id_precio_fkey FOREIGN KEY (id_precio) REFERENCES public.precios(id_precio),
   CONSTRAINT ventas_id_admin_venta_fkey FOREIGN KEY (id_admin_venta) REFERENCES public.usuarios(id_usuario),
-  CONSTRAINT ventas_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta)
+  CONSTRAINT ventas_id_cuenta_miembro_fkey FOREIGN KEY (id_cuenta_miembro) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT ventas_id_precio_fkey FOREIGN KEY (id_precio) REFERENCES public.precios(id_precio)
 );

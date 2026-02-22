@@ -76,6 +76,7 @@ const NUEVO_SERVICIO_NOTIF_QUEUE_BATCH = Math.max(
   Math.min(50, Number(process.env.NUEVO_SERVICIO_NOTIF_QUEUE_BATCH) || 20),
 );
 const NUEVO_SERVICIO_NOTIF_QUEUE_TABLE = "eventos_notificacion_nuevo_servicio";
+const HOME_BANNERS_TABLE = "banners";
 let nuevoServicioNotifQueueInProgress = false;
 let nuevoServicioNotifQueueTableMissing = false;
 let nuevoServicioNotifQueueLastRunAt = null;
@@ -176,6 +177,46 @@ const isMissingTableError = (err, tableName) => {
   if (code === "42P01") return true;
   if (!tableName) return false;
   return message.includes("does not exist") && message.includes(String(tableName).toLowerCase());
+};
+
+const SUPABASE_TRANSIENT_RETRIES = 2;
+const SUPABASE_TRANSIENT_RETRY_BASE_MS = 150;
+
+const isTransientSupabaseFetchError = (err) => {
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("network request failed") ||
+    msg.includes("socket hang up") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("timeout")
+  );
+};
+
+const runSupabaseQueryWithRetry = async (queryFactory, label = "supabase") => {
+  let attempt = 0;
+  while (attempt <= SUPABASE_TRANSIENT_RETRIES) {
+    const result = await queryFactory();
+    const queryErr = result?.error;
+    if (!queryErr) return result;
+    if (
+      !isTransientSupabaseFetchError(queryErr) ||
+      attempt >= SUPABASE_TRANSIENT_RETRIES
+    ) {
+      return result;
+    }
+    const waitMs = SUPABASE_TRANSIENT_RETRY_BASE_MS * (attempt + 1);
+    console.warn(
+      `[${label}] error transitorio (${queryErr?.message || queryErr}). Reintento ${attempt + 1}/${
+        SUPABASE_TRANSIENT_RETRIES
+      } en ${waitMs}ms.`,
+    );
+    await sleep(waitMs);
+    attempt += 1;
+  }
+  return { data: null, error: new Error("Query retry exhausted") };
 };
 
 const normalizePerfilText = (perfilRaw) => {
@@ -1862,34 +1903,73 @@ const getOrCreateUsuario = async (req) => {
   throw err;
 };
 
-const getCurrentCarrito = async (idUsuario) => {
-  const { data, error } = await supabaseAdmin
-    .from("carritos")
-    .select("id_carrito")
+const getSessionUsuario = async (req) => {
+  const fromSession = parseSessionUserId(req);
+  if (fromSession && Number.isFinite(Number(fromSession)) && Number(fromSession) > 0) {
+    return Number(fromSession);
+  }
+  const err = new Error(AUTH_REQUIRED);
+  err.code = AUTH_REQUIRED;
+  throw err;
+};
+
+const requireAdminSession = async (req) => {
+  const idUsuario = await getSessionUsuario(req);
+  const { data: permRow, error: permErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("permiso_admin, permiso_superadmin")
     .eq("id_usuario", idUsuario)
-    .order("fecha_creacion", { ascending: false })
-    .limit(1)
     .maybeSingle();
+  if (permErr) throw permErr;
+  const isAdmin = isTrue(permRow?.permiso_admin) || isTrue(permRow?.permiso_superadmin);
+  if (!isAdmin) {
+    const err = new Error("ADMIN_REQUIRED");
+    err.code = "ADMIN_REQUIRED";
+    throw err;
+  }
+  return idUsuario;
+};
+
+const getCurrentCarrito = async (idUsuario) => {
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from("carritos")
+        .select("id_carrito")
+        .eq("id_usuario", idUsuario)
+        .order("fecha_creacion", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    "cart:getCurrentCarrito",
+  );
   if (error) throw error;
   return data?.id_carrito || null;
 };
 
 const getOrCreateCarrito = async (idUsuario) => {
-  const { data, error } = await supabaseAdmin
-    .from("carritos")
-    .select("id_carrito")
-    .eq("id_usuario", idUsuario)
-    .order("fecha_creacion", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from("carritos")
+        .select("id_carrito")
+        .eq("id_usuario", idUsuario)
+        .order("fecha_creacion", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    "cart:getOrCreateCarrito:select",
+  );
   if (error) throw error;
   if (data) return data.id_carrito;
 
-  const { data: inserted, error: insertErr } = await supabaseAdmin
-    .from("carritos")
-    .insert({ id_usuario: idUsuario, fecha_creacion: new Date().toISOString() })
-    .select("id_carrito")
-    .single();
+  const { data: inserted, error: insertErr } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from("carritos")
+        .insert({ id_usuario: idUsuario, fecha_creacion: new Date().toISOString() })
+        .select("id_carrito")
+        .single(),
+    "cart:getOrCreateCarrito:insert",
+  );
   if (insertErr) throw insertErr;
   return inserted.id_carrito;
 };
@@ -2139,29 +2219,41 @@ app.get("/api/cart", async (_req, res) => {
     const carritoId = await getCurrentCarrito(idUsuario);
     if (!carritoId) return res.json({ items: [] });
 
-    const { data: carritoInfo, error: carritoErr } = await supabaseAdmin
-      .from("carritos")
-      .select("monto_usd, monto_bs, tasa_bs, descuento, monto_final, hora, fecha, usa_saldo")
-      .eq("id_carrito", carritoId)
-      .maybeSingle();
+    const { data: carritoInfo, error: carritoErr } = await runSupabaseQueryWithRetry(
+      () =>
+        supabaseAdmin
+          .from("carritos")
+          .select("monto_usd, monto_bs, tasa_bs, descuento, monto_final, hora, fecha, usa_saldo")
+          .eq("id_carrito", carritoId)
+          .maybeSingle(),
+      "cart:get:carritoInfo",
+    );
     if (carritoErr) throw carritoErr;
 
-    const { data: items, error: itemErr } = await supabaseAdmin
-      .from("carrito_items")
-      .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
-      .eq("id_carrito", carritoId);
+    const { data: items, error: itemErr } = await runSupabaseQueryWithRetry(
+      () =>
+        supabaseAdmin
+          .from("carrito_items")
+          .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
+          .eq("id_carrito", carritoId),
+      "cart:get:items",
+    );
     if (itemErr) throw itemErr;
 
     // Enriquecer con datos de venta/cuenta/perfil para renovaciones
     const ventaIds = (items || []).map((i) => i.id_venta).filter(Boolean);
     let ventaMap = {};
     if (ventaIds.length) {
-      const { data: ventasExtra, error: ventErr } = await supabaseAdmin
-        .from("ventas")
-        .select(
-          "id_venta, id_cuenta, id_perfil, cuentas:cuentas!ventas_id_cuenta_fkey(correo), perfiles:perfiles(n_perfil)"
-        )
-        .in("id_venta", ventaIds);
+      const { data: ventasExtra, error: ventErr } = await runSupabaseQueryWithRetry(
+        () =>
+          supabaseAdmin
+            .from("ventas")
+            .select(
+              "id_venta, id_cuenta, id_perfil, cuentas:cuentas!ventas_id_cuenta_fkey(correo), perfiles:perfiles(n_perfil)"
+            )
+            .in("id_venta", ventaIds),
+        "cart:get:ventasExtra",
+      );
       if (ventErr) throw ventErr;
       ventaMap = (ventasExtra || []).reduce((acc, v) => {
         acc[v.id_venta] = v;
@@ -2202,7 +2294,7 @@ app.get("/api/cart", async (_req, res) => {
 // Actualizar montos fijos del carrito (USD y BS)
 app.post("/api/cart/montos", async (req, res) => {
   try {
-    await getOrCreateUsuario(req);
+    const idUsuario = await getOrCreateUsuario(req);
     const carritoId = await getCurrentCarrito(idUsuario);
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
@@ -2407,12 +2499,44 @@ const normalizePublicAssetsFolder = (rawFolder = "") => {
 };
 
 const isAllowedPublicAssetsFolder = (folder = "") => {
-  const allowed = new Set(["logos", "icono-perfil"]);
+  const allowed = new Set(["logos", "icono-perfil", "banners-index"]);
   return allowed.has(folder);
 };
 
 const isImageFileName = (name = "") =>
   /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(String(name || "").trim());
+
+const normalizePublicAssetsPath = (rawPath = "") =>
+  String(rawPath || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\/{2,}/g, "/");
+
+const extractPublicAssetsPathFromUrl = (rawUrl = "") => {
+  const value = String(rawUrl || "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    const marker = "/storage/v1/object/public/public_assets/";
+    const idx = parsed.pathname.indexOf(marker);
+    if (idx === -1) return "";
+    const rawPath = parsed.pathname.slice(idx + marker.length);
+    return normalizePublicAssetsPath(decodeURIComponent(rawPath));
+  } catch (_err) {
+    return "";
+  }
+};
+
+const isAllowedPublicAssetsPath = (rawPath = "") => {
+  const path = normalizePublicAssetsPath(rawPath);
+  if (!path || path.includes("..")) return false;
+  const [folder, ...rest] = path.split("/");
+  if (!isAllowedPublicAssetsFolder(folder)) return false;
+  if (!rest.length) return false;
+  const fileName = rest[rest.length - 1];
+  return isImageFileName(fileName);
+};
 
 // Sube logos de plataformas al bucket público (public_assets/logos por defecto)
 app.post("/api/logos/upload", async (req, res) => {
@@ -2427,7 +2551,7 @@ app.post("/api/logos/upload", async (req, res) => {
     if (!isAllowedPublicAssetsFolder(folder)) {
       return res
         .status(400)
-        .json({ error: "folder no permitido. Usa logos o icono-perfil." });
+        .json({ error: "folder no permitido. Usa logos, icono-perfil o banners-index." });
     }
     const urls = [];
 
@@ -2473,6 +2597,48 @@ app.post("/api/logos/upload", async (req, res) => {
   }
 });
 
+// Elimina archivos en carpetas permitidas del bucket público (public_assets)
+app.post("/api/logos/delete", jsonParser, async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const pathsRaw = Array.isArray(req.body?.paths) ? req.body.paths : [];
+    const publicUrlsRaw = Array.isArray(req.body?.public_urls) ? req.body.public_urls : [];
+
+    const normalized = [
+      ...pathsRaw.map((row) => normalizePublicAssetsPath(row)),
+      ...publicUrlsRaw.map((row) => extractPublicAssetsPathFromUrl(row)),
+    ]
+      .filter((row) => isAllowedPublicAssetsPath(row));
+
+    const uniquePaths = [...new Set(normalized)];
+    if (!uniquePaths.length) {
+      return res.status(400).json({
+        error: "Debes enviar paths/public_urls válidos de logos, icono-perfil o banners-index.",
+      });
+    }
+
+    const { error } = await supabaseAdmin.storage
+      .from("public_assets")
+      .remove(uniquePaths);
+    if (error) throw error;
+
+    res.json({
+      ok: true,
+      removed_count: uniquePaths.length,
+      removed_paths: uniquePaths,
+    });
+  } catch (err) {
+    console.error("[logos:delete] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "ADMIN_REQUIRED") {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    res.status(500).json({ error: err.message || "No se pudieron eliminar archivos." });
+  }
+});
+
 // Lista archivos en carpetas permitidas del bucket público (public_assets)
 app.get("/api/logos/list", async (req, res) => {
   try {
@@ -2481,7 +2647,7 @@ app.get("/api/logos/list", async (req, res) => {
     if (!isAllowedPublicAssetsFolder(folder)) {
       return res
         .status(400)
-        .json({ error: "folder no permitido. Usa logos o icono-perfil." });
+        .json({ error: "folder no permitido. Usa logos, icono-perfil o banners-index." });
     }
 
     const { data, error } = await supabaseAdmin.storage
@@ -2518,6 +2684,222 @@ app.get("/api/logos/list", async (req, res) => {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Lista banners del home (público). Si include_inactive=true, requiere sesión admin.
+app.get("/api/home-banners", async (req, res) => {
+  try {
+    const includeInactiveRequested = isTrue(req.query?.include_inactive);
+    let includeInactive = false;
+    if (includeInactiveRequested) {
+      try {
+        await requireAdminSession(req);
+        includeInactive = true;
+      } catch (_err) {
+        includeInactive = false;
+      }
+    }
+
+    let query = supabaseAdmin
+      .from(HOME_BANNERS_TABLE)
+      .select("id_banner, imagen, redireccion, oculto, posicion")
+      .order("posicion", { ascending: true })
+      .order("id_banner", { ascending: true });
+
+    if (!includeInactive) {
+      query = query.eq("oculto", false);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      if (isMissingTableError(error, HOME_BANNERS_TABLE)) {
+        return res.json({ items: [], tableMissing: true });
+      }
+      throw error;
+    }
+
+    const items = (data || []).map((row) => ({
+      id_banner: Number(row?.id_banner) || 0,
+      image_url: String(row?.imagen || "").trim(),
+      redirect_url: String(row?.redireccion || "").trim(),
+      oculto: row?.oculto === true,
+      posicion: Number.isFinite(Number(row?.posicion))
+        ? Math.max(1, Math.trunc(Number(row?.posicion)))
+        : null,
+    }));
+
+    res.json({ items });
+  } catch (err) {
+    console.error("[home-banners:list] error", err);
+    res.status(500).json({ error: err.message || "No se pudieron listar banners." });
+  }
+});
+
+// Crea banner del home (solo admin/superadmin autenticado)
+app.post("/api/home-banners", jsonParser, async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const imageUrl = String(req.body?.image_url || "").trim();
+    const redirectUrl = String(req.body?.redirect_url || "").trim();
+    const activoRaw = req.body?.activo;
+    const ocultoRaw = req.body?.oculto;
+    const posicionRaw = Number(req.body?.posicion);
+
+    if (!imageUrl) {
+      return res.status(400).json({ error: "image_url es requerido." });
+    }
+    if (!redirectUrl) {
+      return res.status(400).json({ error: "redirect_url es requerido." });
+    }
+
+    let posicion = Number.isFinite(posicionRaw) ? Math.max(1, Math.trunc(posicionRaw)) : null;
+    if (!posicion) {
+      const { data: maxRow, error: maxErr } = await supabaseAdmin
+        .from(HOME_BANNERS_TABLE)
+        .select("posicion")
+        .order("posicion", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (maxErr) {
+        if (isMissingTableError(maxErr, HOME_BANNERS_TABLE)) {
+          return res.status(400).json({ error: "Falta tabla banners en Supabase." });
+        }
+        throw maxErr;
+      }
+      const maxPos = Number(maxRow?.posicion);
+      posicion = Number.isFinite(maxPos) && maxPos > 0 ? Math.trunc(maxPos) + 1 : 1;
+    }
+
+    const payload = {
+      imagen: imageUrl,
+      redireccion: redirectUrl,
+      oculto:
+        ocultoRaw == null
+          ? activoRaw == null
+            ? false
+            : !isTrue(activoRaw)
+          : isTrue(ocultoRaw),
+      posicion,
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from(HOME_BANNERS_TABLE)
+      .insert(payload)
+      .select("id_banner, imagen, redireccion, oculto, posicion")
+      .single();
+    if (error) {
+      if (isMissingTableError(error, HOME_BANNERS_TABLE)) {
+        return res.status(400).json({
+          error: "Falta tabla banners en Supabase.",
+        });
+      }
+      throw error;
+    }
+    res.json({
+      item: {
+        id_banner: Number(data?.id_banner) || 0,
+        image_url: String(data?.imagen || "").trim(),
+        redirect_url: String(data?.redireccion || "").trim(),
+        oculto: data?.oculto === true,
+        posicion: Number.isFinite(Number(data?.posicion))
+          ? Math.max(1, Math.trunc(Number(data?.posicion)))
+          : null,
+      },
+    });
+  } catch (err) {
+    console.error("[home-banners:create] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "ADMIN_REQUIRED") {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    res.status(500).json({ error: err.message || "No se pudo crear el banner." });
+  }
+});
+
+// Actualiza dirección/imagen/estado de un banner (solo admin/superadmin)
+app.put("/api/home-banners/:id_banner", jsonParser, async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const idBanner = Number(req.params?.id_banner);
+    if (!Number.isFinite(idBanner) || idBanner <= 0) {
+      return res.status(400).json({ error: "id_banner inválido." });
+    }
+
+    const payload = {};
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "redirect_url")) {
+      const redirectUrl = String(req.body?.redirect_url || "").trim();
+      if (!redirectUrl) {
+        return res.status(400).json({ error: "redirect_url no puede estar vacío." });
+      }
+      payload.redireccion = redirectUrl;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "orden")) {
+      // La tabla banners no usa "orden". Se ignora para mantener compatibilidad de API.
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "posicion")) {
+      const posicionRaw = Number(req.body?.posicion);
+      payload.posicion = Number.isFinite(posicionRaw)
+        ? Math.max(1, Math.trunc(posicionRaw))
+        : 1;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "activo")) {
+      payload.oculto = !isTrue(req.body?.activo);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "oculto")) {
+      payload.oculto = isTrue(req.body?.oculto);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "image_url")) {
+      const imageUrl = String(req.body?.image_url || "").trim();
+      if (!imageUrl) {
+        return res.status(400).json({ error: "image_url no puede estar vacío." });
+      }
+      payload.imagen = imageUrl;
+    }
+
+    if (!Object.keys(payload).length) {
+      return res.status(400).json({ error: "Sin campos para actualizar." });
+    }
+    const { data, error } = await supabaseAdmin
+      .from(HOME_BANNERS_TABLE)
+      .update(payload)
+      .eq("id_banner", idBanner)
+      .select("id_banner, imagen, redireccion, oculto, posicion")
+      .maybeSingle();
+    if (error) {
+      if (isMissingTableError(error, HOME_BANNERS_TABLE)) {
+        return res.status(400).json({
+          error: "Falta tabla banners en Supabase.",
+        });
+      }
+      throw error;
+    }
+    if (!data) {
+      return res.status(404).json({ error: "Banner no encontrado." });
+    }
+
+    res.json({
+      item: {
+        id_banner: Number(data?.id_banner) || 0,
+        image_url: String(data?.imagen || "").trim(),
+        redirect_url: String(data?.redireccion || "").trim(),
+        oculto: data?.oculto === true,
+        posicion: Number.isFinite(Number(data?.posicion))
+          ? Math.max(1, Math.trunc(Number(data?.posicion)))
+          : null,
+      },
+    });
+  } catch (err) {
+    console.error("[home-banners:update] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "ADMIN_REQUIRED") {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    res.status(500).json({ error: err.message || "No se pudo actualizar el banner." });
   }
 });
 

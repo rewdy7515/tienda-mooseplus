@@ -2321,6 +2321,96 @@ input[type="number"].input-inline {
   padding: 0 20px 12px;
 }
 
+.home-banners {
+  margin: 12px 20px 8px;
+}
+
+.home-banners-viewport {
+  position: relative;
+  overflow: hidden;
+  max-width: none;
+  width: 100%;
+  aspect-ratio: 1650 / 828;
+  margin: 0 auto;
+  border-radius: 14px;
+  background: #111827;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2);
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.home-banners-track {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  transform: translateX(0);
+  transition: transform 0.55s ease;
+  will-change: transform;
+}
+
+.home-banner-card {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1650 / 828;
+  border-radius: 0;
+  overflow: hidden;
+  background: #111827;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2);
+}
+
+.home-banner-card img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  image-rendering: auto;
+}
+
+.home-banners-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.home-banners-dots.hidden {
+  display: none;
+}
+
+.home-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.86);
+  transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease;
+  opacity: 0.8;
+}
+
+.home-banner-dot.is-active {
+  transform: scale(1.45);
+  opacity: 1;
+  background: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-banners-track {
+    transition: none;
+  }
+}
+
 .missing-data-wrap.hidden {
   display: none;
 }
@@ -2638,6 +2728,10 @@ input[type="number"].input-inline {
 }
 
 @media (max-width: 700px) {
+  .home-banners {
+    margin: 10px 12px 8px;
+  }
+
   /* Quitar cajas de categorías en móvil */
   .categoria-card {
     background: transparent;

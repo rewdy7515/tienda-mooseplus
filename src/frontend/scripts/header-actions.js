@@ -20,6 +20,7 @@ import { resolveAvatarForDisplay } from "./avatar-fallback.js";
 
 if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
+  const HEADER_AVATAR_CACHE_PREFIX = "headerAvatarCache";
   const pagesRoot = window.__headerPages || "";
   const basePagesUrl = (() => {
     try {
@@ -37,10 +38,33 @@ if (!window.__headerActionsInit) {
     }
   };
 
+  const normalizeColor = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash.toLowerCase();
+    return "";
+  };
+
+  const writeHeaderAvatarCache = (idUsuario = null, avatar = null) => {
+    try {
+      if (!idUsuario) return;
+      const url = String(avatar?.url || "").trim();
+      const color = normalizeColor(avatar?.color);
+      if (!url || !color) return;
+      const key = `${HEADER_AVATAR_CACHE_PREFIX}:${String(idUsuario)}`;
+      localStorage.setItem(key, JSON.stringify({ url, color }));
+    } catch (_err) {
+      // noop
+    }
+  };
+
   const applyHeaderAvatar = async (user = null, idUsuario = null) => {
     const avatar = await resolveAvatarForDisplay({ user, idUsuario });
     const foto = String(avatar?.url || "").trim();
-    const fondo = String(avatar?.color || "").trim();
+    const fondo = normalizeColor(avatar?.color);
+    const effectiveUserId = idUsuario || user?.id_usuario || null;
+    writeHeaderAvatarCache(effectiveUserId, { url: foto, color: fondo });
     document.querySelectorAll(".avatar").forEach((img) => {
       if (foto) img.src = foto;
       img.style.backgroundColor = fondo;
