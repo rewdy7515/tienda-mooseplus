@@ -481,15 +481,36 @@ const normalizeBannerRedirect = (value = "") => {
   let raw = String(value || "").trim();
   if (!raw) return "";
 
+  const getPagesRoutePrefix = () => {
+    if (typeof window === "undefined") return "/";
+    const marker = "/src/frontend/pages/";
+    const currentPath = String(window.location.pathname || "");
+    return currentPath.includes(marker) ? marker : "/";
+  };
+
   // Los banners del admin guardan rutas con este prefijo interno.
-  // En producción las páginas cuelgan del root (ej. /checkout.html).
-  const toRootRoute = (pathLike = "") => {
+  // En local se conserva /src/frontend/pages/...; en producción se usa /....
+  const toAppRoute = (pathLike = "") => {
     const txt = String(pathLike || "").trim();
+    if (!txt) return txt;
+    const prefix = getPagesRoutePrefix();
+    const joinWithPrefix = (relativePath = "") => {
+      const rel = String(relativePath || "").replace(/^\/+/, "");
+      if (!rel) return prefix === "/" ? "/" : prefix;
+      return prefix === "/" ? `/${rel}` : `${prefix}${rel}`;
+    };
+
     if (txt.startsWith(HOME_BANNER_ROUTE_PREFIX)) {
-      return `/${txt.slice(HOME_BANNER_ROUTE_PREFIX.length)}`;
+      return joinWithPrefix(txt.slice(HOME_BANNER_ROUTE_PREFIX.length));
+    }
+    if (txt.startsWith("/src/frontend/pages/")) {
+      return joinWithPrefix(txt.slice("/src/frontend/pages/".length));
     }
     if (txt.startsWith("src/frontend/pages/")) {
-      return `/${txt.slice("src/frontend/pages/".length)}`;
+      return joinWithPrefix(txt.slice("src/frontend/pages/".length));
+    }
+    if (prefix !== "/" && /^\/.+\.html(?:[?#].*)?$/i.test(txt)) {
+      return joinWithPrefix(txt.slice(1));
     }
     return txt;
   };
@@ -497,7 +518,7 @@ const normalizeBannerRedirect = (value = "") => {
   if (/^https?:\/\//i.test(raw)) {
     try {
       const parsed = new URL(raw);
-      const mappedPath = toRootRoute(parsed.pathname || "");
+      const mappedPath = toAppRoute(parsed.pathname || "");
       if (
         mappedPath !== parsed.pathname &&
         typeof window !== "undefined" &&
@@ -512,7 +533,7 @@ const normalizeBannerRedirect = (value = "") => {
   }
   if (/^(mailto:|tel:)/i.test(raw)) return raw;
 
-  raw = toRootRoute(raw);
+  raw = toAppRoute(raw);
   if (raw.startsWith("/")) return raw;
   if (raw.startsWith("./") || raw.startsWith("../")) {
     try {
@@ -531,7 +552,7 @@ const normalizeBannerRedirect = (value = "") => {
     pathPart.endsWith(".htm") ||
     pathPart.endsWith(".php") ||
     pathPart.startsWith("index");
-  if (localPathLike) return `/${raw.replace(/^\/+/, "")}`;
+  if (localPathLike) return toAppRoute(`/${raw.replace(/^\/+/, "")}`);
 
   // Solo tratar como dominio externo si tiene formato de host real.
   const looksLikeDomain = /^[a-z0-9.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(raw);
@@ -865,7 +886,9 @@ const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []
             id: Number(row?.id_banner) || 0,
             nombre: String(row?.title || "Banner"),
             image: pickedImage,
-            redirect: String(row?.redirect_url || "").trim(),
+            redirect: String(
+              row?.redirect_url ?? row?.redirect ?? row?.redireccion ?? "",
+            ).trim(),
             sourceType: "custom",
           };
         })

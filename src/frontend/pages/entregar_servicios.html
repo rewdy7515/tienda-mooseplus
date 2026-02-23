@@ -252,16 +252,8 @@
 
       const copyToClipboard = async (text, anchor) => {
         if (!text) return;
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch (err) {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-        }
+        const ok = await copyTextNotify(text);
+        if (!ok) return;
         if (anchor) {
           anchor.textContent = "Copiado";
           setTimeout(() => (anchor.textContent = "Copiar"), 1200);
@@ -278,6 +270,17 @@
       const formatFechaCorte = (value) => {
         if (!value) return "";
         return formatDDMMYYYY(value);
+      };
+
+      const normalizeCopyValue = (value) => {
+        if (value === null || value === undefined) return "";
+        return String(value).trim();
+      };
+
+      const resolveVentaPin = (ventaRow = {}) => {
+        const pinPerfil = normalizeCopyValue(ventaRow?.pin_perfil);
+        if (pinPerfil) return pinPerfil;
+        return normalizeCopyValue(ventaRow?.pin_cuenta);
       };
 
       const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
@@ -345,7 +348,30 @@
                 const perfilTxt = r.perfil || "";
                 const isPendiente = r.pendiente;
                 const requiresClientInputs = showClientInputs && isPendiente;
-                const hasEntregaData = !!(r.correo || r.clave || r.pin || r.n_perfil);
+                const pinPerfil = normalizeCopyValue(r.pin_perfil);
+                const pinCuenta = normalizeCopyValue(r.pin_cuenta);
+                const pinVenta = resolveVentaPin(r);
+                const pinCellHtml = (() => {
+                  if (pinPerfil && pinCuenta && pinPerfil !== pinCuenta) {
+                    return `
+                      <div>
+                        <div>Perfil:
+                          <span class="copyable pin-copy" data-clipboard="${escapeHtml(pinPerfil)}">${escapeHtml(pinPerfil)}</span>
+                        </div>
+                        <div>Cuenta:
+                          <span class="copyable pin-copy" data-clipboard="${escapeHtml(pinCuenta)}">${escapeHtml(pinCuenta)}</span>
+                        </div>
+                      </div>
+                    `;
+                  }
+                  if (pinVenta) {
+                    return `<span class="copyable pin-copy" data-clipboard="${escapeHtml(
+                      pinVenta
+                    )}">${escapeHtml(pinVenta)}</span>`;
+                  }
+                  return "";
+                })();
+                const hasEntregaData = !!(r.correo || r.clave || pinVenta || r.n_perfil);
                 const copyText = isRenovacion
                   ? buildRenovacionMensaje(r, r.fecha_corte, r.plataforma)
                   : requiresClientInputs
@@ -356,7 +382,7 @@
                         correo: r.correo,
                         clave: r.clave,
                         nPerfil: r.n_perfil,
-                        pin: r.pin,
+                        pin: pinVenta,
                         fechaCorte: r.fecha_corte,
                         porAcceso: r.por_acceso,
                         usaPines: r.usa_pines,
@@ -414,13 +440,7 @@
                         : ""
                     }</td>` : ""}
                     ${isRenovacion ? "" : showPerfilColumn ? `<td>${perfilTxt ? `<div>${escapeHtml(perfilTxt)}</div>` : ""}</td>` : ""}
-                    ${showPinColumn ? `<td>${
-                      r.pin
-                        ? `<span class="copyable pin-copy" data-clipboard="${escapeHtml(
-                            r.pin
-                          )}">${escapeHtml(r.pin)}</span>`
-                        : ""
-                    }</td>` : ""}
+                    ${showPinColumn ? `<td>${pinCellHtml}</td>` : ""}
                     <td>${r.fecha_corte ? formatDDMMYYYY(r.fecha_corte) : isPendiente ? "Pendiente" : ""}</td>
                     <td>
                       ${
@@ -578,7 +598,8 @@
               correo: correoCuenta,
               clave: v.cuentas?.clave || "",
               n_perfil: v.perfiles?.n_perfil || "",
-              pin: v.perfiles?.pin || "",
+              pin_perfil: v.perfiles?.pin || "",
+              pin_cuenta: v.cuentas?.pin || "",
               fecha_corte: v.fecha_corte || "",
               plataforma: platName,
               id_plataforma: platId,
@@ -628,7 +649,8 @@
               correo: correoCuenta,
               clave: v.cuentas?.clave || "",
               n_perfil: v.perfiles?.n_perfil || "",
-              pin: v.perfiles?.pin || "",
+              pin_perfil: v.perfiles?.pin || "",
+              pin_cuenta: v.cuentas?.pin || "",
               fecha_corte: v.fecha_corte || "",
               plataforma: platName,
               id_plataforma: platId,

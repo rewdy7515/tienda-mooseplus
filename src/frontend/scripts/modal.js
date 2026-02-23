@@ -368,10 +368,8 @@ const renderPrecios = (plataformaId, flags) => {
     );
     const onlyComplete = items.length > 0 && items.every(isComplete);
     if (onlyComplete) {
-      const completasStock = stockByPlatform[`${plataformaId}_completas`];
-      if (typeof completasStock !== "undefined") {
-        stockPlan = completasStock;
-      }
+      // Para "Cuenta completa" solo se debe usar el stock de cuentas completas.
+      stockPlan = Number(stockByPlatform[`${plataformaId}_completas`]) || 0;
     }
     const planFallback = flags.por_acceso ? "Acceso" : "Perfil";
     const planName = onlyComplete
@@ -557,30 +555,70 @@ const closeModal = () => {
 };
 
 const animateAddToCart = () => {
-  if (!selectedButtonEl) return;
+  const sourceEl = selectedButtonEl || modalEls?.btnAdd || null;
+  if (!sourceEl) return;
   const cartIcon = document.querySelector(".carrito");
   if (!cartIcon) return;
-  const rect = selectedButtonEl.getBoundingClientRect();
+  const rect = sourceEl.getBoundingClientRect();
   const cartRect = cartIcon.getBoundingClientRect();
-  const clone = selectedButtonEl.cloneNode(true);
-  clone.classList.add("flying-price");
-  clone.style.position = "fixed";
-  clone.style.left = `${rect.left}px`;
-  clone.style.top = `${rect.top}px`;
-  clone.style.width = `${rect.width}px`;
-  clone.style.height = `${rect.height}px`;
-  clone.style.pointerEvents = "none";
-  clone.style.zIndex = "9999";
-  document.body.appendChild(clone);
-  const deltaX = cartRect.left + cartRect.width / 2 - (rect.left + rect.width / 2);
-  const deltaY = cartRect.top + cartRect.height / 2 - (rect.top + rect.height / 2);
-  clone.animate(
+  const startX = rect.left + rect.width / 2;
+  const startY = rect.top + rect.height / 2;
+  const endX = cartRect.left + cartRect.width / 2;
+  const endY = cartRect.top + cartRect.height / 2;
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const arcY = Math.min(-24, deltaY * 0.35 - 26);
+
+  const flyer = document.createElement("div");
+  flyer.className = "flying-cart-chip";
+  flyer.style.left = `${startX}px`;
+  flyer.style.top = `${startY}px`;
+  const thumbUrl = String(currentPlatform?.imagen || currentPlatform?.banner || "").trim();
+  const thumbEl = document.createElement("span");
+  thumbEl.className = "flying-cart-chip__thumb";
+  if (thumbUrl) {
+    const imgEl = document.createElement("img");
+    imgEl.src = thumbUrl;
+    imgEl.alt = "";
+    imgEl.loading = "eager";
+    imgEl.decoding = "async";
+    thumbEl.appendChild(imgEl);
+  } else {
+    const dotEl = document.createElement("span");
+    dotEl.className = "flying-cart-chip__dot";
+    dotEl.setAttribute("aria-hidden", "true");
+    thumbEl.appendChild(dotEl);
+  }
+  const qtyEl = document.createElement("span");
+  qtyEl.className = "flying-cart-chip__qty";
+  qtyEl.textContent = `+${Math.max(1, Number(currentQty) || 1)}`;
+  flyer.append(thumbEl, qtyEl);
+  document.body.appendChild(flyer);
+
+  const animation = flyer.animate(
     [
-      { transform: "translate(0, 0) scale(1)", opacity: 1 },
-      { transform: `translate(${deltaX}px, ${deltaY}px) scale(0.4)`, opacity: 0 },
+      { transform: "translate(-50%, -50%) scale(1)", opacity: 0.95 },
+      {
+        transform: `translate(calc(-50% + ${deltaX * 0.55}px), calc(-50% + ${arcY}px)) scale(0.85)`,
+        opacity: 0.9,
+        offset: 0.45,
+      },
+      {
+        transform: `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px)) scale(0.34)`,
+        opacity: 0,
+      },
     ],
-    { duration: 600, easing: "ease-out" }
-  ).onfinish = () => clone.remove();
+    { duration: 760, easing: "cubic-bezier(0.2, 0.78, 0.2, 1)" }
+  );
+
+  animation.onfinish = () => {
+    flyer.remove();
+    cartIcon.classList.remove("cart-pop");
+    // Forzar reflow para poder repetir la animacion en clicks consecutivos.
+    void cartIcon.offsetWidth;
+    cartIcon.classList.add("cart-pop");
+    window.setTimeout(() => cartIcon.classList.remove("cart-pop"), 420);
+  };
 };
 
 export const setPrecios = (map) => {

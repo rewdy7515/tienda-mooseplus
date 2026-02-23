@@ -3337,7 +3337,7 @@ app.get("/api/ventas/orden", async (req, res) => {
         id_orden,
         correo_miembro,
         clave_miembro,
-        cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro),
+        cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, pin, id_plataforma, venta_perfil, venta_miembro),
         perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
         precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)
       `
