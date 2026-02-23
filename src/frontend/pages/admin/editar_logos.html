@@ -4,8 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Editar logos</title>
-    <link rel="icon" href="data:," />
-    <link rel="shortcut icon" href="data:," />
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
       main.categorias-dinamicas {
@@ -1126,6 +1124,7 @@
       const PLATFORM_CARD_LOGOS_FOLDER = "logos/plataformas/tarjeta";
       const PLATFORM_MODAL_BANNERS_FOLDER = "logos/plataformas/banner";
       const STORE_LOGO_FOLDER = "logos/mooseplus";
+      const STATIC_FAVICON_HREF = "/src/frontend/assets/favicon/logo-corto-blanco-icono.png";
       const PAGINA_TARGET_ID = 2;
 
       let plataformasMap = {};
@@ -1745,7 +1744,7 @@
       const applyFavicon = (url = "") => {
         const iconUrl = String(url || "").trim();
         if (!iconUrl) {
-          console.log("[editar_logos][favicon] icono_pestana vacío. Vista sin favicon.");
+          console.log("[editar_logos][favicon] icono_pestana vacío, aplicando favicon fijo.");
         }
         document
           .querySelectorAll(
@@ -1754,16 +1753,15 @@
           .forEach((el) => el.remove());
         const iconLink = document.createElement("link");
         iconLink.setAttribute("rel", "icon");
-        iconLink.setAttribute("href", "data:,");
+        iconLink.setAttribute("type", "image/png");
+        iconLink.setAttribute("href", STATIC_FAVICON_HREF);
         document.head.appendChild(iconLink);
         const shortcutLink = document.createElement("link");
         shortcutLink.setAttribute("rel", "shortcut icon");
-        shortcutLink.setAttribute("href", "data:,");
+        shortcutLink.setAttribute("type", "image/png");
+        shortcutLink.setAttribute("href", STATIC_FAVICON_HREF);
         document.head.appendChild(shortcutLink);
-        console.log(
-          "[editar_logos][favicon] favicon ocultado en esta vista. icono_pestana detectado =",
-          iconUrl || "(vacío)",
-        );
+        console.log("[editar_logos][favicon] aplicando href fijo =", STATIC_FAVICON_HREF);
       };
       const renderStoreAssets = () => {
         const logoUrl = String(paginaPreview?.logo || "").trim();
@@ -3346,9 +3344,7 @@
           if (storeIconPreviewEl) storeIconPreviewEl.src = iconUrl;
           setExtensionBadge(storeIconBadgeEl, iconUrl);
           applyFavicon(iconUrl);
-          setStoreLogoStatus(
-            "Icono validado desde pagina.icono_pestana (id = 2). En esta vista el favicon está oculto.",
-          );
+          setStoreLogoStatus("Favicon recargado desde pagina.icono_pestana (id = 2).");
         } catch (err) {
           console.error("refresh favicon error", err);
           setStoreLogoStatus("No se pudo refrescar el favicon.", true);

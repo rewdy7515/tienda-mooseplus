@@ -17,6 +17,7 @@ import { initModal, openModal, setPrecios, setStockData, setDescuentos } from ".
 import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
 import { AVATAR_RANDOM_COLORS, applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
+import { STATIC_HEADER_LOGO_HREF } from "./branding.js";
 import {
   attachLogout,
   getCachedCart,
@@ -66,9 +67,8 @@ const HOME_BANNERS_WHEEL_AXIS_RATIO = 0.85;
 const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
 const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 190;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
-const PAGINA_TARGET_ID = 2;
 const PAGE_LOADER_LOGO_FALLBACK =
-  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+  STATIC_HEADER_LOGO_HREF;
 let homeBannersSliderTimer = null;
 let homeBannersSliderRunId = 0;
 let homeBannersCurrentIndex = 0;
@@ -151,19 +151,7 @@ const applyPageLoaderLogo = (url = "") => {
 };
 
 const loadPageLoaderLogo = async () => {
-  try {
-    const { data, error } = await supabase
-      .from("pagina")
-      .select("logo")
-      .eq("id", PAGINA_TARGET_ID)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) throw new Error(`No existe pagina.id = ${PAGINA_TARGET_ID}`);
-    applyPageLoaderLogo(data?.logo || "");
-  } catch (err) {
-    console.error("page loader logo load error", err);
-    applyPageLoaderLogo("");
-  }
+  applyPageLoaderLogo(PAGE_LOADER_LOGO_FALLBACK);
 };
 
 const escapeHtml = (value) =>

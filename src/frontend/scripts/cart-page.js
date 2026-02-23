@@ -12,6 +12,7 @@ import {
   updateCartFlags,
 } from "./api.js";
 import { TASA_MARKUP } from "./rate-config.js";
+import { loadPaginaBranding } from "./branding.js";
 import {
   requireSession,
   attachLogout,
@@ -737,6 +738,11 @@ const handleCartClick = async (e) => {
 
 async function init() {
   setStatus("Cargando carrito...");
+  await loadPaginaBranding({ logoSelectors: [".logo"], applyFavicon: true, forceRefresh: true }).catch(
+    (err) => {
+      console.warn("cart branding load error", err);
+    },
+  );
   try {
     await syncAuthSession();
     await ensureServerSession();

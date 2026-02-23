@@ -1,8 +1,5 @@
-import { supabase } from "./api.js";
-
-const PAGINA_TARGET_ID = 2;
-const LOGO_FALLBACK =
-  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+export const STATIC_HEADER_LOGO_HREF = "/src/frontend/assets/logo-header-carga/logo-blanco.webp";
+export const STATIC_FAVICON_HREF = "/src/frontend/assets/favicon/logo-corto-blanco-icono.png";
 
 const ensureFaviconLink = () => {
   document
@@ -19,21 +16,15 @@ const ensureFaviconLink = () => {
   return [iconLink, shortcutLink];
 };
 
-const applyFavicon = (url = "") => {
-  const iconUrl = String(url || "").trim();
-  if (!iconUrl) {
-    return;
-  }
-  const cacheBustedUrl = `${iconUrl}${iconUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+const applyFavicon = () => {
   const links = ensureFaviconLink();
   links.forEach((link) => {
-    link.setAttribute("href", cacheBustedUrl);
+    link.setAttribute("href", STATIC_FAVICON_HREF);
     link.setAttribute("type", "image/png");
   });
 };
 
-const applyLogos = (url = "", selectors = []) => {
-  const logoUrl = String(url || "").trim() || LOGO_FALLBACK;
+const applyLogos = (selectors = []) => {
   const uniqueSelectors = Array.from(
     new Set(
       (Array.isArray(selectors) ? selectors : [])
@@ -44,7 +35,7 @@ const applyLogos = (url = "", selectors = []) => {
   uniqueSelectors.forEach((sel) => {
     document.querySelectorAll(sel).forEach((el) => {
       if (el instanceof HTMLImageElement) {
-        el.src = logoUrl;
+        el.src = STATIC_HEADER_LOGO_HREF;
       }
     });
   });
@@ -56,23 +47,13 @@ export async function loadPaginaBranding(options = {}) {
     : [".logo", ".auth-logo"];
   const shouldApplyFavicon = options?.applyFavicon !== false;
 
-  try {
-    const { data, error } = await supabase
-      .from("pagina")
-      .select("logo, icono_pestana")
-      .eq("id", PAGINA_TARGET_ID)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) throw new Error(`No existe pagina.id = ${PAGINA_TARGET_ID}`);
+  applyLogos(selectors);
+  if (shouldApplyFavicon) applyFavicon();
 
-    const logoUrl = String(data?.logo || "").trim();
-    const iconUrl = String(data?.icono_pestana || "").trim();
-
-    applyLogos(logoUrl, selectors);
-    if (shouldApplyFavicon) applyFavicon(iconUrl);
-    return { logo: logoUrl, icono_pestana: iconUrl, error: null };
-  } catch (err) {
-    applyLogos("", selectors);
-    return { logo: "", icono_pestana: "", error: err };
-  }
+  return {
+    logo: STATIC_HEADER_LOGO_HREF,
+    icono_pestana: STATIC_FAVICON_HREF,
+    error: null,
+  };
 }
+
