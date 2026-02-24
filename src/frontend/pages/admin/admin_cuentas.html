@@ -5627,6 +5627,9 @@
               venta_cliente: false,
               renovacion: true,
               id_venta: null,
+              id_proveedor: currentCuentaDetalle?.proveedorId
+                ? Number(currentCuentaDetalle.proveedorId)
+                : null,
               id_plataforma: currentCuentaDetalle?.plataformaId
                 ? Number(currentCuentaDetalle.plataformaId)
                 : renewPlatId
@@ -7216,10 +7219,45 @@
             // Notificar cambio de PIN al usuario de la venta del perfil
             const { data: ventaPerfil, error: ventaErr } = await supabase
               .from("ventas")
-              .select("id_usuario, id_cuenta, fecha_corte")
+              .select("id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte")
               .eq("id_perfil", modalState.targetId)
               .maybeSingle();
             if (ventaErr) throw ventaErr;
+
+            // Si la cuenta involucrada es miembro, sincroniza también el PIN en cuentas.pin.
+            const cuentaIdsCandidatas = new Set();
+            const cuentaDetalleId = toPositiveId(currentCuentaDetalle?.id_cuenta);
+            if (currentCuentaDetalle?.venta_miembro === true && cuentaDetalleId) {
+              cuentaIdsCandidatas.add(cuentaDetalleId);
+            }
+            const cuentaVentaId = toPositiveId(ventaPerfil?.id_cuenta);
+            const cuentaMiembroVentaId = toPositiveId(ventaPerfil?.id_cuenta_miembro);
+            if (cuentaVentaId) cuentaIdsCandidatas.add(cuentaVentaId);
+            if (cuentaMiembroVentaId) cuentaIdsCandidatas.add(cuentaMiembroVentaId);
+            if (cuentaIdsCandidatas.size) {
+              const ids = Array.from(cuentaIdsCandidatas);
+              const { data: cuentasTipos, error: cuentasTiposErr } = await supabase
+                .from("cuentas")
+                .select("id_cuenta, venta_miembro")
+                .in("id_cuenta", ids);
+              if (cuentasTiposErr) throw cuentasTiposErr;
+              const cuentasMiembroIds = (cuentasTipos || [])
+                .filter((c) => c?.venta_miembro === true)
+                .map((c) => toPositiveId(c?.id_cuenta))
+                .filter(Boolean);
+              if (cuentasMiembroIds.length) {
+                const resSyncPin = await Promise.all(
+                  cuentasMiembroIds.map((idCuenta) =>
+                    supabase
+                      .from("cuentas")
+                      .update({ pin: newPin || null })
+                      .eq("id_cuenta", idCuenta),
+                  ),
+                );
+                const syncErr = resSyncPin.find((r) => r?.error)?.error;
+                if (syncErr) throw syncErr;
+              }
+            }
 
             const userIds = pickNotificationUserIds("pin_actualizado", {
               ventaUserId: ventaPerfil?.id_usuario,

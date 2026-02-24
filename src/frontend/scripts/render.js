@@ -25,7 +25,7 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
             const precioTxt = (() => {
               if (!Number.isFinite(minPrecio)) return "Desde $--";
               const [intPart, decPart] = minPrecio.toFixed(2).split(".");
-              return `Desde $${intPart}<sup>${decPart}</sup>`;
+              return `Desde $<span class="plataforma-precio-int">${intPart}</span><sup class="plataforma-precio-dec">${decPart}</sup>`;
             })();
             return `
             <div class="plataforma-card"

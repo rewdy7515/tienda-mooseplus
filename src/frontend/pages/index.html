@@ -88,6 +88,25 @@
           <div id="categorias-container" class="categorias-grid"></div>
         </section>
       </main>
+      <footer class="site-contact-footer">
+        <p class="site-contact-title">Contacto:</p>
+        <p class="site-contact-inline">
+          <a
+            class="site-contact-link"
+            href="https://wa.me/message/TDECJPV4IC6LG1"
+            target="_blank"
+            rel="noopener noreferrer"
+            >WhatsApp</a
+          >
+          <a
+            class="site-contact-link"
+            href="https://www.instagram.com/moose.plus?igsh=MXB6em8zNDRxb3N1OQ=="
+            target="_blank"
+            rel="noopener noreferrer"
+            >Instagram</a
+          >
+        </p>
+      </footer>
     </div>
 
     <!-- Modal plataformas -->
@@ -132,36 +151,60 @@
           </div>
           <div class="modal-bottom">
             <div class="modal-qty modal-qty-disabled">
-              <span class="modal-duration-label">Duración:</span>
-              <button
-                type="button"
-                id="qty-months-minus"
-                aria-label="Disminuir meses"
-              >
-                -
-              </button>
-              <span id="qty-months-value">1</span>
-              <button
-                type="button"
-                id="qty-months-plus"
-                aria-label="Aumentar meses"
-              >
-                +
-              </button>
-              <span class="modal-duration-suffix">meses</span>
-              <span id="months-discount" class="discount-badge hidden"></span>
+              <div class="modal-qty-head">
+                <span class="modal-qty-title">Meses</span>
+              </div>
+              <div class="modal-qty-row">
+                <button
+                  type="button"
+                  id="qty-months-minus"
+                  aria-label="Disminuir meses"
+                >
+                  -
+                </button>
+                <input
+                  id="qty-months-value"
+                  class="modal-qty-input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  value="1"
+                  aria-label="Cantidad de meses"
+                />
+                <button
+                  type="button"
+                  id="qty-months-plus"
+                  aria-label="Aumentar meses"
+                >
+                  +
+                </button>
+                <span id="months-discount" class="discount-badge hidden"></span>
+              </div>
             </div>
             <div class="modal-qty modal-qty-disabled">
-              <span class="modal-duration-label">Cantidad:</span>
-              <button type="button" id="qty-minus" aria-label="Disminuir">
-                -
-              </button>
-              <span id="qty-value">1</span>
-              <button type="button" id="qty-plus" aria-label="Aumentar">
-                +
-              </button>
-              <span class="modal-duration-suffix">items</span>
-              <span id="items-discount" class="discount-badge hidden"></span>
+              <div class="modal-qty-head">
+                <span class="modal-qty-title">Cantidad</span>
+              </div>
+              <div class="modal-qty-row">
+                <button type="button" id="qty-minus" aria-label="Disminuir">
+                  -
+                </button>
+                <input
+                  id="qty-value"
+                  class="modal-qty-input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  value="1"
+                  aria-label="Cantidad de items"
+                />
+                <button type="button" id="qty-plus" aria-label="Aumentar">
+                  +
+                </button>
+                <span id="items-discount" class="discount-badge hidden"></span>
+              </div>
             </div>
             <p id="modal-total" class="modal-total">Total: $0.00</p>
             <button id="add-cart" class="btn-add">Añadir al carrito</button>

@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .dashboard-page {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .dashboard-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .dashboard-toolbar h2 {
+        margin: 0;
+      }
+      .dashboard-controls {
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+      .dashboard-control {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .dashboard-control label {
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .dashboard-control input,
+      .dashboard-control select {
+        min-width: 170px;
+      }
+      .dashboard-kpis {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .dashboard-kpi {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 10px 12px;
+        grid-column: span 3;
+      }
+      .dashboard-kpi-label {
+        margin: 0;
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .dashboard-kpi-value {
+        margin: 6px 0 0;
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .dashboard-kpi-compare {
+        margin: 6px 0 0;
+        font-size: 12px;
+        font-weight: 600;
+        color: #6b7280;
+      }
+      .dashboard-kpi-compare.up {
+        color: #0f6d3e;
+      }
+      .dashboard-kpi-compare.down {
+        color: #8d1c1c;
+      }
+      .dashboard-kpi-compare.same {
+        color: #6b7280;
+      }
+      .dashboard-kpi.neto {
+        grid-column: span 6;
+        background: #eff5ff;
+        border-color: #dbe7ff;
+      }
+      .dashboard-kpi.neto .dashboard-kpi-label {
+        font-size: 13px;
+        font-weight: 600;
+        color: #42546f;
+      }
+      .dashboard-kpi.neto .dashboard-kpi-value {
+        font-size: 36px;
+        line-height: 1.05;
+      }
+      .dashboard-kpi.ingresos,
+      .dashboard-kpi.gastos {
+        grid-column: span 3;
+      }
+      .dashboard-kpi.gift {
+        grid-column: span 12;
+      }
+      .dashboard-kpi-value.pos {
+        color: #0f6d3e;
+      }
+      .dashboard-kpi-value.neg {
+        color: #8d1c1c;
+      }
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .dashboard-block {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .dashboard-block h3 {
+        margin: 0 0 8px;
+      }
+      .dashboard-block .status {
+        margin: 0;
+      }
+      .dashboard-empty {
+        color: #6b7280;
+        margin: 8px 0 0;
+      }
+      .dashboard-metric-pos {
+        color: #0f6d3e;
+        font-weight: 600;
+      }
+      .dashboard-metric-neg {
+        color: #8d1c1c;
+        font-weight: 600;
+      }
+      .dashboard-mini-note {
+        margin: 0;
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .dashboard-extra-disclaimer {
+        margin-top: 6px;
+        color: #6b7280;
+      }
+      @media (max-width: 1024px) {
+        .dashboard-kpi {
+          grid-column: span 6;
+        }
+        .dashboard-kpi.neto {
+          grid-column: span 12;
+        }
+      }
+      @media (max-width: 720px) {
+        .dashboard-control input,
+        .dashboard-control select {
+          min-width: 140px;
+        }
+        .dashboard-kpis {
+          grid-template-columns: 1fr;
+        }
+        .dashboard-kpi,
+        .dashboard-kpi.neto,
+        .dashboard-kpi.ingresos,
+        .dashboard-kpi.gastos,
+        .dashboard-kpi.gift {
+          grid-column: span 1;
+        }
+        .dashboard-kpi.neto .dashboard-kpi-value {
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas dashboard-page">
+      <div class="dashboard-toolbar">
+        <h2>Dashboard mensual</h2>
+        <div class="dashboard-controls">
+          <div class="dashboard-control">
+            <label for="month-filter">Mes</label>
+            <select id="month-filter"></select>
+          </div>
+          <button type="button" class="btn-primary" id="btn-dashboard-load">Aplicar</button>
+          <button type="button" class="btn-outline" id="btn-dashboard-back">Volver</button>
+        </div>
+      </div>
+
+      <p class="status" id="dashboard-status">Cargando...</p>
+
+      <section class="dashboard-kpis" id="dashboard-kpis">
+        <article class="dashboard-kpi neto">
+          <p class="dashboard-kpi-label">Utilidad neta</p>
+          <p class="dashboard-kpi-value" id="kpi-neto">$0.00</p>
+          <p class="dashboard-kpi-compare" id="cmp-neto">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi ingresos">
+          <p class="dashboard-kpi-label">Ingresos</p>
+          <p class="dashboard-kpi-value" id="kpi-ingresos">$0.00</p>
+          <p class="dashboard-kpi-compare" id="cmp-ingresos">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi gastos">
+          <p class="dashboard-kpi-label">Gastos (incluye tarjetas)</p>
+          <p class="dashboard-kpi-value" id="kpi-gastos">$0.00</p>
+          <p class="dashboard-kpi-compare" id="cmp-gastos">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Margen neto</p>
+          <p class="dashboard-kpi-value" id="kpi-margen">0%</p>
+          <p class="dashboard-kpi-compare" id="cmp-margen">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Movimientos</p>
+          <p class="dashboard-kpi-value" id="kpi-movs">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-movs">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Clientes activos</p>
+          <p class="dashboard-kpi-value" id="kpi-clientes-activos">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-clientes-activos">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Ventas activas</p>
+          <p class="dashboard-kpi-value" id="kpi-ventas-activas">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-ventas-activas">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Renovaciones del mes</p>
+          <p class="dashboard-kpi-value" id="kpi-renov-count">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-renov-count">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Ventas nuevas del mes</p>
+          <p class="dashboard-kpi-value" id="kpi-nuevas-count">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-nuevas-count">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Renovaciones cliente (ingreso)</p>
+          <p class="dashboard-kpi-value" id="kpi-renov-ing">$0.00</p>
+          <p class="dashboard-kpi-compare" id="cmp-renov-ing">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Renovaciones proveedor (gasto)</p>
+          <p class="dashboard-kpi-value" id="kpi-renov-gast">$0.00</p>
+          <p class="dashboard-kpi-compare" id="cmp-renov-gast">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi gift">
+          <p class="dashboard-kpi-label">Gasto en tarjetas no venta</p>
+          <p class="dashboard-kpi-value" id="kpi-gift">$0.00</p>
+          <p class="dashboard-kpi-compare" id="cmp-gift">= Sin cambio vs mes anterior</p>
+        </article>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="dashboard-block">
+          <h3>Resumen del mes</h3>
+          <p class="dashboard-mini-note" id="summary-note">-</p>
+          <p class="dashboard-mini-note dashboard-extra-disclaimer hidden" id="extra-note"></p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Por plataforma</h3>
+          <div class="cuenta-table-wrap">
+            <table class="table-base" id="table-plataformas">
+              <thead>
+                <tr>
+                  <th>Plataforma</th>
+                  <th>Ingresos</th>
+                  <th>Gastos</th>
+                  <th>Neto</th>
+                  <th>Mov.</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="dashboard-empty hidden" id="empty-plataformas">Sin datos para este mes.</p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Pagos a proveedores</h3>
+          <div class="cuenta-table-wrap">
+            <table class="table-base" id="table-proveedores">
+              <thead>
+                <tr>
+                  <th>Proveedor</th>
+                  <th>Gasto total</th>
+                  <th>Renovaciones</th>
+                  <th>Mov.</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="dashboard-empty hidden" id="empty-proveedores">Sin gastos de proveedores en este mes.</p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Flujo diario</h3>
+          <div class="cuenta-table-wrap">
+            <table class="table-base" id="table-diario">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Ingresos</th>
+                  <th>Gastos</th>
+                  <th>Neto</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="dashboard-empty hidden" id="empty-diario">Sin movimientos diarios para este mes.</p>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+
+      requireSession();
+
+      const usernameEl = document.querySelector(".username");
+      const adminLink = document.querySelector(".admin-link");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const monthFilter = document.querySelector("#month-filter");
+      const btnLoad = document.querySelector("#btn-dashboard-load");
+      const btnBack = document.querySelector("#btn-dashboard-back");
+      const statusEl = document.querySelector("#dashboard-status");
+      const summaryNoteEl = document.querySelector("#summary-note");
+      const DASHBOARD_ALLOWED_USER_ID = 23;
+      const extraNoteEl = document.querySelector("#extra-note");
+
+      const kpiIngresos = document.querySelector("#kpi-ingresos");
+      const kpiGastos = document.querySelector("#kpi-gastos");
+      const kpiNeto = document.querySelector("#kpi-neto");
+      const kpiMovs = document.querySelector("#kpi-movs");
+      const kpiClientesActivos = document.querySelector("#kpi-clientes-activos");
+      const kpiVentasActivas = document.querySelector("#kpi-ventas-activas");
+      const kpiRenovCount = document.querySelector("#kpi-renov-count");
+      const kpiNuevasCount = document.querySelector("#kpi-nuevas-count");
+      const kpiRenovIng = document.querySelector("#kpi-renov-ing");
+      const kpiRenovGast = document.querySelector("#kpi-renov-gast");
+      const kpiGift = document.querySelector("#kpi-gift");
+      const kpiMargen = document.querySelector("#kpi-margen");
+
+      const cmpNeto = document.querySelector("#cmp-neto");
+      const cmpIngresos = document.querySelector("#cmp-ingresos");
+      const cmpGastos = document.querySelector("#cmp-gastos");
+      const cmpMargen = document.querySelector("#cmp-margen");
+      const cmpMovs = document.querySelector("#cmp-movs");
+      const cmpClientesActivos = document.querySelector("#cmp-clientes-activos");
+      const cmpVentasActivas = document.querySelector("#cmp-ventas-activas");
+      const cmpRenovCount = document.querySelector("#cmp-renov-count");
+      const cmpNuevasCount = document.querySelector("#cmp-nuevas-count");
+      const cmpRenovIng = document.querySelector("#cmp-renov-ing");
+      const cmpRenovGast = document.querySelector("#cmp-renov-gast");
+      const cmpGift = document.querySelector("#cmp-gift");
+
+      const platformTbody = document.querySelector("#table-plataformas tbody");
+      const providerTbody = document.querySelector("#table-proveedores tbody");
+      const dailyTbody = document.querySelector("#table-diario tbody");
+
+      const emptyPlataformas = document.querySelector("#empty-plataformas");
+      const emptyProveedores = document.querySelector("#empty-proveedores");
+      const emptyDiario = document.querySelector("#empty-diario");
+      const MONTH_NAMES_ES = [
+        "Enero",
+        "Febrero",
+        "Marzo",
+        "Abril",
+        "Mayo",
+        "Junio",
+        "Julio",
+        "Agosto",
+        "Septiembre",
+        "Octubre",
+        "Noviembre",
+        "Diciembre",
+      ];
+      const JANUARY_SHEETS_EXTRA = 265.5;
+      const JANUARY_SHEETS_EXTRA_NEW_SALES = 104;
+      const JANUARY_SHEETS_EXTRA_RENEWALS = 28;
+      const JANUARY_SHEETS_EXTRA_DAY_LIMIT = 15;
+      const GIFT_PLATFORM_REMAP_SOURCE_ID = 21;
+      const GIFT_PLATFORM_REMAP_TARGET_ID = 1;
+      const GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME = "Plataforma 1";
+
+      const moneyFmt = new Intl.NumberFormat("es-VE", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const intFmt = new Intl.NumberFormat("es-VE");
+
+      const getCaracasDateParts = () => {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(now);
+        const pick = (type) => parts.find((p) => p.type === type)?.value || "";
+        return { year: pick("year"), month: pick("month"), day: pick("day") };
+      };
+
+      const getDefaultMonth = () => {
+        const caracas = getCaracasDateParts();
+        return `${caracas.year}-${caracas.month}`;
+      };
+      const monthKeyFromDate = (dateVal) => {
+        const m = String(dateVal || "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+        return m ? `${m[1]}-${m[2]}` : null;
+      };
+      const monthToIndex = (key) => {
+        const m = String(key || "").match(/^(\d{4})-(\d{2})$/);
+        if (!m) return null;
+        const year = Number(m[1]);
+        const month = Number(m[2]);
+        if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+          return null;
+        }
+        return year * 12 + (month - 1);
+      };
+      const indexToMonthKey = (idx) => {
+        if (!Number.isInteger(idx)) return null;
+        const year = Math.floor(idx / 12);
+        const month = (idx % 12) + 1;
+        return `${year}-${String(month).padStart(2, "0")}`;
+      };
+      const previousMonthKey = (key) => {
+        const idx = monthToIndex(key);
+        if (idx === null) return null;
+        return indexToMonthKey(idx - 1);
+      };
+      const formatMonthLabel = (key) => {
+        const m = String(key || "").match(/^(\d{4})-(\d{2})$/);
+        if (!m) return key || "";
+        const monthNum = Number(m[2]);
+        const monthName = MONTH_NAMES_ES[monthNum - 1] || m[2];
+        return `${monthName} ${m[1]}`;
+      };
+      const buildMonthOptions = (minKey, maxKey, selectedKey) => {
+        if (!monthFilter) return;
+        const minIdx = monthToIndex(minKey);
+        const maxIdx = monthToIndex(maxKey);
+        if (minIdx === null || maxIdx === null || maxIdx < minIdx) return;
+        monthFilter.innerHTML = "";
+        for (let idx = maxIdx; idx >= minIdx; idx -= 1) {
+          const key = indexToMonthKey(idx);
+          if (!key) continue;
+          const option = document.createElement("option");
+          option.value = key;
+          option.textContent = formatMonthLabel(key);
+          monthFilter.appendChild(option);
+        }
+        const hasSelected = Array.from(monthFilter.options).some((opt) => opt.value === selectedKey);
+        monthFilter.value = hasSelected
+          ? selectedKey
+          : monthFilter.options.length
+          ? monthFilter.options[0].value
+          : "";
+      };
+      const loadMonthOptions = async () => {
+        if (!monthFilter) return getDefaultMonth();
+        const defaultMonth = getDefaultMonth();
+        try {
+          const [
+            { data: histMinData, error: histMinErr },
+            { data: histMaxData, error: histMaxErr },
+            { data: giftMinData, error: giftMinErr },
+            { data: giftMaxData, error: giftMaxErr },
+          ] = await Promise.all([
+            supabase
+              .from("historial_ventas")
+              .select("fecha_pago")
+              .not("fecha_pago", "is", null)
+              .order("fecha_pago", { ascending: true })
+              .limit(1),
+            supabase
+              .from("historial_ventas")
+              .select("fecha_pago")
+              .not("fecha_pago", "is", null)
+              .order("fecha_pago", { ascending: false })
+              .limit(1),
+            supabase
+              .from("tarjetas_de_regalo")
+              .select("fecha_compra")
+              .eq("para_venta", false)
+              .not("fecha_compra", "is", null)
+              .order("fecha_compra", { ascending: true })
+              .limit(1),
+            supabase
+              .from("tarjetas_de_regalo")
+              .select("fecha_compra")
+              .eq("para_venta", false)
+              .not("fecha_compra", "is", null)
+              .order("fecha_compra", { ascending: false })
+              .limit(1),
+          ]);
+
+          if (histMinErr) throw histMinErr;
+          if (histMaxErr) throw histMaxErr;
+          if (giftMinErr) throw giftMinErr;
+          if (giftMaxErr) throw giftMaxErr;
+
+          const minCandidates = [
+            monthKeyFromDate(histMinData?.[0]?.fecha_pago),
+            monthKeyFromDate(giftMinData?.[0]?.fecha_compra),
+            defaultMonth,
+          ].filter(Boolean);
+          const maxCandidates = [
+            monthKeyFromDate(histMaxData?.[0]?.fecha_pago),
+            monthKeyFromDate(giftMaxData?.[0]?.fecha_compra),
+            defaultMonth,
+          ].filter(Boolean);
+
+          const minIdx = Math.min(...minCandidates.map((k) => monthToIndex(k)).filter(Number.isFinite));
+          const maxIdx = Math.max(...maxCandidates.map((k) => monthToIndex(k)).filter(Number.isFinite));
+          const minKey = indexToMonthKey(minIdx);
+          const maxKey = indexToMonthKey(maxIdx);
+          buildMonthOptions(minKey, maxKey, defaultMonth);
+        } catch (err) {
+          console.error("dashboard months error", err);
+          const currentIdx = monthToIndex(defaultMonth);
+          const minKey = indexToMonthKey(currentIdx - 11);
+          buildMonthOptions(minKey, defaultMonth, defaultMonth);
+        }
+        return monthFilter.value || defaultMonth;
+      };
+
+      const monthRange = (monthVal) => {
+        const match = String(monthVal || "").match(/^(\d{4})-(\d{2})$/);
+        if (!match) return null;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+          return null;
+        }
+        const lastDay = new Date(year, month, 0).getDate();
+        const mm = String(month).padStart(2, "0");
+        return {
+          start: `${year}-${mm}-01`,
+          end: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+        };
+      };
+      const monthRangeUntilDay = (monthVal, dayLimit) => {
+        const base = monthRange(monthVal);
+        if (!base) return null;
+        const match = String(monthVal || "").match(/^(\d{4})-(\d{2})$/);
+        if (!match) return base;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const lastDay = new Date(year, month, 0).getDate();
+        const day = Math.max(1, Math.min(Number(dayLimit) || 1, lastDay));
+        const mm = String(month).padStart(2, "0");
+        return {
+          start: `${year}-${mm}-01`,
+          end: `${year}-${mm}-${String(day).padStart(2, "0")}`,
+        };
+      };
+      const buildCompareContext = (monthVal) => {
+        const currentCaracas = getCaracasDateParts();
+        const currentMonthKey = `${currentCaracas.year}-${currentCaracas.month}`;
+        const currentDay = Number(currentCaracas.day) || 1;
+        const prevMonthVal = previousMonthKey(monthVal);
+        const currentRange = monthRange(monthVal);
+        const prevRange = monthRange(prevMonthVal);
+        if (!currentRange) {
+          return {
+            range: null,
+            prevRange: null,
+            compareSuffix: "vs mes anterior",
+            isProgressCut: false,
+          };
+        }
+        if (!prevRange) {
+          return {
+            range: currentRange,
+            prevRange: currentRange,
+            compareSuffix: "vs mes anterior",
+            isProgressCut: false,
+          };
+        }
+        if (monthVal === currentMonthKey) {
+          const rangeCut = monthRangeUntilDay(monthVal, currentDay) || currentRange;
+          const prevRangeCut = monthRangeUntilDay(prevMonthVal, currentDay) || prevRange;
+          const dayTxt = String(currentDay).padStart(2, "0");
+          return {
+            range: rangeCut,
+            prevRange: prevRangeCut,
+            compareSuffix: `vs mes anterior al día ${dayTxt}`,
+            isProgressCut: true,
+          };
+        }
+        return {
+          range: currentRange,
+          prevRange,
+          compareSuffix: "vs mes anterior",
+          isProgressCut: false,
+        };
+      };
+
+      const toNumber = (v) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+
+      const toName = (joined, fallback) => {
+        if (!joined) return fallback;
+        if (Array.isArray(joined)) return joined[0]?.nombre || fallback;
+        return joined.nombre || fallback;
+      };
+
+      const formatMoney = (v) => moneyFmt.format(toNumber(v));
+      const formatMoneyPlain = (v) => {
+        const n = toNumber(v);
+        return `${n.toFixed(2).replace(".", ",")}`;
+      };
+
+      const formatDDMMYYYY = (isoDate) => {
+        const m = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return isoDate || "-";
+        return `${m[3]}-${m[2]}-${m[1]}`;
+      };
+      const escapeHtml = (v) =>
+        String(v ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      const isoDay = (isoDate) => {
+        const m = String(isoDate || "").match(/^\d{4}-\d{2}-(\d{2})$/);
+        return m ? Number(m[1]) : 0;
+      };
+      const getSheetsJanuaryAdjustment = (range) => {
+        const monthKey = monthKeyFromDate(range?.start);
+        const endDay = isoDay(range?.end);
+        const applies =
+          Boolean(monthKey) &&
+          String(monthKey).endsWith("-01") &&
+          endDay >= JANUARY_SHEETS_EXTRA_DAY_LIMIT;
+        return {
+          amount: applies ? JANUARY_SHEETS_EXTRA : 0,
+          newSalesCount: applies ? JANUARY_SHEETS_EXTRA_NEW_SALES : 0,
+          renewalsCount: applies ? JANUARY_SHEETS_EXTRA_RENEWALS : 0,
+          applies,
+          monthKey: monthKey || "",
+        };
+      };
+      const applyIncomeAdjustment = (stats, adjustment) => {
+        if (!stats || !adjustment) return;
+        const extra = toNumber(adjustment.amount);
+        const extraNewSales = Math.max(0, Number(adjustment.newSalesCount) || 0);
+        const extraRenewals = Math.max(0, Number(adjustment.renewalsCount) || 0);
+        const extraMovements = extraNewSales + extraRenewals;
+        if (!extra && !extraMovements) return;
+
+        if (extra) {
+          stats.ingresosTotal += extra;
+          stats.netoTotal += extra;
+          stats.margenPct = stats.ingresosTotal > 0 ? (stats.netoTotal / stats.ingresosTotal) * 100 : 0;
+          stats.extraIngresoGoogleSheets = (stats.extraIngresoGoogleSheets || 0) + extra;
+        }
+        if (extraRenewals) {
+          stats.renovacionesClienteCount += extraRenewals;
+        }
+        if (extraNewSales) {
+          stats.ventasNuevasClienteCount += extraNewSales;
+        }
+        if (extraMovements) {
+          stats.countIngresos += extraMovements;
+          stats.movimientos += extraMovements;
+          stats.extraMovimientosGoogleSheets = (stats.extraMovimientosGoogleSheets || 0) + extraMovements;
+        }
+      };
+
+      const setStatus = (text) => {
+        if (!statusEl) return;
+        statusEl.textContent = text || "";
+      };
+
+      const clearTableBody = (tbody) => {
+        if (tbody) tbody.innerHTML = "";
+      };
+
+      const formatDelta = (valueType, delta) => {
+        const abs = Math.abs(toNumber(delta));
+        if (valueType === "money") return formatMoney(abs);
+        if (valueType === "int") return intFmt.format(abs);
+        if (valueType === "pct") return `${abs.toFixed(2)} pp`;
+        return String(abs);
+      };
+
+      const setCompare = (el, valueType, currentVal, prevVal, suffix = "vs mes anterior") => {
+        if (!el) return;
+        const delta = toNumber(currentVal) - toNumber(prevVal);
+        el.classList.remove("up", "down", "same");
+        if (delta > 0) {
+          el.classList.add("up");
+          el.textContent = `▲ +${formatDelta(valueType, delta)} ${suffix}`;
+          return;
+        }
+        if (delta < 0) {
+          el.classList.add("down");
+          el.textContent = `▼ -${formatDelta(valueType, delta)} ${suffix}`;
+          return;
+        }
+        el.classList.add("same");
+        el.textContent = `= Sin cambio ${suffix}`;
+      };
+
+      const fillKpis = (stats, prevStats, compareSuffix = "vs mes anterior") => {
+        if (kpiIngresos) kpiIngresos.textContent = formatMoney(stats.ingresosTotal);
+        if (kpiGastos) kpiGastos.textContent = formatMoney(stats.gastosTotal);
+        if (kpiNeto) {
+          kpiNeto.textContent = formatMoney(stats.netoTotal);
+          kpiNeto.classList.toggle("pos", stats.netoTotal >= 0);
+          kpiNeto.classList.toggle("neg", stats.netoTotal < 0);
+        }
+        if (kpiMovs) kpiMovs.textContent = intFmt.format(stats.movimientos);
+        if (kpiClientesActivos) {
+          kpiClientesActivos.textContent = intFmt.format(stats.clientesActivosCount);
+        }
+        if (kpiVentasActivas) {
+          kpiVentasActivas.textContent = intFmt.format(stats.ventasActivasCount);
+        }
+        if (kpiRenovCount) kpiRenovCount.textContent = intFmt.format(stats.renovacionesClienteCount);
+        if (kpiNuevasCount) kpiNuevasCount.textContent = intFmt.format(stats.ventasNuevasClienteCount);
+        if (kpiRenovIng) kpiRenovIng.textContent = formatMoney(stats.renovIngresoTotal);
+        if (kpiRenovGast) kpiRenovGast.textContent = formatMoney(stats.renovGastoTotal);
+        if (kpiGift) kpiGift.textContent = formatMoney(stats.gastoGiftTotal);
+        if (kpiMargen) {
+          const marginTxt = Number.isFinite(stats.margenPct)
+            ? `${stats.margenPct.toFixed(2)}%`
+            : "0%";
+          kpiMargen.textContent = marginTxt;
+          kpiMargen.classList.toggle("pos", stats.margenPct >= 0);
+          kpiMargen.classList.toggle("neg", stats.margenPct < 0);
+        }
+
+        setCompare(cmpNeto, "money", stats.netoTotal, prevStats.netoTotal, compareSuffix);
+        setCompare(cmpIngresos, "money", stats.ingresosTotal, prevStats.ingresosTotal, compareSuffix);
+        setCompare(cmpGastos, "money", stats.gastosTotal, prevStats.gastosTotal, compareSuffix);
+        setCompare(cmpMargen, "pct", stats.margenPct, prevStats.margenPct, compareSuffix);
+        setCompare(cmpMovs, "int", stats.movimientos, prevStats.movimientos, compareSuffix);
+        setCompare(
+          cmpClientesActivos,
+          "int",
+          stats.clientesActivosCount,
+          prevStats.clientesActivosCount,
+          compareSuffix,
+        );
+        setCompare(
+          cmpVentasActivas,
+          "int",
+          stats.ventasActivasCount,
+          prevStats.ventasActivasCount,
+          compareSuffix,
+        );
+        setCompare(
+          cmpRenovCount,
+          "int",
+          stats.renovacionesClienteCount,
+          prevStats.renovacionesClienteCount,
+          compareSuffix,
+        );
+        setCompare(
+          cmpNuevasCount,
+          "int",
+          stats.ventasNuevasClienteCount,
+          prevStats.ventasNuevasClienteCount,
+          compareSuffix,
+        );
+        setCompare(
+          cmpRenovIng,
+          "money",
+          stats.renovIngresoTotal,
+          prevStats.renovIngresoTotal,
+          compareSuffix,
+        );
+        setCompare(
+          cmpRenovGast,
+          "money",
+          stats.renovGastoTotal,
+          prevStats.renovGastoTotal,
+          compareSuffix,
+        );
+        setCompare(cmpGift, "money", stats.gastoGiftTotal, prevStats.gastoGiftTotal, compareSuffix);
+      };
+
+      const renderPlatforms = (rows) => {
+        clearTableBody(platformTbody);
+        if (!rows.length) {
+          emptyPlataformas?.classList.remove("hidden");
+          return;
+        }
+        emptyPlataformas?.classList.add("hidden");
+
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          const netClass = row.neto >= 0 ? "dashboard-metric-pos" : "dashboard-metric-neg";
+          tr.innerHTML = `
+            <td>${escapeHtml(row.nombre)}</td>
+            <td>${formatMoney(row.ingresos)}</td>
+            <td>${formatMoney(row.gastos)}</td>
+            <td class="${netClass}">${formatMoney(row.neto)}</td>
+            <td>${intFmt.format(row.movimientos)}</td>
+          `;
+          platformTbody.appendChild(tr);
+        });
+      };
+
+      const renderProviders = (rows) => {
+        clearTableBody(providerTbody);
+        if (!rows.length) {
+          emptyProveedores?.classList.remove("hidden");
+          return;
+        }
+        emptyProveedores?.classList.add("hidden");
+
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${escapeHtml(row.nombre)}</td>
+            <td>${formatMoney(row.gastoTotal)}</td>
+            <td>${formatMoney(row.renovTotal)}</td>
+            <td>${intFmt.format(row.movimientos)}</td>
+          `;
+          providerTbody.appendChild(tr);
+        });
+      };
+
+      const renderDaily = (rows) => {
+        clearTableBody(dailyTbody);
+        if (!rows.length) {
+          emptyDiario?.classList.remove("hidden");
+          return;
+        }
+        emptyDiario?.classList.add("hidden");
+
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          const netClass = row.neto >= 0 ? "dashboard-metric-pos" : "dashboard-metric-neg";
+          tr.innerHTML = `
+            <td>${formatDDMMYYYY(row.fecha)}</td>
+            <td>${formatMoney(row.ingresos)}</td>
+            <td>${formatMoney(row.gastos)}</td>
+            <td class="${netClass}">${formatMoney(row.neto)}</td>
+          `;
+          dailyTbody.appendChild(tr);
+        });
+      };
+
+      const computeStats = (historial, giftRows) => {
+        const rowsIngreso = [];
+        const rowsNuevasIngreso = [];
+        const rowsGasto = [];
+        const rowsRenovIngreso = [];
+        const rowsRenovGasto = [];
+
+        historial.forEach((row) => {
+          const isIngreso = isTrue(row?.venta_cliente);
+          const isRenov = isTrue(row?.renovacion);
+          if (isIngreso) {
+            rowsIngreso.push(row);
+            if (isRenov) rowsRenovIngreso.push(row);
+            else rowsNuevasIngreso.push(row);
+          } else {
+            rowsGasto.push(row);
+            if (isRenov) rowsRenovGasto.push(row);
+          }
+        });
+
+        const ingresosTotal = rowsIngreso.reduce((acc, r) => acc + toNumber(r?.monto), 0);
+        const gastoHistorialTotal = rowsGasto.reduce((acc, r) => acc + toNumber(r?.monto), 0);
+        const gastoGiftTotal = giftRows.reduce((acc, r) => acc + toNumber(r?.costo), 0);
+        const gastosTotal = gastoHistorialTotal + gastoGiftTotal;
+        const netoTotal = ingresosTotal - gastosTotal;
+
+        const renovIngresoTotal = rowsRenovIngreso.reduce((acc, r) => acc + toNumber(r?.monto), 0);
+        const renovGastoHistorial = rowsRenovGasto.reduce((acc, r) => acc + toNumber(r?.monto), 0);
+        const renovGastoGift = giftRows.reduce(
+          (acc, r) => acc + (isTrue(r?.usado) ? toNumber(r?.costo) : 0),
+          0,
+        );
+        const renovGastoTotal = renovGastoHistorial + renovGastoGift;
+
+        const movimientos = historial.length + giftRows.length;
+        const margenPct = ingresosTotal > 0 ? (netoTotal / ingresosTotal) * 100 : 0;
+
+        const platformMap = new Map();
+        const upsertPlatform = (id, nombre) => {
+          const key = String(id ?? "sin-plataforma");
+          if (!platformMap.has(key)) {
+            platformMap.set(key, {
+              id,
+              nombre: nombre || "Sin plataforma",
+              ingresos: 0,
+              gastos: 0,
+              neto: 0,
+              movimientos: 0,
+            });
+          }
+          return platformMap.get(key);
+        };
+
+        historial.forEach((row) => {
+          const nombrePlataforma = toName(row?.plataformas, "Sin plataforma");
+          const entry = upsertPlatform(row?.id_plataforma ?? null, nombrePlataforma);
+          const monto = toNumber(row?.monto);
+          if (isTrue(row?.venta_cliente)) entry.ingresos += monto;
+          else entry.gastos += monto;
+          entry.movimientos += 1;
+        });
+
+        giftRows.forEach((row) => {
+          const rawPlatformId = Number(row?.id_plataforma);
+          const shouldRemapGiftPlatform =
+            rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID &&
+            !isTrue(row?.para_venta) &&
+            isTrue(row?.usado);
+          const mappedPlatformId = shouldRemapGiftPlatform
+            ? GIFT_PLATFORM_REMAP_TARGET_ID
+            : row?.id_plataforma ?? null;
+          const mappedPlatformName = shouldRemapGiftPlatform
+            ? GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME
+            : toName(row?.plataformas, "Sin plataforma");
+          const entry = upsertPlatform(mappedPlatformId, mappedPlatformName);
+          entry.gastos += toNumber(row?.costo);
+          entry.movimientos += 1;
+        });
+
+        const platformRows = Array.from(platformMap.values())
+          .map((r) => ({ ...r, neto: r.ingresos - r.gastos }))
+          .sort((a, b) => b.neto - a.neto);
+
+        const providerMap = new Map();
+        const upsertProvider = (id, nombre) => {
+          const key = String(id ?? "sin-proveedor");
+          if (!providerMap.has(key)) {
+            providerMap.set(key, {
+              id,
+              nombre: nombre || "Sin proveedor",
+              gastoTotal: 0,
+              renovTotal: 0,
+              movimientos: 0,
+            });
+          }
+          return providerMap.get(key);
+        };
+
+        rowsGasto.forEach((row) => {
+          const provNombre = toName(row?.proveedores, "Sin proveedor");
+          const entry = upsertProvider(row?.id_proveedor ?? null, provNombre);
+          const monto = toNumber(row?.monto);
+          entry.gastoTotal += monto;
+          if (isTrue(row?.renovacion)) entry.renovTotal += monto;
+          entry.movimientos += 1;
+        });
+
+        giftRows.forEach((row) => {
+          const provNombre = toName(row?.proveedores, "Sin proveedor");
+          const entry = upsertProvider(row?.id_proveedor ?? null, provNombre);
+          const giftCost = toNumber(row?.costo);
+          entry.gastoTotal += giftCost;
+          if (isTrue(row?.usado)) entry.renovTotal += giftCost;
+          entry.movimientos += 1;
+        });
+
+        const providerRows = Array.from(providerMap.values()).sort((a, b) => b.gastoTotal - a.gastoTotal);
+
+        const dailyMap = new Map();
+        const upsertDay = (fecha) => {
+          const key = String(fecha || "");
+          if (!key) return null;
+          if (!dailyMap.has(key)) {
+            dailyMap.set(key, { fecha: key, ingresos: 0, gastos: 0, neto: 0 });
+          }
+          return dailyMap.get(key);
+        };
+
+        historial.forEach((row) => {
+          const day = upsertDay(row?.fecha_pago);
+          if (!day) return;
+          const monto = toNumber(row?.monto);
+          if (isTrue(row?.venta_cliente)) day.ingresos += monto;
+          else day.gastos += monto;
+        });
+
+        giftRows.forEach((row) => {
+          const day = upsertDay(row?.fecha_compra);
+          if (!day) return;
+          day.gastos += toNumber(row?.costo);
+        });
+
+        const dailyRows = Array.from(dailyMap.values())
+          .map((r) => ({ ...r, neto: r.ingresos - r.gastos }))
+          .sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+        return {
+          ingresosTotal,
+          gastosTotal,
+          netoTotal,
+          renovIngresoTotal,
+          renovGastoTotal,
+          gastoGiftTotal,
+          movimientos,
+          margenPct,
+          platformRows,
+          providerRows,
+          dailyRows,
+          countIngresos: rowsIngreso.length,
+          countGastos: rowsGasto.length,
+          countGift: giftRows.length,
+          clientesActivosCount: 0,
+          ventasActivasCount: 0,
+          renovacionesClienteCount: rowsRenovIngreso.length,
+          ventasNuevasClienteCount: rowsNuevasIngreso.length,
+        };
+      };
+
+      const fetchMonthData = async (range) => {
+        const [{ data: historialData, error: histErr }, { data: giftData, error: giftErr }] =
+          await Promise.all([
+            supabase
+              .from("historial_ventas")
+              .select(
+                "id_historial_ventas, monto, fecha_pago, venta_cliente, renovacion, id_plataforma, id_proveedor, plataformas(nombre), proveedores(nombre)",
+              )
+              .gte("fecha_pago", range.start)
+              .lte("fecha_pago", range.end)
+              .order("fecha_pago", { ascending: true }),
+            supabase
+              .from("tarjetas_de_regalo")
+              .select(
+                "id_tarjeta_de_regalo, costo, para_venta, usado, fecha_compra, id_plataforma, id_proveedor, plataformas(nombre), proveedores(nombre)",
+              )
+              .eq("para_venta", false)
+              .gte("fecha_compra", range.start)
+              .lte("fecha_compra", range.end)
+              .order("fecha_compra", { ascending: true }),
+          ]);
+
+        if (histErr) throw histErr;
+        if (giftErr) throw giftErr;
+
+        return {
+          historial: historialData || [],
+          gifts: giftData || [],
+        };
+      };
+      const fetchActiveCounts = async (endDate) => {
+        if (!endDate) {
+          return { clientesActivosCount: 0, ventasActivasCount: 0 };
+        }
+        const { data, error } = await supabase
+          .from("ventas")
+          .select("id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado")
+          .not("id_usuario", "is", null)
+          .not("fecha_pago", "is", null)
+          .lte("fecha_pago", endDate);
+        if (error) throw error;
+        const rows = (data || []).filter((row) => {
+          const notSuspended = !isTrue(row?.suspendido);
+          const notPending = !isTrue(row?.pendiente);
+          const notRejected = !isTrue(row?.pago_rechazado);
+          const activeByDate =
+            isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= endDate);
+          return notSuspended && notPending && notRejected && activeByDate;
+        });
+        const users = new Set(
+          rows
+            .map((row) => Number(row?.id_usuario))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        );
+        return {
+          clientesActivosCount: users.size,
+          ventasActivasCount: rows.length,
+        };
+      };
+
+      const renderAll = (
+        stats,
+        prevStats,
+        range,
+        prevRange,
+        compareSuffix,
+        isProgressCut,
+        adjustments = {},
+      ) => {
+        fillKpis(stats, prevStats, compareSuffix);
+        renderPlatforms(stats.platformRows);
+        renderProviders(stats.providerRows);
+        renderDaily(stats.dailyRows);
+
+        if (summaryNoteEl) {
+          const cutNote = isProgressCut ? " · Corte parcial según fecha actual de Caracas" : "";
+          summaryNoteEl.textContent = `Periodo ${formatDDMMYYYY(range.start)} a ${formatDDMMYYYY(range.end)} · Activos: ${intFmt.format(stats.clientesActivosCount)} clientes / ${intFmt.format(stats.ventasActivasCount)} ventas · Renovaciones: ${intFmt.format(stats.renovacionesClienteCount)} · Ventas nuevas: ${intFmt.format(stats.ventasNuevasClienteCount)} · Mes anterior (${formatDDMMYYYY(prevRange.start)} a ${formatDDMMYYYY(prevRange.end)}): Activos ${intFmt.format(prevStats.clientesActivosCount)} clientes / ${intFmt.format(prevStats.ventasActivasCount)} ventas, Renovaciones ${intFmt.format(prevStats.renovacionesClienteCount)} / Ventas nuevas ${intFmt.format(prevStats.ventasNuevasClienteCount)}${cutNote}`;
+        }
+        if (extraNoteEl) {
+          const notes = [];
+          if (adjustments.current?.amount) {
+            const monthLbl = formatMonthLabel(adjustments.current.monthKey);
+            notes.push(
+              `Dato extra agregado de plantilla de google sheets: +$${formatMoneyPlain(adjustments.current.amount)}, +${intFmt.format(adjustments.current.newSalesCount || 0)} ventas nuevas y +${intFmt.format(adjustments.current.renewalsCount || 0)} renovaciones aplicado a ${monthLbl}.`,
+            );
+          }
+          if (adjustments.previous?.amount) {
+            const monthLbl = formatMonthLabel(adjustments.previous.monthKey);
+            notes.push(
+              `Dato extra agregado de plantilla de google sheets (mes anterior): +$${formatMoneyPlain(adjustments.previous.amount)}, +${intFmt.format(adjustments.previous.newSalesCount || 0)} ventas nuevas y +${intFmt.format(adjustments.previous.renewalsCount || 0)} renovaciones aplicado a ${monthLbl}.`,
+            );
+          }
+          if (notes.length) {
+            notes.push(
+              "Este monto corresponde a los primeros 15 días de enero y no está registrado en la base de datos de la página web.",
+            );
+            extraNoteEl.textContent = notes.join(" ");
+            extraNoteEl.classList.remove("hidden");
+          } else {
+            extraNoteEl.textContent = "";
+            extraNoteEl.classList.add("hidden");
+          }
+        }
+      };
+
+      const loadDashboard = async () => {
+        const monthVal = monthFilter?.value || "";
+        const compareCtx = buildCompareContext(monthVal);
+        const range = compareCtx.range;
+        if (!range) {
+          setStatus("Selecciona un mes válido.");
+          return;
+        }
+        const prevRange = compareCtx.prevRange;
+
+        setStatus("Cargando datos...");
+        try {
+          const currentAdjustment = getSheetsJanuaryAdjustment(range);
+          const previousAdjustment = getSheetsJanuaryAdjustment(prevRange);
+          const [{ historial, gifts }, prevData, currentActive, previousActive] = await Promise.all([
+            fetchMonthData(range),
+            prevRange ? fetchMonthData(prevRange) : Promise.resolve({ historial: [], gifts: [] }),
+            fetchActiveCounts(range.end),
+            fetchActiveCounts(prevRange?.end || range.end),
+          ]);
+          const stats = computeStats(historial, gifts);
+          const prevStats = computeStats(prevData.historial || [], prevData.gifts || []);
+          stats.clientesActivosCount = currentActive?.clientesActivosCount || 0;
+          stats.ventasActivasCount = currentActive?.ventasActivasCount || 0;
+          prevStats.clientesActivosCount = previousActive?.clientesActivosCount || 0;
+          prevStats.ventasActivasCount = previousActive?.ventasActivasCount || 0;
+          applyIncomeAdjustment(stats, currentAdjustment);
+          applyIncomeAdjustment(prevStats, previousAdjustment);
+          renderAll(
+            stats,
+            prevStats,
+            range,
+            prevRange || range,
+            compareCtx.compareSuffix,
+            compareCtx.isProgressCut,
+            { current: currentAdjustment, previous: previousAdjustment },
+          );
+          const loadedLabel = formatMonthLabel(monthVal);
+          const loadedNote = compareCtx.isProgressCut ? " (comparación al corte actual)" : "";
+          setStatus(`Datos cargados para ${loadedLabel}${loadedNote}.`);
+        } catch (err) {
+          console.error("dashboard load error", err);
+          setStatus("No se pudieron cargar los datos del dashboard.");
+        }
+      };
+
+      async function init() {
+        try {
+          const user = await loadCurrentUser();
+          if (user && usernameEl) {
+            const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            usernameEl.textContent = fullName || user.correo || "Usuario";
+          }
+
+          const currentUserId = Number(user?.id_usuario || 0);
+          if (currentUserId !== DASHBOARD_ALLOWED_USER_ID) {
+            window.location.replace("admin.html");
+            return;
+          }
+
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+
+          await loadMonthOptions();
+          await loadDashboard();
+        } catch (err) {
+          console.error("dashboard init error", err);
+          setStatus("No se pudo inicializar el dashboard.");
+        }
+      }
+
+      btnLoad?.addEventListener("click", loadDashboard);
+      monthFilter?.addEventListener("change", loadDashboard);
+      btnBack?.addEventListener("click", () => {
+        window.location.href = "admin.html";
+      });
+
+      init();
+      attachLogout(clearServerSession);
+      attachLogoHome();
+    </script>
+  </body>
+</html>

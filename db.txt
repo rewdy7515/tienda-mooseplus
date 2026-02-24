@@ -7,6 +7,8 @@ CREATE TABLE public.banners (
   redireccion text,
   oculto boolean,
   posicion smallint,
+  imagen_movil text,
+  titulo text,
   CONSTRAINT banners_pkey PRIMARY KEY (id_banner)
 );
 CREATE TABLE public.carrito_items (
@@ -138,7 +140,8 @@ CREATE TABLE public.historial_ventas (
   CONSTRAINT historial_ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_id_usuario_cliente_fkey FOREIGN KEY (id_usuario_cliente) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
-  CONSTRAINT historial_ventas_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden)
+  CONSTRAINT historial_ventas_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
+  CONSTRAINT historial_ventas_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor)
 );
 CREATE TABLE public.metodos_de_pago (
   id_metodo_de_pago bigint NOT NULL,
@@ -151,6 +154,14 @@ CREATE TABLE public.metodos_de_pago (
   imagen text,
   color_fondo text,
   CONSTRAINT metodos_de_pago_pkey PRIMARY KEY (id_metodo_de_pago)
+);
+CREATE TABLE public.metricas_mensuales (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  clientes_activos smallint NOT NULL,
+  ventas_activas smallint,
+  clientes_nuevos smallint,
+  actualizacion date,
+  CONSTRAINT metricas_mensuales_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.notificacion_plantilla (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -203,7 +214,6 @@ CREATE TABLE public.pagina (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   logo text,
   preview text,
-  logo_pestana text,
   icono_pestana text,
   CONSTRAINT pagina_pkey PRIMARY KEY (id)
 );

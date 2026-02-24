@@ -27,6 +27,28 @@
       .admin-actions.admin-group[data-loading="true"] > :not(.admin-loading) {
         display: none;
       }
+      #btn-dashboard.admin-action-dashboard {
+        background: #a8e8e3;
+        border-color: #a8e8e3;
+        color: #1f5f5a;
+        width: 100%;
+        max-width: none;
+      }
+      #btn-dashboard.admin-action-dashboard:hover {
+        background: #95ddd7;
+        border-color: #95ddd7;
+      }
+      .admin-dashboard-action {
+        grid-column: 1 / -1;
+        display: block;
+        margin-top: -2px;
+      }
+      #btn-dashboard .card-title {
+        margin: 0;
+        font-weight: 700;
+        font-size: 15px;
+        color: inherit;
+      }
     </style>
   </head>
   <body>
@@ -39,22 +61,27 @@
         <div class="admin-card reportes" id="dash-reportes">
           <p class="card-title">Reportes</p>
           <div class="card-count" id="count-reportes">--</div>
-          <p class="card-desc"></p>
+          <p class="card-desc">reportes pendientes</p>
         </div>
         <div class="admin-card cortes" id="dash-cortes">
           <p class="card-title">Cortes</p>
           <div class="card-count" id="count-cortes">--</div>
-          <p class="card-desc">Ventas por vencer</p>
+          <p class="card-desc">ventas vencidas</p>
         </div>
         <div class="admin-card pedidos" id="dash-pedidos">
           <p class="card-title">Pedidos</p>
           <div class="card-count" id="count-pedidos">--</div>
-          <p class="card-desc">Solicitudes recientes</p>
+          <p class="card-desc">ventas pendientes</p>
         </div>
         <div class="admin-card tareas" id="dash-tareas">
           <p class="card-title">Tareas</p>
           <div class="card-count" id="count-tareas">--</div>
           <p class="card-desc">Pendientes</p>
+        </div>
+        <div class="admin-dashboard-action hidden" id="dash-dashboard-action">
+          <button class="btn-primary admin-action admin-action-dashboard" id="btn-dashboard">
+            <span class="card-title">Dashboard</span>
+          </button>
         </div>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
@@ -144,12 +171,14 @@
       const spotifyLibresEl = document.querySelector("#spotify-libres");
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
       const btnOrdenes = document.querySelector("#btn-ordenes");
+      const dashDashboardAction = document.querySelector("#dash-dashboard-action");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
       const modalRenovarList = document.querySelector("#spotify-renovar-list");
       const modalRenovarYes = document.querySelector("#spotify-renovar-yes");
       const modalRenovarNo = document.querySelector("#spotify-renovar-no");
       const modalRenovarMonto = document.querySelector("#spotify-renovar-monto");
       const modalRenovarCopy = document.querySelector("#spotify-renovar-copy");
+      const DASHBOARD_ALLOWED_USER_ID = 23;
       let currentUserId = null;
 
       const getMonthStart = () => {
@@ -363,9 +392,14 @@
           currentUserId = user?.id_usuario || null;
           const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
           const isSuperAdmin = isTrue(user?.permiso_superadmin);
+          const canViewDashboard = Number(currentUserId) === DASHBOARD_ALLOWED_USER_ID;
           if (adminLink) {
             adminLink.classList.toggle("hidden", !isAdmin);
             adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (dashDashboardAction) {
+            dashDashboardAction.classList.toggle("hidden", !canViewDashboard);
+            dashDashboardAction.style.display = canViewDashboard ? "block" : "none";
           }
           if (btnOrdenes) {
             btnOrdenes.classList.toggle("hidden", !isSuperAdmin);
@@ -431,6 +465,10 @@
       });
       document.getElementById("btn-ordenes")?.addEventListener("click", () => {
         window.location.href = "ordenes.html";
+      });
+
+      document.getElementById("btn-dashboard")?.addEventListener("click", () => {
+        window.location.href = "dashboard.html";
       });
 
       document.getElementById("btn-registrar-proveedor")?.addEventListener("click", () => {

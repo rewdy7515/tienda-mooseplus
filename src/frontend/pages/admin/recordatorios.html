@@ -378,7 +378,8 @@
               platInfo.correo_cliente === "1";
             const correo = useCorreoCliente ? v.correo_miembro || "-" : cuenta.correo || "-";
             const perfInfo = v.id_perfil ? mapPerf[v.id_perfil] : null;
-            const perfilTxt = perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
+            const showPerfil = Number(platId) !== 9;
+            const perfilTxt = showPerfil && perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
             const isNetflix = platId === 1;
             const isPlan2Precio = v.id_precio === 4 || v.id_precio === 5;
             const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfInfo?.hogar);

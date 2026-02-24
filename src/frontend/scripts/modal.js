@@ -201,6 +201,52 @@ const updateModalTotal = () => {
   totalEl.textContent = `Total: $${final.toFixed(2)}`;
 };
 
+const normalizePositiveInt = (value, fallback = 1) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Math.max(1, Math.trunc(Number(fallback) || 1));
+  return Math.max(1, Math.trunc(parsed));
+};
+
+const setMonthsDisplayValue = (value) => {
+  const el = modalEls?.qtyMonthsValue;
+  if (!el) return;
+  const safe = normalizePositiveInt(value, 1);
+  if (String(el.tagName || "").toUpperCase() === "INPUT") {
+    el.value = String(safe);
+    return;
+  }
+  el.textContent = String(safe);
+};
+
+const readMonthsDisplayValue = () => {
+  const el = modalEls?.qtyMonthsValue;
+  if (!el) return 1;
+  if (String(el.tagName || "").toUpperCase() === "INPUT") {
+    return normalizePositiveInt(el.value, 1);
+  }
+  return normalizePositiveInt(el.textContent, 1);
+};
+
+const setQtyDisplayValue = (value) => {
+  const el = modalEls?.qtyValue;
+  if (!el) return;
+  const safe = normalizePositiveInt(value, 1);
+  if (String(el.tagName || "").toUpperCase() === "INPUT") {
+    el.value = String(safe);
+    return;
+  }
+  el.textContent = String(safe);
+};
+
+const readQtyDisplayValue = () => {
+  const el = modalEls?.qtyValue;
+  if (!el) return 1;
+  if (String(el.tagName || "").toUpperCase() === "INPUT") {
+    return normalizePositiveInt(el.value, 1);
+  }
+  return normalizePositiveInt(el.textContent, 1);
+};
+
 const renderPrecios = (plataformaId, flags) => {
   const {
     modalPrecios,
@@ -221,8 +267,8 @@ const renderPrecios = (plataformaId, flags) => {
   currentQty = 1;
   currentMonths = 1;
   updateModalTotal();
-  qtyValue.textContent = currentQty;
-  qtyMonthsValue.textContent = currentMonths;
+  setQtyDisplayValue(currentQty);
+  setMonthsDisplayValue(currentMonths);
   btnMinus.disabled = true;
   btnPlus.disabled = true;
   btnMonthsMinus.disabled = true;
@@ -405,14 +451,14 @@ const renderPrecios = (plataformaId, flags) => {
       nameEl.className = "plan-name";
       nameEl.textContent = planName;
       titleEl.appendChild(nameEl);
+      const infoWrap = createPlanInfo(planName, planDesc);
+      if (infoWrap) titleEl.appendChild(infoWrap);
       if (onlyComplete) {
         const tagEl = document.createElement("span");
         tagEl.className = "plan-encargo-tag";
         tagEl.textContent = "Por encargo";
         titleEl.appendChild(tagEl);
       }
-      const infoWrap = createPlanInfo(planName, planDesc);
-      if (infoWrap) titleEl.appendChild(infoWrap);
       titleEl.appendChild(document.createElement("br"));
     };
 
@@ -453,8 +499,8 @@ const renderPrecios = (plataformaId, flags) => {
         selectedButtonEl = null;
         currentQty = 1;
         currentMonths = 1;
-        qtyValue.textContent = currentQty;
-        qtyMonthsValue.textContent = currentMonths;
+        setQtyDisplayValue(currentQty);
+        setMonthsDisplayValue(currentMonths);
         btnMinus.disabled = true;
         btnPlus.disabled = true;
         btnMonthsMinus.disabled = true;
@@ -471,8 +517,8 @@ const renderPrecios = (plataformaId, flags) => {
       selectedButtonEl = wrapper;
       const isMesUnit = !flags.por_pantalla && !flags.por_acceso;
       currentQty = isMesUnit ? 1 : opcionBase?.cantidad || 1;
-      qtyValue.textContent = currentQty;
-      qtyMonthsValue.textContent = currentMonths;
+      setQtyDisplayValue(currentQty);
+      setMonthsDisplayValue(currentMonths);
       updateModalTotal();
       btnMinus.disabled = false;
       btnPlus.disabled = false;
@@ -516,9 +562,9 @@ const renderPrecios = (plataformaId, flags) => {
 
 const updateQtyItems = (delta) => {
   if (!selectedPrecio) return;
-  const { qtyValue, monthsDiscount, itemsDiscount } = modalEls;
+  const { monthsDiscount, itemsDiscount } = modalEls;
   currentQty = Math.max(1, currentQty + delta);
-  qtyValue.textContent = currentQty;
+  setQtyDisplayValue(currentQty);
   updateModalTotal();
   const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
   const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
@@ -532,9 +578,9 @@ const updateQtyItems = (delta) => {
 
 const updateQtyMonths = (delta) => {
   if (!selectedPrecio) return;
-  const { qtyMonthsValue, monthsDiscount, itemsDiscount } = modalEls;
+  const { monthsDiscount, itemsDiscount } = modalEls;
   currentMonths = Math.max(1, Math.round(currentMonths + delta));
-  qtyMonthsValue.textContent = currentMonths;
+  setMonthsDisplayValue(currentMonths);
   updateModalTotal();
   const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
   const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
@@ -644,6 +690,7 @@ export const setStockData = (map) => {
 
 export const initModal = (elements) => {
   modalEls = elements;
+  setMonthsDisplayValue(currentMonths);
   modalTopEl = document.querySelector("#platform-modal .modal-top");
   modalScrollHintEl = document.querySelector("#modal-scroll-hint");
   if (modalTopEl && modalScrollHintEl && !scrollHintBound) {
@@ -663,11 +710,87 @@ export const initModal = (elements) => {
         .forEach((el) => el.classList.remove("is-visible"));
     });
   }
-  const { btnMinus, btnPlus, btnMonthsMinus, btnMonthsPlus, closeBtn, backdrop, btnAdd } = modalEls;
+  const {
+    btnMinus,
+    btnPlus,
+    btnMonthsMinus,
+    btnMonthsPlus,
+    closeBtn,
+    backdrop,
+    btnAdd,
+    qtyValue,
+    qtyMonthsValue,
+    monthsDiscount,
+    itemsDiscount,
+  } = modalEls;
   btnMinus?.addEventListener("click", () => updateQtyItems(-1));
   btnPlus?.addEventListener("click", () => updateQtyItems(1));
   btnMonthsMinus?.addEventListener("click", () => updateQtyMonths(-1));
   btnMonthsPlus?.addEventListener("click", () => updateQtyMonths(1));
+  const isMonthsInput = String(qtyMonthsValue?.tagName || "").toUpperCase() === "INPUT";
+  if (isMonthsInput && qtyMonthsValue && qtyMonthsValue.dataset.bound !== "1") {
+    qtyMonthsValue.dataset.bound = "1";
+    const commitMonthsInput = () => {
+      currentMonths = readMonthsDisplayValue();
+      setMonthsDisplayValue(currentMonths);
+      if (!selectedPrecio) return;
+      updateModalTotal();
+      const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
+      const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
+      setDiscountBadge(itemsDiscount, pctItems);
+      setDiscountBadge(monthsDiscount, pctMonths);
+      if (modalEls.modalQtyMonths?.classList.contains("hidden")) {
+        monthsDiscount?.classList.add("hidden");
+      }
+    };
+    qtyMonthsValue.addEventListener("input", () => {
+      const raw = String(qtyMonthsValue.value || "");
+      const digitsOnly = raw.replace(/[^\d]/g, "");
+      if (raw !== digitsOnly) qtyMonthsValue.value = digitsOnly;
+      if (!digitsOnly) return;
+      commitMonthsInput();
+    });
+    qtyMonthsValue.addEventListener("blur", commitMonthsInput);
+    qtyMonthsValue.addEventListener("change", commitMonthsInput);
+    qtyMonthsValue.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      commitMonthsInput();
+      qtyMonthsValue.blur();
+    });
+  }
+  const isQtyInput = String(qtyValue?.tagName || "").toUpperCase() === "INPUT";
+  if (isQtyInput && qtyValue && qtyValue.dataset.bound !== "1") {
+    qtyValue.dataset.bound = "1";
+    const commitQtyInput = () => {
+      currentQty = readQtyDisplayValue();
+      setQtyDisplayValue(currentQty);
+      if (!selectedPrecio) return;
+      updateModalTotal();
+      const pctItems = getDiscountPercent(currentPlatform, currentQty, "items");
+      const pctMonths = getDiscountPercent(currentPlatform, currentMonths, "months");
+      setDiscountBadge(itemsDiscount, pctItems);
+      setDiscountBadge(monthsDiscount, pctMonths);
+      if (modalEls.modalQtyMonths?.classList.contains("hidden")) {
+        monthsDiscount?.classList.add("hidden");
+      }
+    };
+    qtyValue.addEventListener("input", () => {
+      const raw = String(qtyValue.value || "");
+      const digitsOnly = raw.replace(/[^\d]/g, "");
+      if (raw !== digitsOnly) qtyValue.value = digitsOnly;
+      if (!digitsOnly) return;
+      commitQtyInput();
+    });
+    qtyValue.addEventListener("blur", commitQtyInput);
+    qtyValue.addEventListener("change", commitQtyInput);
+    qtyValue.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      commitQtyInput();
+      qtyValue.blur();
+    });
+  }
   closeBtn?.addEventListener("click", closeModal);
   backdrop?.addEventListener("click", closeModal);
   btnAdd?.addEventListener("click", () => {
