@@ -480,6 +480,16 @@
         color: #fff;
         cursor: pointer;
       }
+      .precio-id-input {
+        width: 92px;
+        padding: 4px 6px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      .precio-id-input.is-saving {
+        opacity: 0.6;
+      }
       .codigo-input-wrap {
         display: inline-flex;
         align-items: center;
@@ -964,6 +974,20 @@
             <button type="button" class="btn-edit-fecha">✏️</button>
             <input type="date" class="fecha-input hidden" ${dataAttrs} value="${fechaValue}" />
           </div>`;
+      };
+      const renderPrecioVentaCell = (ventaId, idPrecio) => {
+        if (!ventaId) return "-";
+        const precioVal = Number.isFinite(Number(idPrecio)) ? String(Number(idPrecio)) : "";
+        return `<input
+            type="number"
+            class="precio-id-input"
+            data-id-venta="${ventaId}"
+            data-prev="${precioVal}"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            value="${precioVal}"
+          />`;
       };
       const decorateCopyColumns = (root) => {
         if (!root) return;
@@ -2545,6 +2569,7 @@
                 ${perfilCell}
                 <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
                 <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
+                <td>${renderPrecioVentaCell(r.id_venta, r.id_precio)}</td>
                 <td class="action-cell">
                   <button class="btn-primary btn-reemplazar-row"
                     data-cuenta="${r.id_cuenta ?? ""}"
@@ -2596,6 +2621,7 @@
                       ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
                       <th>Fecha de Corte</th>
                       <th>Estado</th>
+                      <th>ID Precio</th>
                       <th class="action-cell">Acción</th>
                     </tr>
                   </thead>
@@ -2735,6 +2761,7 @@
               pin: perfilInfo.pin ?? "",
               fecha_corte: v.fecha_corte || "",
               suspendido: v.suspendido === true,
+              id_precio: v.id_precio ?? null,
               id_plataforma: platId,
               perfil_hogar: perfilInfo.perfil_hogar,
               es_subcuenta: false,
@@ -2753,6 +2780,69 @@
               '<p class="status">No se pudo cargar ventas.</p>';
         }
       };
+
+      const updateVentaIdPrecio = async (input) => {
+        if (!input) return;
+        const ventaId = Number(input.dataset.idVenta || input.dataset.idventa || 0);
+        if (!Number.isFinite(ventaId) || ventaId <= 0) return;
+        const previousRaw = String(input.dataset.prev || "").trim();
+        const raw = String(input.value || "").trim();
+        let idPrecio = null;
+        if (raw) {
+          if (!/^\d+$/.test(raw)) {
+            alert("El ID Precio debe ser un número entero.");
+            input.value = previousRaw;
+            return;
+          }
+          idPrecio = Number(raw);
+          if (!Number.isFinite(idPrecio) || idPrecio <= 0) {
+            alert("El ID Precio debe ser mayor a 0.");
+            input.value = previousRaw;
+            return;
+          }
+        }
+        const previousVal = previousRaw ? Number(previousRaw) : null;
+        if (previousVal === idPrecio) return;
+
+        input.disabled = true;
+        input.classList.add("is-saving");
+        try {
+          const { error } = await supabase
+            .from("ventas")
+            .update({ id_precio: idPrecio })
+            .eq("id_venta", ventaId);
+          if (error) throw error;
+          input.dataset.prev = idPrecio ? String(idPrecio) : "";
+          input.value = input.dataset.prev;
+        } catch (err) {
+          console.error("update id_precio venta error", err);
+          alert("No se pudo actualizar el ID Precio.");
+          input.value = previousRaw;
+        } finally {
+          input.disabled = false;
+          input.classList.remove("is-saving");
+        }
+      };
+
+      const bindPrecioInputEvents = (rootEl) => {
+        if (!rootEl) return;
+        rootEl.addEventListener("change", (e) => {
+          const input = e.target.closest(".precio-id-input");
+          if (!input) return;
+          updateVentaIdPrecio(input);
+        });
+        rootEl.addEventListener("keydown", (e) => {
+          const input = e.target.closest(".precio-id-input");
+          if (!input) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            input.blur();
+          }
+        });
+      };
+
+      bindPrecioInputEvents(clienteVentasEl);
+      bindPrecioInputEvents(detalleEl);
 
       clienteVentasEl?.addEventListener("click", async (e) => {
         const copyEl = e.target.closest(".copyable-text");
@@ -2925,7 +3015,7 @@
           currentCanvaFlags = canvaFlags;
           const { data: ventas, error: vErr } = await supabase
             .from("ventas")
-            .select("id_venta, id_usuario, id_perfil, fecha_corte, suspendido, correo_miembro")
+            .select("id_venta, id_usuario, id_perfil, fecha_corte, suspendido, id_precio, correo_miembro")
             .eq("id_cuenta", cuenta.id_cuenta)
             .not("id_perfil", "is", null)
             .order("id_venta", { ascending: true });
@@ -2988,6 +3078,7 @@
                 <td>${v.correo_miembro || "-"}</td>
                 <td>${renderFechaEditCell(v.fecha_corte, v.id_venta)}</td>
                 <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
+                <td>${renderPrecioVentaCell(v.id_venta, v.id_precio)}</td>
                 <td class="action-cell">
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
@@ -3000,7 +3091,7 @@
             `;
           });
           const colCountCanva =
-            5 + (canvaFlags.showPerfil ? 1 : 0) + (canvaFlags.porPantalla ? 1 : 0);
+            6 + (canvaFlags.showPerfil ? 1 : 0) + (canvaFlags.porPantalla ? 1 : 0);
           const body = rows.length
             ? rows.join("")
             : `<tr><td colspan="${colCountCanva}" class="status">Sin perfiles registrados.</td></tr>`;
@@ -3022,6 +3113,7 @@
                     <th>Correo</th>
                     <th>Fecha de corte</th>
                     <th>Estado</th>
+                    <th>ID Precio</th>
                     <th class="action-cell">Acción</th>
                   </tr>
                 </thead>
@@ -3076,17 +3168,19 @@
             ${showClaveCliente ? "<th>Clave</th>" : ""}
             <th>Fecha de corte</th>
             <th>Estado</th>
+            <th>ID Precio</th>
             <th class="action-cell">Acción</th>
           </tr>`;
         } else if (colMode === "perfil") {
           thead = `<tr>
-            <th>ID Venta</th>
+            <th>Venta</th>
             ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
             ${showPin ? "<th>PIN</th>" : ""}
             ${showHogar ? "<th>Perfil hogar</th>" : ""}
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
+            <th>ID Precio</th>
             <th class="action-cell">Acción</th>
           </tr>`;
         } else if (colMode === "miembro") {
@@ -3096,6 +3190,7 @@
             <th>Ocupado por</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
+            <th>ID Precio</th>
             <th class="action-cell">Acción</th>
           </tr>`;
         } else {
@@ -3104,7 +3199,8 @@
             <th>Cliente</th>
             <th>Fecha de corte</th>
             <th>Estado</th>
-            <th class="action-cell">Acción</th>
+            <th>ID Precio</th>
+            <th class="action-cell">Acciones</th>
           </tr>`;
         }
 
@@ -3112,28 +3208,24 @@
         if (isCuentaMadre) {
           rows = [...(info.madreRows || [])];
         }
-        // Si no hay perfiles y hay ventas de cuenta completa, crear filas sintéticas
-        if (
-          !rows.length &&
-          Array.isArray(info.ventasCuenta) &&
-          info.ventasCuenta.length
-        ) {
-          info.ventasCuenta.forEach((v) => {
-            rows.push({
-              perfil: "",
-              pin: "",
-              hogar: false,
-              id_perfil: null,
-              n_raw: null,
-              reemplazado: false,
-              ocupadoPor:
-                info.usuariosCuenta?.[v.id_usuario] || info.correo || "",
-              id_venta: v.id_venta,
-              fecha_corte: v.fecha_corte || "",
-              fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
-              suspendido: v.suspendido === true,
-            });
-          });
+        // Cuentas completas: mostrar siempre la tabla basada en ventas (no en perfiles).
+        if (colMode === "ocupado" && !isCuentaMadre) {
+          rows = (Array.isArray(info.ventasCuenta) ? info.ventasCuenta : []).map((v) => ({
+            perfil: "",
+            pin: "",
+            hogar: false,
+            id_perfil: null,
+            n_raw: null,
+            reemplazado: false,
+            ocupadoPor:
+              info.usuariosCuenta?.[v.id_usuario] ||
+              (v.id_usuario ? `Usuario ${v.id_usuario}` : "-"),
+            id_venta: v.id_venta,
+            fecha_corte: v.fecha_corte || "",
+            fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
+            suspendido: v.suspendido === true,
+            id_precio: v.id_precio ?? null,
+          }));
         }
         if (colMode === "miembro" && rows.length === 0) {
           rows.push({
@@ -3148,26 +3240,24 @@
             fecha_corte: "",
             fecha_corte_fmt: "",
             suspendido: false,
+            id_precio: null,
           });
         }
-        if (colMode === "ocupado" && !isCuentaMadre) {
-          if (rows.length === 0) {
-            rows.push({
-              perfil: "",
-              pin: "",
-              hogar: false,
-              id_perfil: null,
-              n_raw: null,
-              reemplazado: false,
-              ocupadoPor: "",
-              id_venta: null,
-              fecha_corte: "",
-              fecha_corte_fmt: "",
-              suspendido: false,
-            });
-          } else if (rows.length > 1) {
-            rows = [rows[0]];
-          }
+        if (colMode === "ocupado" && !isCuentaMadre && rows.length === 0) {
+          rows.push({
+            perfil: "",
+            pin: "",
+            hogar: false,
+            id_perfil: null,
+            n_raw: null,
+            reemplazado: false,
+            ocupadoPor: "",
+            id_venta: null,
+            fecha_corte: "",
+            fecha_corte_fmt: "",
+            suspendido: false,
+            id_precio: null,
+          });
         }
         if (colMode === "miembro" && !isCuentaMadre) {
           const fechaReferencia = info.fecha_corte_display || info.fecha_corte || "";
@@ -3273,6 +3363,7 @@
                 ${showClaveCliente ? `<td>${claveCell}</td>` : ""}
                 <td>${fechaCell}</td>
                 <td class="estado-cell ${estadoRow.className}">${estadoRow.label}</td>
+                <td>${renderPrecioVentaCell(p.id_venta, p.id_precio)}</td>
                 <td class="action-cell">
                   ${accionButtons}
                 </td>
@@ -3326,6 +3417,7 @@
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
+                <td>${renderPrecioVentaCell(p.id_venta, p.id_precio)}</td>
                 <td class="action-cell">
                   <button type="button" class="btn-primary btn-reemplazar-row"
                   data-perfil="${p.id_perfil || ""}"
@@ -3390,6 +3482,7 @@
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
+                <td>${renderPrecioVentaCell(p.id_venta, p.id_precio)}</td>
                 <td class="action-cell">
                   <button type="button" class="btn-primary btn-reemplazar-row"
                   data-perfil="${p.id_perfil || ""}"
@@ -3430,9 +3523,11 @@
               perfilHogar: p.hogar,
               isSubCuenta: false,
             });
+            const hasVenta = !!p.id_venta;
+            const clienteCell = hasVenta ? (ocupadoRaw || "-") : ocupadoCell;
             return `<tr>
               <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
-              <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : ocupadoCell}</td>
+              <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : clienteCell}</td>
               <td>
                 ${
                   p.id_venta
@@ -3441,27 +3536,9 @@
                 }
               </td>
               <td class="estado-cell ${estado.className}">${estado.label}</td>
+              <td>${renderPrecioVentaCell(p.id_venta, p.id_precio)}</td>
               <td class="action-cell">
-                <button type="button" class="btn-primary btn-reemplazar-row"
-                data-perfil="${p.id_perfil || ""}"
-                data-correo="${info.correo || ""}"
-                data-clave="${info.clave || ""}"
-                data-nperfil="${p.n_raw ?? ""}"
-                data-pin="${p.pin ?? ""}"
-                data-plat="${info.plataformaNombre || ""}"
-                data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
-                data-idventa="${p.id_venta || ""}"
-                data-cliente="${clienteNombreEncoded}"
-              >Reemplazar</button>
-                <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
-                <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
-                  data-perfil="${p.id_perfil || ""}"
-                >Registrar servicio</button>
-                ${
-                  isSuperadmin && p.id_venta
-                    ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
-                    : ""
-                }
+                <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
               </td>
             </tr>`;
           })
@@ -3469,14 +3546,14 @@
 
         let addPerfilRow = "";
         const colCountPerfil =
-          5 +
+          6 +
           (showPerfil ? 1 : 0) +
           (showPin ? 1 : 0) +
           (showHogar ? 1 : 0);
-        const colCountMiembro = 5 + (showPin ? 1 : 0);
-        const colCountOcupado = 5;
+        const colCountMiembro = 6 + (showPin ? 1 : 0);
+        const colCountOcupado = 6;
         const colCountMadre =
-          6 + (showPerfil ? 1 : 0) + (showClaveCliente ? 1 : 0);
+          7 + (showPerfil ? 1 : 0) + (showClaveCliente ? 1 : 0);
         const colCountTable = isCuentaMadre
           ? colCountMadre
           : colMode === "perfil"
@@ -3723,7 +3800,7 @@
               ? ""
               : `
           ${info.cuenta_madre ? "" : plat9Table}
-          <h4>${isCuentaMadre ? "Perfiles ocupados" : "Perfiles"}</h4>
+          <h4>${isCuentaMadre ? "Perfiles ocupados" : colMode === "ocupado" ? "Ventas de cuenta completa" : "Perfiles"}</h4>
           ${table}
           ${
             info.showMiembros && info.venta_miembro !== true
@@ -3737,6 +3814,8 @@
                   ${showClaveCliente ? "<th>Clave</th>" : ""}
                   ${showPin ? "<th>PIN</th>" : ""}
                   <th>Ocupado por</th>
+                  <th>ID Venta</th>
+                  <th>ID Precio</th>
                   <th>Fecha de corte</th>
                   <th class="action-cell">Acción</th>
                 </tr>
@@ -3770,6 +3849,8 @@
                           ${showClaveCliente ? `<td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>` : ""}
                           ${showPin ? `<td><span class="pin-copy" data-clipboard="${m.pin || ""}">${m.pin || "-"}</span></td>` : ""}
                           <td>${hasVenta ? m.ocupado || "-" : `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />`}</td>
+                          <td>${hasVenta ? `#${m.id_venta}` : "-"}</td>
+                          <td>${renderPrecioVentaCell(m.id_venta, m.id_precio)}</td>
                           <td>
                             ${
                               hasVenta
@@ -3815,7 +3896,7 @@
                     if (Number.isFinite(maxMiembros) && maxMiembros > 0 && actuales >= maxMiembros) {
                       return "";
                     }
-                    const colSpan = 4 + (showClaveCliente ? 1 : 0) + (showPin ? 1 : 0);
+                    const colSpan = 6 + (showClaveCliente ? 1 : 0) + (showPin ? 1 : 0);
                     return `<tr class="row-add-miembro">
                       <td colspan="${colSpan}" style="text-align:center; font-weight:700; cursor:pointer;">+</td>
                     </tr>`;
@@ -3962,7 +4043,7 @@
           if (perfilIds.length) {
             const { data: ventas, error: ventErr } = await supabase
             .from("ventas")
-            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido, correo_miembro, clave_miembro")
+            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido, id_precio, correo_miembro, clave_miembro")
               .in("id_perfil", perfilIds);
             if (ventErr) throw ventErr;
             ventasMap = (ventas || []).reduce((acc, v) => {
@@ -3971,6 +4052,7 @@
                 id_venta: v.id_venta,
                 fecha_corte: v.fecha_corte,
                 suspendido: v.suspendido,
+                id_precio: v.id_precio,
                 correo_miembro: v.correo_miembro,
                 clave_miembro: v.clave_miembro,
               };
@@ -4007,7 +4089,7 @@
           if (colMode === "ocupado" || colMode === "miembro") {
             const { data: ventasCta, error: ventasCtaErr } = await supabase
             .from("ventas")
-            .select("id_venta, id_usuario, fecha_corte, suspendido")
+            .select("id_venta, id_usuario, fecha_corte, suspendido, id_precio")
               .eq("id_cuenta", idCuenta);
             if (ventasCtaErr) throw ventasCtaErr;
             ventasCuenta = ventasCta || [];
@@ -4067,6 +4149,7 @@
                   formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
                 suspendido: ventasMap[p.id_perfil]?.suspendido === true,
                 reemplazado: enReemplazos,
+                id_precio: ventasMap[p.id_perfil]?.id_precio ?? null,
               };
             });
 
@@ -4089,6 +4172,7 @@
                   clave: ventaInfo.clave_miembro || "",
                   fecha_corte: ventaInfo.fecha_corte || "",
                   suspendido: ventaInfo.suspendido === true,
+                  id_precio: ventaInfo.id_precio ?? null,
                 };
               })
             : [];
@@ -4145,7 +4229,7 @@
             const { data: ventasM, error: ventMErr } = await supabase
               .from("ventas")
               .select(
-                "id_cuenta, id_venta, fecha_corte, usuario:usuarios!ventas_id_usuario_fkey(nombre, apellido)",
+                "id_cuenta, id_venta, id_precio, fecha_corte, usuario:usuarios!ventas_id_usuario_fkey(nombre, apellido)",
               )
               .in("id_cuenta", cuentaIds);
             if (ventMErr) throw ventMErr;
@@ -4161,6 +4245,7 @@
               if (!acc[v.id_cuenta]) {
                 acc[v.id_cuenta] = {
                   id_venta: v.id_venta,
+                  id_precio: v.id_precio ?? null,
                   fecha_corte: v.fecha_corte || "",
                 };
               }
@@ -4173,6 +4258,7 @@
               pin: m.pin,
               ocupado: mapUser[m.id_cuenta] || "-",
               id_venta: mapVenta[m.id_cuenta]?.id_venta || null,
+              id_precio: mapVenta[m.id_cuenta]?.id_precio ?? null,
               fecha_corte: mapVenta[m.id_cuenta]?.fecha_corte || "",
               fecha_corte_fmt:
                 formatDDMMYYYY(mapVenta[m.id_cuenta]?.fecha_corte) || "",
@@ -5196,6 +5282,7 @@
               const claveCell = showClaveCliente ? cells[idx++] || null : null;
               const fechaCell = cells[idx++] || null;
               const estadoCell = cells[idx++] || null;
+              const precioCell = cells[idx++] || null;
               const accionCell = cells[idx++] || null;
 
               if (idCell) idCell.textContent = newVentaId ? `#${newVentaId}` : "";
@@ -5208,6 +5295,9 @@
                 estadoCell.classList.remove("activo", "vencido", "suspendido");
                 if (estadoInfo.className)
                   estadoCell.classList.add(estadoInfo.className);
+              }
+              if (precioCell) {
+                precioCell.innerHTML = renderPrecioVentaCell(newVentaId, null);
               }
 
               let nPerfil = "";
@@ -5743,7 +5833,7 @@
         if (tbody.querySelector(".miembro-input-row")) return;
         const currentFlags = getPlatFlags(currentCuentaDetalle || {});
         const colSpanMiembroInput =
-          4 + (currentFlags.showClave ? 1 : 0) + (currentFlags.showPin ? 1 : 0);
+          6 + (currentFlags.showClave ? 1 : 0) + (currentFlags.showPin ? 1 : 0);
         const inputRow = document.createElement("tr");
         inputRow.className = "miembro-input-row";
         inputRow.innerHTML = `
@@ -7289,22 +7379,32 @@
               .eq("id_cuenta", modalState.targetId);
             if (error) throw error;
 
-            // Si la cuenta es miembro, sincroniza la clave del miembro en ventas.
+            // Si la cuenta es miembro/dominio, sincroniza la clave en ventas.
             let isCuentaMiembro = false;
+            let isCuentaDominio = false;
+            let correoCuentaDominio = (modalState?.correo || "").trim();
             if (
               currentCuentaDetalle &&
               String(currentCuentaDetalle.id_cuenta || "") ===
                 String(modalState.targetId || "")
             ) {
               isCuentaMiembro = currentCuentaDetalle.venta_miembro === true;
+              isCuentaDominio = currentCuentaDetalle.venta_dominio === true;
+              if (!correoCuentaDominio) {
+                correoCuentaDominio = (currentCuentaDetalle.correo || "").trim();
+              }
             } else {
               const { data: cuentaTipo, error: cuentaTipoErr } = await supabase
                 .from("cuentas")
-                .select("venta_miembro")
+                .select("venta_miembro, venta_dominio, correo")
                 .eq("id_cuenta", modalState.targetId)
                 .maybeSingle();
               if (cuentaTipoErr) throw cuentaTipoErr;
               isCuentaMiembro = cuentaTipo?.venta_miembro === true;
+              isCuentaDominio = cuentaTipo?.venta_dominio === true;
+              if (!correoCuentaDominio) {
+                correoCuentaDominio = (cuentaTipo?.correo || "").trim();
+              }
             }
             if (isCuentaMiembro) {
               const targetCuentaId = Number(modalState.targetId);
@@ -7325,6 +7425,13 @@
               const ventasResults = await Promise.all(updatesVentas);
               const ventasErr = ventasResults.find((r) => r?.error)?.error;
               if (ventasErr) throw ventasErr;
+            }
+            if (isCuentaDominio && correoCuentaDominio) {
+              const { error: ventasDomErr } = await supabase
+                .from("ventas")
+                .update({ clave_miembro: newPin || null })
+                .eq("correo_miembro", correoCuentaDominio);
+              if (ventasDomErr) throw ventasDomErr;
             }
 
             // Notificar cambio de clave a usuarios con fecha_corte >= mañana y no suspendidos

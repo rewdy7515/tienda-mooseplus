@@ -14,10 +14,8 @@
       <div class="cart-title-row">
         <h2>Carrito</h2>
         <div class="cart-saldo-wrap">
-          <p id="cart-saldo" class="cart-saldo">Saldo: $0.00</p>
-          <button id="btn-use-saldo" type="button" class="btn-outline btn-use-saldo" aria-pressed="false">
-            Usar saldo
-          </button>
+          <p class="cart-saldo-label">Saldo disponible</p>
+          <p id="cart-saldo" class="cart-saldo">$0.00</p>
         </div>
       </div>
       <p id="cart-status" class="status"></p>
@@ -25,7 +23,10 @@
         <div id="cart-page-items" class="cart-items page-cart"></div>
         <div class="page-actions">
           <div class="cart-pay-stack">
-            <button id="btn-page-pay" class="btn-primary">Finalizar compra</button>
+            <div class="cart-pay-row">
+              <button id="btn-page-continue" class="btn-cart-main">Seguir comprando</button>
+              <button id="btn-page-pay" class="btn-cart-main">Ir a pagar</button>
+            </div>
             <p id="cart-refresh-note" class="status hidden">
               Actualiza el carrito para continuar.
             </p>

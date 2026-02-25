@@ -181,7 +181,7 @@ body.cart-drawer-open {
   cursor: default;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1100px) {
   .cart-items.page-cart {
     max-height: none;
     overflow: visible;
@@ -201,8 +201,8 @@ body.cart-drawer-open {
   width: 60px;
   height: 60px;
   object-fit: contain;
-  border-radius: 8px;
-  background: #f7f7f7;
+  border-radius: 0;
+  background: transparent;
 }
 
 .cart-info {
@@ -215,13 +215,24 @@ body.cart-drawer-open {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+.cart-product-scroll {
+  width: 100%;
+  overflow: visible;
+}
+
+.cart-product-scroll .cart-product {
+  min-width: 0;
+  width: 100%;
 }
 
 .cart-thumb-sm {
   width: 46px;
   height: 46px;
-  border-radius: 8px;
-  background: #f7f7f7;
+  border-radius: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -232,17 +243,20 @@ body.cart-drawer-open {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  border-radius: 0;
 }
 
 .cart-product-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .cart-name {
   margin: 0;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .cart-detail,
@@ -250,6 +264,24 @@ body.cart-drawer-open {
   margin: 0;
   color: #555;
   font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.cart-detail-email {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.cart-email-label {
+  white-space: nowrap;
+}
+
+.cart-email-value {
+  display: inline-block;
+  max-width: 15ch;
+  word-break: break-all;
+  line-height: 1.2;
 }
 
 .cart-controls {
@@ -286,19 +318,20 @@ body.cart-drawer-open {
 
 .cart-table-wrap {
   width: 100%;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 /* Tabla carrito página */
 .cart-page-table {
-  table-layout: auto;
-  width: max-content;
-  min-width: 100%;
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
 }
 
 .cart-page-table th:nth-child(1),
 .cart-page-table td:nth-child(1) {
   width: 28%;
+  overflow: visible;
 }
 .cart-page-table th:nth-child(2),
 .cart-page-table td:nth-child(2) {
@@ -330,6 +363,11 @@ body.cart-drawer-open {
   text-align: center;
 }
 
+.cart-page-table th:nth-child(1),
+.cart-page-table td:nth-child(1) {
+  overflow: visible;
+}
+
 .cart-page-table tbody tr {
   height: 52px;
 }
@@ -340,6 +378,14 @@ body.cart-drawer-open {
 
 .cart-total-discount {
   font-weight: 600;
+}
+
+.cart-discount-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .cart-page-table .cart-qty-inline {
@@ -385,7 +431,7 @@ body.cart-drawer-open {
 .cart-item-logo {
   width: 60px;
   height: 60px;
-  border-radius: 10px;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -396,7 +442,7 @@ body.cart-drawer-open {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 0;
 }
 
 .cart-item-info {
@@ -436,7 +482,21 @@ body.cart-drawer-open {
   text-align: center;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1100px) {
+  .cart-detail-email {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .cart-email-value {
+    max-width: none;
+    white-space: nowrap;
+    word-break: normal;
+  }
+
   .cart-table-wrap {
     overflow-x: hidden;
   }
@@ -461,16 +521,36 @@ body.cart-drawer-open {
   }
 
   .cart-item-top {
-    grid-template-columns: 140px 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "banner banner"
+      "info remove";
+    gap: 10px;
   }
 
   .cart-item-logo {
-    width: 140px;
-    height: 140px;
+    grid-area: banner;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 7;
+    border-radius: 0;
+  }
+
+  .cart-item-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 0;
+  }
+
+  .cart-item-info {
+    grid-area: info;
   }
 
   .cart-item-top .cart-remove {
+    grid-area: remove;
     align-self: flex-start;
+    justify-self: end;
   }
 
   .cart-item-bottom {

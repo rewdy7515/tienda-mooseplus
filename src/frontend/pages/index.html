@@ -150,59 +150,61 @@
             </div>
           </div>
           <div class="modal-bottom">
-            <div class="modal-qty modal-qty-disabled">
-              <div class="modal-qty-head">
-                <span class="modal-qty-title">Meses</span>
-              </div>
-              <div class="modal-qty-row">
-                <button
-                  type="button"
-                  id="qty-months-minus"
-                  aria-label="Disminuir meses"
-                >
-                  -
-                </button>
-                <input
-                  id="qty-months-value"
-                  class="modal-qty-input"
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputmode="numeric"
-                  value="1"
-                  aria-label="Cantidad de meses"
-                />
-                <button
-                  type="button"
-                  id="qty-months-plus"
-                  aria-label="Aumentar meses"
-                >
-                  +
-                </button>
+            <div class="modal-qty-group">
+              <div class="modal-qty modal-qty-disabled">
+                <div class="modal-qty-head">
+                  <span class="modal-qty-title">Meses</span>
+                </div>
+                <div class="modal-qty-row">
+                  <button
+                    type="button"
+                    id="qty-months-minus"
+                    aria-label="Disminuir meses"
+                  >
+                    -
+                  </button>
+                  <input
+                    id="qty-months-value"
+                    class="modal-qty-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    value="1"
+                    aria-label="Cantidad de meses"
+                  />
+                  <button
+                    type="button"
+                    id="qty-months-plus"
+                    aria-label="Aumentar meses"
+                  >
+                    +
+                  </button>
+                </div>
                 <span id="months-discount" class="discount-badge hidden"></span>
               </div>
-            </div>
-            <div class="modal-qty modal-qty-disabled">
-              <div class="modal-qty-head">
-                <span class="modal-qty-title">Cantidad</span>
-              </div>
-              <div class="modal-qty-row">
-                <button type="button" id="qty-minus" aria-label="Disminuir">
-                  -
-                </button>
-                <input
-                  id="qty-value"
-                  class="modal-qty-input"
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputmode="numeric"
-                  value="1"
-                  aria-label="Cantidad de items"
-                />
-                <button type="button" id="qty-plus" aria-label="Aumentar">
-                  +
-                </button>
+              <div class="modal-qty modal-qty-disabled">
+                <div class="modal-qty-head">
+                  <span class="modal-qty-title">Cantidad</span>
+                </div>
+                <div class="modal-qty-row">
+                  <button type="button" id="qty-minus" aria-label="Disminuir">
+                    -
+                  </button>
+                  <input
+                    id="qty-value"
+                    class="modal-qty-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    value="1"
+                    aria-label="Cantidad de items"
+                  />
+                  <button type="button" id="qty-plus" aria-label="Aumentar">
+                    +
+                  </button>
+                </div>
                 <span id="items-discount" class="discount-badge hidden"></span>
               </div>
             </div>

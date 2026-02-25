@@ -32,7 +32,6 @@ const itemsEl = document.querySelector("#cart-page-items");
 const btnContinue = document.querySelector("#btn-page-continue");
 const btnPay = document.querySelector("#btn-page-pay");
 const cartSaldoEl = document.querySelector("#cart-saldo");
-const btnUseSaldo = document.querySelector("#btn-use-saldo");
 const refreshNoteEl = document.querySelector("#cart-refresh-note");
 let cartItems = [];
 let precios = [];
@@ -55,10 +54,25 @@ const isTrue = (v) =>
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 const updateUseSaldoButton = () => {
-  if (!btnUseSaldo) return;
-  btnUseSaldo.classList.toggle("is-active", !!cartUseSaldo);
-  btnUseSaldo.setAttribute("aria-pressed", cartUseSaldo ? "true" : "false");
-  btnUseSaldo.textContent = cartUseSaldo ? "Usando saldo" : "Usar saldo";
+  const canUseSaldo = Number(userSaldo) > 0;
+  if (!canUseSaldo) {
+    cartUseSaldo = false;
+  }
+  const saldoToggleInput = document.querySelector(
+    'input[data-cart-action="toggle-saldo"]',
+  );
+  const saldoToggleWrap = document.querySelector(".cart-saldo-toggle");
+  if (saldoToggleInput) {
+    saldoToggleInput.disabled = !canUseSaldo;
+    saldoToggleInput.checked = canUseSaldo && !!cartUseSaldo;
+  }
+  if (saldoToggleWrap) {
+    saldoToggleWrap.classList.toggle("is-active", canUseSaldo && !!cartUseSaldo);
+    saldoToggleWrap.classList.toggle("is-disabled", !canUseSaldo);
+    saldoToggleWrap.title = canUseSaldo
+      ? "Aplicar saldo al total"
+      : "No tienes saldo disponible";
+  }
 };
 
 const setRefreshLoading = (btn, loading) => {
@@ -146,15 +160,11 @@ const setStatus = (msg) => {
 
 const placePayButton = () => {
   if (!btnPay) return;
-  const rightCol = document.querySelector(".cart-right");
-  if (!rightCol) return;
-  let wrap = rightCol.querySelector(".cart-pay-wrap");
-  if (!wrap) {
-    wrap = document.createElement("div");
-    wrap.className = "cart-pay-wrap";
-    rightCol.appendChild(wrap);
+  const payRow = document.querySelector(".cart-pay-row");
+  if (!payRow) return;
+  if (btnPay.parentElement !== payRow) {
+    payRow.appendChild(btnPay);
   }
-  wrap.appendChild(btnPay);
 };
 
 const updateRefreshButtonState = () => {
@@ -425,23 +435,32 @@ const renderCart = () => {
         price.plan ||
         (platform.tarjeta_de_regalo ? `Región: ${price.region || "-"}` : "");
       const tipo = item.renovacion ? "Renovación" : "Nuevo";
+      const correoRenovacion =
+        item.renovacion === true ? (item.correo || "-") : "";
       subtotalBruto = round2(subtotalBruto + baseSubtotal);
       const rowHtml = `
         <tr data-cart-row="1" data-index="${idx}">
           <td>
             <div class="cart-info tight">
-              <div class="cart-product">
-                <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">
-                  <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/x-icon.png.webp" alt="" aria-hidden="true" />
-                </button>
-                <div class="cart-thumb-sm">
-                  <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
-                </div>
-                <div class="cart-product-text">
-                  <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
-                  <p class="cart-detail">${detalle || ""}</p>
-                  <p class="cart-detail">Tipo: ${tipo}</p>
-                  <p class="cart-detail cart-price-line">Precio: $${round2(unit).toFixed(2)}</p>
+              <div class="cart-product-scroll">
+                <div class="cart-product">
+                  <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">
+                    <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/x-icon.png.webp" alt="" aria-hidden="true" />
+                  </button>
+                  <div class="cart-thumb-sm">
+                    <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
+                  </div>
+                  <div class="cart-product-text">
+                    <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
+                    <p class="cart-detail">${detalle || ""}</p>
+                    <p class="cart-detail">Tipo: ${tipo}</p>
+                    ${
+                      item.renovacion
+                        ? `<p class="cart-detail cart-detail-email"><span class="cart-email-label">Correo:</span><span class="cart-email-value">${correoRenovacion}</span></p>`
+                        : ""
+                    }
+                    <p class="cart-detail cart-price-line">Precio: $${round2(unit).toFixed(2)}</p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -493,16 +512,22 @@ const renderCart = () => {
             <button type="button" class="cart-plus" data-index="${idx}" aria-label="Aumentar">+</button>
           </div>
         `;
+      const cardImage = platform.banner || "";
       const cardHtml = `
         <section class="cart-item-card" data-index="${idx}">
           <div class="cart-item-top">
             <div class="cart-item-logo">
-              <img src="${platform.imagen || ""}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
+              <img src="${cardImage}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
             </div>
             <div class="cart-item-info">
               <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
               <p class="cart-detail">${detalle || ""}</p>
               <p class="cart-detail">Tipo: ${tipo}</p>
+              ${
+                item.renovacion
+                  ? `<p class="cart-detail cart-detail-email"><span class="cart-email-label">Correo:</span><span class="cart-email-value">${correoRenovacion}</span></p>`
+                  : ""
+              }
               <p class="cart-detail">Precio: $${round2(unit).toFixed(2)}</p>
             </div>
             <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">
@@ -569,6 +594,7 @@ const renderCart = () => {
               <td class="cart-cell-center"><span data-summary="saldo">-$${Number(saldoAplicado).toFixed(2)}</span></td>
             </tr>
           `;
+  const canUseSaldo = userSaldo > 0;
   itemsEl.innerHTML = `
     <div class="cart-layout">
       <div class="cart-left">
@@ -592,8 +618,11 @@ const renderCart = () => {
           </table>
         </div>
         <div class="cart-actions-inline">
-          <button type="button" class="btn-outline" data-cart-action="continue">Seguir comprando</button>
-          <button type="button" class="btn-primary" data-cart-action="refresh">Actualizar carrito</button>
+          <label class="cart-saldo-toggle ${canUseSaldo ? (showSaldoRow ? "is-active" : "") : "is-disabled"}" title="${canUseSaldo ? "Aplicar saldo al total" : "No tienes saldo disponible"}">
+            <input type="checkbox" data-cart-action="toggle-saldo" ${showSaldoRow ? "checked" : ""} ${canUseSaldo ? "" : "disabled"} />
+            <span>Usar saldo</span>
+          </label>
+          <button type="button" class="btn-cart-main" data-cart-action="refresh">Actualizar carrito</button>
         </div>
       </div>
       <div class="cart-right">
@@ -627,6 +656,9 @@ const handleCartClick = async (e) => {
     const action = cartActionBtn.dataset.cartAction;
     if (action === "continue") {
       window.location.href = "index.html";
+      return;
+    }
+    if (action === "toggle-saldo") {
       return;
     }
     if (action === "refresh") {
@@ -736,6 +768,16 @@ const handleCartClick = async (e) => {
   }
 };
 
+const handleCartChange = (e) => {
+  const saldoToggle = e.target.closest('input[data-cart-action="toggle-saldo"]');
+  if (!saldoToggle) return;
+  if (saldoToggle.disabled) return;
+  cartUseSaldo = !!saldoToggle.checked;
+  updateUseSaldoButton();
+  updateCartSummaryUI();
+  updateCartNeedsSync();
+};
+
 async function init() {
   setStatus("Cargando carrito...");
   await loadPaginaBranding({ logoSelectors: [".logo"], applyFavicon: true, forceRefresh: true }).catch(
@@ -758,7 +800,8 @@ async function init() {
       const saldoVal = Number(currentUser?.saldo);
       const saldoNum = Number.isFinite(saldoVal) ? saldoVal : 0;
       userSaldo = saldoNum;
-      cartSaldoEl.textContent = `Saldo: $${saldoNum.toFixed(2)}`;
+      cartSaldoEl.textContent = `$${saldoNum.toFixed(2)}`;
+      cartSaldoEl.classList.toggle("is-zero", saldoNum <= 0);
     }
     setSessionRoles(currentUser || {});
     const sessionRoles = getSessionRoles();
@@ -782,9 +825,6 @@ async function init() {
     dbUseSaldo = isTrue(cartData?.usa_saldo);
     cartUseSaldo = dbUseSaldo;
     const canUseSaldo = userSaldo > 0;
-    if (btnUseSaldo) {
-      btnUseSaldo.classList.toggle("hidden", !canUseSaldo);
-    }
     if (!canUseSaldo) {
       cartUseSaldo = false;
       dbUseSaldo = false;
@@ -818,12 +858,7 @@ async function init() {
     renderCart();
     setStatus("");
     itemsEl?.addEventListener("click", handleCartClick);
-    btnUseSaldo?.addEventListener("click", () => {
-      cartUseSaldo = !cartUseSaldo;
-      updateUseSaldoButton();
-      updateCartSummaryUI();
-      updateCartNeedsSync();
-    });
+    itemsEl?.addEventListener("change", handleCartChange);
   } catch (err) {
     console.error("cart page error", err);
     setStatus("No se pudo cargar el carrito.");
