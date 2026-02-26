@@ -65,6 +65,11 @@
       .admin-cuentas-col .admin-action {
         align-self: flex-start;
       }
+      .categorias-dinamicas .admin-actions.admin-group {
+        max-width: none;
+        width: 100%;
+        box-sizing: border-box;
+      }
       @media (max-width: 900px) {
         .admin-cuentas-grid {
           grid-template-columns: 1fr;
@@ -191,6 +196,7 @@
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
 
       requireSession();
 
@@ -246,6 +252,13 @@
         if (parts.length !== 3) return val;
         return `${parts[2]}-${parts[1]}-${parts[0]}`;
       };
+      const escapeHtml = (val) =>
+        String(val ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
       const addMonthsKeepDay = (baseDate, months) => {
         const d = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
         const day = baseDate.getDate();
@@ -410,9 +423,10 @@
             if (rowClass) tr.className = rowClass;
             const correoData = encodeURIComponent(row.correo || "");
             const claveData = encodeURIComponent(row.clave || "");
+            const correoText = row.correo || "-";
             tr.innerHTML = `
               <td><input type="checkbox" class="spotify-renovar-check" data-correo="${correoData}" data-clave="${claveData}" /></td>
-              <td>${row.correo || "-"}</td>
+              <td><span class="copyable" data-clipboard="${escapeHtml(row.correo || "")}">${escapeHtml(correoText)}</span></td>
               <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
               <td>${libresByCuenta.get(Number(row.id_cuenta)) || 0}</td>
             `;
@@ -444,9 +458,11 @@
           netflixStatus.textContent = "";
           data.forEach((row) => {
             const tr = document.createElement("tr");
+            const correo = row.correo || "-";
+            const clave = row.clave || "-";
             tr.innerHTML = `
-              <td>${row.correo || "-"}</td>
-              <td>${row.clave || "-"}</td>
+              <td><span class="copyable" data-clipboard="${escapeHtml(row.correo || "")}">${escapeHtml(correo)}</span></td>
+              <td><span class="copyable" data-clipboard="${escapeHtml(row.clave || "")}">${escapeHtml(clave)}</span></td>
               <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
             `;
             netflixTable.appendChild(tr);
@@ -559,6 +575,16 @@
       document.getElementById("btn-renovar")?.addEventListener("click", () => {
         window.location.href = "renovar_cliente.html";
       });
+
+      const handleCopyClick = async (event) => {
+        const copyTarget = event.target.closest(".copyable");
+        if (!copyTarget) return;
+        const text = copyTarget.dataset.clipboard || copyTarget.textContent?.trim() || "";
+        if (!text || text === "-") return;
+        await copyTextNotify(text);
+      };
+      spotifyTable?.addEventListener("click", handleCopyClick);
+      netflixTable?.addEventListener("click", handleCopyClick);
 
       spotifyRenovarBtn?.addEventListener("click", () => {
         const checks = document.querySelectorAll(".spotify-renovar-check:checked");
