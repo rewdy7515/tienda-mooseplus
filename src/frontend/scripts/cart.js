@@ -10,15 +10,117 @@ let actionsEl;
 let btnCheckout;
 let btnViewCart;
 let btnAssign;
+let totalBarEl;
+let totalDrawerEl;
+let savingsDrawerEl;
 let catalogCache = null;
 let userAcceso = null;
 let cartRawItems = [];
 let refreshFromServerFn = null;
 let cartBound = false;
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+const getClosestDiscountPct = (rows, value, column) => {
+  const key = Number(value) || 0;
+  if (!Array.isArray(rows) || key <= 0) return 0;
+  const exact = rows.find((d) => Number(d.meses) === key);
+  const exactVal = exact?.[column];
+  if (exactVal !== null && exactVal !== undefined && exactVal !== "") {
+    return Number(exactVal) || 0;
+  }
+  let best = null;
+  for (const d of rows) {
+    const n = Number(d?.meses);
+    if (!Number.isFinite(n) || n > key) continue;
+    const raw = d?.[column];
+    if (raw === null || raw === undefined || raw === "") continue;
+    if (!best || n > Number(best.meses)) best = d;
+  }
+  return Number(best?.[column]) || 0;
+};
+
+const getDiscountColumnsFromRows = (rows = []) => {
+  const cols = new Set();
+  (rows || []).forEach((row) => {
+    Object.keys(row || {}).forEach((k) => {
+      const key = String(k || "").toLowerCase();
+      if (/^descuento_\\d+$/i.test(key)) cols.add(key);
+    });
+  });
+  const out = Array.from(cols).sort((a, b) => {
+    const na = Number(a.split("_")[1]) || 0;
+    const nb = Number(b.split("_")[1]) || 0;
+    return na - nb;
+  });
+  return out.length ? out : ["descuento_1", "descuento_2"];
+};
+
+const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
+  const ids = Array.from(
+    new Set(
+      (rows || [])
+        .map((row) => Number(row?.id_descuento))
+        .filter((n) => Number.isFinite(n)),
+    ),
+  ).sort((a, b) => a - b);
+  const map = {};
+  ids.forEach((id, idx) => {
+    if (cols[idx]) map[id] = cols[idx];
+  });
+  return map;
+};
+
+const resolveDiscountColumn = (platform, mode, discountColumns, discountColumnById) => {
+  const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
+  const asText = String(raw || "").trim();
+  if (/^descuento_\\d+$/i.test(asText)) return asText.toLowerCase();
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) {
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
+    const direct = `descuento_${Math.trunc(asNum)}`;
+    if (discountColumns.includes(direct)) return direct;
+  }
+  return mode === "items" ? "descuento_2" : "descuento_1";
+};
+
+const isDiscountEnabledForAudience = (platform, mode = "months", isCliente = true) => {
+  if (mode === "items") {
+    return isCliente
+      ? !(
+          platform?.aplica_descuento_cantidad_detal === false ||
+          platform?.aplica_descuento_cantidad_detal === "false" ||
+          platform?.aplica_descuento_cantidad_detal === 0 ||
+          platform?.aplica_descuento_cantidad_detal === "0"
+        )
+      : !(
+          platform?.aplica_descuento_cantidad_mayor === false ||
+          platform?.aplica_descuento_cantidad_mayor === "false" ||
+          platform?.aplica_descuento_cantidad_mayor === 0 ||
+          platform?.aplica_descuento_cantidad_mayor === "0"
+        );
+  }
+  return isCliente
+    ? !(
+        platform?.aplica_descuento_mes_detal === false ||
+        platform?.aplica_descuento_mes_detal === "false" ||
+        platform?.aplica_descuento_mes_detal === 0 ||
+        platform?.aplica_descuento_mes_detal === "0"
+      )
+    : !(
+        platform?.aplica_descuento_mes_mayor === false ||
+        platform?.aplica_descuento_mes_mayor === "false" ||
+        platform?.aplica_descuento_mes_mayor === 0 ||
+        platform?.aplica_descuento_mes_mayor === "0"
+      );
+};
 
 const mapCartItems = (items = [], catalog = {}, acceso = null) => {
   const precios = catalog.precios || [];
   const plataformas = catalog.plataformas || [];
+  const descuentos = catalog.descuentos || [];
+  const discountColumns = getDiscountColumnsFromRows(descuentos);
+  const discountColumnById = buildDiscountColumnByIdMap(descuentos, discountColumns);
   const priceById = precios.reduce((acc, p) => {
     acc[p.id_precio] = p;
     return acc;
@@ -35,23 +137,51 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
       por_acceso: platform.por_acceso,
       tarjeta_de_regalo: platform.tarjeta_de_regalo,
     };
+    const qty = Number(item.cantidad || price.cantidad || 1) || 1;
+    const meses = Number(item.meses || price.duracion || 1) || 1;
+    const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
+    const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
+    const mesesTxt = `${meses} mes${meses === 1 ? "" : "es"}`;
+    const useMayor = acceso === false;
+    const isCliente = acceso === false ? false : true;
+    const unit =
+      useMayor && price.precio_usd_mayor != null && price.precio_usd_mayor !== undefined
+        ? Number(price.precio_usd_mayor) || 0
+        : Number(price.precio_usd_detal) || 0;
+    const baseSubtotal = round2(unit * qty * (flags.tarjeta_de_regalo ? 1 : meses));
+    const monthEnabled =
+      !!platform?.descuento_meses &&
+      !flags.tarjeta_de_regalo &&
+      isDiscountEnabledForAudience(platform, "months", isCliente);
+    const qtyEnabled = isDiscountEnabledForAudience(platform, "items", isCliente);
+    const monthColumn = resolveDiscountColumn(
+      platform,
+      "months",
+      discountColumns,
+      discountColumnById,
+    );
+    const qtyColumn = resolveDiscountColumn(
+      platform,
+      "items",
+      discountColumns,
+      discountColumnById,
+    );
+    const rawRateMeses = monthEnabled
+      ? getClosestDiscountPct(descuentos, meses, monthColumn)
+      : 0;
+    const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qty, qtyColumn) : 0;
+    const rateMeses = rawRateMeses > 1 ? rawRateMeses / 100 : rawRateMeses;
+    const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
+    const descuentoMesesVal = rateMeses > 0 ? round2(baseSubtotal * rateMeses) : 0;
+    const descuentoCantidadVal = rateQty > 0 ? round2(baseSubtotal * rateQty) : 0;
+    const descuentoTotal = round2(descuentoMesesVal + descuentoCantidadVal);
+    const montoUsd = round2(baseSubtotal - descuentoTotal);
     const detalle = (() => {
       if (flags.tarjeta_de_regalo) {
         const region = price.region || "-";
-        const monto = `${price.valor_tarjeta_de_regalo || ""} ${price.moneda || ""} $${price.precio_usd_detal || ""}`;
-        return `Región: ${region} · Monto: ${monto}`;
+        return `Región: ${region} · Cantidad: ${qty} · ${mesesTxt}`;
       }
-      const qty = item.cantidad || price.cantidad || 1;
-      const meses = item.meses || price.duracion || 1;
-      const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
-      const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
-      const mesesTxt = baseUnit === "mes" ? ` · ${meses} mes${meses === 1 ? "" : "es"}` : "";
-      const useMayor = acceso === false;
-      const unit =
-        useMayor && price.precio_usd_mayor != null && price.precio_usd_mayor !== undefined
-          ? price.precio_usd_mayor
-          : price.precio_usd_detal;
-      return `${qty} ${baseUnit}${plural}${mesesTxt} $${unit || 0}`;
+      return `${qty} ${baseUnit}${plural} · ${mesesTxt}`;
     })();
     return {
       id_precio: item.id_precio,
@@ -63,9 +193,12 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
       imagen: platform.imagen,
       plan: price.plan,
       precio: price.precio_usd_detal,
-      cantidad: item.cantidad,
-      meses: item.meses,
+      cantidad: qty,
+      meses,
       detalle,
+      monto_usd: montoUsd,
+      monto_original: baseSubtotal,
+      descuento_total: descuentoTotal,
       flags,
       renovacion: item.renovacion,
       id_venta: item.id_venta,
@@ -136,40 +269,60 @@ const toggleActions = (hasItems) => {
   btnCheckout?.classList.toggle("hidden", !hasItems);
   btnViewCart?.classList.toggle("hidden", !hasItems);
   btnAssign?.classList.toggle("hidden", !hasItems);
+  totalBarEl?.classList.toggle("hidden", !hasItems);
 };
 
 const renderCart = () => {
   if (!itemsEl) return;
   if (!cartItems.length) {
     itemsEl.innerHTML = '<p class="cart-empty">Tu carrito está vacío.</p>';
+    if (totalDrawerEl) totalDrawerEl.textContent = "$0.00";
+    if (savingsDrawerEl) savingsDrawerEl.textContent = "$0.00";
     toggleActions(false);
     return;
   }
   toggleActions(true);
+  const totalCarrito = round2(
+    cartItems.reduce((acc, item) => acc + (Number(item?.monto_usd) || 0), 0),
+  );
+  const totalAhorro = round2(
+    cartItems.reduce((acc, item) => acc + (Number(item?.descuento_total) || 0), 0),
+  );
+  if (totalDrawerEl) totalDrawerEl.textContent = `$${totalCarrito.toFixed(2)}`;
+  if (savingsDrawerEl) savingsDrawerEl.textContent = `$${totalAhorro.toFixed(2)}`;
   itemsEl.innerHTML = cartItems
     .map(
-      (item, idx) => `
+      (item, idx) => {
+        const detailLine = [item.plan, item.detalle].filter(Boolean).join(" · ");
+        const original = Number(item.monto_original || 0);
+        const actual = Number(item.monto_usd || 0);
+        const showOriginal = original > actual + 0.0001;
+        return `
       <div class="cart-item">
         <div class="cart-thumb"><img src="${item.imagen || ""}" alt="${item.nombre}" loading="lazy" decoding="async" /></div>
         <div class="cart-info">
           <p class="cart-name">${item.nombre}</p>
-          <p class="cart-detail">${item.plan || ""} · ${item.detalle}</p>
+          ${detailLine ? `<p class="cart-detail">${detailLine}</p>` : ""}
+          <p class="cart-amount-row">
+            <strong class="cart-amount-usd">$${actual.toFixed(2)}</strong>
+            ${
+              showOriginal
+                ? `<span class="cart-amount-original">$${original.toFixed(2)}</span>`
+                : ""
+            }
+          </p>
           ${item.id_cuenta ? `<p class="cart-detail renewal-detail">Renovación: ${item.correo || ""}</p>` : ""}
           ${
             item.id_perfil
               ? `<p class="cart-detail renewal-detail">Perfil: M${item.n_perfil || ""}</p>`
               : ""
           }
-          ${
-            item.meses
-              ? `<p class="cart-duration">${item.meses} mes${item.meses === 1 ? "" : "es"}</p>`
-              : ""
-          }
         </div>
       <div class="cart-controls">
         <button class="cart-remove" data-index="${idx}" data-id-item="${item.id_item || ""}" aria-label="Eliminar">×</button>
       </div>
-      </div>`
+      </div>`;
+      }
     )
     .join("");
 };
@@ -193,6 +346,9 @@ export function initCart({
   btnCheckout = drawerEl?.querySelector("#btn-checkout") || null;
   btnViewCart = drawerEl?.querySelector("#btn-view-cart") || null;
   btnAssign = drawerEl?.querySelector("#btn-assign-client") || null;
+  totalBarEl = drawerEl?.querySelector(".cart-total-bar") || null;
+  totalDrawerEl = drawerEl?.querySelector("#cart-total-drawer") || null;
+  savingsDrawerEl = drawerEl?.querySelector("#cart-savings-drawer") || null;
 
   if (catalog) {
     catalogCache = catalog;

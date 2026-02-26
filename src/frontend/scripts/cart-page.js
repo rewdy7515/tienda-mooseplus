@@ -643,6 +643,7 @@ const renderCart = () => {
               </div>
             </div>
           </td>
+          <td class="cart-cell-center">$${round2(unit).toFixed(2)}</td>
           <td class="cart-cell-center">
             <div class="modal-qty">
               <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
@@ -650,7 +651,6 @@ const renderCart = () => {
               <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
             </div>
           </td>
-          <td class="cart-cell-center">$${round2(unit).toFixed(2)}</td>
           <td class="cart-cell-center">
             ${
               item.renovacion
@@ -784,8 +784,8 @@ const renderCart = () => {
             <thead>
               <tr>
                 <th>Producto</th>
-                <th>Meses</th>
                 <th>Precio</th>
+                <th>Meses</th>
                 <th>Cantidad</th>
                 <th>Subtotal</th>
               </tr>

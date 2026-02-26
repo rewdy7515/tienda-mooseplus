@@ -1,10 +1,17 @@
 @import "./cart.css";
 
+html,
+body {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: #f6f7f9;
   font-family: sans-serif;
   overflow-x: hidden;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
   padding-top: var(--header-offset, 0px);
 }
 
@@ -181,14 +188,17 @@ main {
     max-width: calc(100% - 120px);
   }
   .header .user-menu {
+    --avatar-size: clamp(32px, 8.8vw, 38px);
     min-width: 0;
     max-width: 100%;
-    padding-left: 6px;
+    width: fit-content;
+    padding: 2px 6px 2px 2px;
     gap: 6px;
+    border-radius: calc(var(--avatar-size) / 2 + 4px);
   }
   .header .avatar {
-    width: clamp(32px, 8.8vw, 38px);
-    height: clamp(32px, 8.8vw, 38px);
+    width: var(--avatar-size);
+    height: var(--avatar-size);
     flex: 0 0 auto;
   }
   .header .username {
@@ -248,13 +258,16 @@ main {
 }
 
 .user-menu {
+  --avatar-size: 40px;
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  padding-left: 15px;
-  border-radius: 999px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 8px 2px 2px;
+  border-radius: calc(var(--avatar-size) / 2 + 4px);
   transition:
     background-color 0.15s ease,
     box-shadow 0.15s ease;
@@ -266,8 +279,8 @@ main {
 }
 
 .avatar {
-  width: 40px;
-  height: 40px;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
   border-radius: 50%;
   object-fit: cover;
   border: none;
@@ -305,6 +318,12 @@ main {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+}
+
+.user-menu.suppress-dropdown .user-dropdown {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-5px);
 }
 
 .delivery-toast {
@@ -472,15 +491,15 @@ main {
 }
 
 .cart-pay-row #btn-page-continue {
-  background: #e5e7eb;
+  background: #ffffff;
   border-color: #d1d5db;
-  color: #374151;
+  color: #111827;
   box-shadow: 0 4px 10px rgba(100, 116, 139, 0.16);
 }
 
 .cart-pay-row #btn-page-continue:hover {
-  background: #dbe0e6;
-  border-color: #c7ced8;
+  background: #f8fafc;
+  border-color: #cbd5e1;
 }
 
 .cart-pay-stack .status {

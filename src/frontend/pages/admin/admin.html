@@ -49,6 +49,27 @@
         font-size: 15px;
         color: inherit;
       }
+      .admin-cuentas-grid {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        align-items: start;
+      }
+      .admin-cuentas-col {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .admin-cuentas-col .admin-action {
+        align-self: flex-start;
+      }
+      @media (max-width: 900px) {
+        .admin-cuentas-grid {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -103,22 +124,42 @@
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
-        <h3 style="margin: 0 0 6px 0;">Cuentas madre Spotify próximas a vencer</h3>
-        <button class="btn-primary admin-action" id="btn-renovar-spotify" style="margin: 6px 0 8px 0;">Renovar</button>
-        <div id="spotify-libres" class="status">Espacios libres: --</div>
-        <div id="spotify-cuentas-status" class="status">Cargando...</div>
-        <div class="cuenta-table-wrap">
-          <table class="table-base" id="spotify-cuentas-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Correo</th>
-                <th>Fecha de corte</th>
-                <th>Espacios</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div class="admin-cuentas-grid">
+          <div class="admin-cuentas-col">
+            <h3 style="margin: 0 0 6px 0;">Cuentas madre Spotify próximas a vencer</h3>
+            <button class="btn-primary admin-action" id="btn-renovar-spotify" style="margin: 6px 0 8px 0;">Renovar</button>
+            <div id="spotify-libres" class="status">Espacios libres: --</div>
+            <div id="spotify-cuentas-status" class="status">Cargando...</div>
+            <div class="cuenta-table-wrap">
+              <table class="table-base" id="spotify-cuentas-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Correo</th>
+                    <th>Fecha de corte</th>
+                    <th>Espacios</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="admin-cuentas-col">
+            <h3 style="margin: 0 0 6px 0;">Cuentas Netflix próximas a vencer</h3>
+            <div id="netflix-cuentas-status" class="status">Cargando...</div>
+            <div class="cuenta-table-wrap">
+              <table class="table-base" id="netflix-cuentas-table">
+                <thead>
+                  <tr>
+                    <th>Correo</th>
+                    <th>Clave</th>
+                    <th>Fecha de corte</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
       <p class="status" id="pines-por-comprar">Pines por comprar: --</p>
@@ -170,6 +211,8 @@
       const spotifyStatus = document.querySelector("#spotify-cuentas-status");
       const spotifyLibresEl = document.querySelector("#spotify-libres");
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
+      const netflixTable = document.querySelector("#netflix-cuentas-table tbody");
+      const netflixStatus = document.querySelector("#netflix-cuentas-status");
       const btnOrdenes = document.querySelector("#btn-ordenes");
       const dashDashboardAction = document.querySelector("#dash-dashboard-action");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
@@ -381,6 +424,39 @@
         }
       }
 
+      async function loadNetflixProximas() {
+        if (!netflixTable || !netflixStatus) return;
+        try {
+          const today = getTodayLocal();
+          const { data, error } = await supabase
+            .from("cuentas")
+            .select("correo, clave, fecha_corte")
+            .eq("id_plataforma", 1)
+            .not("fecha_corte", "is", null)
+            .gte("fecha_corte", today)
+            .order("fecha_corte", { ascending: true });
+          if (error) throw error;
+          netflixTable.innerHTML = "";
+          if (!data?.length) {
+            netflixStatus.textContent = "Sin cuentas próximas.";
+            return;
+          }
+          netflixStatus.textContent = "";
+          data.forEach((row) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td>${row.correo || "-"}</td>
+              <td>${row.clave || "-"}</td>
+              <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
+            `;
+            netflixTable.appendChild(tr);
+          });
+        } catch (err) {
+          console.error("load netflix proximas error", err);
+          netflixStatus.textContent = "No se pudo cargar.";
+        }
+      }
+
       async function init() {
         setAdminGroupsLoading(true);
         try {
@@ -411,6 +487,7 @@
           }
           await loadCounts();
           await loadSpotifyMadres();
+          await loadNetflixProximas();
         } catch (err) {
           console.error("admin init error", err);
         } finally {

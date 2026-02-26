@@ -184,26 +184,26 @@ if (!window.__headerActionsInit) {
       if (userMenu && userDropdown) {
         const toggleMenu = (e) => {
           e?.stopPropagation();
-          userMenu.classList.toggle("open");
+          const isOpen = userMenu.classList.contains("open");
+          if (isOpen) {
+            userMenu.classList.remove("open");
+            userMenu.classList.add("suppress-dropdown");
+            return;
+          }
+          userMenu.classList.remove("suppress-dropdown");
+          userMenu.classList.add("open");
         };
         userMenu.addEventListener("click", toggleMenu);
-        userMenu.addEventListener("touchstart", toggleMenu, { passive: true });
         userDropdown.addEventListener("click", (e) => e.stopPropagation());
-        userDropdown.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+        userMenu.addEventListener("mouseleave", () => {
+          userMenu.classList.remove("suppress-dropdown");
+        });
         document.addEventListener("click", (e) => {
           if (!userMenu.contains(e.target)) {
             userMenu.classList.remove("open");
+            userMenu.classList.remove("suppress-dropdown");
           }
         });
-        document.addEventListener(
-          "touchstart",
-          (e) => {
-            if (!userMenu.contains(e.target)) {
-              userMenu.classList.remove("open");
-            }
-          },
-          { passive: true }
-        );
       }
       const showLogin = () => {
         if (loginBtn) {

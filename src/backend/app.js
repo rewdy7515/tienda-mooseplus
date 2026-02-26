@@ -2046,7 +2046,8 @@ const getCurrentCarrito = async (idUsuario) => {
         .from("carritos")
         .select("id_carrito")
         .eq("id_usuario", idUsuario)
-        .order("fecha_creacion", { ascending: false })
+        // fecha_creacion es DATE; para evitar empates del mismo día usamos id_carrito.
+        .order("id_carrito", { ascending: false })
         .limit(1)
         .maybeSingle(),
     "cart:getCurrentCarrito",
@@ -2062,7 +2063,8 @@ const getOrCreateCarrito = async (idUsuario) => {
         .from("carritos")
         .select("id_carrito")
         .eq("id_usuario", idUsuario)
-        .order("fecha_creacion", { ascending: false })
+        // fecha_creacion es DATE; para evitar empates del mismo día usamos id_carrito.
+        .order("id_carrito", { ascending: false })
         .limit(1)
         .maybeSingle(),
     "cart:getOrCreateCarrito:select",
@@ -2483,15 +2485,17 @@ app.post("/api/checkout/draft", async (req, res) => {
 
     const { data: existingRows, error: existingErr } = await supabaseAdmin
       .from("ordenes")
-      .select("id_orden")
+      .select("id_orden, orden_cancelada, checkout_finalizado")
       .eq("id_usuario", idUsuario)
       .eq("id_carrito", carritoId)
-      .or("orden_cancelada.is.null,orden_cancelada.eq.false")
       .order("id_orden", { ascending: false })
-      .limit(1);
+      .limit(20);
     if (existingErr) throw existingErr;
 
-    const existingId = Number(existingRows?.[0]?.id_orden || 0);
+    const openDraft = (existingRows || []).find(
+      (row) => !isTrue(row?.orden_cancelada) && !isTrue(row?.checkout_finalizado),
+    );
+    const existingId = Number(openDraft?.id_orden || 0);
     if (existingId > 0) {
       return res.json({ ok: true, id_orden: existingId, existing: true });
     }
