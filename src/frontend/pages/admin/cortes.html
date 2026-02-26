@@ -49,6 +49,15 @@
       .cortes-table tbody tr:nth-child(even) {
         background: #fff;
       }
+      .cortes-platform-link {
+        margin: 8px 0 2px;
+        font-size: 13px;
+      }
+      .cortes-platform-link a {
+        color: #1d4ed8;
+        text-decoration: underline;
+        word-break: break-all;
+      }
       .perfil-dot {
         display: inline-block;
         width: 8px;
@@ -442,6 +451,18 @@
         value === true || value === "true" || value === 1 || value === "1" || value === "t";
       const shouldShowOrangeDot = ({ ventaMiembro, perfilHogar }) =>
         isTruthy(ventaMiembro) || isTruthy(perfilHogar);
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      const normalizeExternalUrl = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      };
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -605,7 +626,20 @@
             const ventasItems = sortedItems.filter((v) => v.tipo === "venta");
             const reemplazosItems = sortedItems.filter((v) => v.tipo === "reemplazo");
             const motherEnabled = plataforma.cuenta_madre === true;
+            const platLinkHref = normalizeExternalUrl(plataforma.link_pagina);
+            const platLinkHtml = platLinkHref
+              ? `
+                <div class="cortes-platform-link">
+                  <a href="${escapeHtml(platLinkHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+                      plataforma.link_pagina
+                    )}</a>
+                </div>
+              `
+              : "";
             let contentHtml = "";
+            if (platLinkHtml) {
+              contentHtml += platLinkHtml;
+            }
             if (motherEnabled && ventasItems.length) {
               const motherMap = new Map();
               const sinMadre = [];
@@ -737,10 +771,14 @@
           const { data: plataformasInfo, error: platErr } = await supabase
             .from("plataformas")
             .select(
-              "id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso, cuenta_madre"
+              "id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso, cuenta_madre, link_pagina"
             )
             .in("id_plataforma", platIds);
           if (platErr) throw platErr;
+          const platInfoMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = p;
+            return acc;
+          }, {});
           const platNameMap = (plataformasInfo || []).reduce((acc, p) => {
             acc[p.id_plataforma] = p.nombre;
             return acc;
@@ -766,20 +804,23 @@
             return acc;
           }, {});
 
-          const bloques = Array.from(map.values()).map((entry) => ({
-            plataforma: {
-              id_plataforma: entry.plataforma.id_plataforma,
-              nombre: platNameMap[entry.plataforma.id_plataforma] || `Plataforma ${entry.plataforma.id_plataforma}`,
-              max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
-              usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
-              por_acceso: platAccessMap[entry.plataforma.id_plataforma] || false,
-              cuenta_madre:
-                (plataformasInfo || []).find(
-                  (p) => p.id_plataforma === entry.plataforma.id_plataforma
-                )?.cuenta_madre === true,
-            },
-            items: entry.items,
-          }));
+          const bloques = Array.from(map.values()).map((entry) => {
+            const platInfo = platInfoMap[entry.plataforma.id_plataforma] || {};
+            return {
+              plataforma: {
+                id_plataforma: entry.plataforma.id_plataforma,
+                nombre:
+                  platNameMap[entry.plataforma.id_plataforma] ||
+                  `Plataforma ${entry.plataforma.id_plataforma}`,
+                max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
+                usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
+                por_acceso: platAccessMap[entry.plataforma.id_plataforma] || false,
+                cuenta_madre: platInfo.cuenta_madre === true,
+                link_pagina: platInfo.link_pagina || "",
+              },
+              items: entry.items,
+            };
+          });
 
           bloques.sort(
             (a, b) => Number(a.plataforma.id_plataforma) - Number(b.plataforma.id_plataforma)

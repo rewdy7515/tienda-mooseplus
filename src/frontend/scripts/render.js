@@ -16,7 +16,12 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
             tarjeta_de_regalo,
             entrega_inmediata,
             descuento_meses,
-            id_descuento,
+            id_descuento_mes,
+            id_descuento_cantidad,
+            aplica_descuento_mes_detal,
+            aplica_descuento_mes_mayor,
+            aplica_descuento_cantidad_detal,
+            aplica_descuento_cantidad_mayor,
             mostrar_stock,
             num_max_dispositivos,
           }) => {
@@ -39,6 +44,12 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
               data-tarjeta-de-regalo="${tarjeta_de_regalo}"
               data-entrega-inmediata="${entrega_inmediata}"
               data-descuento-meses="${descuento_meses}"
+              data-id-descuento-mes="${id_descuento_mes ?? ""}"
+              data-id-descuento-cantidad="${id_descuento_cantidad ?? ""}"
+              data-aplica-descuento-mes-detal="${aplica_descuento_mes_detal}"
+              data-aplica-descuento-mes-mayor="${aplica_descuento_mes_mayor}"
+              data-aplica-descuento-cantidad-detal="${aplica_descuento_cantidad_detal}"
+              data-aplica-descuento-cantidad-mayor="${aplica_descuento_cantidad_mayor}"
               data-mostrar-stock="${mostrar_stock}"
               data-num-max-dispositivos="${num_max_dispositivos ?? ""}"
             data-id-descuento="">

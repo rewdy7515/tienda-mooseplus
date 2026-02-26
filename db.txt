@@ -76,7 +76,8 @@ CREATE TABLE public.cuentas (
   CONSTRAINT cuentas_pkey PRIMARY KEY (id_cuenta),
   CONSTRAINT cuentas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT cuentas_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
-  CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario)
+  CONSTRAINT cuentas_dominio_de_fkey FOREIGN KEY (dominio_de) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT cuentas_id_cuenta_madre_fkey FOREIGN KEY (id_cuenta_madre) REFERENCES public.cuentas(id_cuenta)
 );
 CREATE TABLE public.descuentos (
   id_descuento bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -204,6 +205,7 @@ CREATE TABLE public.ordenes (
   recargar_saldo boolean,
   hora_confirmacion time without time zone,
   checkout_finalizado boolean,
+  marcado_pago boolean,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
@@ -277,8 +279,16 @@ CREATE TABLE public.plataformas (
   banner text,
   link_pagina text,
   posicion smallint,
+  id_descuento_mes bigint,
+  id_descuento_cantidad bigint,
+  aplica_descuento_mes_detal boolean NOT NULL DEFAULT true,
+  aplica_descuento_mes_mayor boolean NOT NULL DEFAULT true,
+  aplica_descuento_cantidad_detal boolean NOT NULL DEFAULT true,
+  aplica_descuento_cantidad_mayor boolean NOT NULL DEFAULT true,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
-  CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
+  CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria),
+  CONSTRAINT plataformas_id_descuento_mes_fkey FOREIGN KEY (id_descuento_mes) REFERENCES public.descuentos(id_descuento),
+  CONSTRAINT plataformas_id_descuento_cantidad_fkey FOREIGN KEY (id_descuento_cantidad) REFERENCES public.descuentos(id_descuento)
 );
 CREATE TABLE public.precios (
   id_precio bigint GENERATED ALWAYS AS IDENTITY NOT NULL,

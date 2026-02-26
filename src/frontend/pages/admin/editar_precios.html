@@ -203,6 +203,107 @@
         background: #10b981 !important;
         color: #fff;
       }
+      .descuento-config {
+        min-width: 170px;
+        padding-right: 8px;
+      }
+      .descuento-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+      }
+      .descuento-cell-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+      }
+      .descuento-select {
+        width: 100%;
+        min-width: 120px;
+        padding: 6px 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        background: #fff;
+        font-size: 12px;
+      }
+      .descuento-help {
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        border: 1px solid #d1d5db;
+        background: #111;
+        color: #fff;
+        cursor: pointer;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .descuento-help:hover {
+        background: #000;
+      }
+      .descuentos-modal-card {
+        width: min(920px, 94vw);
+        max-width: 920px;
+      }
+      .descuentos-modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .descuentos-table-wrap {
+        width: 100%;
+        overflow: auto;
+        max-height: 62vh;
+      }
+      .descuentos-table th,
+      .descuentos-table td {
+        text-align: center;
+        white-space: nowrap;
+      }
+      .descuentos-col-h {
+        min-width: 120px;
+      }
+      .descuento-check-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 8px;
+        width: 100%;
+        align-items: center;
+      }
+      .descuento-check-title {
+        font-size: 10px;
+        font-weight: 700;
+        color: #6b7280;
+        text-align: center;
+      }
+      .descuento-check {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .descuento-check input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        accent-color: #16a34a;
+        cursor: pointer;
+      }
+      .descuento-check input[type="checkbox"]:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+      .descuento-check-mark {
+        font-size: 11px;
+        font-weight: 700;
+        color: #6b7280;
+        text-align: center;
+        line-height: 1;
+      }
+      .descuento-warning {
+        margin: 0;
+        font-size: 12px;
+        color: #b45309;
+      }
     </style>
   </head>
   <body>
@@ -217,6 +318,19 @@
       <div style="height: 160px;"></div>
     </main>
 
+    <div id="descuentos-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card descuentos-modal-card">
+        <button type="button" id="descuentos-modal-close" class="modal-close" aria-label="Cerrar">×</button>
+        <div class="modal-body descuentos-modal-body">
+          <h3>Grupos de descuentos por columna</h3>
+          <div class="descuentos-table-wrap">
+            <table class="table-base descuentos-table" id="descuentos-table"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, supabase } from "../../scripts/api.js";
@@ -227,9 +341,132 @@
 
       const wrapper = document.getElementById("precios-wrapper");
       const estadoEl = document.getElementById("estado");
+      const descuentosModalEl = document.getElementById("descuentos-modal");
+      const descuentosModalCloseEl = document.getElementById("descuentos-modal-close");
+      const descuentosModalBackdropEl = descuentosModalEl?.querySelector(".modal-backdrop");
+      const descuentosTableEl = document.getElementById("descuentos-table");
+
+      const FALLBACK_DISCOUNT_COLUMNS = ["descuento_1", "descuento_2", "descuento_3", "descuento_4"];
+      let descuentoColumnas = [...FALLBACK_DISCOUNT_COLUMNS];
+      let descuentoOpciones = [];
+      let descuentosFilas = [];
+      let soporteColumnasDescuentoPlataforma = true;
+      let soporteChecksDescuentoPlataforma = true;
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
+      };
+
+      const obtenerColumnasDescuento = (rows = []) => {
+        if (!Array.isArray(rows) || !rows.length) return [...FALLBACK_DISCOUNT_COLUMNS];
+        const keys = Object.keys(rows[0] || {});
+        const desdeTercera = keys.slice(2).filter(Boolean);
+        const columnas = desdeTercera.filter((k) => /^descuento_/i.test(String(k)));
+        if (columnas.length) return columnas;
+        const porNombre = keys.filter((k) => /^descuento_/i.test(String(k)));
+        return porNombre.length ? porNombre : [...FALLBACK_DISCOUNT_COLUMNS];
+      };
+
+      const construirOpcionesDescuento = (rows = [], columnas = []) => {
+        const ids = [];
+        (rows || []).forEach((row) => {
+          const id = Number(row?.id_descuento);
+          if (!Number.isFinite(id)) return;
+          if (!ids.includes(id)) ids.push(id);
+        });
+        return (columnas || []).map((col, idx) => ({
+          label: col,
+          id: Number.isFinite(Number(ids[idx])) ? Number(ids[idx]) : null,
+          pos: idx + 1,
+        }));
+      };
+
+      const getDescuentoIdPorPos = (pos = 1) => {
+        const target = Number(pos);
+        const opt = descuentoOpciones.find((o) => Number(o.pos) === target && Number.isFinite(Number(o.id)));
+        if (opt) return Number(opt.id);
+        const first = descuentoOpciones.find((o) => Number.isFinite(Number(o.id)));
+        return first ? Number(first.id) : null;
+      };
+
+      const normalizarIdDescuento = (value, fallback = null) => {
+        const num = Number(value);
+        if (Number.isFinite(num) && descuentoOpciones.some((o) => Number(o.id) === num)) {
+          return Math.trunc(num);
+        }
+        const fallbackNum = Number(fallback);
+        if (Number.isFinite(fallbackNum) && descuentoOpciones.some((o) => Number(o.id) === fallbackNum)) {
+          return Math.trunc(fallbackNum);
+        }
+        return getDescuentoIdPorPos(1);
+      };
+
+      const resolveScopeFields = (field = "") =>
+        field === "id_descuento_mes"
+          ? {
+              detalField: "aplica_descuento_mes_detal",
+              mayorField: "aplica_descuento_mes_mayor",
+            }
+          : {
+              detalField: "aplica_descuento_cantidad_detal",
+              mayorField: "aplica_descuento_cantidad_mayor",
+            };
+
+      const isExplicitFalse = (v) =>
+        v === false || v === 0 || v === "0" || String(v || "").toLowerCase() === "false";
+
+      const valorDescuento = (row, col) => {
+        const raw = Number(row?.[col]);
+        return Number.isFinite(raw) ? raw : null;
+      };
+
+      const renderModalDescuentos = () => {
+        if (!descuentosTableEl) return;
+        const cols = [...descuentoColumnas];
+        if (!descuentosFilas.length) {
+          descuentosTableEl.innerHTML = `
+            <thead>
+              <tr><th>Meses</th>${cols.map((c) => `<th class="descuentos-col-h">${c}</th>`).join("")}</tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="${cols.length + 1}">No hay datos en la tabla descuentos.</td></tr>
+            </tbody>
+          `;
+          return;
+        }
+        descuentosTableEl.innerHTML = `
+          <thead>
+            <tr>
+              <th>Meses</th>
+              ${cols.map((c) => `<th class="descuentos-col-h">${c}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${descuentosFilas
+              .map((row) => {
+                const meses = row?.meses ?? "-";
+                const values = cols
+                  .map((c) => {
+                    const v = valorDescuento(row, c);
+                    return `<td>${v == null ? "-" : `${v}%`}</td>`;
+                  })
+                  .join("");
+                return `<tr><td>${meses}</td>${values}</tr>`;
+              })
+              .join("")}
+          </tbody>
+        `;
+      };
+
+      const abrirModalDescuentos = () => {
+        renderModalDescuentos();
+        descuentosModalEl?.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+      };
+
+      const cerrarModalDescuentos = () => {
+        descuentosModalEl?.classList.add("hidden");
+        document.body.classList.remove("modal-open");
       };
 
       const formatCantidad = (cantidad, flags = {}, completa = false) => {
@@ -253,8 +490,81 @@
         `;
       };
 
+      const renderDescuentoCell = (platMeta = {}, field, value) => {
+        const idPlataforma = platMeta.id_plataforma;
+        const fallbackId = getDescuentoIdPorPos(field === "id_descuento_cantidad" ? 2 : 1);
+        const selected = normalizarIdDescuento(value, fallbackId);
+        const hasValidOptions = descuentoOpciones.some((o) => Number.isFinite(Number(o.id)));
+        const selectEnabled = soporteColumnasDescuentoPlataforma && hasValidOptions;
+        const { detalField, mayorField } = resolveScopeFields(field);
+        const detalEnabled = !isExplicitFalse(platMeta?.[detalField]);
+        const mayorEnabled = !isExplicitFalse(platMeta?.[mayorField]);
+        const title = !hasValidOptions
+          ? "No hay IDs válidos en descuentos para guardar."
+          : soporteColumnasDescuentoPlataforma
+          ? "Selecciona la columna de descuentos"
+          : "Faltan columnas id_descuento_mes/id_descuento_cantidad en plataformas";
+        return `
+          <td class="precio-cell descuento-config">
+            <div class="descuento-cell-wrap">
+              <div class="descuento-inline">
+                <select
+                  class="descuento-select"
+                  data-descuento-select="1"
+                  data-field="${field}"
+                  data-plat="${idPlataforma}"
+                  data-prev="${selected ?? ""}"
+                  title="${title}"
+                  ${selectEnabled ? "" : "disabled"}
+                >
+                  ${descuentoOpciones
+                    .map(
+                      (opt) =>
+                        `<option value="${opt.id ?? ""}" ${selected === opt.id ? "selected" : ""} ${
+                          Number.isFinite(Number(opt.id)) ? "" : "disabled"
+                        }>${opt.label}</option>`
+                    )
+                    .join("")}
+                </select>
+                <button type="button" class="descuento-help" data-descuento-help="1" aria-label="Ver tabla de descuentos">?</button>
+              </div>
+              <div class="descuento-check-grid">
+                <span class="descuento-check-title">Detal</span>
+                <span class="descuento-check-title">Mayor</span>
+                <label class="descuento-check">
+                  <input
+                    type="checkbox"
+                    data-descuento-scope="1"
+                    data-plat="${idPlataforma}"
+                    data-field="${detalField}"
+                    ${detalEnabled ? "checked" : ""}
+                  />
+                </label>
+                <label class="descuento-check">
+                  <input
+                    type="checkbox"
+                    data-descuento-scope="1"
+                    data-plat="${idPlataforma}"
+                    data-field="${mayorField}"
+                    ${mayorEnabled ? "checked" : ""}
+                  />
+                </label>
+              </div>
+            </div>
+          </td>
+        `;
+      };
+
       const renderTabla = (titulo, precios, platFlags = {}, platMeta = {}, planKey = null, planOptions = []) => {
         const esGift = !!platMeta.tarjeta_de_regalo;
+        const descuentoMes = normalizarIdDescuento(
+          platMeta.id_descuento_mes,
+          getDescuentoIdPorPos(1)
+        );
+        const descuentoCant = normalizarIdDescuento(
+          platMeta.id_descuento_cantidad,
+          getDescuentoIdPorPos(2)
+        );
         const planOpts = (planOptions || []).filter(Boolean);
         const sorted = [...precios].sort((a, b) => {
           const aComp = a.completa ? 1 : 0;
@@ -304,6 +614,8 @@
                     deleteLabel: "Eliminar precio mayor",
                   })}
                 </td>
+                ${renderDescuentoCell(platMeta, "id_descuento_mes", descuentoMes)}
+                ${renderDescuentoCell(platMeta, "id_descuento_cantidad", descuentoCant)}
               </tr>
             `;
             }
@@ -359,6 +671,8 @@
                     deleteLabel: "Eliminar precio mayor",
                   })}
                 </td>
+                ${renderDescuentoCell(platMeta, "id_descuento_mes", descuentoMes)}
+                ${renderDescuentoCell(platMeta, "id_descuento_cantidad", descuentoCant)}
               </tr>
             `;
           })
@@ -373,12 +687,14 @@
                   ${esGift ? "<th>Valor</th><th>Región</th>" : "<th>Plan</th><th>Duración</th>"}
                   <th>Precio USD detal</th>
                   <th>Precio USD mayor</th>
+                  <th>Descuento mes</th>
+                  <th>Descuento cant.</th>
                 </tr>
               </thead>
               <tbody>
-                ${rows || `<tr><td colspan="${esGift ? 5 : 5}">Sin precios</td></tr>`}
-                <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}">
-                  <td colspan="${esGift ? 5 : 5}" style="text-align:center; font-weight:700;">+</td>
+                ${rows || `<tr><td colspan="7">Sin precios</td></tr>`}
+                <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-descuento-mes="${descuentoMes}" data-descuento-cant="${descuentoCant}" data-aplica-descuento-mes-detal="${!isExplicitFalse(platMeta?.aplica_descuento_mes_detal)}" data-aplica-descuento-mes-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_mes_mayor)}" data-aplica-descuento-cantidad-detal="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_detal)}" data-aplica-descuento-cantidad-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_mayor)}">
+                  <td colspan="7" style="text-align:center; font-weight:700;">+</td>
                 </tr>
               </tbody>
             </table>
@@ -398,9 +714,67 @@
 
       const cargar = async () => {
         try {
-          const { data: plataformas, error: platErr } = await supabase
+          const { data: descuentosData, error: descuentosErr } = await supabase
+            .from("descuentos")
+            .select("*")
+            .order("meses", { ascending: true });
+          if (descuentosErr) throw descuentosErr;
+          descuentosFilas = descuentosData || [];
+          descuentoColumnas = obtenerColumnasDescuento(descuentosFilas);
+          descuentoOpciones = construirOpcionesDescuento(descuentosFilas, descuentoColumnas);
+
+          let plataformas = [];
+          let platErr = null;
+          const selectPlataformasConDescuentos =
+            "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo, id_descuento_mes, id_descuento_cantidad, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+          const selectPlataformasConIds =
+            "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo, id_descuento_mes, id_descuento_cantidad";
+          const selectPlataformasBase =
+            "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo";
+
+          ({ data: plataformas, error: platErr } = await supabase
             .from("plataformas")
-            .select("id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo");
+            .select(selectPlataformasConDescuentos));
+
+          if (platErr) {
+            const msg = String(platErr.message || "");
+            if (
+              /aplica_descuento_mes_detal|aplica_descuento_mes_mayor|aplica_descuento_cantidad_detal|aplica_descuento_cantidad_mayor/i.test(
+                msg
+              )
+            ) {
+              soporteChecksDescuentoPlataforma = false;
+              ({ data: plataformas, error: platErr } = await supabase
+                .from("plataformas")
+                .select(selectPlataformasConIds));
+              if (!platErr) {
+                plataformas = (plataformas || []).map((p) => ({
+                  ...p,
+                  aplica_descuento_mes_detal: true,
+                  aplica_descuento_mes_mayor: true,
+                  aplica_descuento_cantidad_detal: true,
+                  aplica_descuento_cantidad_mayor: true,
+                }));
+              }
+            } else if (/id_descuento_mes|id_descuento_cantidad/i.test(msg)) {
+              soporteColumnasDescuentoPlataforma = false;
+              soporteChecksDescuentoPlataforma = false;
+              ({ data: plataformas, error: platErr } = await supabase
+                .from("plataformas")
+                .select(selectPlataformasBase));
+              if (!platErr) {
+                plataformas = (plataformas || []).map((p) => ({
+                  ...p,
+                  id_descuento_mes: getDescuentoIdPorPos(1),
+                  id_descuento_cantidad: getDescuentoIdPorPos(2),
+                  aplica_descuento_mes_detal: true,
+                  aplica_descuento_mes_mayor: true,
+                  aplica_descuento_cantidad_detal: true,
+                  aplica_descuento_cantidad_mayor: true,
+                }));
+              }
+            }
+          }
           if (platErr) throw platErr;
 
           const { data: precios, error: priceErr } = await supabase
@@ -445,6 +819,21 @@
           if (wrapper) {
             wrapper.innerHTML = blocks.join("");
           }
+          if (!soporteColumnasDescuentoPlataforma && !soporteChecksDescuentoPlataforma) {
+            setEstado(
+              "Faltan columnas en plataformas: id_descuento_* y aplica_descuento_*."
+            );
+          } else if (!soporteColumnasDescuentoPlataforma) {
+            setEstado(
+              "Faltan columnas en plataformas: id_descuento_mes y id_descuento_cantidad."
+            );
+          } else if (!soporteChecksDescuentoPlataforma) {
+            setEstado(
+              "Faltan columnas de check en plataformas: aplica_descuento_*."
+            );
+          } else {
+            setEstado("");
+          }
           attachPrecioEditors();
         } catch (err) {
           console.error("editar precios init error", err);
@@ -453,7 +842,97 @@
       };
 
       const attachPrecioEditors = () => {
+        wrapper?.addEventListener("change", async (e) => {
+          const descuentoScope = e.target.closest('[data-descuento-scope="1"]');
+          if (descuentoScope) {
+            const idPlataforma = Number(descuentoScope.dataset.plat);
+            const field = String(descuentoScope.dataset.field || "");
+            const nextValue = !!descuentoScope.checked;
+            if (!idPlataforma || !field) return;
+            try {
+              const { error } = await supabase
+                .from("plataformas")
+                .update({ [field]: nextValue })
+                .eq("id_plataforma", idPlataforma);
+              if (error) throw error;
+              wrapper
+                ?.querySelectorAll(
+                  `[data-descuento-scope="1"][data-plat="${idPlataforma}"][data-field="${field}"]`
+                )
+                .forEach((el) => {
+                  el.checked = nextValue;
+                });
+              const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
+              rowAdds.forEach((row) => {
+                if (field === "aplica_descuento_mes_detal") row.dataset.aplicaDescuentoMesDetal = String(nextValue);
+                if (field === "aplica_descuento_mes_mayor") row.dataset.aplicaDescuentoMesMayor = String(nextValue);
+                if (field === "aplica_descuento_cantidad_detal")
+                  row.dataset.aplicaDescuentoCantidadDetal = String(nextValue);
+                if (field === "aplica_descuento_cantidad_mayor")
+                  row.dataset.aplicaDescuentoCantidadMayor = String(nextValue);
+              });
+              setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+            } catch (err) {
+              console.error("update descuento scope error", err);
+              descuentoScope.checked = !nextValue;
+              alert("No se pudo actualizar el check de descuento.");
+            }
+            return;
+          }
+
+          const descuentoSelect = e.target.closest('[data-descuento-select="1"]');
+          if (!descuentoSelect) return;
+          const idPlataforma = Number(descuentoSelect.dataset.plat);
+          const field = String(descuentoSelect.dataset.field || "");
+          const fallbackId = getDescuentoIdPorPos(field === "id_descuento_cantidad" ? 2 : 1);
+          const nextValue = normalizarIdDescuento(descuentoSelect.value, fallbackId);
+          const prevValue = normalizarIdDescuento(descuentoSelect.dataset.prev, fallbackId);
+          if (!Number.isFinite(Number(nextValue))) {
+            alert("No hay IDs de descuentos válidos para guardar.");
+            descuentoSelect.value = String(prevValue ?? "");
+            return;
+          }
+          if (!idPlataforma || !field || !nextValue) return;
+          try {
+            const { error } = await supabase
+              .from("plataformas")
+              .update({ [field]: nextValue })
+              .eq("id_plataforma", idPlataforma);
+            if (error) throw error;
+            wrapper
+              ?.querySelectorAll(
+                `[data-descuento-select="1"][data-plat="${idPlataforma}"][data-field="${field}"]`
+              )
+              .forEach((el) => {
+                el.value = String(nextValue);
+                el.dataset.prev = String(nextValue);
+              });
+            const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
+            rowAdds.forEach((row) => {
+              if (field === "id_descuento_mes") row.dataset.descuentoMes = String(nextValue);
+              if (field === "id_descuento_cantidad") row.dataset.descuentoCant = String(nextValue);
+            });
+            setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+          } catch (err) {
+            console.error("update descuento plataforma error", err);
+            descuentoSelect.value = String(prevValue);
+            if (String(err?.code || "") === "23503") {
+              alert(
+                "No se pudo guardar porque el id_descuento no existe en la tabla descuentos (FK 23503)."
+              );
+            } else {
+              alert("No se pudo actualizar la columna de descuento.");
+            }
+          }
+        });
+
         wrapper?.addEventListener("click", async (e) => {
+          const descuentoHelpBtn = e.target.closest('[data-descuento-help="1"]');
+          if (descuentoHelpBtn) {
+            abrirModalDescuentos();
+            return;
+          }
+
           const planEditBtn = e.target.closest(".plan-edit");
           if (planEditBtn) {
             const editor = planEditBtn.closest(".plan-editor");
@@ -532,6 +1011,25 @@
               const esGift = addRow.dataset.gift === "true";
               const por_pantalla = addRow.dataset.porpantalla === "true";
               const por_acceso = addRow.dataset.poracceso === "true";
+              const aplicaMesDetal = !isExplicitFalse(addRow.dataset.aplicaDescuentoMesDetal);
+              const aplicaMesMayor = !isExplicitFalse(addRow.dataset.aplicaDescuentoMesMayor);
+              const aplicaCantidadDetal = !isExplicitFalse(addRow.dataset.aplicaDescuentoCantidadDetal);
+              const aplicaCantidadMayor = !isExplicitFalse(addRow.dataset.aplicaDescuentoCantidadMayor);
+              const descuentoMes = normalizarIdDescuento(
+                addRow.dataset.descuentoMes,
+                getDescuentoIdPorPos(1)
+              );
+              const descuentoCant = normalizarIdDescuento(
+                addRow.dataset.descuentoCant,
+                getDescuentoIdPorPos(2)
+              );
+              const platMetaForRow = {
+                id_plataforma: Number(platId),
+                aplica_descuento_mes_detal: aplicaMesDetal,
+                aplica_descuento_mes_mayor: aplicaMesMayor,
+                aplica_descuento_cantidad_detal: aplicaCantidadDetal,
+                aplica_descuento_cantidad_mayor: aplicaCantidadMayor,
+              };
               try {
                 const payload = {
                   id_plataforma: Number(platId),
@@ -569,12 +1067,30 @@
                       <span class="precio-text">-</span>
                       ${renderActions({ editLabel: "Editar precio mayor" })}
                     </td>
+                    ${renderDescuentoCell(platMetaForRow, "id_descuento_mes", descuentoMes)}
+                    ${renderDescuentoCell(platMetaForRow, "id_descuento_cantidad", descuentoCant)}
                   `;
                 } else {
                   tr.innerHTML = `
                     <td data-id="${data.id_precio}" data-field="cantidad" class="precio-cell" data-completa="${data.completa ? "true" : "false"}" data-porpantalla="${por_pantalla}" data-poracceso="${por_acceso}" data-cantidad="${data.cantidad ?? ""}">
                       <span class="precio-text">-</span>
                       ${renderActions({ editLabel: "Editar cantidad" })}
+                    </td>
+                    <td class="plan-cell">
+                      <div class="plan-editor" data-id="${data.id_precio}">
+                        <span class="plan-text">Sin plan</span>
+                        <button type="button" class="plan-edit" data-id="${data.id_precio}" aria-label="Editar plan">✏️</button>
+                        <div class="plan-edit-controls hidden">
+                          <select class="plan-select">
+                            <option value="">Seleccionar</option>
+                          </select>
+                          <span class="plan-input-wrap">
+                            <input type="text" class="plan-input" placeholder="Nuevo plan" />
+                            <button type="button" class="plan-save" data-id="${data.id_precio}" aria-label="Guardar plan">💾</button>
+                            <button type="button" class="plan-cancel" aria-label="Cancelar">✖</button>
+                          </span>
+                        </div>
+                      </div>
                     </td>
                     <td data-id="${data.id_precio}" data-field="duracion" class="precio-cell">
                       <span class="precio-text">-</span>
@@ -588,6 +1104,8 @@
                       <span class="precio-text">-</span>
                       ${renderActions({ editLabel: "Editar precio mayor" })}
                     </td>
+                    ${renderDescuentoCell(platMetaForRow, "id_descuento_mes", descuentoMes)}
+                    ${renderDescuentoCell(platMetaForRow, "id_descuento_cantidad", descuentoCant)}
                   `;
                 }
                 tbody.insertBefore(tr, addRow);
@@ -1024,6 +1542,14 @@
           });
         });
       };
+
+      descuentosModalCloseEl?.addEventListener("click", cerrarModalDescuentos);
+      descuentosModalBackdropEl?.addEventListener("click", cerrarModalDescuentos);
+      document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && !descuentosModalEl?.classList.contains("hidden")) {
+          cerrarModalDescuentos();
+        }
+      });
 
       cargar();
     </script>

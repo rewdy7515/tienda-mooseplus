@@ -98,6 +98,37 @@ const isTransientCartBackendError = (status, bodyText = "") => {
 };
 
 export async function loadCatalog() {
+  const fetchPlataformasCatalog = async () => {
+    const fullSelect =
+      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+    const baseSelect =
+      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos";
+    const full = await supabase.from("plataformas").select(fullSelect).order("nombre");
+    if (!full.error) return full;
+    const msg = String(full.error?.message || "");
+    if (
+      !/id_descuento_mes|id_descuento_cantidad|aplica_descuento_mes_detal|aplica_descuento_mes_mayor|aplica_descuento_cantidad_detal|aplica_descuento_cantidad_mayor/i.test(
+        msg
+      )
+    ) {
+      return full;
+    }
+    const base = await supabase.from("plataformas").select(baseSelect).order("nombre");
+    if (base.error) return base;
+    return {
+      ...base,
+      data: (base.data || []).map((p) => ({
+        ...p,
+        id_descuento_mes: 1,
+        id_descuento_cantidad: 2,
+        aplica_descuento_mes_detal: true,
+        aplica_descuento_mes_mayor: true,
+        aplica_descuento_cantidad_detal: true,
+        aplica_descuento_cantidad_mayor: true,
+      })),
+    };
+  };
+
   const [
     { data: categorias, error: errCat },
     { data: plataformas, error: errPlat },
@@ -105,19 +136,14 @@ export async function loadCatalog() {
     { data: descuentos, error: errDesc },
   ] = await Promise.all([
     supabase.from("categorias").select("id_categoria, nombre").order("id_categoria"),
-    supabase
-      .from("plataformas")
-      .select(
-        "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos"
-      )
-      .order("nombre"),
+    fetchPlataformasCatalog(),
     supabase
       .from("precios")
       .select(
         "id_precio, id_plataforma, cantidad, precio_usd_detal, precio_usd_mayor, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta, descripcion_plan"
       )
       .order("id_precio"),
-    supabase.from("descuentos").select("id_descuento, meses, descuento_1, descuento_2"),
+    supabase.from("descuentos").select("*"),
   ]);
 
   if (errCat || errPlat || errPre || errDesc) {

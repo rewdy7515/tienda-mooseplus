@@ -13,7 +13,14 @@ import {
   fetchHomeBanners,
 } from "./api.js";
 import { initCart } from "./cart.js";
-import { initModal, openModal, setPrecios, setStockData, setDescuentos } from "./modal.js";
+import {
+  initModal,
+  openModal,
+  setPrecios,
+  setStockData,
+  setDescuentos,
+  setDiscountAudience,
+} from "./modal.js";
 import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
 import { AVATAR_RANDOM_COLORS, applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
@@ -1069,6 +1076,12 @@ const attachPlatformClicks = (onClick) => {
         tarjeta_de_regalo: card.dataset.tarjetaDeRegalo,
         entrega_inmediata: card.dataset.entregaInmediata,
         descuento_meses: isTrue(card.dataset.descuentoMeses),
+        id_descuento_mes: card.dataset.idDescuentoMes,
+        id_descuento_cantidad: card.dataset.idDescuentoCantidad,
+        aplica_descuento_mes_detal: card.dataset.aplicaDescuentoMesDetal,
+        aplica_descuento_mes_mayor: card.dataset.aplicaDescuentoMesMayor,
+        aplica_descuento_cantidad_detal: card.dataset.aplicaDescuentoCantidadDetal,
+        aplica_descuento_cantidad_mayor: card.dataset.aplicaDescuentoCantidadMayor,
         mostrar_stock: card.dataset.mostrarStock,
         num_max_dispositivos: card.dataset.numMaxDispositivos,
         id_descuento: null,
@@ -1498,6 +1511,7 @@ async function init() {
       !currentUser ||
       isTrue(sessionRoles?.acceso_cliente) ||
       isTrue(currentUser?.acceso_cliente);
+    setDiscountAudience(esCliente);
     const usarMayor = !esCliente;
     const preciosVisibles = (precios || [])
       .map((p) => {

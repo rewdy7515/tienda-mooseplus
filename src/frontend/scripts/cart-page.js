@@ -47,6 +47,7 @@ let cartNeedsSync = false;
 let cartUseSaldo = false;
 let dbUseSaldo = false;
 let dbCartSnapshot = new Map();
+let currentUserIsCliente = true;
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) =>
@@ -122,6 +123,46 @@ const getClosestDiscountPct = (rows, value, column) => {
     if (!best || n > Number(best.meses)) best = d;
   }
   return Number(best?.[column]) || 0;
+};
+
+const resolveDiscountColumn = (platform, mode = "months") => {
+  const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) return `descuento_${Math.trunc(asNum)}`;
+  const asText = String(raw || "").trim();
+  if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
+  return mode === "items" ? "descuento_2" : "descuento_1";
+};
+
+const isDiscountEnabledForAudience = (platform, mode = "months", isCliente = true) => {
+  if (mode === "items") {
+    return isCliente
+      ? !(
+          platform?.aplica_descuento_cantidad_detal === false ||
+          platform?.aplica_descuento_cantidad_detal === "false" ||
+          platform?.aplica_descuento_cantidad_detal === 0 ||
+          platform?.aplica_descuento_cantidad_detal === "0"
+        )
+      : !(
+          platform?.aplica_descuento_cantidad_mayor === false ||
+          platform?.aplica_descuento_cantidad_mayor === "false" ||
+          platform?.aplica_descuento_cantidad_mayor === 0 ||
+          platform?.aplica_descuento_cantidad_mayor === "0"
+        );
+  }
+  return isCliente
+    ? !(
+        platform?.aplica_descuento_mes_detal === false ||
+        platform?.aplica_descuento_mes_detal === "false" ||
+        platform?.aplica_descuento_mes_detal === 0 ||
+        platform?.aplica_descuento_mes_detal === "0"
+      )
+    : !(
+        platform?.aplica_descuento_mes_mayor === false ||
+        platform?.aplica_descuento_mes_mayor === "false" ||
+        platform?.aplica_descuento_mes_mayor === 0 ||
+        platform?.aplica_descuento_mes_mayor === "0"
+      );
 };
 
 async function syncAuthSession() {
@@ -279,12 +320,18 @@ const calcItemTotals = (item, price, platform) => {
   let descuentoMesesVal = 0;
   let descuentoCantidadVal = 0;
   let rateMeses = 0;
-  if (platform?.descuento_meses) {
-    const rawRate = getClosestDiscountPct(descuentos, mesesVal, "descuento_1");
+  const monthColumn = resolveDiscountColumn(platform, "months");
+  const qtyColumn = resolveDiscountColumn(platform, "items");
+  const monthEnabled =
+    !!platform?.descuento_meses &&
+    isDiscountEnabledForAudience(platform, "months", currentUserIsCliente);
+  const qtyEnabled = isDiscountEnabledForAudience(platform, "items", currentUserIsCliente);
+  if (monthEnabled) {
+    const rawRate = getClosestDiscountPct(descuentos, mesesVal, monthColumn);
     rateMeses = rawRate > 1 ? rawRate / 100 : rawRate;
     descuentoMesesVal = round2(baseSubtotal * rateMeses);
   }
-  const rawRateQty = getClosestDiscountPct(descuentos, qtyVal, "descuento_2");
+  const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qtyVal, qtyColumn) : 0;
   const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
   if (rateQty > 0) {
     descuentoCantidadVal = round2(baseSubtotal * rateQty);
@@ -844,6 +891,7 @@ async function init() {
     const esCliente =
       isTrue(sessionRoles?.acceso_cliente) ||
       isTrue(currentUser?.acceso_cliente);
+    currentUserIsCliente = !!esCliente;
     const precioData = (catalog.precios || [])
       .map((p) => {
         const valor = esCliente ? p.precio_usd_detal : p.precio_usd_mayor;

@@ -17,6 +17,55 @@ let modalTopEl = null;
 let modalScrollHintEl = null;
 let scrollHintBound = false;
 let tooltipDismissBound = false;
+let discountAudienceIsCliente = true;
+
+const isTrueLike = (v) =>
+  v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
+
+const isFalseLike = (v) =>
+  v === false || v === 0 || v === "0" || String(v || "").toLowerCase() === "false";
+
+const resolveDiscountColumn = (platform, mode = "months") => {
+  const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) {
+    return `descuento_${Math.trunc(asNum)}`;
+  }
+  const asText = String(raw || "").trim();
+  if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
+  return mode === "items" ? "descuento_2" : "descuento_1";
+};
+
+const isDiscountEnabledForAudience = (platform, mode = "months") => {
+  if (mode === "items") {
+    return discountAudienceIsCliente
+      ? !(
+          platform?.aplica_descuento_cantidad_detal === false ||
+          platform?.aplica_descuento_cantidad_detal === "false" ||
+          platform?.aplica_descuento_cantidad_detal === 0 ||
+          platform?.aplica_descuento_cantidad_detal === "0"
+        )
+      : !(
+          platform?.aplica_descuento_cantidad_mayor === false ||
+          platform?.aplica_descuento_cantidad_mayor === "false" ||
+          platform?.aplica_descuento_cantidad_mayor === 0 ||
+          platform?.aplica_descuento_cantidad_mayor === "0"
+        );
+  }
+  return discountAudienceIsCliente
+    ? !(
+        platform?.aplica_descuento_mes_detal === false ||
+        platform?.aplica_descuento_mes_detal === "false" ||
+        platform?.aplica_descuento_mes_detal === 0 ||
+        platform?.aplica_descuento_mes_detal === "0"
+      )
+    : !(
+        platform?.aplica_descuento_mes_mayor === false ||
+        platform?.aplica_descuento_mes_mayor === "false" ||
+        platform?.aplica_descuento_mes_mayor === 0 ||
+        platform?.aplica_descuento_mes_mayor === "0"
+      );
+};
 
 const updateScrollHint = () => {
   if (!modalTopEl || !modalScrollHintEl) return;
@@ -93,9 +142,10 @@ const getDiscountPercent = (platform, value, mode = "months") => {
     platform?.descuento_meses === true ||
     platform?.descuento_meses === "true" ||
     platform?.descuento_meses === "1";
-  if (!usa) return 0;
+  if (mode === "months" && !usa) return 0;
+  if (!isDiscountEnabledForAudience(platform, mode)) return 0;
   const key = Number(value) || 0;
-  const col = mode === "items" ? "descuento_2" : "descuento_1";
+  const col = resolveDiscountColumn(platform, mode);
   const row = getClosestDiscountRow(key, col) || {};
   const pct = Number(row[col]) || 0;
   console.log("[discount] plataforma", platform?.nombre, mode, key, "pct", pct, "map", descuentosPorMes);
@@ -675,10 +725,13 @@ export const setDescuentos = (rows = []) => {
   descuentosPorMes = (rows || []).reduce((acc, d) => {
     const meses = Number(d.meses);
     if (Number.isFinite(meses) && meses > 0) {
-      acc[meses] = {
-        descuento_1: Number(d.descuento_1) || 0,
-        descuento_2: Number(d.descuento_2) || 0,
-      };
+      const row = { ...d };
+      Object.keys(row).forEach((k) => {
+        if (/^descuento_/i.test(String(k))) {
+          row[k] = Number(row[k]) || 0;
+        }
+      });
+      acc[meses] = row;
     }
     return acc;
   }, {});
@@ -686,6 +739,10 @@ export const setDescuentos = (rows = []) => {
 
 export const setStockData = (map) => {
   stockByPlatform = map || {};
+};
+
+export const setDiscountAudience = (isCliente = true) => {
+  discountAudienceIsCliente = !!isCliente;
 };
 
 export const initModal = (elements) => {
@@ -884,6 +941,12 @@ export const openModal = (platform) => {
     entrega_inmediata,
     descuento_meses,
     id_descuento,
+    id_descuento_mes,
+    id_descuento_cantidad,
+    aplica_descuento_mes_detal,
+    aplica_descuento_mes_mayor,
+    aplica_descuento_cantidad_detal,
+    aplica_descuento_cantidad_mayor,
     mostrar_stock,
     num_max_dispositivos,
   } = platform;
@@ -944,10 +1007,14 @@ export const openModal = (platform) => {
     banner,
     num_max_dispositivos,
     descuento_meses:
-      descuento_meses === true ||
-      descuento_meses === "true" ||
-      descuento_meses === "1",
+      isTrueLike(descuento_meses),
     id_descuento: null,
+    id_descuento_mes,
+    id_descuento_cantidad,
+    aplica_descuento_mes_detal: !isFalseLike(aplica_descuento_mes_detal),
+    aplica_descuento_mes_mayor: !isFalseLike(aplica_descuento_mes_mayor),
+    aplica_descuento_cantidad_detal: !isFalseLike(aplica_descuento_cantidad_detal),
+    aplica_descuento_cantidad_mayor: !isFalseLike(aplica_descuento_cantidad_mayor),
     mostrar_stock,
   };
   updateModalImage();
