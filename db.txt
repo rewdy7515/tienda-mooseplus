@@ -162,6 +162,11 @@ CREATE TABLE public.metricas_mensuales (
   ventas_activas smallint,
   clientes_nuevos smallint,
   actualizacion date,
+  periodo_mes date,
+  ventas_unicas integer,
+  clientes_abandonaron integer,
+  clientes_registrados_web integer,
+  clientes_nuevos_web smallint,
   CONSTRAINT metricas_mensuales_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.notificacion_plantilla (
@@ -413,6 +418,8 @@ CREATE TABLE public.usuarios (
   recordatorio_dias_antes smallint,
   foto_perfil text,
   fondo_perfil text,
+  fecha_ultima_compra date,
+  fecha_registro_admin date,
   CONSTRAINT usuarios_pkey PRIMARY KEY (id_usuario)
 );
 CREATE TABLE public.ventas (

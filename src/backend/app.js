@@ -1964,6 +1964,22 @@ const processOrderFromItems = async ({
   await supabaseAdmin.from("carrito_items").delete().eq("id_carrito", carritoId);
   await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
 
+  const idUsuarioVenta = toPositiveInt(idUsuarioVentas);
+  const huboVentasProcesadas = insertedVentas.length > 0 || renovaciones.length > 0;
+  if (idUsuarioVenta && huboVentasProcesadas) {
+    const { error: updUserErr } = await supabaseAdmin
+      .from("usuarios")
+      .update({ fecha_ultima_compra: isoHoy })
+      .eq("id_usuario", idUsuarioVenta);
+    if (updUserErr) {
+      console.error("[checkout] update fecha_ultima_compra error", {
+        id_usuario: idUsuarioVenta,
+        fecha_ultima_compra: isoHoy,
+        error: updUserErr?.message || updUserErr,
+      });
+    }
+  }
+
   console.log("[checkout] processOrderFromItems end", {
     ordenId,
     ventasCount: ventasToInsert.length,

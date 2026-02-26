@@ -35,6 +35,41 @@
       </div>
     </main>
 
+    <div id="cart-remove-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card cart-remove-modal-card">
+        <button
+          type="button"
+          class="modal-close"
+          id="cart-remove-modal-close"
+          aria-label="Cerrar"
+        >
+          ×
+        </button>
+        <div class="modal-body cart-remove-modal-body">
+          <p class="cart-remove-modal-message">
+            ¿Quieres eliminar este item del carrito?
+          </p>
+          <div class="cart-remove-modal-actions">
+            <button
+              type="button"
+              class="btn-outline"
+              id="cart-remove-cancel"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="btn-primary"
+              id="cart-remove-confirm"
+            >
+              Eliminar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="../scripts/cart-page.js"></script>
   </body>
 </html>

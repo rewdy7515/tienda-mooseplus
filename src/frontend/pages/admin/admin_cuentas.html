@@ -1490,6 +1490,63 @@
         if (!text) return;
         await copyTextNotify(text);
       };
+      const updateRowCopyPayload = (row) => {
+        if (!row) return;
+        const copyBtn = row.querySelector(".btn-copy-row");
+        const replBtn = row.querySelector(".btn-reemplazar-row");
+        if (!copyBtn || !replBtn) return;
+        const idVenta = (replBtn.dataset.idventa || "").trim();
+        if (!idVenta) return;
+        const fechaVal =
+          (replBtn.dataset.fecha || "").trim() ||
+          (row.querySelector(".fecha-input")?.value || "").trim();
+        const correoVal = (
+          replBtn.dataset.correo ||
+          row.querySelector(".correo-copy")?.dataset?.clipboard ||
+          row.querySelector(".correo-copy")?.textContent ||
+          currentCuentaDetalle?.correo ||
+          ""
+        ).trim();
+        const claveVal = (
+          replBtn.dataset.clave ||
+          row.querySelector(".clave-copy")?.dataset?.clipboard ||
+          row.querySelector(".clave-copy")?.textContent ||
+          currentCuentaDetalle?.clave ||
+          ""
+        ).trim();
+        const pinVal = (
+          replBtn.dataset.pin ||
+          row.querySelector(".pin-copy")?.dataset?.clipboard ||
+          row.querySelector(".pin-copy")?.textContent ||
+          ""
+        ).trim();
+        const ventaPerfil =
+          replBtn.dataset.ventaPerfil !== undefined
+            ? isTrue(replBtn.dataset.ventaPerfil)
+            : currentCuentaDetalle?.venta_perfil;
+        const ventaMiembro =
+          replBtn.dataset.ventaMiembro !== undefined
+            ? isTrue(replBtn.dataset.ventaMiembro)
+            : currentCuentaDetalle?.venta_miembro;
+        const copyText = buildServiceCopyText({
+          plataforma:
+            replBtn.dataset.plat || currentCuentaDetalle?.plataformaNombre || "",
+          idVenta,
+          correo: correoVal,
+          clave: claveVal,
+          nPerfil: replBtn.dataset.nperfil || "",
+          pin: pinVal,
+          fechaCorte: fechaVal,
+          porAcceso: currentCuentaDetalle?.por_acceso,
+          usaPines: currentCuentaDetalle?.usa_pines,
+          ventaPerfil,
+          ventaMiembro,
+          idPlataforma: currentCuentaDetalle?.plataformaId,
+          perfilHogar: row.querySelector(".toggle-hogar")?.checked === true,
+          isSubCuenta: false,
+        });
+        copyBtn.dataset.copy = encodeURIComponent(copyText);
+      };
       let fetchCounter = 0;
       let currentCuentaId = null;
       let currentCuentaDetalle = null;
@@ -1648,28 +1705,6 @@
         const displayVal = showBusqueda ? "" : "none";
         if (detalleEl) detalleEl.style.display = showBusqueda ? "block" : "none";
         if (clienteVentasEl) clienteVentasEl.style.display = displayVal;
-      };
-      const isCanvaDetalleActivo = () => {
-        const title = detalleEl?.querySelector(".cuenta-title")?.textContent || "";
-        return title.trim().toLowerCase() === "cuenta canva";
-      };
-      const refreshDetalleConDatosReales = async () => {
-        if (!detalleEl) return;
-        if (isCanvaDetalleActivo()) {
-          await loadCuentaCanva();
-          return;
-        }
-        const cuentaId = Number(currentCuentaDetalle?.id_cuenta || currentCuentaId || 0);
-        if (cuentaId > 0) {
-          await loadCuentaDetalle(cuentaId);
-        }
-      };
-      const safeRefreshDetalleConDatosReales = async () => {
-        try {
-          await refreshDetalleConDatosReales();
-        } catch (err) {
-          console.error("refresh detalle error", err);
-        }
       };
 
       const loadPlataformasSelect = async () => {
@@ -3795,15 +3830,11 @@
           `
               : ""
           }
-          ${
-            info.venta_dominio
-              ? ""
-              : `
           ${info.cuenta_madre ? "" : plat9Table}
           <h4>${isCuentaMadre ? "Perfiles ocupados" : colMode === "ocupado" ? "Ventas de cuenta completa" : "Perfiles"}</h4>
           ${table}
           ${
-            info.showMiembros && info.venta_miembro !== true
+            !info.venta_dominio && info.showMiembros && info.venta_miembro !== true
               ? `
           <h4>Miembros extras</h4>
           <div class="cuenta-table-wrap">
@@ -3909,8 +3940,6 @@
         `
               : ""
           }
-          `
-          }
           ${
             info.venta_miembro || info.venta_dominio
               ? `<p class="cuenta-miembro-label">Miembro de: ${info.correo_madre || ""}${info.correo_madre ? ` <span class="cliente-alert" data-correo="${info.correo_madre}" title="Ver cuenta">!</span>` : ""}</p>`
@@ -3935,7 +3964,6 @@
                 ?.querySelector(".toggle-text");
               if (labelText)
                 labelText.textContent = checked ? "Inactivada" : "Activa";
-              await safeRefreshDetalleConDatosReales();
             } catch (err) {
               console.error("toggle inactiva error", err);
               e.target.checked = !checked;
@@ -4087,11 +4115,46 @@
 
           // Ventas de cuenta completa (sin perfiles)
           if (colMode === "ocupado" || colMode === "miembro") {
-            const { data: ventasCta, error: ventasCtaErr } = await supabase
-            .from("ventas")
-            .select("id_venta, id_usuario, fecha_corte, suspendido, id_precio")
-              .eq("id_cuenta", idCuenta);
-            if (ventasCtaErr) throw ventasCtaErr;
+            const ventasSelect =
+              "id_venta, id_usuario, fecha_corte, suspendido, id_precio";
+            let ventasCta = [];
+            if (cuenta.venta_dominio === true) {
+              const queryResults = await Promise.all([
+                supabase
+                  .from("ventas")
+                  .select(ventasSelect)
+                  .eq("id_cuenta", idCuenta),
+                supabase
+                  .from("ventas")
+                  .select(ventasSelect)
+                  .eq("id_cuenta_miembro", idCuenta),
+                cuenta.correo
+                  ? supabase
+                      .from("ventas")
+                      .select(ventasSelect)
+                      .eq("correo_miembro", cuenta.correo)
+                  : Promise.resolve({ data: [], error: null }),
+              ]);
+              queryResults.forEach((r) => {
+                if (r?.error) throw r.error;
+              });
+              const mapVentas = new Map();
+              queryResults.forEach((r) => {
+                (r?.data || []).forEach((v) => {
+                  const key = Number(v?.id_venta) || null;
+                  if (!key || mapVentas.has(key)) return;
+                  mapVentas.set(key, v);
+                });
+              });
+              ventasCta = Array.from(mapVentas.values());
+            } else {
+              const { data, error: ventasCtaErr } = await supabase
+                .from("ventas")
+                .select(ventasSelect)
+                .eq("id_cuenta", idCuenta);
+              if (ventasCtaErr) throw ventasCtaErr;
+              ventasCta = data || [];
+            }
             ventasCuenta = ventasCta || [];
             const userIdsCta = Array.from(
               new Set(
@@ -4483,7 +4546,6 @@
             .update({ perfil_hogar: checked })
             .eq("id_perfil", idPerfil);
           if (error) throw error;
-          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("toggle hogar error", err);
           hog.checked = !checked;
@@ -4750,7 +4812,6 @@
             detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
               btn.dataset.corte = newDate;
             });
-            await safeRefreshDetalleConDatosReales();
           } catch (err) {
             console.error("update fecha corte cuenta error", err);
             alert("No se pudo actualizar la fecha.");
@@ -4910,7 +4971,11 @@
               if (editBtn) editBtn.classList.remove("hidden");
               if (cancelBtn) cancelBtn.classList.add("hidden");
               saveEditBtn.classList.add("hidden");
-              await safeRefreshDetalleConDatosReales();
+              const replBtn = row?.querySelector(".btn-reemplazar-row");
+              if (replBtn) {
+                replBtn.dataset.fecha = newDate;
+              }
+              updateRowCopyPayload(row);
             } catch (err) {
               console.error("update fecha corte error", err);
               alert("No se pudo actualizar la fecha.");
@@ -4955,7 +5020,11 @@
               if (editBtn) editBtn.classList.remove("hidden");
               if (cancelBtn) cancelBtn.classList.add("hidden");
               saveEditBtn.classList.add("hidden");
-              await safeRefreshDetalleConDatosReales();
+              const replBtn = row?.querySelector(".btn-reemplazar-row");
+              if (replBtn) {
+                replBtn.dataset.correo = newCorreo;
+              }
+              updateRowCopyPayload(row);
             } catch (err) {
               console.error("update correo miembro error", err);
               alert("No se pudo actualizar el correo.");
@@ -5009,7 +5078,11 @@
               if (editBtn) editBtn.classList.remove("hidden");
               if (cancelBtn) cancelBtn.classList.add("hidden");
               saveEditBtn.classList.add("hidden");
-              await safeRefreshDetalleConDatosReales();
+              const replBtn = row?.querySelector(".btn-reemplazar-row");
+              if (replBtn) {
+                replBtn.dataset.cliente = encodeURIComponent(value);
+              }
+              updateRowCopyPayload(row);
             } catch (err) {
               console.error("update cliente error", err);
               alert("No se pudo actualizar el cliente.");
@@ -5613,7 +5686,11 @@
             }
             input.classList.remove("show");
             input.classList.add("hidden");
-            await safeRefreshDetalleConDatosReales();
+            const replBtn = row?.querySelector(".btn-reemplazar-row");
+            if (replBtn) {
+              replBtn.dataset.fecha = newDate;
+            }
+            updateRowCopyPayload(row);
           } catch (err) {
             console.error("update fecha corte error", err);
             alert("No se pudo actualizar la fecha.");
@@ -5642,7 +5719,11 @@
             }
             input.classList.remove("show");
             input.classList.add("hidden");
-            await safeRefreshDetalleConDatosReales();
+            const replBtn = row?.querySelector(".btn-reemplazar-row");
+            if (replBtn) {
+              replBtn.dataset.correo = newCorreo;
+            }
+            updateRowCopyPayload(row);
           } catch (err) {
             console.error("update correo miembro error", err);
             alert("No se pudo actualizar el correo.");
@@ -5739,7 +5820,6 @@
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
           });
-          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("renovar cuenta error", err);
           alert("No se pudo renovar la cuenta.");
@@ -5790,7 +5870,6 @@
           detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
             btn.dataset.corte = nuevaFecha;
           });
-          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("recargar cuenta error", err);
           alert("No se pudo recargar la cuenta.");
@@ -7305,6 +7384,12 @@
               pinSpan.dataset.clipboard = newPin || "";
             }
             if (pinBtn) pinBtn.dataset.pin = newPin || "";
+            const pinRow = pinBtn?.closest("tr");
+            const replPinBtn = pinRow?.querySelector(".btn-reemplazar-row");
+            if (replPinBtn) {
+              replPinBtn.dataset.pin = newPin || "";
+            }
+            updateRowCopyPayload(pinRow);
 
             // Notificar cambio de PIN al usuario de la venta del perfil
             const { data: ventaPerfil, error: ventaErr } = await supabase
@@ -7476,8 +7561,47 @@
               if (notifErr) throw notifErr;
             }
           }
+          if (modalState.type === "clave") {
+            const claveText = newPin || "-";
+            const claveClipboard = newPin || "";
+            if (
+              currentCuentaDetalle &&
+              String(currentCuentaDetalle.id_cuenta || "") ===
+                String(modalState.targetId || "")
+            ) {
+              currentCuentaDetalle.clave = newPin || "";
+            }
+            const platformCredVals = detalleEl?.querySelectorAll(
+              ".cuenta-platform-cred .cred-copy",
+            );
+            if (platformCredVals?.length > 1) {
+              platformCredVals[1].textContent = claveText;
+              platformCredVals[1].dataset.clipboard = claveClipboard;
+            }
+            const claveBtns = Array.from(
+              detalleEl?.querySelectorAll(
+                `.btn-clave[data-cuenta="${modalState.targetId}"]`,
+              ) || [],
+            );
+            claveBtns.forEach((btn) => {
+              btn.dataset.clave = newPin || "";
+              const claveSpan = btn.closest("p")?.querySelector(".cred-copy");
+              if (claveSpan) {
+                claveSpan.textContent = claveText;
+                claveSpan.dataset.clipboard = claveClipboard;
+              }
+            });
+            detalleEl?.querySelectorAll(".btn-reemplazar-row[data-clave]").forEach((btn) => {
+              btn.dataset.clave = newPin || "";
+            });
+            detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
+              btn.dataset.clave = newPin || "";
+            });
+            detalleEl?.querySelectorAll("tr").forEach((row) => {
+              updateRowCopyPayload(row);
+            });
+          }
           closePinModal();
-          await safeRefreshDetalleConDatosReales();
         } catch (err) {
           console.error("update pin/clave error", err);
           alert("No se pudo actualizar.");

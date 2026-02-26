@@ -232,6 +232,13 @@
           .replace(/[\u0300-\u036f]/g, "")
           .toLowerCase()
           .trim();
+      const todayInVenezuela = () =>
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date());
 
       const loadUsuariosCache = async () => {
         if (usuariosCache) return usuariosCache;
@@ -446,6 +453,7 @@
         const nombre = toTitleCase(modalNombre?.value || "").trim();
         const apellido = toTitleCase(modalApellido?.value || "").trim();
         const correo = (modalCorreo?.value || "").trim();
+        const fechaRegistroAdmin = todayInVenezuela();
         let telefono = (modalTelefono?.value || "").trim();
         telefono = telefono.replace(/[^\d]/g, "");
         if (!nombre || !apellido || !correo) {
@@ -461,6 +469,7 @@
               correo,
               telefono,
               acceso_cliente: true,
+              fecha_registro_admin: fechaRegistroAdmin,
             })
             .select("id_usuario")
             .single();

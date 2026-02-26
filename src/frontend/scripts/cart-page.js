@@ -33,6 +33,11 @@ const btnContinue = document.querySelector("#btn-page-continue");
 const btnPay = document.querySelector("#btn-page-pay");
 const cartSaldoEl = document.querySelector("#cart-saldo");
 const refreshNoteEl = document.querySelector("#cart-refresh-note");
+const removeModalEl = document.querySelector("#cart-remove-modal");
+const removeModalBackdropEl = removeModalEl?.querySelector(".modal-backdrop");
+const removeModalCloseEl = document.querySelector("#cart-remove-modal-close");
+const removeModalCancelEl = document.querySelector("#cart-remove-cancel");
+const removeModalConfirmEl = document.querySelector("#cart-remove-confirm");
 let cartItems = [];
 let precios = [];
 let plataformas = [];
@@ -48,11 +53,45 @@ let cartUseSaldo = false;
 let dbUseSaldo = false;
 let dbCartSnapshot = new Map();
 let currentUserIsCliente = true;
+let discountColumns = [];
+let discountColumnById = {};
+let pendingRemoveIndex = null;
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) =>
   v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+const getDiscountColumnsFromRows = (rows = []) => {
+  const cols = new Set();
+  (rows || []).forEach((row) => {
+    Object.keys(row || {}).forEach((k) => {
+      const key = String(k || "").toLowerCase();
+      if (/^descuento_\d+$/i.test(key)) cols.add(key);
+    });
+  });
+  const out = Array.from(cols).sort((a, b) => {
+    const na = Number(a.split("_")[1]) || 0;
+    const nb = Number(b.split("_")[1]) || 0;
+    return na - nb;
+  });
+  return out.length ? out : ["descuento_1", "descuento_2"];
+};
+
+const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
+  const ids = Array.from(
+    new Set(
+      (rows || [])
+        .map((row) => Number(row?.id_descuento))
+        .filter((n) => Number.isFinite(n)),
+    ),
+  ).sort((a, b) => a - b);
+  const map = {};
+  ids.forEach((id, idx) => {
+    if (cols[idx]) map[id] = cols[idx];
+  });
+  return map;
+};
 
 const updateUseSaldoButton = () => {
   const canUseSaldo = Number(userSaldo) > 0;
@@ -127,10 +166,15 @@ const getClosestDiscountPct = (rows, value, column) => {
 
 const resolveDiscountColumn = (platform, mode = "months") => {
   const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
-  const asNum = Number(raw);
-  if (Number.isFinite(asNum) && asNum >= 1) return `descuento_${Math.trunc(asNum)}`;
   const asText = String(raw || "").trim();
   if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) {
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
+    const direct = `descuento_${Math.trunc(asNum)}`;
+    if (discountColumns.includes(direct)) return direct;
+  }
   return mode === "items" ? "descuento_2" : "descuento_1";
 };
 
@@ -199,6 +243,50 @@ const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg;
 };
 
+const closeRemoveModal = () => {
+  pendingRemoveIndex = null;
+  removeModalEl?.classList.add("hidden");
+  removeModalEl?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+};
+
+const openRemoveModal = (idx) => {
+  if (!Number.isFinite(idx) || idx < 0) return;
+  pendingRemoveIndex = idx;
+  removeModalEl?.classList.remove("hidden");
+  removeModalEl?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+};
+
+const confirmRemoveModal = () => {
+  const idx = Number(pendingRemoveIndex);
+  if (!Number.isFinite(idx) || idx < 0) {
+    closeRemoveModal();
+    return;
+  }
+  const item = cartItems[idx];
+  if (!item) {
+    closeRemoveModal();
+    return;
+  }
+  cartItems.splice(idx, 1);
+  cartNeedsSync = true;
+  renderCart();
+  closeRemoveModal();
+  (async () => {
+    if (removeModalConfirmEl) {
+      removeModalConfirmEl.disabled = true;
+    }
+    try {
+      await syncCartWithServer({ alertOnError: true });
+    } finally {
+      if (removeModalConfirmEl) {
+        removeModalConfirmEl.disabled = false;
+      }
+    }
+  })();
+};
+
 const placePayButton = () => {
   if (!btnPay) return;
   const payRow = document.querySelector(".cart-pay-row");
@@ -223,6 +311,49 @@ const updateRefreshButtonState = () => {
   const summaryTable = itemsEl?.querySelector(".cart-summary-table");
   summaryTable?.classList.toggle("is-dim", needsSync);
   refreshNoteEl?.classList.toggle("hidden", !needsSync);
+};
+
+const syncCartWithServer = async ({ refreshBtn = null, alertOnError = false } = {}) => {
+  try {
+    if (refreshBtn) setRefreshLoading(refreshBtn, true);
+    await syncCartValuesBeforeCheckout();
+    const freshCart = await fetchCart();
+    if (freshCart?.items) {
+      cartItems = freshCart.items;
+    }
+    dbUseSaldo = isTrue(freshCart?.usa_saldo);
+    cartUseSaldo = dbUseSaldo;
+    updateUseSaldoButton();
+    cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
+      ? Number(freshCart.monto_usd)
+      : cartMontoUsd;
+    cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
+      ? Number(freshCart.monto_final)
+      : cartMontoFinal;
+    cartDescuento = Number.isFinite(Number(freshCart?.descuento))
+      ? Number(freshCart.descuento)
+      : cartDescuento;
+    dbCartSnapshot = buildCartSnapshot(cartItems);
+    cartNeedsSync = false;
+    updateCartNeedsSync();
+    const cardCount = itemsEl?.querySelectorAll(".cart-item-card").length || 0;
+    if (cardCount && cardCount !== cartItems.length) {
+      renderCart();
+    } else {
+      (cartItems || []).forEach((_, idx) => updateCartRowUI(idx));
+      updateCartSummaryUI();
+    }
+    return true;
+  } catch (err) {
+    console.error("refresh cart error", err);
+    if (alertOnError) {
+      alert("No se pudo actualizar el carrito.");
+    }
+    return false;
+  } finally {
+    if (refreshBtn) setRefreshLoading(refreshBtn, false);
+    updateCartNeedsSync();
+  }
 };
 
 const buildCartSnapshot = (items) => {
@@ -710,44 +841,7 @@ const handleCartClick = async (e) => {
     }
     if (action === "refresh") {
       const refreshBtn = cartActionBtn;
-      try {
-        setRefreshLoading(refreshBtn, true);
-        await syncCartValuesBeforeCheckout();
-        const freshCart = await fetchCart();
-        if (freshCart?.items) {
-          cartItems = freshCart.items;
-        }
-        dbUseSaldo = isTrue(freshCart?.usa_saldo);
-        cartUseSaldo = dbUseSaldo;
-        updateUseSaldoButton();
-        cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
-          ? Number(freshCart.monto_usd)
-          : cartMontoUsd;
-        cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
-          ? Number(freshCart.monto_final)
-          : cartMontoFinal;
-        cartDescuento = Number.isFinite(Number(freshCart?.descuento))
-          ? Number(freshCart.descuento)
-          : cartDescuento;
-        dbCartSnapshot = buildCartSnapshot(cartItems);
-        cartNeedsSync = false;
-        updateCartNeedsSync();
-        const cardCount = itemsEl?.querySelectorAll(".cart-item-card").length || 0;
-        if (cardCount && cardCount !== cartItems.length) {
-          renderCart();
-        } else {
-          (cartItems || []).forEach((_, idx) => updateCartRowUI(idx));
-          updateCartSummaryUI();
-        }
-        // No sobreescribir UI con datos de BD aquí.
-        // Este botón debe empujar HTML -> BD.
-      } catch (err) {
-        console.error("refresh cart error", err);
-        alert("No se pudo actualizar el carrito.");
-      } finally {
-        setRefreshLoading(refreshBtn, false);
-        updateCartNeedsSync();
-      }
+      await syncCartWithServer({ refreshBtn, alertOnError: true });
       return;
     }
   }
@@ -767,12 +861,9 @@ const handleCartClick = async (e) => {
   const item = cartItems[idx];
   if (!item) return;
   const price = precios.find((p) => p.id_precio === item.id_precio) || {};
-  const platform = plataformas.find((p) => p.id_plataforma === price.id_plataforma) || {};
 
   if (btnRemove) {
-    cartItems.splice(idx, 1);
-    cartNeedsSync = true;
-    renderCart();
+    openRemoveModal(idx);
     return;
   }
 
@@ -781,19 +872,7 @@ const handleCartClick = async (e) => {
     const delta = btnMinus ? -1 : 1;
     const newQty = (item.cantidad || 0) + delta;
     if (newQty <= 0) {
-      if (btnMinus) {
-        const nombrePlat = platform.nombre || `Precio ${item.id_precio || ""}`;
-        const ok = window.confirm(
-          `¿Quieres eliminar ${nombrePlat} de tu carrito?\n\nSi/No`
-        );
-        if (!ok) {
-          renderCart();
-          return;
-        }
-      }
-      cartItems.splice(idx, 1);
-      cartNeedsSync = true;
-      renderCart();
+      openRemoveModal(idx);
       return;
     }
     item.cantidad = newQty;
@@ -824,6 +903,16 @@ const handleCartChange = (e) => {
   updateCartSummaryUI();
   updateCartNeedsSync();
 };
+
+removeModalBackdropEl?.addEventListener("click", closeRemoveModal);
+removeModalCloseEl?.addEventListener("click", closeRemoveModal);
+removeModalCancelEl?.addEventListener("click", closeRemoveModal);
+removeModalConfirmEl?.addEventListener("click", confirmRemoveModal);
+window.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  if (removeModalEl?.classList.contains("hidden")) return;
+  closeRemoveModal();
+});
 
 async function init() {
   setStatus("Cargando carrito...");
@@ -902,6 +991,8 @@ async function init() {
     precios = precioData;
     plataformas = catalog.plataformas;
     descuentos = catalog.descuentos || [];
+    discountColumns = getDiscountColumnsFromRows(descuentos);
+    discountColumnById = buildDiscountColumnByIdMap(descuentos, discountColumns);
     cartItems = cartData.items || [];
     renderCart();
     setStatus("");

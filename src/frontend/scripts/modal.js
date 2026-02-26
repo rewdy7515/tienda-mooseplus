@@ -18,6 +18,8 @@ let modalScrollHintEl = null;
 let scrollHintBound = false;
 let tooltipDismissBound = false;
 let discountAudienceIsCliente = true;
+let discountColumns = [];
+let discountColumnById = {};
 
 const isTrueLike = (v) =>
   v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
@@ -25,14 +27,48 @@ const isTrueLike = (v) =>
 const isFalseLike = (v) =>
   v === false || v === 0 || v === "0" || String(v || "").toLowerCase() === "false";
 
+const getDiscountColumnsFromRows = (rows = []) => {
+  const cols = new Set();
+  (rows || []).forEach((row) => {
+    Object.keys(row || {}).forEach((k) => {
+      const key = String(k || "").toLowerCase();
+      if (/^descuento_\d+$/i.test(key)) cols.add(key);
+    });
+  });
+  const out = Array.from(cols).sort((a, b) => {
+    const na = Number(a.split("_")[1]) || 0;
+    const nb = Number(b.split("_")[1]) || 0;
+    return na - nb;
+  });
+  return out.length ? out : ["descuento_1", "descuento_2"];
+};
+
+const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
+  const ids = Array.from(
+    new Set(
+      (rows || [])
+        .map((row) => Number(row?.id_descuento))
+        .filter((n) => Number.isFinite(n)),
+    ),
+  ).sort((a, b) => a - b);
+  const map = {};
+  ids.forEach((id, idx) => {
+    if (cols[idx]) map[id] = cols[idx];
+  });
+  return map;
+};
+
 const resolveDiscountColumn = (platform, mode = "months") => {
   const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
-  const asNum = Number(raw);
-  if (Number.isFinite(asNum) && asNum >= 1) {
-    return `descuento_${Math.trunc(asNum)}`;
-  }
   const asText = String(raw || "").trim();
   if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) {
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
+    const direct = `descuento_${Math.trunc(asNum)}`;
+    if (discountColumns.includes(direct)) return direct;
+  }
   return mode === "items" ? "descuento_2" : "descuento_1";
 };
 
@@ -722,6 +758,8 @@ export const setPrecios = (map) => {
 };
 
 export const setDescuentos = (rows = []) => {
+  discountColumns = getDiscountColumnsFromRows(rows);
+  discountColumnById = buildDiscountColumnByIdMap(rows, discountColumns);
   descuentosPorMes = (rows || []).reduce((acc, d) => {
     const meses = Number(d.meses);
     if (Number.isFinite(meses) && meses > 0) {
@@ -862,10 +900,8 @@ export const initModal = (elements) => {
       return;
     }
     animateAddToCart();
-    const monthsToSend =
-      !currentFlags.por_pantalla && !currentFlags.por_acceso
-        ? Number(selectedPrecio.duracion) || 1
-        : currentMonths;
+    // Respetar siempre el valor seleccionado en el control de meses.
+    const monthsToSend = currentFlags.tarjeta_de_regalo ? 1 : currentMonths;
     const unitPrice =
       Number(selectedPrecio.precio_usd_detal) ||
       Number(selectedPrecio.precio_usd_mayor) ||
