@@ -692,57 +692,59 @@ const renderCart = () => {
         `;
       const cardImage = platform.banner || "";
       const cardHtml = `
-        <section class="cart-item-card" data-index="${idx}">
-          <div class="cart-item-top">
-            <div class="cart-item-logo">
-              <img src="${cardImage}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
-            </div>
-            <div class="cart-item-info">
-              <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
-              <p class="cart-detail">${detalle || ""}</p>
-              <p class="cart-detail">Tipo: ${tipo}</p>
-              ${
-                item.renovacion
-                  ? `<p class="cart-detail cart-detail-email"><span class="cart-email-label">Correo:</span><span class="cart-email-value">${correoRenovacion}</span></p>`
-                  : ""
-              }
-              <p class="cart-detail">Precio: $${round2(unit).toFixed(2)}</p>
-            </div>
-            <button type="button" class="cart-remove btn-delete" data-index="${idx}" aria-label="Eliminar item">
-              <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/x-icon.png.webp" alt="" aria-hidden="true" />
-            </button>
-          </div>
-          <div class="cart-item-bottom">
-            <div class="cart-item-cell">
-              <span class="cart-item-label">Meses</span>
-              <div class="modal-qty">
-                <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
-                <span class="cart-meses-value">${mesesVal}</span>
-                <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
+        <div class="cart-item-card-wrap" data-index="${idx}">
+          <button type="button" class="cart-remove btn-delete cart-card-remove" data-index="${idx}" aria-label="Eliminar item">
+            <img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/x-icon.png.webp" alt="" aria-hidden="true" />
+          </button>
+          <section class="cart-item-card" data-index="${idx}">
+            <div class="cart-item-top">
+              <div class="cart-item-logo">
+                <img src="${cardImage}" alt="${platform.nombre || ""}" loading="lazy" decoding="async" />
+              </div>
+              <div class="cart-item-info">
+                <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
+                <p class="cart-detail">${detalle || ""}</p>
+                <p class="cart-detail">Tipo: ${tipo}</p>
+                ${
+                  item.renovacion
+                    ? `<p class="cart-detail cart-detail-email"><span class="cart-email-label">Correo:</span><span class="cart-email-value">${correoRenovacion}</span></p>`
+                    : ""
+                }
+                <p class="cart-detail">Precio: $${round2(unit).toFixed(2)}</p>
               </div>
             </div>
-            <div class="cart-item-cell">
-              <span class="cart-item-label">Cantidad</span>
-              ${qtyControl}
+            <div class="cart-item-bottom">
+              <div class="cart-item-cell">
+                <span class="cart-item-label">Meses</span>
+                <div class="modal-qty">
+                  <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
+                  <span class="cart-meses-value">${mesesVal}</span>
+                  <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
+                </div>
+              </div>
+              <div class="cart-item-cell">
+                <span class="cart-item-label">Cantidad</span>
+                ${qtyControl}
+              </div>
             </div>
-          </div>
-          <div class="cart-item-subtotal">
-            <span class="cart-item-label">Subtotal</span>
-            <div class="cart-subtotal"><span class="cart-subtotal-value">$${subtotal.toFixed(2)}</span></div>
-            <div class="cart-discount-line">
-              ${
-                descuentoMesesVal > 0
-                  ? `<span class="discount-badge">-${(rateMeses * 100).toFixed(2)}% mes</span>`
-                  : ""
-              }
-              ${
-                descuentoCantidadVal > 0
-                  ? `<span class="discount-badge">-${(rateQty * 100).toFixed(2)}% cant.</span>`
-                  : ""
-              }
+            <div class="cart-item-subtotal">
+              <span class="cart-item-label">Subtotal</span>
+              <div class="cart-subtotal"><span class="cart-subtotal-value">$${subtotal.toFixed(2)}</span></div>
+              <div class="cart-discount-line">
+                ${
+                  descuentoMesesVal > 0
+                    ? `<span class="discount-badge">-${(rateMeses * 100).toFixed(2)}% mes</span>`
+                    : ""
+                }
+                ${
+                  descuentoCantidadVal > 0
+                    ? `<span class="discount-badge">-${(rateQty * 100).toFixed(2)}% cant.</span>`
+                    : ""
+                }
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       `;
       return { rowHtml, cardHtml };
     });

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Inventario</title>
+    <title>Mis cuentas</title>
     <link rel="stylesheet" href="../styles/styles.css" />
     <style>
       .copyable {
@@ -213,7 +213,7 @@
     </div>
 
     <main class="categorias-dinamicas">
-      <h2>Inventario</h2>
+      <h2>Mis cuentas</h2>
       <div class="cuentas-busqueda" style="margin: 0 0 12px 0">
         <div class="input-wrap">
           <input
@@ -239,7 +239,7 @@
           Renovar cuentas
         </button>
       </div>
-      <p id="inventario-status" class="status">Cargando inventario...</p>
+      <p id="inventario-status" class="status">Cargando mis cuentas...</p>
       <div id="inventario-list" class="inventario-list"></div>
     </main>
 
@@ -976,7 +976,7 @@
       };
 
       const loadInventario = async () => {
-        if (statusEl) statusEl.textContent = "Cargando inventario...";
+        if (statusEl) statusEl.textContent = "Cargando mis cuentas...";
         // Garantiza que la cookie de sesión esté activa antes de pedir datos protegidos
         await ensureServerSession();
         const resp = await fetchInventario();
@@ -1047,7 +1047,7 @@
         } catch (err) {
           console.error("inventario init error", err);
           if (statusEl)
-            statusEl.textContent = "No se pudo cargar el inventario.";
+            statusEl.textContent = "No se pudieron cargar tus cuentas.";
         }
       }
 

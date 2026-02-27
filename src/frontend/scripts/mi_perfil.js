@@ -23,6 +23,7 @@ const nombreInputEl = document.querySelector("#perfil-nombre-input");
 const apellidoInputEl = document.querySelector("#perfil-apellido-input");
 const correoInputEl = document.querySelector("#perfil-correo-input");
 const telefonoInputEl = document.querySelector("#perfil-telefono-input");
+const recordatorioDiasInputEl = document.querySelector("#perfil-recordatorio-dias-input");
 const avatarModalEl = document.querySelector("#avatar-modal");
 const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
 const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
@@ -34,10 +35,11 @@ let savedAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let savedBgColor = DEFAULT_BG_COLOR;
 let pendingAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let pendingBgColor = DEFAULT_BG_COLOR;
+let savedRecordatorioDiasAntes = null;
 
 const setInput = (el, value) => {
   if (!el) return;
-  el.value = String(value || "").trim();
+  el.value = String(value ?? "").trim();
 };
 
 const escapeHtml = (value) =>
@@ -54,6 +56,16 @@ const normalizeColor = (value) => {
   const withHash = raw.startsWith("#") ? raw : `#${raw}`;
   if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(withHash)) return withHash.toLowerCase();
   return "";
+};
+
+const parseRecordatorioDias = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return { valid: true, value: null };
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: parsed };
 };
 
 const isImageName = (name) =>
@@ -240,6 +252,9 @@ const init = async () => {
     setInput(apellidoInputEl, user.apellido);
     setInput(correoInputEl, user.correo);
     setInput(telefonoInputEl, user.telefono);
+    const parsedRecordatorio = parseRecordatorioDias(user.recordatorio_dias_antes);
+    savedRecordatorioDiasAntes = parsedRecordatorio.valid ? parsedRecordatorio.value : null;
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
 
     applyAvatarSavedState({ url: savedAvatarUrl, color: savedBgColor });
 
@@ -248,6 +263,33 @@ const init = async () => {
   } catch (err) {
     console.error("mi_perfil init error", err);
     if (statusEl) statusEl.textContent = "No se pudo cargar el perfil.";
+  }
+};
+
+const saveRecordatorioDiasAntes = async () => {
+  if (!currentUserId || !recordatorioDiasInputEl) return;
+  const parsed = parseRecordatorioDias(recordatorioDiasInputEl.value);
+  if (!parsed.valid) {
+    alert("Ingresa un numero entero de dias (0 o mayor).");
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
+    return;
+  }
+  if (parsed.value === savedRecordatorioDiasAntes) {
+    setInput(recordatorioDiasInputEl, parsed.value ?? "");
+    return;
+  }
+  try {
+    const { error } = await supabase
+      .from("usuarios")
+      .update({ recordatorio_dias_antes: parsed.value })
+      .eq("id_usuario", currentUserId);
+    if (error) throw error;
+    savedRecordatorioDiasAntes = parsed.value;
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
+  } catch (err) {
+    console.error("save recordatorio_dias_antes error", err);
+    alert("No se pudo guardar los dias de recordatorio.");
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
   }
 };
 
@@ -276,6 +318,13 @@ avatarModalEl?.addEventListener("click", (e) => {
 
 avatarModalCloseEl?.addEventListener("click", () => closeAvatarModal(true));
 btnAvatarSaveEl?.addEventListener("click", saveAvatarProfile);
+recordatorioDiasInputEl?.addEventListener("change", saveRecordatorioDiasAntes);
+recordatorioDiasInputEl?.addEventListener("blur", saveRecordatorioDiasAntes);
+recordatorioDiasInputEl?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  saveRecordatorioDiasAntes();
+});
 
 init();
 attachLogoHome();

@@ -883,6 +883,34 @@
         </div>
 
         <div class="preview-section">
+          <button type="button" class="btn-outline preview-toggle" id="btn-metodos-pago-toggle">
+            Metodos de pago
+          </button>
+          <div id="metodos-pago-editor" class="logo-editor hidden">
+            <div class="logo-current">
+              <p class="logo-label">Métodos de pago actuales</p>
+              <p class="status logo-status">
+                Arrastra y suelta una imagen sobre el método para reemplazarla.
+              </p>
+              <div id="metodos-pago-list" class="platform-logos-list">
+                <p class="status icono-empty">Sin métodos de pago cargados.</p>
+              </div>
+              <p id="metodos-pago-selected-status" class="status logo-status">
+                Método: -
+              </p>
+            </div>
+            <div class="logo-upload">
+              <p class="logo-label">Actualizar imagen del método seleccionado</p>
+              <input type="file" id="metodo-pago-file" accept="image/*" />
+              <button type="button" class="btn-primary" id="btn-metodo-pago-update">
+                Guardar imagen
+              </button>
+              <p id="metodos-pago-status" class="status logo-status"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-section">
           <button type="button" class="btn-outline preview-toggle" id="btn-store-logo-toggle">
             Logo tienda
           </button>
@@ -1057,17 +1085,24 @@
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const platformLogosToggleBtn = document.querySelector("#btn-platform-logos-toggle");
+      const metodosPagoToggleBtn = document.querySelector("#btn-metodos-pago-toggle");
       const platformBannersToggleBtn = document.querySelector("#btn-platform-banners-toggle");
       const storeLogoToggleBtn = document.querySelector("#btn-store-logo-toggle");
       const editor = document.querySelector("#logo-editor");
+      const metodosPagoEditor = document.querySelector("#metodos-pago-editor");
       const platformLogosCurrentEl = document.querySelector("#platform-logos-current");
       const bannerEditor = document.querySelector("#banner-editor");
       const storeLogoEditor = document.querySelector("#store-logo-editor");
       const platformLogosListEl = document.querySelector("#platform-logos-list");
+      const metodosPagoListEl = document.querySelector("#metodos-pago-list");
       const platformSelectedStatusEl = document.querySelector("#platform-selected-status");
+      const metodosPagoSelectedStatusEl = document.querySelector("#metodos-pago-selected-status");
       const fileInput = document.querySelector("#logo-file");
       const btnUpdate = document.querySelector("#btn-logo-update");
       const statusEl = document.querySelector("#logo-status");
+      const metodoPagoInput = document.querySelector("#metodo-pago-file");
+      const btnMetodoPagoUpdate = document.querySelector("#btn-metodo-pago-update");
+      const metodosPagoStatusEl = document.querySelector("#metodos-pago-status");
       const storeLogoInput = document.querySelector("#store-logo-input");
       const btnStoreLogoUpdate = document.querySelector("#btn-store-logo-upload");
       const storeIconInput = document.querySelector("#store-icon-input");
@@ -1123,12 +1158,15 @@
       const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
       const PLATFORM_CARD_LOGOS_FOLDER = "logos/plataformas/tarjeta";
       const PLATFORM_MODAL_BANNERS_FOLDER = "logos/plataformas/banner";
+      const PAYMENT_METHOD_LOGOS_FOLDER = "logos/metodos-pago";
       const STORE_LOGO_FOLDER = "logos/mooseplus";
       const STATIC_FAVICON_HREF = "/src/frontend/assets/favicon/logo-corto-blanco-icono.png";
       const PAGINA_TARGET_ID = 2;
 
       let plataformasMap = {};
+      let metodosPagoMap = {};
       let selectedId = null;
+      let selectedMetodoPagoId = null;
       let paginaPreview = null;
       let draggingHomeBannerRow = null;
       let homeBannerOrderSaving = false;
@@ -1150,6 +1188,12 @@
         storeLogoStatusEl.textContent = msg || "";
         storeLogoStatusEl.classList.toggle("is-error", isError);
         storeLogoStatusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+      const setMetodosPagoStatus = (msg, isError = false) => {
+        if (!metodosPagoStatusEl) return;
+        metodosPagoStatusEl.textContent = msg || "";
+        metodosPagoStatusEl.classList.toggle("is-error", isError);
+        metodosPagoStatusEl.classList.toggle("is-success", !isError && !!msg);
       };
 
       const setBannerStatus = (msg, isError = false) => {
@@ -1293,6 +1337,12 @@
               .querySelectorAll(".platform-logo-row.is-drop-target")
               .forEach((row) => row.classList.remove("is-drop-target"));
           });
+      };
+      const clearMetodosPagoDropTargets = () => {
+        if (!metodosPagoListEl) return;
+        metodosPagoListEl
+          .querySelectorAll(".platform-logo-row.is-drop-target")
+          .forEach((row) => row.classList.remove("is-drop-target"));
       };
       const clearStoreAssetDropTargets = () => {
         [storeLogoFrameEl, storeIconFrameEl, storePreviewFrameEl]
@@ -1654,6 +1704,57 @@
             `;
           })
           .join("");
+      };
+      const renderMetodosPagoList = () => {
+        if (!metodosPagoListEl) return;
+        const rows = Object.values(metodosPagoMap || {})
+          .filter((row) => Number.isFinite(Number(row?.id_metodo_de_pago)))
+          .sort((a, b) => {
+            const idA = Number(a?.id_metodo_de_pago) || 0;
+            const idB = Number(b?.id_metodo_de_pago) || 0;
+            if (idA !== idB) return idA - idB;
+            return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es");
+          });
+        if (!rows.length) {
+          metodosPagoListEl.innerHTML =
+            '<p class="status icono-empty">Sin métodos de pago cargados.</p>';
+          if (metodosPagoSelectedStatusEl) metodosPagoSelectedStatusEl.textContent = "Método: -";
+          return;
+        }
+        metodosPagoListEl.innerHTML = rows
+          .map((row) => {
+            const rowId = Number(row?.id_metodo_de_pago || 0);
+            const isSelected = rowId > 0 && rowId === Number(selectedMetodoPagoId || 0);
+            const nombre = String(row?.nombre || "").trim() || `Método #${rowId}`;
+            const imgUrl = String(row?.imagen || "").trim();
+            const extraInfo = [row?.correo, row?.telefono].filter(Boolean).join(" · ");
+            return `
+              <article class="platform-logo-row platform-banner-row ${isSelected ? "is-selected" : ""}" data-id-metodo="${rowId}">
+                <div class="platform-logo-thumb platform-banner-thumb">
+                  ${
+                    imgUrl
+                      ? `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(nombre)}" loading="lazy" decoding="async" />
+                         ${getExtensionBadgeHtml(imgUrl)}`
+                      : '<span class="status" style="font-size:11px; padding:4px; text-align:center;">Sin imagen</span>'
+                  }
+                </div>
+                <div class="platform-logo-meta">
+                  <p class="platform-logo-name">${escapeHtml(nombre)}</p>
+                  <p class="status" style="margin:0; font-size:11px;">ID método: ${rowId}${
+                    extraInfo ? ` · ${escapeHtml(extraInfo)}` : ""
+                  }</p>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+        const selectedMetodo =
+          selectedMetodoPagoId != null ? metodosPagoMap[selectedMetodoPagoId] : null;
+        if (metodosPagoSelectedStatusEl) {
+          metodosPagoSelectedStatusEl.textContent = selectedMetodo?.nombre
+            ? `Método: ${selectedMetodo.nombre}`
+            : "Método: -";
+        }
       };
       const renderPlatformBannersList = () => {
         if (!platformBannersListEl) return;
@@ -2235,6 +2336,57 @@
         };
       };
 
+      const replaceMetodoPagoImage = async (
+        idMetodoPago,
+        file,
+        previousImageUrl = "",
+      ) => {
+        if (!Number.isFinite(idMetodoPago) || idMetodoPago <= 0) {
+          throw new Error("id_metodo_de_pago inválido.");
+        }
+        if (!isImageFile(file)) {
+          throw new Error("Solo se permiten archivos de imagen.");
+        }
+
+        setMetodosPagoStatus("Reemplazando imagen...");
+        let optimized = file;
+        optimized = await resizeImageIfNeeded(optimized, 512, 512, 200000);
+        const { urls, error: uploadErr } = await uploadPlatformLogos([optimized], {
+          folder: PAYMENT_METHOD_LOGOS_FOLDER,
+        });
+        if (uploadErr) throw uploadErr;
+        const imageUrl = String(urls?.[0] || "").trim();
+        if (!imageUrl) throw new Error("No se obtuvo URL de la imagen.");
+
+        const { error: updErr } = await supabase
+          .from("metodos_de_pago")
+          .update({ imagen: imageUrl })
+          .eq("id_metodo_de_pago", idMetodoPago);
+        if (updErr) throw updErr;
+
+        let deleteError = null;
+        const prevUrl = String(previousImageUrl || "").trim();
+        if (prevUrl && prevUrl !== imageUrl) {
+          const deleted = await deletePublicAssets({
+            public_urls: [prevUrl],
+          });
+          if (deleted?.error) {
+            deleteError = deleted.error;
+          }
+        }
+
+        metodosPagoMap[idMetodoPago] = {
+          ...(metodosPagoMap[idMetodoPago] || {}),
+          id_metodo_de_pago: idMetodoPago,
+          imagen: imageUrl,
+        };
+
+        return {
+          imageUrl,
+          deleteError,
+        };
+      };
+
       const replacePlatformBannerImage = async (
         idPlataforma,
         file,
@@ -2458,6 +2610,32 @@
         }
       };
 
+      const loadMetodosPago = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("metodos_de_pago")
+            .select("id_metodo_de_pago, nombre, imagen, correo, telefono")
+            .order("id_metodo_de_pago", { ascending: true });
+          if (error) throw error;
+          metodosPagoMap = (data || []).reduce((acc, metodo) => {
+            const idMetodo = Number(metodo?.id_metodo_de_pago || 0);
+            if (!Number.isFinite(idMetodo) || idMetodo <= 0) return acc;
+            acc[idMetodo] = metodo;
+            return acc;
+          }, {});
+          if (selectedMetodoPagoId && !metodosPagoMap[selectedMetodoPagoId]) {
+            selectedMetodoPagoId = null;
+          }
+          renderMetodosPagoList();
+        } catch (err) {
+          console.error("load metodos de pago error", err);
+          metodosPagoMap = {};
+          selectedMetodoPagoId = null;
+          renderMetodosPagoList();
+          setMetodosPagoStatus("No se pudieron cargar los métodos de pago.", true);
+        }
+      };
+
       platformLogosToggleBtn?.addEventListener("click", () => {
         if (!editor) return;
         const willOpen = editor.classList.contains("hidden");
@@ -2465,6 +2643,15 @@
         if (willOpen) {
           setStatus("");
           renderPlatformLogosList();
+        }
+      });
+      metodosPagoToggleBtn?.addEventListener("click", async () => {
+        if (!metodosPagoEditor) return;
+        const willOpen = metodosPagoEditor.classList.contains("hidden");
+        metodosPagoEditor.classList.toggle("hidden");
+        if (willOpen) {
+          setMetodosPagoStatus("");
+          await loadMetodosPago();
         }
       });
       storeLogoToggleBtn?.addEventListener("click", () => {
@@ -2645,6 +2832,90 @@
         renderEditor(plat);
       });
 
+      metodosPagoListEl?.addEventListener("click", (e) => {
+        const row = e.target.closest(".platform-logo-row[data-id-metodo]");
+        if (!row) return;
+        const nextId = Number(row.dataset.idMetodo || 0);
+        if (!Number.isFinite(nextId) || nextId <= 0) return;
+        selectedMetodoPagoId = nextId;
+        renderMetodosPagoList();
+      });
+
+      metodosPagoListEl?.addEventListener("dragenter", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-metodo]");
+        if (!row) return;
+        e.preventDefault();
+        clearMetodosPagoDropTargets();
+        row.classList.add("is-drop-target");
+      });
+
+      metodosPagoListEl?.addEventListener("dragleave", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-metodo]");
+        if (!row) return;
+        const nextTarget = e.relatedTarget;
+        if (nextTarget && row.contains(nextTarget)) return;
+        row.classList.remove("is-drop-target");
+      });
+
+      metodosPagoListEl?.addEventListener("dragover", (e) => {
+        if (!isFileDragEvent(e)) return;
+        const row = e.target.closest(".platform-logo-row[data-id-metodo]");
+        if (!row) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        clearMetodosPagoDropTargets();
+        row.classList.add("is-drop-target");
+      });
+
+      metodosPagoListEl?.addEventListener("drop", async (e) => {
+        if (!isFileDragEvent(e)) return;
+        const filesDropped = Array.from(e.dataTransfer?.files || []).filter((file) =>
+          isImageFile(file),
+        );
+        if (!filesDropped.length) return;
+        e.preventDefault();
+        const row = e.target.closest(".platform-logo-row[data-id-metodo]");
+        clearMetodosPagoDropTargets();
+        if (!row) {
+          setMetodosPagoStatus("Suelta la imagen sobre un método de pago.", true);
+          return;
+        }
+        const idMetodoPago = Number(row.dataset.idMetodo || 0);
+        if (!Number.isFinite(idMetodoPago) || idMetodoPago <= 0) {
+          setMetodosPagoStatus("Método de pago inválido.", true);
+          return;
+        }
+        const droppedFile = filesDropped[0];
+        const previousImageUrl = String(metodosPagoMap[idMetodoPago]?.imagen || "").trim();
+        const metodoName =
+          String(metodosPagoMap[idMetodoPago]?.nombre || "").trim() || `#${idMetodoPago}`;
+        setBusyOverlay(row, "Reemplazando");
+        try {
+          const result = await replaceMetodoPagoImage(
+            idMetodoPago,
+            droppedFile,
+            previousImageUrl,
+          );
+          selectedMetodoPagoId = idMetodoPago;
+          renderMetodosPagoList();
+          if (result?.deleteError) {
+            setMetodosPagoStatus(
+              `Imagen de ${metodoName} actualizada, pero no se pudo eliminar la imagen anterior.`,
+              true,
+            );
+          } else {
+            setMetodosPagoStatus(`Imagen de ${metodoName} actualizada correctamente.`);
+          }
+        } catch (err) {
+          console.error("replace metodo pago by drop error", err);
+          setMetodosPagoStatus("No se pudo reemplazar la imagen del método de pago.", true);
+        } finally {
+          clearBusyOverlay(row);
+        }
+      });
+
       platformLogosListEl?.addEventListener("dragenter", (e) => {
         if (!isFileDragEvent(e)) return;
         const row = e.target.closest(".platform-logo-row[data-id-plataforma]");
@@ -2802,6 +3073,7 @@
         }
       });
       document.addEventListener("dragend", clearPlatformDropTargets);
+      document.addEventListener("dragend", clearMetodosPagoDropTargets);
       document.addEventListener("dragend", clearStoreAssetDropTargets);
       document.addEventListener("dragend", clearPlatformLogosImportTarget);
       document.addEventListener("dragend", clearIconoDropTargets);
@@ -3223,6 +3495,48 @@
         await saveHomeBannersOrder();
       });
 
+      btnMetodoPagoUpdate?.addEventListener("click", async () => {
+        if (!selectedMetodoPagoId) {
+          setMetodosPagoStatus("Selecciona un método de pago.", true);
+          return;
+        }
+        let file = metodoPagoInput?.files?.[0];
+        if (!file) {
+          setMetodosPagoStatus("Selecciona una imagen.", true);
+          return;
+        }
+        const rowEl = metodosPagoListEl?.querySelector(
+          `.platform-logo-row[data-id-metodo="${selectedMetodoPagoId}"]`,
+        );
+        const previousImageUrl = String(metodosPagoMap[selectedMetodoPagoId]?.imagen || "").trim();
+        const metodoName =
+          String(metodosPagoMap[selectedMetodoPagoId]?.nombre || "").trim() ||
+          `#${selectedMetodoPagoId}`;
+        try {
+          setBusyOverlay(rowEl, "Importando");
+          const result = await replaceMetodoPagoImage(
+            selectedMetodoPagoId,
+            file,
+            previousImageUrl,
+          );
+          renderMetodosPagoList();
+          if (result?.deleteError) {
+            setMetodosPagoStatus(
+              `Imagen de ${metodoName} actualizada, pero no se pudo eliminar la imagen anterior.`,
+              true,
+            );
+          } else {
+            setMetodosPagoStatus(`Imagen de ${metodoName} actualizada correctamente.`);
+          }
+          if (metodoPagoInput) metodoPagoInput.value = "";
+        } catch (err) {
+          console.error("actualizar metodo pago error", err);
+          setMetodosPagoStatus("No se pudo actualizar la imagen del método de pago.", true);
+        } finally {
+          clearBusyOverlay(rowEl);
+        }
+      });
+
       btnUpdate?.addEventListener("click", async () => {
         const selectedFiles = Array.from(fileInput?.files || []);
         if (!selectedFiles.length) {
@@ -3397,6 +3711,7 @@
 
       init();
       loadPlataformas();
+      loadMetodosPago();
       loadPreview();
       updateNewRoutePreview();
       attachLogout(clearServerSession);

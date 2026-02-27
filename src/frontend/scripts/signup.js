@@ -1,6 +1,7 @@
 import { supabase } from "./api.js";
 import { attachLogoHome } from "./session.js";
 import { loadPaginaBranding } from "./branding.js";
+import { initAuthCaptcha } from "./auth-captcha.js";
 
 const form = document.getElementById("signup-form");
 const fields = {
@@ -28,6 +29,8 @@ let iti = null;
 const toggleButtons = document.querySelectorAll(".toggle-password");
 let phoneMaxDigits = null;
 let phonePattern = "";
+let captchaController = null;
+let captchaInitPromise = null;
 
 const limitMessage = () =>
   phoneMaxDigits ? `Puedes escribir hasta ${phoneMaxDigits} dígitos` : "";
@@ -37,6 +40,8 @@ function clearMessages() {
     if (el) el.textContent = "";
   });
   Object.values(fields).forEach((input) => input?.classList.remove("input-error"));
+  const captchaError = document.getElementById("signup-captcha-error");
+  if (captchaError) captchaError.textContent = "";
   statusEl.textContent = "";
   statusEl.classList.remove("is-error", "is-success");
 }
@@ -127,6 +132,14 @@ async function handleSubmit(e) {
 
   if (hasError) return;
 
+  const ctrl = captchaController || (captchaInitPromise ? await captchaInitPromise : null);
+  if (!ctrl || !ctrl.enabled) {
+    setStatus("Captcha no disponible. Recarga la página e intenta de nuevo.", true);
+    return;
+  }
+  const captchaToken = ctrl.ensureToken();
+  if (!captchaToken) return;
+
   setLoading(true);
 
   try {
@@ -162,6 +175,7 @@ async function handleSubmit(e) {
           telefono: phoneFull,
           phone: phoneFull,
         },
+        captchaToken,
       },
     });
     if (authErr) {
@@ -207,10 +221,18 @@ async function handleSubmit(e) {
     setStatus("No se pudo completar el registro. Intenta de nuevo.", true);
   } finally {
     setLoading(false);
+    captchaController?.reset();
   }
 }
 
 function init() {
+  captchaInitPromise = initAuthCaptcha({
+    containerId: "signup-captcha",
+    errorId: "signup-captcha-error",
+  }).then((ctrl) => {
+    captchaController = ctrl;
+    return ctrl;
+  });
   attachLogoHome();
   loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
     console.warn("signup branding load error", err);

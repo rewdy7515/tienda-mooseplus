@@ -6,7 +6,11 @@
     <title>Inicio de sesión</title>
     <link rel="stylesheet" href="../styles/styles.css" />
   </head>
-  <body class="auth-page">
+  <body
+    class="auth-page login-page"
+    data-captcha-provider="hcaptcha"
+    data-captcha-site-key="dd68463a-0bc6-4dde-962c-aaa4535240fc"
+  >
     <main class="auth-container">
       <section class="auth-card">
         <img
@@ -63,7 +67,14 @@
               </svg>
             </button>
           </div>
+          <div class="auth-forgot">
+            <a href="#" id="login-forgot-link" class="auth-forgot-link">Olvidé mi contraseña</a>
+          </div>
           <p id="password-error" class="input-message"></p>
+          <div class="auth-captcha-wrap">
+            <div id="login-captcha" class="auth-captcha"></div>
+            <p id="login-captcha-error" class="input-message"></p>
+          </div>
 
           <button type="submit" class="btn-primary auth-submit">
             Iniciar sesión

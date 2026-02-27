@@ -1,6 +1,7 @@
 import { supabase, startSession, fetchCart } from "./api.js";
 import { setSessionUserId, setCachedCart, setSessionRoles, attachLogoHome } from "./session.js";
 import { loadPaginaBranding } from "./branding.js";
+import { initAuthCaptcha } from "./auth-captcha.js";
 
 const form = document.querySelector(".auth-form");
 const emailInput = document.getElementById("login-user");
@@ -10,11 +11,17 @@ const passwordError = document.getElementById("password-error");
 const statusMessage = document.getElementById("login-status");
 const toggleBtn = document.querySelector(".toggle-password");
 const signupBtn = document.getElementById("login-signup-link");
+const forgotBtn = document.getElementById("login-forgot-link");
 const submitBtn = document.querySelector(".auth-submit");
+let forgotLoading = false;
+let captchaController = null;
+let captchaInitPromise = null;
 
 function clearFeedback() {
   emailError.textContent = "";
   passwordError.textContent = "";
+  const captchaError = document.getElementById("login-captcha-error");
+  if (captchaError) captchaError.textContent = "";
   statusMessage.textContent = "";
   emailInput.classList.remove("input-error");
   passwordInput.classList.remove("input-error");
@@ -31,6 +38,61 @@ function setLoading(isLoading) {
   if (!submitBtn) return;
   submitBtn.disabled = isLoading;
   submitBtn.textContent = isLoading ? "Iniciando..." : "Iniciar sesión";
+}
+
+function getResetRedirectUrl() {
+  return new URL("restablecer_clave.html", window.location.href).toString();
+}
+
+async function requireCaptchaToken() {
+  const ctrl = captchaController || (captchaInitPromise ? await captchaInitPromise : null);
+  if (!ctrl || !ctrl.enabled) {
+    setStatus("Captcha no disponible. Recarga la página e intenta de nuevo.", true);
+    return null;
+  }
+  return ctrl.ensureToken();
+}
+
+async function handleForgotPassword(event) {
+  event.preventDefault();
+  if (forgotLoading) return;
+  clearFeedback();
+
+  const email = emailInput.value.trim().toLowerCase();
+  if (!email || !emailInput.checkValidity()) {
+    emailError.textContent = "Ingresa tu correo para restablecer la clave.";
+    emailInput.classList.add("input-error");
+    return;
+  }
+
+  const captchaToken = await requireCaptchaToken();
+  if (!captchaToken) return;
+
+  forgotLoading = true;
+  if (forgotBtn) {
+    forgotBtn.classList.add("input-disabled");
+    forgotBtn.setAttribute("aria-disabled", "true");
+    forgotBtn.style.pointerEvents = "none";
+  }
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: getResetRedirectUrl(),
+      captchaToken,
+    });
+    if (error) throw error;
+    setStatus("Te enviamos un enlace para restablecer tu contraseña.", false);
+  } catch (err) {
+    console.error("forgot password error", err);
+    setStatus("No se pudo enviar el enlace de recuperación.", true);
+  } finally {
+    forgotLoading = false;
+    if (forgotBtn) {
+      forgotBtn.classList.remove("input-disabled");
+      forgotBtn.removeAttribute("aria-disabled");
+      forgotBtn.style.pointerEvents = "";
+    }
+    captchaController?.reset();
+  }
 }
 
 async function handleLogin(event) {
@@ -52,6 +114,9 @@ async function handleLogin(event) {
     return;
   }
 
+  const captchaToken = await requireCaptchaToken();
+  if (!captchaToken) return;
+
   setLoading(true);
 
   try {
@@ -59,6 +124,9 @@ async function handleLogin(event) {
     const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
       email,
       password,
+      options: {
+        captchaToken,
+      },
     });
     if (authErr) {
       const msg = (authErr.message || "").toLowerCase();
@@ -108,13 +176,6 @@ async function handleLogin(event) {
       return;
     }
 
-    // Opcional: valida clave local si aún se usa
-    if (user.clave && user.clave !== password) {
-      passwordError.textContent = "La clave no coincide.";
-      passwordInput.classList.add("input-error");
-      return;
-    }
-
     // 3) Setear sesión local con id_usuario de la tabla
     setSessionUserId(user.id_usuario);
     setSessionRoles({
@@ -130,7 +191,6 @@ async function handleLogin(event) {
     } catch (err) {
       console.warn("No se pudo precargar carrito", err);
     }
-    setStatus("Sesión iniciada correctamente. Redirigiendo...", false);
     setTimeout(() => {
       window.location.href = "index.html";
     }, 400);
@@ -139,6 +199,7 @@ async function handleLogin(event) {
     setStatus("No se pudo iniciar sesión. Intenta de nuevo.", true);
   } finally {
     setLoading(false);
+    captchaController?.reset();
   }
 }
 
@@ -163,8 +224,16 @@ function initSignupRedirect() {
 }
 
 function init() {
+  captchaInitPromise = initAuthCaptcha({
+    containerId: "login-captcha",
+    errorId: "login-captcha-error",
+  }).then((ctrl) => {
+    captchaController = ctrl;
+    return ctrl;
+  });
   initToggle();
   initSignupRedirect();
+  forgotBtn?.addEventListener("click", handleForgotPassword);
   if (form) {
     form.addEventListener("submit", handleLogin);
   }

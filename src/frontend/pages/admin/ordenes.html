@@ -67,6 +67,19 @@
       #ordenes-table tbody tr.orden-row-even {
         background: #ffffff;
       }
+      .orden-id-link {
+        border: 0;
+        background: transparent;
+        color: #1d4ed8;
+        font-weight: 700;
+        text-decoration: underline;
+        cursor: pointer;
+        padding: 0;
+      }
+      .orden-id-link:hover,
+      .orden-id-link:focus-visible {
+        color: #1e40af;
+      }
     </style>
   </head>
   <body>
@@ -135,6 +148,8 @@
       let userMap = {};
       let metodoMap = {};
       let filterCheckoutActive = true;
+      let currentUser = null;
+      let canManageOrdenes = false;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -192,9 +207,23 @@
             const estadoClass = cancelada ? "estado-bad" : verificado ? "estado-ok" : "estado-warn";
             const canEntregar = !verificado && !cancelada;
             const canRechazar = !verificado && !cancelada;
+            const accionesCell = canManageOrdenes
+              ? `
+                <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}" ${canEntregar ? "" : "disabled"}>
+                  ${canEntregar ? "Entregar servicio" : cancelada ? "Rechazada" : "Entregado"}
+                </button>
+                <button type="button" class="btn-outline btn-rechazar" data-orden="${orden.id_orden}" ${canRechazar ? "" : "disabled"}>
+                  Rechazar servicio
+                </button>
+              `
+              : "-";
             return `
               <tr data-orden="${orden.id_orden}">
-                <td>${orden.id_orden ?? "-"}</td>
+                <td>
+                  <button type="button" class="orden-id-link" data-open-orden="${orden.id_orden}">
+                    ${orden.id_orden ?? "-"}
+                  </button>
+                </td>
                 <td>${cliente || "-"}</td>
                 <td>${metodo}</td>
                 <td>${montoVal}</td>
@@ -202,14 +231,7 @@
                 <td>${fecha}</td>
                 <td>${hora}</td>
                 <td class="estado-cell ${estadoClass}">${estado}</td>
-                <td class="acciones-cell">
-                  <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}" ${canEntregar ? "" : "disabled"}>
-                    ${canEntregar ? "Entregar servicio" : cancelada ? "Rechazada" : "Entregado"}
-                  </button>
-                  <button type="button" class="btn-outline btn-rechazar" data-orden="${orden.id_orden}" ${canRechazar ? "" : "disabled"}>
-                    Rechazar servicio
-                  </button>
-                </td>
+                <td class="acciones-cell">${accionesCell}</td>
               </tr>
             `;
           })
@@ -338,10 +360,13 @@
 
       const loadOrdenes = async () => {
         setStatus("Cargando ordenes...");
-        const { data: ordenes, error } = await supabase
+        let query = supabase
           .from("ordenes")
-          .select("id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, referencia, fecha, hora_orden, pago_verificado, orden_cancelada")
-          .order("id_orden", { ascending: false });
+          .select("id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, referencia, fecha, hora_orden, pago_verificado, orden_cancelada");
+        if (!isTrue(currentUser?.permiso_superadmin)) {
+          query = query.eq("id_usuario", currentUser?.id_usuario ?? -1);
+        }
+        const { data: ordenes, error } = await query.order("id_orden", { ascending: false });
         if (error) {
           console.error("ordenes load error", error);
           setStatus("No se pudieron cargar las ordenes.");
@@ -395,13 +420,16 @@
 
       const init = async () => {
         try {
-          const user = await loadCurrentUser();
-          const isSuperAdmin = isTrue(user?.permiso_superadmin);
-          if (!isSuperAdmin) {
+          currentUser = await loadCurrentUser();
+          if (!currentUser?.id_usuario) {
             if (tableWrap) tableWrap.classList.add("hidden");
             if (filterWrap) filterWrap.classList.add("hidden");
-            setStatus("No tienes permisos para ver las ordenes.");
+            setStatus("No se pudo identificar al usuario.");
             return;
+          }
+          canManageOrdenes = isTrue(currentUser?.permiso_superadmin);
+          if (!isTrue(currentUser?.permiso_superadmin)) {
+            setStatus("Mostrando solo tus ordenes.");
           }
           await loadOrdenes();
         } catch (err) {
@@ -466,6 +494,14 @@
               currentBtn.textContent = prevText || "Entregar servicio";
             }
           }
+          return;
+        }
+
+        const openOrdenBtn = event.target.closest(".orden-id-link");
+        if (openOrdenBtn) {
+          const idOrden = Number(openOrdenBtn.dataset.openOrden);
+          if (!Number.isFinite(idOrden)) return;
+          window.location.href = `../detalle_ordenes.html?id_orden=${encodeURIComponent(idOrden)}`;
           return;
         }
 

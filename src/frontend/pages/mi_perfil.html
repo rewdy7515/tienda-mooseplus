@@ -6,14 +6,35 @@
     <title>Mi perfil</title>
     <link rel="stylesheet" href="../styles/styles.css" />
     <style>
-      .perfil-wrap {
-        max-width: 640px;
+      .perfil-wrap.categorias-dinamicas {
+        width: min(100%, 320px);
+        max-width: 320px;
+        margin: 0 auto 24px;
+        padding: 12px 0 0;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .perfil-wrap > h2,
+      .perfil-wrap > #perfil-status,
+      .perfil-wrap > .perfil-card {
+        width: 100%;
+      }
+      .perfil-wrap h2,
+      .perfil-wrap #perfil-status {
+        text-align: center;
       }
       .perfil-card {
+        width: 100%;
+        max-width: 100%;
+        margin: 0 auto;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-radius: 12px;
         padding: 14px;
+        box-sizing: border-box;
+        overflow: hidden;
       }
       .perfil-top {
         display: flex;
@@ -23,8 +44,8 @@
         margin-bottom: 14px;
       }
       .perfil-avatar-layer {
-        width: 84px;
-        height: 84px;
+        width: 112px;
+        height: 112px;
         border-radius: 999px;
         border: 1px solid #d1d5db;
         overflow: hidden;
@@ -46,6 +67,32 @@
       .perfil-form {
         display: grid;
         gap: 8px;
+        width: 100%;
+        max-width: 100%;
+        margin: 0 auto;
+        min-width: 0;
+      }
+      .perfil-form .form-input,
+      .perfil-form .form-select {
+        width: 92%;
+        max-width: 520px;
+        min-width: 0;
+        box-sizing: border-box;
+        justify-self: center;
+      }
+      .perfil-form .form-label {
+        width: 92%;
+        max-width: 520px;
+        justify-self: center;
+        text-align: left;
+      }
+      @media (max-width: 640px) {
+        .perfil-wrap {
+          padding: 8px 0 0;
+        }
+        .perfil-card {
+          padding: 12px;
+        }
       }
     </style>
   </head>
@@ -69,7 +116,7 @@
             />
           </div>
           <button type="button" id="btn-editar-foto" class="btn-outline">
-            Editar foto de perfil
+            Editar
           </button>
         </div>
 
@@ -106,6 +153,19 @@
             type="tel"
             class="form-input"
             placeholder="0412..."
+          />
+
+          <label for="perfil-recordatorio-dias-input" class="form-label">
+            Recordatorio de renovación (días antes)
+          </label>
+          <input
+            id="perfil-recordatorio-dias-input"
+            type="number"
+            min="0"
+            step="1"
+            inputmode="numeric"
+            class="form-input"
+            placeholder="3"
           />
         </div>
       </section>

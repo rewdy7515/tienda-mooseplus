@@ -767,7 +767,7 @@ export async function loadCurrentUser() {
   const { data, error } = await supabase
     .from("usuarios")
     .select(
-      "id_usuario, nombre, apellido, correo, telefono, foto_perfil, fondo_perfil, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo"
+      "id_usuario, nombre, apellido, correo, telefono, foto_perfil, fondo_perfil, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo, recordatorio_dias_antes"
     )
     .eq("id_usuario", idUsuario)
     .maybeSingle();

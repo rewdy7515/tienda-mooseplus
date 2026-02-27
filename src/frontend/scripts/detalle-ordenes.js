@@ -68,13 +68,20 @@ const buildEstado = (orden) => {
   return "Pendiente";
 };
 
-const renderInfo = (orden) => {
+const formatNombreApellido = (user) => {
+  const nombre = String(user?.nombre || "").trim();
+  const apellido = String(user?.apellido || "").trim();
+  return [nombre, apellido].filter(Boolean).join(" ").trim() || "-";
+};
+
+const renderInfo = (orden, clienteNombre = "-") => {
   if (!infoGridEl) return;
   const fecha = formatDDMMYYYY(orden?.fecha) || orden?.fecha || "-";
   const hora = formatHora12(orden?.hora_orden);
   const estado = buildEstado(orden);
   const rows = [
     { label: "N. orden", value: orden?.id_orden ?? "-" },
+    { label: "Cliente", value: clienteNombre || "-" },
     { label: "Fecha", value: fecha },
     { label: "Hora", value: hora },
     { label: "Estado", value: estado },
@@ -417,7 +424,13 @@ const init = async () => {
       itemsTitleEl?.classList.add("hidden");
       return;
     }
-    renderInfo(orden);
+    const usuarioOrden = detalleResp?.usuario || null;
+    const nombreUsuarioOrden = formatNombreApellido(usuarioOrden);
+    let clienteNombre = nombreUsuarioOrden;
+    if (clienteNombre === "-" && Number(orden?.id_usuario) === Number(currentUser?.id_usuario)) {
+      clienteNombre = formatNombreApellido(currentUser);
+    }
+    renderInfo(orden, clienteNombre);
 
     setStatus("Cargando items...");
     let items = Array.isArray(detalleResp?.items) ? detalleResp.items : [];

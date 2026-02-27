@@ -22,28 +22,49 @@
           id="checkout-order-title"
           style="color:#6b7280; font-weight:600; margin: 4px 0 10px; display:none;"
         ></div>
-        <label class="form-label" for="metodo-select">Método de pago <span class="required">*</span></label>
-        <select id="metodo-select" class="form-select">
-          <option value="">Seleccione un método</option>
-        </select>
-        <div id="pago-movil-note" class="pago-movil-note hidden">NUEVOS DATOS DE PAGOMOVIL</div>
-        <div id="metodo-detalle" class="metodo-detalle"></div>
-        <div id="checkout-total" class="checkout-total"></div>
+        <section id="checkout-metodo-menu" class="checkout-metodo-menu">
+          <p class="checkout-metodo-menu-label">Selecciona un método de pago para continuar</p>
+          <div id="checkout-metodo-buttons" class="checkout-metodo-buttons"></div>
+          <button
+            id="btn-metodo-continue"
+            type="button"
+            class="btn-primary checkout-metodo-continue"
+            disabled
+          >
+            Continuar
+          </button>
+        </section>
 
-        <label class="form-label" for="input-ref">Referencia <span class="required">*</span></label>
-        <input id="input-ref" class="form-input" type="text" placeholder="Ingrese últimos 4 dígitos" />
+        <div id="checkout-main-content" class="checkout-main-content hidden">
+          <button id="btn-back-metodo" type="button" class="btn-outline checkout-change-metodo">
+            <img
+              class="checkout-back-icon"
+              src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/regresar.webp"
+              alt=""
+              aria-hidden="true"
+            />
+            <span>Regresar</span>
+          </button>
 
+          <label class="form-label hidden" for="metodo-select">Método de pago <span class="required">*</span></label>
+          <select id="metodo-select" class="form-select hidden">
+            <option value="">Seleccione un método</option>
+          </select>
+          <div id="metodo-detalle" class="metodo-detalle"></div>
+          <div id="checkout-total" class="checkout-total"></div>
+          <label class="form-label" for="input-ref">Referencia <span class="required">*</span></label>
+          <input id="input-ref" class="form-input" type="text" placeholder="Ingrese últimos 4 dígitos" />
 
-        <label class="form-label">Comprobante de pago</label>
-        <div id="dropzone" class="dropzone">
-          <p>Arrastra una imagen aquí o</p>
-          <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
-          <input id="input-files" type="file" accept="image/*" hidden />
-          <div id="file-preview" class="file-preview"></div>
+          <label class="form-label">Comprobante de pago</label>
+          <div id="dropzone" class="dropzone">
+            <p>Arrastra una imagen aquí o</p>
+            <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
+            <input id="input-files" type="file" accept="image/*" hidden />
+            <div id="file-preview" class="file-preview"></div>
+          </div>
+
+          <button id="btn-send-payment" class="btn-primary page-pay-btn">Enviar pago</button>
         </div>
-
-        <button id="btn-send-payment" class="btn-primary page-pay-btn">Enviar pago</button>
-        <button id="btn-verify-payment" class="btn-outline page-pay-btn" type="button">Verificar pago (solo prueba)</button>
       </section>
     </main>
 

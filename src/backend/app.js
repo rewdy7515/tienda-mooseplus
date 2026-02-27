@@ -2352,6 +2352,30 @@ app.get("/api/cart", async (_req, res) => {
     if (itemErr) throw itemErr;
 
     // Enriquecer con datos de venta/cuenta/perfil para renovaciones
+    const cuentaIds = Array.from(
+      new Set(
+        (items || [])
+          .map((it) => Number(it?.id_cuenta))
+          .filter((idCuenta) => Number.isFinite(idCuenta) && idCuenta > 0),
+      ),
+    );
+    let cuentaMap = {};
+    if (cuentaIds.length) {
+      const { data: cuentasExtra, error: cuentasErr } = await runSupabaseQueryWithRetry(
+        () =>
+          supabaseAdmin
+            .from("cuentas")
+            .select("id_cuenta, correo")
+            .in("id_cuenta", cuentaIds),
+        "cart:get:cuentasExtra",
+      );
+      if (cuentasErr) throw cuentasErr;
+      cuentaMap = (cuentasExtra || []).reduce((acc, cta) => {
+        acc[cta.id_cuenta] = cta;
+        return acc;
+      }, {});
+    }
+
     const ventaIds = (items || []).map((i) => i.id_venta).filter(Boolean);
     let ventaMap = {};
     if (ventaIds.length) {
@@ -2360,7 +2384,7 @@ app.get("/api/cart", async (_req, res) => {
           supabaseAdmin
             .from("ventas")
             .select(
-              "id_venta, id_cuenta, id_perfil, cuentas:cuentas!ventas_id_cuenta_fkey(correo), perfiles:perfiles(n_perfil)"
+              "id_venta, id_cuenta, id_cuenta_miembro, id_perfil, correo_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(correo), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo), perfiles:perfiles(n_perfil)"
             )
             .in("id_venta", ventaIds),
         "cart:get:ventasExtra",
@@ -2374,9 +2398,16 @@ app.get("/api/cart", async (_req, res) => {
 
     const enriched = (items || []).map((it) => {
       const ventaInfo = it.id_venta ? ventaMap[it.id_venta] || {} : {};
+      const cuentaItem = it.id_cuenta ? cuentaMap[it.id_cuenta] || null : null;
+      const correoResolved =
+        cuentaItem?.correo ||
+        ventaInfo?.correo_miembro ||
+        ventaInfo?.cuentas_miembro?.correo ||
+        ventaInfo?.cuentas?.correo ||
+        null;
       return {
         ...it,
-        correo: ventaInfo?.cuentas?.correo || null,
+        correo: correoResolved,
         n_perfil: ventaInfo?.perfiles?.n_perfil || null,
       };
     });
@@ -2615,6 +2646,7 @@ const isAllowedPublicAssetsFolder = (folder = "") => {
   const allowed = new Set([
     "logos",
     "logos/mooseplus",
+    "logos/metodos-pago",
     "logos/plataformas/tarjeta",
     "logos/plataformas/banner",
     "icono-perfil",
@@ -2744,7 +2776,7 @@ app.post("/api/logos/upload", async (req, res) => {
         .status(400)
         .json({
           error:
-            "folder no permitido. Usa logos/mooseplus, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
+            "folder no permitido. Usa logos/mooseplus, logos/metodos-pago, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
         });
     }
     const overwriteByName = isTrue(req.body?.overwrite_by_name);
@@ -2807,7 +2839,7 @@ app.post("/api/logos/delete", jsonParser, async (req, res) => {
     if (!uniquePaths.length) {
       return res.status(400).json({
         error:
-          "Debes enviar paths/public_urls válidos de logos, logos/mooseplus, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
+          "Debes enviar paths/public_urls válidos de logos, logos/mooseplus, logos/metodos-pago, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
       });
     }
 
@@ -2843,7 +2875,7 @@ app.get("/api/logos/list", async (req, res) => {
         .status(400)
         .json({
           error:
-            "folder no permitido. Usa logos/mooseplus, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
+            "folder no permitido. Usa logos/mooseplus, logos/metodos-pago, logos/plataformas/tarjeta, logos/plataformas/banner, icono-perfil o banners-index.",
         });
     }
 
@@ -3168,6 +3200,7 @@ app.get("/api/inventario", async (req, res) => {
         id_precio,
         id_cuenta,
         id_perfil,
+        completa,
         cuentas:cuentas!ventas_id_cuenta_fkey(
           id_cuenta,
           id_plataforma,
@@ -3194,7 +3227,7 @@ app.get("/api/inventario", async (req, res) => {
           id_cuenta_miembro,
           perfil_hogar
         ),
-        precios:precios(plan, sub_cuenta)
+        precios:precios(plan, sub_cuenta, completa)
       `
       )
       .eq("id_usuario", idUsuario);
@@ -3230,7 +3263,8 @@ app.get("/api/inventario", async (req, res) => {
       const por_acceso = row.cuentas?.plataformas?.por_acceso ?? null;
       const correo_cliente_flag = row.cuentas?.plataformas?.correo_cliente ?? null;
       const clave_cliente_flag = row.cuentas?.plataformas?.clave_cliente ?? null;
-      const plan = row.precios?.plan || "Sin plan";
+      const isCompleta = isTrue(row?.completa) || isTrue(row?.precios?.completa);
+      const plan = (row.precios?.plan || "").trim() || (isCompleta ? "Cuenta completa" : "Sin plan");
       const sub_cuenta = row.precios?.sub_cuenta ?? null;
       const memberId = row.perfiles?.id_cuenta_miembro || null;
       const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
@@ -3260,6 +3294,7 @@ app.get("/api/inventario", async (req, res) => {
         fecha_corte: row.fecha_corte,
         venta_perfil: row.cuentas?.venta_perfil,
         venta_miembro: row.cuentas?.venta_miembro,
+        completa: isCompleta,
         sub_cuenta,
       };
     });
@@ -3280,8 +3315,16 @@ app.get("/api/inventario", async (req, res) => {
           planes: {},
         };
       }
-      if (!acc[key].planes[item.plan]) acc[key].planes[item.plan] = [];
-      acc[key].planes[item.plan].push(item);
+      if (!acc[key].planes[item.plan]) {
+        acc[key].planes[item.plan] = {
+          plan: item.plan,
+          completa: isTrue(item.completa),
+          ventas: [],
+        };
+      }
+      acc[key].planes[item.plan].completa =
+        acc[key].planes[item.plan].completa || isTrue(item.completa);
+      acc[key].planes[item.plan].ventas.push(item);
       return acc;
     }, {});
 
@@ -3296,7 +3339,11 @@ app.get("/api/inventario", async (req, res) => {
       por_acceso: payload.por_acceso ?? null,
       plat_correo_cliente: payload.plat_correo_cliente ?? null,
       plat_clave_cliente: payload.plat_clave_cliente ?? null,
-      planes: Object.entries(payload.planes).map(([plan, ventas]) => ({ plan, ventas })),
+      planes: Object.values(payload.planes).map((entry) => ({
+        plan: entry.plan,
+        completa: entry.completa,
+        ventas: entry.ventas,
+      })),
     }));
 
     res.json({ plataformas });
@@ -3407,6 +3454,17 @@ app.get("/api/ordenes/detalle", async (req, res) => {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
 
+    let usuario = null;
+    if (orden.id_usuario) {
+      const { data: usuarioRow, error: usuarioErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("id_usuario, nombre, apellido")
+        .eq("id_usuario", orden.id_usuario)
+        .maybeSingle();
+      if (usuarioErr) throw usuarioErr;
+      usuario = usuarioRow || null;
+    }
+
     let items = [];
     if (orden.id_carrito) {
       const { data: cartItems, error: itemErr } = await supabaseAdmin
@@ -3417,7 +3475,7 @@ app.get("/api/ordenes/detalle", async (req, res) => {
       items = cartItems || [];
     }
 
-    res.json({ orden, items });
+    res.json({ orden, items, usuario });
   } catch (err) {
     console.error("[ordenes/detalle] error", err);
     res.status(500).json({ error: err.message });
@@ -4168,6 +4226,7 @@ app.post("/api/checkout", async (req, res) => {
       tasa_bs: tasaBs,
       monto_bs,
       id_metodo_de_pago,
+      marcado_pago: true,
       referencia,
       comprobante: archivos,
       en_espera,

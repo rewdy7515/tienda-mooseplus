@@ -27,16 +27,20 @@ let checkoutOrderId =
 
 const metodoDetalle = document.querySelector("#metodo-detalle");
 const metodoSelect = document.querySelector("#metodo-select");
-const pagoMovilNote = document.querySelector("#pago-movil-note");
+const metodoMenu = document.querySelector("#checkout-metodo-menu");
+const metodoButtonsWrap = document.querySelector("#checkout-metodo-buttons");
+const btnMetodoContinue = document.querySelector("#btn-metodo-continue");
+const checkoutMainContent = document.querySelector("#checkout-main-content");
+const btnBackMetodo = document.querySelector("#btn-back-metodo");
 const btnAddImage = document.querySelector("#btn-add-image");
 const inputFiles = document.querySelector("#input-files");
 const filePreview = document.querySelector("#file-preview");
 const dropzone = document.querySelector("#dropzone");
 const totalEl = document.querySelector("#checkout-total");
+const checkoutVerificacionNoteEl = document.querySelector("#checkout-verificacion-note");
 const orderTitleEl = document.querySelector("#checkout-order-title");
 const btnSendPayment = document.querySelector("#btn-send-payment");
 const refInput = document.querySelector("#input-ref");
-const btnVerifyPayment = document.querySelector("#btn-verify-payment");
 
 let metodos = [];
 let seleccionado = null;
@@ -56,13 +60,31 @@ let fixedMontoUsd = null;
 let fixedHora = null;
 let fixedFecha = null;
 let montoRefreshTimer = null;
-let countdownTimer = null;
 let saldoWatcher = null;
 let lastSaldoValue = null;
-const MONTO_REFRESH_MS = 60 * 60 * 1000;
+const RATE_SLOT_SECONDS = 2 * 60 * 60;
+const METODO_RECARGO_USD_ID = 4;
+const METODO_RECARGO_USD_PERCENT = 0.0349;
+const METODO_RECARGO_USD_FIJO = 0.49;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const isMetodoVerificacionAutomatica = (metodo) => isTrue(metodo?.verificacion_automatica);
+const CHECKOUT_PANEL_ANIM_MS = 260;
+const CHECKOUT_PANEL_ANIM_CLASSES = [
+  "checkout-panel-animating",
+  "checkout-panel-enter-left",
+  "checkout-panel-enter-right",
+  "checkout-panel-exit-left",
+  "checkout-panel-exit-right",
+];
+const getTotalUsdMostrado = (baseUsd, metodoId) => {
+  const montoBase = Number(baseUsd);
+  if (!Number.isFinite(montoBase)) return 0;
+  if (Number(metodoId) !== METODO_RECARGO_USD_ID) return round2(montoBase);
+  return round2(montoBase * (1 + METODO_RECARGO_USD_PERCENT) + METODO_RECARGO_USD_FIJO);
+};
+let isMetodoMenuAnimating = false;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -105,58 +127,90 @@ const parseCaracasDate = (fechaStr, horaStr) => {
   return Number.isNaN(dt.getTime()) ? null : dt;
 };
 
+const parseCaracasClock = (horaStr) => {
+  const [h = "0", m = "0", s = "0"] = String(horaStr || "00:00:00").split(":");
+  const hh = Number(h);
+  const mm = Number(m);
+  const ss = Number(s);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
+  return { hh, mm, ss };
+};
+
+const getCurrentRateWindowStartDate = () => {
+  const nowVz = getCaracasNow();
+  const nowDt = parseCaracasDate(nowVz.fecha, nowVz.hora);
+  const clock = parseCaracasClock(nowVz.hora);
+  if (!nowDt || !clock) return null;
+  const secSinceMidnight = clock.hh * 3600 + clock.mm * 60 + clock.ss;
+  const elapsedInWindow = secSinceMidnight % RATE_SLOT_SECONDS;
+  return new Date(nowDt.getTime() - elapsedInWindow * 1000);
+};
+
 const shouldRefreshMonto = (fechaStr, horaStr) => {
   const dt = parseCaracasDate(fechaStr, horaStr);
   if (!dt) return true;
-  return Date.now() - dt.getTime() >= MONTO_REFRESH_MS;
+  const windowStart = getCurrentRateWindowStartDate();
+  if (!windowStart) return true;
+  return dt.getTime() < windowStart.getTime();
 };
 
-const formatCountdown = (msLeft) => {
-  const totalSec = Math.max(0, Math.floor(msLeft / 1000));
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  const mm = String(min).padStart(2, "0");
-  const ss = String(sec).padStart(2, "0");
-  return `${mm}min ${ss}seg`;
+const getNextRateUpdateDate = () => {
+  const nowVz = getCaracasNow();
+  const nowDt = parseCaracasDate(nowVz.fecha, nowVz.hora);
+  const clock = parseCaracasClock(nowVz.hora);
+  if (!nowDt || !clock) return null;
+  const secSinceMidnight = clock.hh * 3600 + clock.mm * 60 + clock.ss;
+  const mod = secSinceMidnight % RATE_SLOT_SECONDS;
+  const secToNextSlot = mod === 0 ? RATE_SLOT_SECONDS : RATE_SLOT_SECONDS - mod;
+  return new Date(nowDt.getTime() + secToNextSlot * 1000);
 };
 
-const getCountdownMs = (fechaStr, horaStr) => {
-  const dt = parseCaracasDate(fechaStr, horaStr);
-  if (!dt) return null;
-  const elapsed = Date.now() - dt.getTime();
-  const remaining = MONTO_REFRESH_MS - elapsed;
-  return remaining > 0 ? remaining : 0;
+const formatCaracasHour = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("es-VE", {
+    timeZone: "America/Caracas",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
 };
 
-const startCountdown = () => {
-  if (countdownTimer) {
-    clearInterval(countdownTimer);
-    countdownTimer = null;
-  }
-  countdownTimer = setInterval(() => {
-    renderTotal();
-  }, 1000);
+const refreshRateBs = async () => {
+  const rawRate = await fetchP2PRate();
+  if (!Number.isFinite(rawRate)) return null;
+  return Math.round(rawRate * TASA_MARKUP * 100) / 100;
 };
 
-const scheduleMontoRefresh = (fechaStr, horaStr, totalUsdVal, tasaVal) => {
+const scheduleMontoRefresh = (totalUsdVal) => {
   if (montoRefreshTimer) {
     clearTimeout(montoRefreshTimer);
     montoRefreshTimer = null;
   }
-  const dt = parseCaracasDate(fechaStr, horaStr);
-  if (!dt) return;
-  const elapsed = Date.now() - dt.getTime();
-  const waitMs = MONTO_REFRESH_MS - elapsed;
+  const nextRateUpdate = getNextRateUpdateDate();
+  if (!nextRateUpdate) return;
+  const waitMs = Math.max(1000, nextRateUpdate.getTime() - Date.now());
   if (waitMs <= 0) return;
   montoRefreshTimer = setTimeout(async () => {
     try {
       const cartData = await fetchCart();
-      await syncCartMontosIfNeeded(cartData, totalUsdVal, tasaVal);
+      const refreshedRate = await refreshRateBs();
+      if (Number.isFinite(refreshedRate)) {
+        tasaBs = refreshedRate;
+      } else {
+        scheduleMontoRefresh(totalUsdVal);
+        return;
+      }
+      await syncCartMontosIfNeeded(
+        cartData,
+        totalUsdVal,
+        Number.isFinite(tasaBs) ? tasaBs : null
+      );
       renderTotal();
     } catch (err) {
       console.warn("checkout monto refresh error", err);
+      scheduleMontoRefresh(totalUsdVal);
     }
-  }, waitMs + 1000);
+  }, waitMs + 600);
 };
 
 const startSaldoWatcher = () => {
@@ -205,7 +259,7 @@ const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
     } catch (err) {
       console.warn("checkout cart monto update error", err);
     }
-    startCountdown();
+    scheduleMontoRefresh(totalUsdVal);
     return;
   }
 
@@ -225,10 +279,9 @@ const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
     } catch (err) {
       console.warn("checkout cart monto update error", err);
     }
-    startCountdown();
+    scheduleMontoRefresh(totalUsdVal);
   } else {
-    scheduleMontoRefresh(fixedFecha, fixedHora, totalUsdVal, tasaVal);
-    if (fixedHora) startCountdown();
+    scheduleMontoRefresh(totalUsdVal);
   }
 };
 
@@ -236,6 +289,7 @@ const renderDetalle = () => {
   if (!metodoDetalle) return;
   if (seleccionado === null) {
     metodoDetalle.innerHTML = "";
+    checkoutVerificacionNoteEl?.classList.add("hidden");
     return;
   }
   const m = metodos[seleccionado];
@@ -245,13 +299,24 @@ const renderDetalle = () => {
     { label: nombreLabel, valor: m.nombre, copy: false },
     { label: "Correo", valor: m.correo, copy: true },
     { label: "ID", valor: m.id, copy: true },
-    { label: "Cédula", valor: m.cedula, copy: false },
-    { label: "Teléfono", valor: m.telefono, copy: false },
+    {
+      label: "Cédula",
+      valor: m.cedula,
+      copy: true,
+      copyValue: normalizeReferenceDigits(m.cedula),
+    },
+    {
+      label: "Teléfono",
+      valor: m.telefono,
+      copy: true,
+      copyValue: normalizeReferenceDigits(m.telefono),
+    },
   ].filter((c) => c.valor !== null && c.valor !== undefined && c.valor !== "");
 
   const detalleHtml = campos
     .map((c) => {
-      const safeVal = String(c.valor).replace(/"/g, "&quot;");
+      const valueToCopy = c.copy ? c.copyValue ?? c.valor : "";
+      const safeVal = String(valueToCopy).replace(/"/g, "&quot;");
       const copyIcon = c.copy
         ? `<img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" class="copy-field-icon" data-copy="${safeVal}" style="width:14px; height:14px; margin-left:6px; cursor:pointer;" />`
         : "";
@@ -259,8 +324,11 @@ const renderDetalle = () => {
     })
     .join("");
 
-  if (pagoMovilNote) {
-    pagoMovilNote.classList.toggle("hidden", !isMetodoBs);
+  if (checkoutVerificacionNoteEl) {
+    checkoutVerificacionNoteEl.classList.toggle(
+      "hidden",
+      !isMetodoVerificacionAutomatica(m)
+    );
   }
   metodoDetalle.innerHTML =
     detalleHtml +
@@ -271,10 +339,24 @@ const renderDetalle = () => {
         </button>`
       : "");
 
+  const imageUrl = String(m.imagen || "").trim();
+  if (imageUrl) {
+    const logoWrap = document.createElement("div");
+    logoWrap.className = "metodo-detalle-logo-wrap";
+    const logoImg = document.createElement("img");
+    logoImg.className = "metodo-detalle-logo";
+    logoImg.src = imageUrl;
+    logoImg.alt = m.nombre ? `Logo ${m.nombre}` : "Logo metodo de pago";
+    logoImg.loading = "lazy";
+    logoImg.decoding = "async";
+    logoWrap.appendChild(logoImg);
+    metodoDetalle.prepend(logoWrap);
+  }
+
   if (isMetodoBs) {
     const btnCopy = metodoDetalle.querySelector(".copy-detalle-btn");
     btnCopy?.addEventListener("click", async () => {
-      const text = campos.map((c) => `${c.valor}`).join("\n");
+      const text = campos.map((c) => `${c.copyValue ?? c.valor}`).join("\n");
       try {
         if (navigator?.clipboard?.writeText) {
           await navigator.clipboard.writeText(text);
@@ -326,7 +408,6 @@ const populateSelect = (defaultIdx = null) => {
   metodoSelect.innerHTML = '<option value="">Seleccione un método</option>';
   metodos
     .map((m, idx) => ({ m, idx }))
-    .filter(({ m }) => Number(m.id_metodo_de_pago ?? m.id) === 1)
     .forEach(({ m, idx }) => {
     const opt = document.createElement("option");
     opt.value = String(idx);
@@ -337,13 +418,157 @@ const populateSelect = (defaultIdx = null) => {
   if (selIdx !== null && selIdx >= 0) {
     metodoSelect.value = String(selIdx);
   } else {
-    const first = metodoSelect.querySelector("option[value]:not([value=''])");
-    if (first) {
-      metodoSelect.value = first.value;
-      const idx = Number(first.value);
-      if (Number.isFinite(idx)) seleccionado = idx;
-    }
+    metodoSelect.value = "";
   }
+};
+
+const syncMetodoButtonsState = () => {
+  if (!metodoButtonsWrap) return;
+  metodoButtonsWrap.querySelectorAll(".checkout-metodo-btn").forEach((btn) => {
+    const idx = Number(btn.dataset.idx);
+    btn.classList.toggle("is-active", Number.isFinite(idx) && idx === seleccionado);
+  });
+};
+
+const updateMetodoContinueState = () => {
+  if (!btnMetodoContinue) return;
+  btnMetodoContinue.disabled = !(Number.isInteger(seleccionado) && seleccionado >= 0);
+};
+
+const clearCheckoutPanelAnimation = (panel) => {
+  if (!panel) return;
+  panel.classList.remove(...CHECKOUT_PANEL_ANIM_CLASSES);
+};
+
+const runCheckoutPanelAnimation = (panel, animationClass) =>
+  new Promise((resolve) => {
+    if (!panel) {
+      resolve();
+      return;
+    }
+    clearCheckoutPanelAnimation(panel);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      panel.removeEventListener("animationend", onEnd);
+      clearTimeout(fallbackTimer);
+      clearCheckoutPanelAnimation(panel);
+      resolve();
+    };
+    const onEnd = () => finish();
+    const fallbackTimer = setTimeout(finish, CHECKOUT_PANEL_ANIM_MS + 120);
+    panel.addEventListener("animationend", onEnd, { once: true });
+    void panel.offsetWidth;
+    panel.classList.add("checkout-panel-animating", animationClass);
+  });
+
+const showMetodoMenu = async (show, { animate = false } = {}) => {
+  if (!metodoMenu || !checkoutMainContent) return;
+  const menuVisible = !metodoMenu.classList.contains("hidden");
+  if ((show && menuVisible) || (!show && !menuVisible)) return;
+
+  const reduceMotion = window?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  if (!animate || reduceMotion || isMetodoMenuAnimating) {
+    metodoMenu.classList.toggle("hidden", !show);
+    checkoutMainContent.classList.toggle("hidden", !!show);
+    clearCheckoutPanelAnimation(metodoMenu);
+    clearCheckoutPanelAnimation(checkoutMainContent);
+    return;
+  }
+
+  isMetodoMenuAnimating = true;
+  try {
+    if (show) {
+      if (!checkoutMainContent.classList.contains("hidden")) {
+        await runCheckoutPanelAnimation(checkoutMainContent, "checkout-panel-exit-right");
+      }
+      checkoutMainContent.classList.add("hidden");
+      metodoMenu.classList.remove("hidden");
+      await runCheckoutPanelAnimation(metodoMenu, "checkout-panel-enter-left");
+    } else {
+      if (!metodoMenu.classList.contains("hidden")) {
+        await runCheckoutPanelAnimation(metodoMenu, "checkout-panel-exit-left");
+      }
+      metodoMenu.classList.add("hidden");
+      checkoutMainContent.classList.remove("hidden");
+      await runCheckoutPanelAnimation(checkoutMainContent, "checkout-panel-enter-right");
+    }
+  } finally {
+    isMetodoMenuAnimating = false;
+  }
+};
+
+const renderMetodoButtons = () => {
+  if (!metodoButtonsWrap) return;
+  metodoButtonsWrap.innerHTML = "";
+  if (!Array.isArray(metodos) || !metodos.length) {
+    metodoButtonsWrap.innerHTML =
+      '<p class="checkout-metodo-empty">No hay métodos de pago disponibles.</p>';
+    updateSelection(null);
+    return;
+  }
+
+  const createMetodoButton = (m, idx) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "checkout-metodo-btn";
+    btn.dataset.idx = String(idx);
+    const metodoName = String(m.nombre || `Método ${idx + 1}`).trim();
+    btn.setAttribute("aria-label", metodoName || `Método ${idx + 1}`);
+    btn.title = metodoName || `Método ${idx + 1}`;
+
+    const img = document.createElement("img");
+    img.className = "checkout-metodo-btn-image";
+    img.alt = metodoName || `Método ${idx + 1}`;
+    img.loading = "lazy";
+    img.decoding = "async";
+
+    const imageUrl = String(m.imagen || "").trim();
+    if (imageUrl) {
+      img.src = imageUrl;
+      btn.appendChild(img);
+    } else {
+      const fallback = document.createElement("span");
+      fallback.className = "checkout-metodo-btn-image-fallback";
+      fallback.setAttribute("aria-hidden", "true");
+      btn.appendChild(fallback);
+    }
+    btn.addEventListener("click", () => {
+      updateSelection(idx);
+    });
+    return btn;
+  };
+
+  const appendMetodoSection = (title, rows = [], sectionClass = "") => {
+    if (!rows.length) return;
+    const section = document.createElement("section");
+    section.className = "checkout-metodo-section";
+    if (sectionClass) section.classList.add(sectionClass);
+
+    const titleEl = document.createElement("p");
+    titleEl.className = "checkout-metodo-section-title";
+    titleEl.textContent = title;
+    section.appendChild(titleEl);
+
+    const grid = document.createElement("div");
+    grid.className = "checkout-metodo-section-grid";
+    rows.forEach(({ m, idx }) => {
+      grid.appendChild(createMetodoButton(m, idx));
+    });
+    section.appendChild(grid);
+    metodoButtonsWrap.appendChild(section);
+  };
+
+  const rows = metodos.map((m, idx) => ({ m, idx }));
+  const autoRows = rows.filter(({ m }) => isMetodoVerificacionAutomatica(m));
+  const manualRows = rows.filter(({ m }) => !isMetodoVerificacionAutomatica(m));
+
+  appendMetodoSection("Verificación automática", autoRows, "is-auto");
+  appendMetodoSection("Verificación manual", manualRows, "is-manual");
+
+  syncMetodoButtonsState();
+  updateMetodoContinueState();
 };
 
 const updateSelection = (idx) => {
@@ -353,10 +578,21 @@ const updateSelection = (idx) => {
     seleccionado = idx;
   }
   renderDetalle();
-  if (metodoSelect && seleccionado !== null) {
-    metodoSelect.value = String(seleccionado);
+  if (metodoSelect) {
+    metodoSelect.value = seleccionado !== null ? String(seleccionado) : "";
   }
+  syncMetodoButtonsState();
+  updateMetodoContinueState();
   renderTotal();
+  if (
+    seleccionado !== null &&
+    checkoutMainContent &&
+    !checkoutMainContent.classList.contains("hidden")
+  ) {
+    persistMetodoSeleccionadoEnOrden().catch((err) => {
+      console.warn("checkout persist metodo on selection change error", err);
+    });
+  }
 };
 
 metodoSelect?.addEventListener("change", (e) => {
@@ -366,6 +602,28 @@ metodoSelect?.addEventListener("change", (e) => {
   } else {
     updateSelection(idx);
   }
+});
+
+btnMetodoContinue?.addEventListener("click", async () => {
+  if (seleccionado === null) {
+    alert("Selecciona un método de pago para continuar.");
+    return;
+  }
+  try {
+    const persisted = await persistMetodoSeleccionadoEnOrden({ force: true });
+    if (!persisted?.ok) {
+      alert("No se pudo guardar el método de pago en la orden. Intenta de nuevo.");
+      return;
+    }
+    await showMetodoMenu(false, { animate: true });
+  } catch (err) {
+    console.error("checkout persist metodo before continue error", err);
+    alert("No se pudo guardar el método de pago en la orden. Intenta de nuevo.");
+  }
+});
+
+btnBackMetodo?.addEventListener("click", async () => {
+  await showMetodoMenu(true, { animate: true });
 });
 
 btnAddImage?.addEventListener("click", () => {
@@ -452,7 +710,15 @@ const renderTotal = () => {
     metodos.every((m) => Number(m?.id_metodo_de_pago ?? m?.id) === 1);
   const isBs = (metodo && Number(metodoId) === 1) || (!metodo && onlyMetodoBs);
   const tasaVal = Number.isFinite(tasaBs) ? tasaBs : null;
-  const lineUsd = `Total: $${totalUsd.toFixed(2)} ${precioTierLabel ? `(${precioTierLabel})` : ""}`;
+  const totalUsdMostrado = getTotalUsdMostrado(totalUsd, metodoId);
+  const isMetodoUsdt = Number(metodoId) === 2;
+  const totalUsdText = isMetodoUsdt
+    ? `${totalUsdMostrado.toFixed(2)} USDT`
+    : `$${totalUsdMostrado.toFixed(2)}`;
+  const usdLabel = Number(metodoId) === METODO_RECARGO_USD_ID ? "Monto Paypal" : "Total";
+  const lineUsd = `${usdLabel}: ${totalUsdText} ${
+    precioTierLabel ? `(${precioTierLabel})` : ""
+  }`;
   let montoBsView = null;
   let countdownLine = "";
   if (isBs) {
@@ -461,14 +727,9 @@ const renderTotal = () => {
     } else if (tasaVal) {
       montoBsView = round2(totalUsd * tasaVal);
     }
-    if (fixedHora) {
-      const remaining = getCountdownMs(fixedFecha, fixedHora);
-      if (remaining !== null) {
-        countdownLine = `<div class="checkout-countdown">El monto en bolivares se actualizará en ${formatCountdown(remaining)}</div>`;
-      }
-    } else if (countdownTimer) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
+    const nextRateUpdate = getNextRateUpdateDate();
+    if (nextRateUpdate) {
+      countdownLine = `<div class="checkout-countdown">Proxima actualización de tasa a las ${formatCaracasHour(nextRateUpdate)} hora Venezuela</div>`;
     }
   }
   const lineBs = isBs && Number.isFinite(montoBsView)
@@ -676,14 +937,18 @@ async function init() {
     const [metodosResp, tasaResp, user] = await Promise.all([
       supabase
         .from("metodos_de_pago")
-        .select("id_metodo_de_pago, nombre, correo, id, cedula, telefono"),
+        .select(
+          "id_metodo_de_pago, nombre, imagen, correo, id, cedula, telefono, verificacion_automatica"
+        ),
       fetchP2PRate(),
       loadCurrentUser(),
     ]);
     if (metodosResp.error) throw metodosResp.error;
     metodos = metodosResp.data || [];
     currentUser = user || null;
-    tasaBs = tasaResp ? Math.round(tasaResp * TASA_MARKUP * 100) / 100 : null;
+    tasaBs = Number.isFinite(tasaResp)
+      ? Math.round(tasaResp * TASA_MARKUP * 100) / 100
+      : null;
     userAcceso = currentUser?.acceso_cliente;
     currentUserId = currentUser?.id_usuario || null;
     const initialSaldo = Number(currentUser?.saldo);
@@ -712,7 +977,6 @@ async function init() {
           : null;
         fixedHora = ordenData?.hora_orden ?? null;
         fixedFecha = ordenData?.fecha ?? null;
-        if (fixedHora) startCountdown();
       }
     }
 
@@ -748,7 +1012,6 @@ async function init() {
       }
       fixedHora = cartData?.hora ?? null;
       fixedFecha = cartData?.fecha ?? null;
-      if (fixedHora) startCountdown();
 
       try {
         await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
@@ -766,27 +1029,10 @@ async function init() {
       }
     }
 
-    // Selecciona por defecto el método con id 1 si existe
-    // Prefill de pruebas: seleccionar índice 5 si existe, si no cae al método id 1
-    let idxDefault = metodos.findIndex(
-      (m) => Number(m.id_metodo_de_pago ?? m.id) === 1
-    );
-    if (idxDefault < 0 && metodos.length) idxDefault = 0;
-    populateSelect(idxDefault >= 0 ? idxDefault : null);
-    if (idxDefault >= 0) {
-      updateSelection(idxDefault);
-    } else if (seleccionado !== null) {
-      updateSelection(seleccionado);
-    } else {
-      renderDetalle();
-      renderTotal();
-    }
-    if (btnVerifyPayment) {
-      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
-      const isSuper = isTrue(currentUser?.permiso_superadmin);
-      btnVerifyPayment.classList.toggle("hidden", !isSuper);
-      if (!isSuper) btnVerifyPayment.style.display = "none";
-    }
+    populateSelect(null);
+    renderMetodoButtons();
+    updateSelection(null);
+    showMetodoMenu(true);
     startSaldoWatcher();
   } catch (err) {
     console.error("checkout load error", err);
@@ -798,6 +1044,7 @@ init();
 
 window.addEventListener("beforeunload", () => {
   if (saldoWatcher) clearInterval(saldoWatcher);
+  if (montoRefreshTimer) clearTimeout(montoRefreshTimer);
 });
 
 const uploadFiles = async () => {
@@ -821,6 +1068,75 @@ const updateOrdenConReferencia = async (idOrden, updatePayload) => {
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
   return false;
+};
+
+let lastMetodoPersistOrderId = null;
+let lastMetodoPersistId = null;
+
+const getMetodoIdSeleccionado = () => {
+  if (seleccionado === null || seleccionado < 0 || seleccionado >= metodos.length) return null;
+  const metodo = metodos[seleccionado];
+  const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
+  if (!Number.isFinite(metodoId) || metodoId <= 0) return null;
+  return metodoId;
+};
+
+const ensureOrderIdForMetodoPersist = async () => {
+  if (Number.isFinite(checkoutOrderId) && checkoutOrderId > 0) return checkoutOrderId;
+
+  if (isSaldoCheckout) {
+    const saldoId = Number(saldoOrder?.id_orden ?? saldoOrderId);
+    if (Number.isFinite(saldoId) && saldoId > 0) {
+      setCheckoutOrderId(saldoId, { updateUrl: false });
+      return saldoId;
+    }
+    return null;
+  }
+
+  const draftResp = await fetchCheckoutDraft();
+  if (draftResp?.error) {
+    throw new Error(draftResp.error);
+  }
+  const draftId = Number(draftResp?.id_orden);
+  if (!Number.isFinite(draftId) || draftId <= 0) return null;
+  setCheckoutOrderId(draftId);
+  return draftId;
+};
+
+const persistMetodoSeleccionadoEnOrden = async ({ force = false } = {}) => {
+  const metodoId = getMetodoIdSeleccionado();
+  if (!metodoId) return { ok: false, reason: "metodo_invalido" };
+
+  const orderId = await ensureOrderIdForMetodoPersist();
+  if (!orderId) return { ok: false, reason: "orden_invalida" };
+
+  if (!force && lastMetodoPersistOrderId === orderId && lastMetodoPersistId === metodoId) {
+    return { ok: true, skipped: true, id_orden: orderId, id_metodo_de_pago: metodoId };
+  }
+
+  let updated = await updateOrdenConReferencia(orderId, { id_metodo_de_pago: metodoId });
+  if (!updated && !isSaldoCheckout) {
+    const refreshDraft = await fetchCheckoutDraft();
+    if (refreshDraft?.error) {
+      throw new Error(refreshDraft.error);
+    }
+    const refreshedId = Number(refreshDraft?.id_orden);
+    if (Number.isFinite(refreshedId) && refreshedId > 0 && refreshedId !== orderId) {
+      setCheckoutOrderId(refreshedId);
+      updated = await updateOrdenConReferencia(refreshedId, { id_metodo_de_pago: metodoId });
+      if (updated) {
+        lastMetodoPersistOrderId = refreshedId;
+        lastMetodoPersistId = metodoId;
+        return { ok: true, id_orden: refreshedId, id_metodo_de_pago: metodoId };
+      }
+    }
+  }
+
+  if (!updated) return { ok: false, reason: "update_sin_filas", id_orden: orderId };
+
+  lastMetodoPersistOrderId = orderId;
+  lastMetodoPersistId = metodoId;
+  return { ok: true, id_orden: orderId, id_metodo_de_pago: metodoId };
 };
 
 btnSendPayment?.addEventListener("click", async () => {
@@ -866,20 +1182,9 @@ btnSendPayment?.addEventListener("click", async () => {
   } catch (err) {
     console.error("recalc checkout error", err);
   }
-  // Forzamos método 1 por pruebas si existe
-  if (seleccionado === null) {
-    const idxDefault = metodos.findIndex(
-      (m) => Number(m.id_metodo_de_pago ?? m.id) === 1
-    );
-    if (idxDefault >= 0) {
-      seleccionado = idxDefault;
-      if (metodoSelect) metodoSelect.value = String(idxDefault);
-      renderDetalle();
-    }
-  }
   if (seleccionado === null) {
     alert("Selecciona un método de pago.");
-    metodoSelect?.classList.add("input-error");
+    showMetodoMenu(true);
     return;
   }
   const metodo = metodos[seleccionado];
@@ -917,6 +1222,7 @@ btnSendPayment?.addEventListener("click", async () => {
     const comprobantes = isMetodoBs ? [] : await uploadFiles();
     const { fecha, hora } = getCaracasNow();
     if (isSaldoCheckout) {
+      const pendienteVerificacion = isMetodoVerificacionAutomatica(metodo);
       const montoBs = Number.isFinite(tasaBs) ? round2(totalUsd * tasaBs) : null;
       const { error: ordErr } = await supabase
         .from("ordenes")
@@ -927,6 +1233,7 @@ btnSendPayment?.addEventListener("click", async () => {
           total: totalUsd,
           tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
           monto_bs: montoBs,
+          marcado_pago: true,
           en_espera: true,
           id_carrito: null,
           pago_verificado: false,
@@ -939,9 +1246,10 @@ btnSendPayment?.addEventListener("click", async () => {
         })
         .eq("id_orden", saldoOrderId);
       if (ordErr) throw ordErr;
-      window.location.href = `verificando_pago.html?id_orden=${encodeURIComponent(
-        saldoOrderId
-      )}`;
+      const saldoNextUrl = pendienteVerificacion
+        ? `verificando_pago.html?id_orden=${encodeURIComponent(saldoOrderId)}`
+        : `entregar_servicios.html?id_orden=${encodeURIComponent(saldoOrderId)}`;
+      window.location.href = saldoNextUrl;
       return;
     }
     const payload = {
@@ -951,6 +1259,7 @@ btnSendPayment?.addEventListener("click", async () => {
       comprobantes,
       total: totalUsd,
       tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+      marcado_pago: true,
     };
     const resp = await submitCheckout(payload);
     if (resp?.error) {
@@ -1063,7 +1372,7 @@ btnSendPayment?.addEventListener("click", async () => {
     }
 
     alert("Pago enviado correctamente.");
-    const pendienteVerificacion = resp?.pendiente_verificacion === true;
+    const pendienteVerificacion = isMetodoVerificacionAutomatica(metodo);
     const nextUrl = resp?.id_orden
       ? pendienteVerificacion
         ? `verificando_pago.html?id_orden=${encodeURIComponent(resp.id_orden)}`
@@ -1075,15 +1384,6 @@ btnSendPayment?.addEventListener("click", async () => {
   } catch (err) {
     console.error("checkout submit error", err);
     alert("No se pudo enviar el pago. Intenta de nuevo.");
-  }
-});
-
-btnVerifyPayment?.addEventListener("click", async () => {
-  try {
-    await verifyPagoMovil();
-  } catch (err) {
-    console.error("verify pago movil error", err);
-    alert("No se pudo verificar el pago.");
   }
 });
 

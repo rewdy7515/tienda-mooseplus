@@ -24,14 +24,16 @@ const params = new URLSearchParams(window.location.search);
 const idOrden = Number(params.get("id_orden"));
 
 let orden = null;
-let verifyTimer = null;
+let pagosInsertChannel = null;
 let countdownTimer = null;
 let currentUserId = null;
 let expired = false;
 let processingOrder = false;
 let orderProcessed = false;
+let verifyRunning = false;
 let cartMontoBs = null;
 let cartTasaBs = null;
+const VERIFY_WINDOW_MS = 3 * 60 * 1000;
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 
 const setStatus = (msg) => {
@@ -88,12 +90,12 @@ const updateCountdown = () => {
   }
   const dt = parseCaracasDate(orden.fecha, orden.hora_orden);
   if (!dt) {
-    if (countdownEl) countdownEl.textContent = "2min 0seg";
+    if (countdownEl) countdownEl.textContent = "3min 0seg";
     if (progressBar) progressBar.style.width = "100%";
     return;
   }
   const elapsed = Date.now() - dt.getTime();
-  const remaining = Math.max(0, 2 * 60 * 1000 - elapsed);
+  const remaining = Math.max(0, VERIFY_WINDOW_MS - elapsed);
   if (remaining <= 0 && !expired) {
     expired = true;
     if (processingBlock) processingBlock.classList.add("hidden");
@@ -101,12 +103,8 @@ const updateCountdown = () => {
     if (countdownEl) countdownEl.textContent = "0min 0seg";
     setStatus("Pago no encontrado");
     toggleRetryActions(true);
-    if (verifyTimer) {
-      clearInterval(verifyTimer);
-      verifyTimer = null;
-    }
   }
-  const pct = Math.max(0, Math.min(100, (remaining / (2 * 60 * 1000)) * 100));
+  const pct = Math.max(0, Math.min(100, (remaining / VERIFY_WINDOW_MS) * 100));
   if (progressBar) progressBar.style.width = `${pct}%`;
   if (countdownEl) countdownEl.textContent = formatCountdown(remaining);
 };
@@ -368,13 +366,44 @@ const verifyPago = async () => {
   window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(orden.id_orden)}`;
 };
 
-const startVerifyLoop = () => {
-  if (verifyTimer) clearInterval(verifyTimer);
-  verifyTimer = setInterval(() => {
-    verifyPago().catch((err) => {
-      console.error("verificar pago error", err);
+const triggerVerify = async () => {
+  if (verifyRunning) return;
+  verifyRunning = true;
+  try {
+    await verifyPago();
+  } finally {
+    verifyRunning = false;
+  }
+};
+
+const stopPagosInsertSubscription = () => {
+  if (!pagosInsertChannel) return;
+  try {
+    supabase.removeChannel(pagosInsertChannel);
+  } catch (err) {
+    console.warn("remove pagomoviles channel error", err);
+  }
+  pagosInsertChannel = null;
+};
+
+const startPagosInsertSubscription = () => {
+  if (pagosInsertChannel) return;
+  pagosInsertChannel = supabase
+    .channel("verificando-pago-pagomoviles-insert")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "pagomoviles" },
+      () => {
+        triggerVerify().catch((err) => {
+          console.error("verificar pago por insercion error", err);
+        });
+      }
+    )
+    .subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.error("pagomoviles subscription status", status);
+      }
     });
-  }, 10000);
 };
 
 const bindEdit = () => {
@@ -432,7 +461,8 @@ const bindRetryActions = () => {
       toggleRetryActions(false);
       setStatus("Reintentando...");
       startCountdown();
-      startVerifyLoop();
+      await triggerVerify();
+      startPagosInsertSubscription();
     } catch (err) {
       console.error("reintentar orden error", err);
       setStatus("No se pudo reintentar.");
@@ -492,10 +522,10 @@ async function init() {
     bindEdit();
     bindRetryActions();
     startCountdown();
-    verifyPago().catch((err) => {
+    triggerVerify().catch((err) => {
       console.error("verificar pago inicial error", err);
     });
-    startVerifyLoop();
+    startPagosInsertSubscription();
   } catch (err) {
     console.error("verificando pago init error", err);
     setStatus("No se pudo cargar la orden.");
@@ -505,6 +535,6 @@ async function init() {
 init();
 
 window.addEventListener("beforeunload", () => {
-  if (verifyTimer) clearInterval(verifyTimer);
+  stopPagosInsertSubscription();
   if (countdownTimer) clearInterval(countdownTimer);
 });

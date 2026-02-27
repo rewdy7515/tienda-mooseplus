@@ -3,60 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Registro</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/css/intlTelInput.css"
-    />
+    <title>Restablecer clave</title>
     <link rel="stylesheet" href="../styles/styles.css" />
   </head>
-  <body
-    class="auth-page signup-page"
-    data-captcha-provider="hcaptcha"
-    data-captcha-site-key="dd68463a-0bc6-4dde-962c-aaa4535240fc"
-  >
+  <body class="auth-page">
     <main class="auth-container">
       <section class="auth-card">
-        <img src="../assets/logo-header-carga/logo-blanco.webp" class="auth-logo" alt="Logo" />
-        <h1 class="auth-title">Crea tu cuenta</h1>
-        <p class="auth-subtitle">Completa tus datos para registrarte.</p>
+        <img
+          src="../assets/logo-header-carga/logo-blanco.webp"
+          class="auth-logo"
+          alt="Logo"
+        />
+        <h1 class="auth-title">Restablece tu clave</h1>
+        <p class="auth-subtitle">Ingresa y confirma tu nueva contraseña.</p>
 
-        <form class="auth-form" id="signup-form">
-          <label for="signup-nombre" class="form-label required">Nombre</label>
-          <input id="signup-nombre" name="nombre" class="form-input" type="text" required />
-          <p id="nombre-error" class="input-message"></p>
-
-          <label for="signup-apellido" class="form-label required">Apellido</label>
-          <input id="signup-apellido" name="apellido" class="form-input" type="text" required />
-          <p id="apellido-error" class="input-message"></p>
-
-          <label for="signup-telefono" class="form-label required">Teléfono</label>
-          <input
-            id="signup-telefono"
-            name="telefono"
-            class="form-input"
-            type="tel"
-            required
-          />
-          <p id="telefono-error" class="input-message"></p>
-
-          <label for="signup-correo" class="form-label required">Correo electrónico</label>
-          <input
-            id="signup-correo"
-            name="correo"
-            class="form-input"
-            type="email"
-            placeholder="usuario@correo.com"
-            autocomplete="email"
-            required
-          />
-          <p id="correo-error" class="input-message"></p>
-
-          <label for="signup-clave" class="form-label required">Clave</label>
+        <form class="auth-form" id="reset-password-form">
+          <label for="reset-password" class="form-label">Nueva clave</label>
           <div class="input-with-toggle">
             <input
-              id="signup-clave"
-              name="clave"
+              id="reset-password"
               class="form-input"
               type="password"
               placeholder="••••••••"
@@ -66,7 +31,7 @@
             <button
               type="button"
               class="toggle-password"
-              data-target="signup-clave"
+              data-target="reset-password"
               aria-label="Mostrar clave"
               aria-pressed="false"
             >
@@ -86,13 +51,12 @@
               </svg>
             </button>
           </div>
-          <p id="clave-error" class="input-message"></p>
+          <p id="reset-password-error" class="input-message"></p>
 
-          <label for="signup-clave2" class="form-label required">Confirmación de clave</label>
+          <label for="reset-password-confirm" class="form-label">Confirmar clave</label>
           <div class="input-with-toggle">
             <input
-              id="signup-clave2"
-              name="clave2"
+              id="reset-password-confirm"
               class="form-input"
               type="password"
               placeholder="••••••••"
@@ -102,7 +66,7 @@
             <button
               type="button"
               class="toggle-password"
-              data-target="signup-clave2"
+              data-target="reset-password-confirm"
               aria-label="Mostrar clave"
               aria-pressed="false"
             >
@@ -122,28 +86,21 @@
               </svg>
             </button>
           </div>
-          <p id="clave2-error" class="input-message"></p>
-          <div class="auth-captcha-wrap">
-            <div id="signup-captcha" class="auth-captcha"></div>
-            <p id="signup-captcha-error" class="input-message"></p>
-          </div>
+          <p id="reset-password-confirm-error" class="input-message"></p>
 
-          <button type="submit" class="btn-primary auth-submit" id="signup-submit">
-            Registrarse
+          <button type="submit" class="btn-primary auth-submit" id="reset-password-submit">
+            Restablecer contraseña
           </button>
         </form>
 
-        <p id="signup-status" class="input-message status-message"></p>
+        <p id="reset-password-status" class="input-message status-message"></p>
 
         <p class="auth-secondary">
-          ¿Ya tienes cuenta? Inicia sesión <a href="login.html" id="signup-login-link">aquí</a>
+          Volver a <a href="login.html">Iniciar sesión</a>
         </p>
       </section>
     </main>
 
-    <script type="module" src="../scripts/session-guard.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/intlTelInput.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/utils.js"></script>
-    <script type="module" src="../scripts/signup.js"></script>
+    <script type="module" src="../scripts/restablecer_clave.js"></script>
   </body>
 </html>

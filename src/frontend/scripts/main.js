@@ -135,6 +135,7 @@ const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const isExplicitFalse = (v) =>
   v === false || v === 0 || v === "0" || v === "false" || v === "f";
+const RATE_SLOT_SECONDS = 2 * 60 * 60;
 const AVATAR_MODAL_DEFAULT_COLOR = AVATAR_RANDOM_COLORS[0] || "#ffa4a4";
 let avatarModalUserId = null;
 let avatarModalSavedUrl = "";
@@ -142,6 +143,96 @@ let avatarModalSavedColor = AVATAR_MODAL_DEFAULT_COLOR;
 let avatarModalPendingUrl = "";
 let avatarModalPendingColor = AVATAR_MODAL_DEFAULT_COLOR;
 let avatarModalWasPrompted = false;
+let tasaRefreshTimer = null;
+let tasaAutoRefreshEnabled = false;
+
+const getCaracasNow = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  return {
+    fecha: `${get("year")}-${get("month")}-${get("day")}`,
+    hora: `${get("hour")}:${get("minute")}:${get("second")}`,
+  };
+};
+
+const parseCaracasDate = (fechaStr, horaStr) => {
+  if (!fechaStr || !horaStr) return null;
+  const dt = new Date(`${fechaStr}T${horaStr}-04:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const parseCaracasClock = (horaStr) => {
+  const [h = "0", m = "0", s = "0"] = String(horaStr || "00:00:00").split(":");
+  const hh = Number(h);
+  const mm = Number(m);
+  const ss = Number(s);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
+  return { hh, mm, ss };
+};
+
+const getNextRateUpdateDate = () => {
+  const nowVz = getCaracasNow();
+  const nowDt = parseCaracasDate(nowVz.fecha, nowVz.hora);
+  const clock = parseCaracasClock(nowVz.hora);
+  if (!nowDt || !clock) return null;
+  const secSinceMidnight = clock.hh * 3600 + clock.mm * 60 + clock.ss;
+  const mod = secSinceMidnight % RATE_SLOT_SECONDS;
+  const secToNextSlot = mod === 0 ? RATE_SLOT_SECONDS : RATE_SLOT_SECONDS - mod;
+  return new Date(nowDt.getTime() + secToNextSlot * 1000);
+};
+
+const getTasaBsValue = (rate) => {
+  if (!Number.isFinite(rate)) return null;
+  const tasaVal = Math.round(rate * TASA_MARKUP * 100) / 100;
+  return Number.isFinite(tasaVal) ? tasaVal : null;
+};
+
+const renderTasaActual = (rate) => {
+  if (!tasaActualEl) return;
+  const tasaVal = getTasaBsValue(rate);
+  if (!Number.isFinite(tasaVal)) {
+    tasaActualEl.classList.add("hidden");
+    return;
+  }
+  tasaActualEl.textContent = `Tasa actual: Bs. ${tasaVal.toFixed(2)}`;
+  tasaActualEl.classList.remove("hidden");
+};
+
+const stopTasaAutoRefresh = () => {
+  tasaAutoRefreshEnabled = false;
+  if (!tasaRefreshTimer) return;
+  window.clearTimeout(tasaRefreshTimer);
+  tasaRefreshTimer = null;
+};
+
+const startTasaAutoRefresh = () => {
+  stopTasaAutoRefresh();
+  tasaAutoRefreshEnabled = true;
+  const scheduleNext = () => {
+    if (!tasaAutoRefreshEnabled) return;
+    const nextRateUpdate = getNextRateUpdateDate();
+    if (!nextRateUpdate) return;
+    const waitMs = Math.max(1000, nextRateUpdate.getTime() - Date.now());
+    tasaRefreshTimer = window.setTimeout(async () => {
+      try {
+        const rate = await fetchP2PRate();
+        renderTasaActual(rate);
+      } finally {
+        scheduleNext();
+      }
+    }, waitMs + 600);
+  };
+  scheduleNext();
+};
 
 const normalizeHexColor = (value) => {
   const raw = String(value || "").trim();
@@ -806,8 +897,11 @@ const attachHomeBannersSwipe = () => {
       const deltaY = Number(e.deltaY) || 0;
       const absX = Math.abs(deltaX);
       const absY = Math.abs(deltaY);
-      const isHorizontalIntent = absX >= Math.max(8, absY * HOME_BANNERS_WHEEL_AXIS_RATIO);
+      const isHorizontalIntent =
+        absX >= Math.max(HOME_BANNERS_WHEEL_MIN_DELTA, absY * HOME_BANNERS_WHEEL_AXIS_RATIO);
       if (!isHorizontalIntent) return;
+      // No secuestrar el scroll vertical de la página cuando el gesto trae componente Y.
+      if (absY > 6) return;
 
       e.preventDefault();
       stopHomeBannersSlider();
@@ -1444,23 +1538,12 @@ async function init() {
     const canSeeRate = !!currentUser && isExplicitFalse(currentUser?.acceso_cliente);
     if (tasaActualEl) {
       if (!canSeeRate) {
+        stopTasaAutoRefresh();
         tasaActualEl.classList.add("hidden");
       } else {
-        fetchP2PRate()
-          .then((rate) => {
-            const tasaVal = rate
-              ? Math.round(rate * TASA_MARKUP * 100) / 100
-              : null;
-            if (!Number.isFinite(tasaVal)) {
-              tasaActualEl.classList.add("hidden");
-              return;
-            }
-            tasaActualEl.textContent = `Tasa actual: Bs. ${tasaVal.toFixed(2)}`;
-            tasaActualEl.classList.remove("hidden");
-          })
-          .catch(() => {
-            tasaActualEl.classList.add("hidden");
-          });
+        const rate = await fetchP2PRate();
+        renderTasaActual(rate);
+        startTasaAutoRefresh();
       }
     }
     const isAdmin =
@@ -1641,3 +1724,7 @@ viewCartBtn?.addEventListener("click", () => {
 
 // Redirección al inicio al hacer clic en el logo
 attachLogoHome();
+
+window.addEventListener("beforeunload", () => {
+  stopTasaAutoRefresh();
+});
