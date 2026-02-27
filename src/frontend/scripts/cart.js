@@ -44,7 +44,7 @@ const getDiscountColumnsFromRows = (rows = []) => {
   (rows || []).forEach((row) => {
     Object.keys(row || {}).forEach((k) => {
       const key = String(k || "").toLowerCase();
-      if (/^descuento_\\d+$/i.test(key)) cols.add(key);
+      if (/^descuento_\d+$/i.test(key)) cols.add(key);
     });
   });
   const out = Array.from(cols).sort((a, b) => {
@@ -56,13 +56,12 @@ const getDiscountColumnsFromRows = (rows = []) => {
 };
 
 const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
-  const ids = Array.from(
-    new Set(
-      (rows || [])
-        .map((row) => Number(row?.id_descuento))
-        .filter((n) => Number.isFinite(n)),
-    ),
-  ).sort((a, b) => a - b);
+  const ids = [];
+  (rows || []).forEach((row) => {
+    const id = Number(row?.id_descuento);
+    if (!Number.isFinite(id)) return;
+    if (!ids.includes(id)) ids.push(id);
+  });
   const map = {};
   ids.forEach((id, idx) => {
     if (cols[idx]) map[id] = cols[idx];
@@ -70,16 +69,36 @@ const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
   return map;
 };
 
-const resolveDiscountColumn = (platform, mode, discountColumns, discountColumnById) => {
-  const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
+const resolveDiscountColumn = (
+  platform,
+  mode,
+  discountColumns,
+  discountColumnById,
+  isCliente = true,
+) => {
+  const isItemsMode = mode === "items";
+  const groupField = isItemsMode
+    ? isCliente
+      ? "id_descuento_cantidad_detal"
+      : "id_descuento_cantidad_mayor"
+    : isCliente
+      ? "id_descuento_mes_detal"
+      : "id_descuento_mes_mayor";
+  const legacyField = isItemsMode ? "id_descuento_cantidad" : "id_descuento_mes";
+  const preferredRaw = platform?.[groupField];
+  const hasPreferredRaw =
+    preferredRaw !== null &&
+    preferredRaw !== undefined &&
+    String(preferredRaw).trim() !== "";
+  const raw = hasPreferredRaw ? preferredRaw : platform?.[legacyField];
   const asText = String(raw || "").trim();
-  if (/^descuento_\\d+$/i.test(asText)) return asText.toLowerCase();
+  if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
   const asNum = Number(raw);
   if (Number.isFinite(asNum) && asNum >= 1) {
-    const mapped = discountColumnById[Math.trunc(asNum)];
-    if (mapped) return mapped;
     const direct = `descuento_${Math.trunc(asNum)}`;
     if (discountColumns.includes(direct)) return direct;
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
   }
   return mode === "items" ? "descuento_2" : "descuento_1";
 };
@@ -159,12 +178,14 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
       "months",
       discountColumns,
       discountColumnById,
+      isCliente,
     );
     const qtyColumn = resolveDiscountColumn(
       platform,
       "items",
       discountColumns,
       discountColumnById,
+      isCliente,
     );
     const rawRateMeses = monthEnabled
       ? getClosestDiscountPct(descuentos, meses, monthColumn)
@@ -179,7 +200,7 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
     const detalle = (() => {
       if (flags.tarjeta_de_regalo) {
         const region = price.region || "-";
-        return `Región: ${region} · Cantidad: ${qty} · ${mesesTxt}`;
+        return `Región: ${region} · Cantidad: ${qty}`;
       }
       return `${qty} ${baseUnit}${plural} · ${mesesTxt}`;
     })();

@@ -303,7 +303,7 @@
       const getColor2 = (p) => p?.color_2 ?? p?.color2 ?? null;
       const getColor3 = (p) => p?.color_3 ?? p?.color3 ?? null;
       const getPlatFlags = (p) => {
-        const showPin = isTrue(p?.usa_pines);
+        const showPin = isTrue(p?.usa_pines) || isTrue(p?.tarjeta_de_regalo);
         const showPerfil = isTrue(p?.por_pantalla);
         const showClave = !(isTrue(p?.plat_correo_cliente) && !isTrue(p?.plat_clave_cliente));
         return { showPin, showPerfil, showClave };

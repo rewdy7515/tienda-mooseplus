@@ -18,6 +18,10 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
             descuento_meses,
             id_descuento_mes,
             id_descuento_cantidad,
+            id_descuento_mes_detal,
+            id_descuento_mes_mayor,
+            id_descuento_cantidad_detal,
+            id_descuento_cantidad_mayor,
             aplica_descuento_mes_detal,
             aplica_descuento_mes_mayor,
             aplica_descuento_cantidad_detal,
@@ -46,6 +50,10 @@ export function renderCategorias(container, categorias, plataformasPorCategoria,
               data-descuento-meses="${descuento_meses}"
               data-id-descuento-mes="${id_descuento_mes ?? ""}"
               data-id-descuento-cantidad="${id_descuento_cantidad ?? ""}"
+              data-id-descuento-mes-detal="${id_descuento_mes_detal ?? ""}"
+              data-id-descuento-mes-mayor="${id_descuento_mes_mayor ?? ""}"
+              data-id-descuento-cantidad-detal="${id_descuento_cantidad_detal ?? ""}"
+              data-id-descuento-cantidad-mayor="${id_descuento_cantidad_mayor ?? ""}"
               data-aplica-descuento-mes-detal="${aplica_descuento_mes_detal}"
               data-aplica-descuento-mes-mayor="${aplica_descuento_mes_mayor}"
               data-aplica-descuento-cantidad-detal="${aplica_descuento_cantidad_detal}"

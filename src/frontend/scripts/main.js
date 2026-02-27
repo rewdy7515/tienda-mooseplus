@@ -1420,6 +1420,10 @@ const attachPlatformClicks = (onClick) => {
         descuento_meses: isTrue(card.dataset.descuentoMeses),
         id_descuento_mes: card.dataset.idDescuentoMes,
         id_descuento_cantidad: card.dataset.idDescuentoCantidad,
+        id_descuento_mes_detal: card.dataset.idDescuentoMesDetal,
+        id_descuento_mes_mayor: card.dataset.idDescuentoMesMayor,
+        id_descuento_cantidad_detal: card.dataset.idDescuentoCantidadDetal,
+        id_descuento_cantidad_mayor: card.dataset.idDescuentoCantidadMayor,
         aplica_descuento_mes_detal: card.dataset.aplicaDescuentoMesDetal,
         aplica_descuento_mes_mayor: card.dataset.aplicaDescuentoMesMayor,
         aplica_descuento_cantidad_detal: card.dataset.aplicaDescuentoCantidadDetal,
@@ -1446,6 +1450,8 @@ const loadStockSummary = async (canLogStock = false) => {
     { data: perfiles, error: perfErr },
     { data: cuentasMiembro, error: ctaErr },
     { data: cuentasCompletas, error: compErr },
+    { data: giftPins, error: giftPinsErr },
+    { data: giftPlatforms, error: giftPlatErr },
   ] = await Promise.all([
     supabase
       .from("perfiles")
@@ -1471,9 +1477,19 @@ const loadStockSummary = async (canLogStock = false) => {
       .eq("venta_miembro", false)
       .eq("ocupado", false)
       .eq("inactiva", false),
+    supabase
+      .from("tarjetas_de_regalo")
+      .select("id_plataforma")
+      .eq("para_venta", true)
+      .eq("usado", false)
+      .not("id_plataforma", "is", null),
+    supabase
+      .from("plataformas")
+      .select("id_plataforma")
+      .eq("tarjeta_de_regalo", true),
   ]);
-  if (perfErr || ctaErr || compErr) {
-    logStockError("stock summary error", perfErr || ctaErr || compErr);
+  if (perfErr || ctaErr || compErr || giftPinsErr || giftPlatErr) {
+    logStockError("stock summary error", perfErr || ctaErr || compErr || giftPinsErr || giftPlatErr);
     return {};
   }
   let stockObj = {};
@@ -1540,6 +1556,18 @@ const loadStockSummary = async (canLogStock = false) => {
   });
   Object.keys(completasCount).forEach((platId) => {
     stockObj[`${platId}_completas`] = completasCount[platId];
+  });
+
+  const giftStockByPlat = (giftPins || []).reduce((acc, row) => {
+    const platId = Number(row?.id_plataforma);
+    if (!Number.isFinite(platId) || platId <= 0) return acc;
+    acc[platId] = (acc[platId] || 0) + 1;
+    return acc;
+  }, {});
+  (giftPlatforms || []).forEach((plat) => {
+    const platId = Number(plat?.id_plataforma);
+    if (!Number.isFinite(platId) || platId <= 0) return;
+    stockObj[platId] = giftStockByPlat[platId] || 0;
   });
 
   stockObj["1_plan1"] = netflixPlan1;

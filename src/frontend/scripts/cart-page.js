@@ -79,13 +79,12 @@ const getDiscountColumnsFromRows = (rows = []) => {
 };
 
 const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
-  const ids = Array.from(
-    new Set(
-      (rows || [])
-        .map((row) => Number(row?.id_descuento))
-        .filter((n) => Number.isFinite(n)),
-    ),
-  ).sort((a, b) => a - b);
+  const ids = [];
+  (rows || []).forEach((row) => {
+    const id = Number(row?.id_descuento);
+    if (!Number.isFinite(id)) return;
+    if (!ids.includes(id)) ids.push(id);
+  });
   const map = {};
   ids.forEach((id, idx) => {
     if (cols[idx]) map[id] = cols[idx];
@@ -164,16 +163,30 @@ const getClosestDiscountPct = (rows, value, column) => {
   return Number(best?.[column]) || 0;
 };
 
-const resolveDiscountColumn = (platform, mode = "months") => {
-  const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
+const resolveDiscountColumn = (platform, mode = "months", isCliente = currentUserIsCliente) => {
+  const isItemsMode = mode === "items";
+  const groupField = isItemsMode
+    ? isCliente
+      ? "id_descuento_cantidad_detal"
+      : "id_descuento_cantidad_mayor"
+    : isCliente
+      ? "id_descuento_mes_detal"
+      : "id_descuento_mes_mayor";
+  const legacyField = isItemsMode ? "id_descuento_cantidad" : "id_descuento_mes";
+  const preferredRaw = platform?.[groupField];
+  const hasPreferredRaw =
+    preferredRaw !== null &&
+    preferredRaw !== undefined &&
+    String(preferredRaw).trim() !== "";
+  const raw = hasPreferredRaw ? preferredRaw : platform?.[legacyField];
   const asText = String(raw || "").trim();
   if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
   const asNum = Number(raw);
   if (Number.isFinite(asNum) && asNum >= 1) {
-    const mapped = discountColumnById[Math.trunc(asNum)];
-    if (mapped) return mapped;
     const direct = `descuento_${Math.trunc(asNum)}`;
     if (discountColumns.includes(direct)) return direct;
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
   }
   return mode === "items" ? "descuento_2" : "descuento_1";
 };
@@ -446,15 +459,17 @@ const getPriceMaps = () => {
 const calcItemTotals = (item, price, platform) => {
   const unit = price?.precio_usd_detal || 0;
   const qtyVal = item?.cantidad || 0;
-  const mesesVal = item?.meses || price?.duracion || 1;
-  const baseSubtotal = round2(unit * qtyVal * mesesVal);
+  const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
+  const mesesVal = isGiftCard ? 1 : item?.meses || price?.duracion || 1;
+  const baseSubtotal = round2(unit * qtyVal * (isGiftCard ? 1 : mesesVal));
   let descuentoMesesVal = 0;
   let descuentoCantidadVal = 0;
   let rateMeses = 0;
-  const monthColumn = resolveDiscountColumn(platform, "months");
-  const qtyColumn = resolveDiscountColumn(platform, "items");
+  const monthColumn = resolveDiscountColumn(platform, "months", currentUserIsCliente);
+  const qtyColumn = resolveDiscountColumn(platform, "items", currentUserIsCliente);
   const monthEnabled =
     !!platform?.descuento_meses &&
+    !isGiftCard &&
     isDiscountEnabledForAudience(platform, "months", currentUserIsCliente);
   const qtyEnabled = isDiscountEnabledForAudience(platform, "items", currentUserIsCliente);
   if (monthEnabled) {
@@ -480,6 +495,7 @@ const calcItemTotals = (item, price, platform) => {
     rateQty,
     descuentoVal,
     subtotal,
+    isGiftCard,
   };
 };
 
@@ -587,27 +603,18 @@ const renderCart = () => {
   const renderedItems = cartItems.map((item, idx) => {
       const price = priceById[item.id_precio] || {};
       const platform = platformById[price.id_plataforma] || {};
-      const unit = price.precio_usd_detal || 0;
-      const qtyVal = item.cantidad || 0;
-      const mesesVal = item.meses || price.duracion || 1;
-      const baseSubtotal = round2(unit * qtyVal * mesesVal);
-      let descuentoVal = 0;
-      let descuentoMesesVal = 0;
-      let descuentoCantidadVal = 0;
-      let rateMeses = 0;
-      if (platform?.descuento_meses) {
-        const rawRate = getClosestDiscountPct(descuentos, mesesVal, "descuento_1");
-        rateMeses = rawRate > 1 ? rawRate / 100 : rawRate;
-        descuentoMesesVal = round2(baseSubtotal * rateMeses);
-      }
-      const rawRateQty = getClosestDiscountPct(descuentos, qtyVal, "descuento_2");
-      const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
-      if (rateQty > 0) {
-        descuentoCantidadVal = round2(baseSubtotal * rateQty);
-      }
-      descuentoVal = round2(descuentoMesesVal + descuentoCantidadVal);
-      const subtotal = round2(baseSubtotal - descuentoVal);
-      totalDescuento = round2(totalDescuento + descuentoVal);
+      const totals = calcItemTotals(item, price, platform);
+      const unit = totals.unit;
+      const qtyVal = totals.qtyVal;
+      const mesesVal = totals.mesesVal;
+      const baseSubtotal = totals.baseSubtotal;
+      const descuentoMesesVal = totals.descuentoMesesVal;
+      const descuentoCantidadVal = totals.descuentoCantidadVal;
+      const rateMeses = totals.rateMeses;
+      const rateQty = totals.rateQty;
+      const subtotal = totals.subtotal;
+      const isGiftCard = totals.isGiftCard;
+      totalDescuento = round2(totalDescuento + totals.descuentoVal);
       total = round2(total + subtotal);
       const detalle =
         price.plan ||
@@ -616,6 +623,15 @@ const renderCart = () => {
       const correoRenovacion =
         item.renovacion === true ? (item.correo || "-") : "";
       subtotalBruto = round2(subtotalBruto + baseSubtotal);
+      const mesesControl = isGiftCard
+        ? `<span class="cart-meses-static">No aplica</span>`
+        : `
+            <div class="modal-qty">
+              <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
+              <span class="cart-meses-value">${mesesVal}</span>
+              <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
+            </div>
+          `;
       const rowHtml = `
         <tr data-cart-row="1" data-index="${idx}">
           <td>
@@ -645,11 +661,7 @@ const renderCart = () => {
           </td>
           <td class="cart-cell-center">$${round2(unit).toFixed(2)}</td>
           <td class="cart-cell-center">
-            <div class="modal-qty">
-              <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
-              <span class="cart-meses-value">${mesesVal}</span>
-              <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
-            </div>
+            ${mesesControl}
           </td>
           <td class="cart-cell-center">
             ${
@@ -716,11 +728,7 @@ const renderCart = () => {
             <div class="cart-item-bottom">
               <div class="cart-item-cell">
                 <span class="cart-item-label">Meses</span>
-                <div class="modal-qty">
-                  <button type="button" class="meses-minus" data-index="${idx}" aria-label="menos">-</button>
-                  <span class="cart-meses-value">${mesesVal}</span>
-                  <button type="button" class="meses-plus" data-index="${idx}" aria-label="más">+</button>
-                </div>
+                ${mesesControl}
               </div>
               <div class="cart-item-cell">
                 <span class="cart-item-label">Cantidad</span>
@@ -863,6 +871,7 @@ const handleCartClick = async (e) => {
   const item = cartItems[idx];
   if (!item) return;
   const price = precios.find((p) => p.id_precio === item.id_precio) || {};
+  const platform = plataformas.find((p) => p.id_plataforma === price.id_plataforma) || {};
 
   if (btnRemove) {
     openRemoveModal(idx);
@@ -882,6 +891,7 @@ const handleCartClick = async (e) => {
     didUpdate = true;
   }
   if (btnMesesMinus || btnMesesPlus) {
+    if (isTrue(platform?.tarjeta_de_regalo)) return;
     const delta = btnMesesMinus ? -1 : 1;
     const current = item.meses || price.duracion || 1;
     const next = Math.max(1, current + delta);

@@ -281,6 +281,8 @@
       };
 
       const resolveVentaPin = (ventaRow = {}) => {
+        const pinTarjeta = normalizeCopyValue(ventaRow?.pin_tarjeta);
+        if (pinTarjeta) return pinTarjeta;
         const pinPerfil = normalizeCopyValue(ventaRow?.pin_perfil);
         if (pinPerfil) return pinPerfil;
         return normalizeCopyValue(ventaRow?.pin_cuenta);
@@ -344,7 +346,9 @@
               platId === 9;
             const showClaveInput =
               showClientInputs && (platObj.clave_cliente === true || platId === 9);
-            const showPinColumn = !isRenovacion && isTrue(platObj.usa_pines);
+            const showPinColumn =
+              !isRenovacion &&
+              (isTrue(platObj.usa_pines) || isTrue(platObj.tarjeta_de_regalo));
             const showPerfilColumn = !!(platObj.por_acceso || platObj.por_pantalla);
             const perfilHeader = platObj.por_acceso ? "Acceso" : "Perfil";
             const showTipoColumn = !isRenovacion && platId === 9;
@@ -533,7 +537,7 @@
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
               .select(
-                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
+                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, tarjeta_de_regalo, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
               )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
@@ -595,6 +599,7 @@
                 por_acceso: isTrue(plat.por_acceso),
                 por_pantalla: isTrue(plat.por_pantalla),
                 usa_pines: isTrue(plat.usa_pines),
+                tarjeta_de_regalo: isTrue(plat.tarjeta_de_regalo),
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -627,6 +632,7 @@
               n_perfil: v.perfiles?.n_perfil || "",
               pin_perfil: v.perfiles?.pin || "",
               pin_cuenta: v.cuentas?.pin || "",
+              pin_tarjeta: v.tarjetas_de_regalo?.pin || "",
               fecha_corte: v.fecha_corte || "",
               plataforma: platName,
               id_plataforma: platId,
@@ -660,6 +666,7 @@
                 por_acceso: isTrue(plat.por_acceso),
                 por_pantalla: isTrue(plat.por_pantalla),
                 usa_pines: isTrue(plat.usa_pines),
+                tarjeta_de_regalo: isTrue(plat.tarjeta_de_regalo),
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -692,6 +699,7 @@
               n_perfil: v.perfiles?.n_perfil || "",
               pin_perfil: v.perfiles?.pin || "",
               pin_cuenta: v.cuentas?.pin || "",
+              pin_tarjeta: v.tarjetas_de_regalo?.pin || "",
               fecha_corte: v.fecha_corte || "",
               plataforma: platName,
               id_plataforma: platId,

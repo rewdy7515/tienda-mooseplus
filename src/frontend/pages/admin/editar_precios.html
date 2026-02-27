@@ -360,6 +360,26 @@
         font-size: 12px;
         color: #b45309;
       }
+      .bulk-save-row {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .btn-save-all {
+        border: none;
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: #111;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn-save-all:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
     </style>
   </head>
   <body>
@@ -367,6 +387,11 @@
     <script src="../../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas">
+      <div class="bulk-save-row">
+        <button type="button" id="btn-save-all-discounts" class="btn-save-all">
+          Guardar todo
+        </button>
+      </div>
       <h2>Editar precios</h2>
       <div class="precios-wrapper" id="precios-wrapper">
         <p class="status" id="estado">Cargando plataformas y precios...</p>
@@ -397,6 +422,7 @@
 
       const wrapper = document.getElementById("precios-wrapper");
       const estadoEl = document.getElementById("estado");
+      const btnSaveAllDiscountsEl = document.getElementById("btn-save-all-discounts");
       const descuentosModalEl = document.getElementById("descuentos-modal");
       const descuentosModalCloseEl = document.getElementById("descuentos-modal-close");
       const descuentosModalBackdropEl = descuentosModalEl?.querySelector(".modal-backdrop");
@@ -405,6 +431,7 @@
       const FALLBACK_DISCOUNT_COLUMNS = ["descuento_1", "descuento_2", "descuento_3", "descuento_4"];
       let descuentoColumnas = [...FALLBACK_DISCOUNT_COLUMNS];
       let descuentoOpciones = [];
+      let descuentoPosByLegacyId = {};
       let descuentosFilas = [];
       let soporteColumnasDescuentoPlataforma = true;
       let soporteChecksDescuentoPlataforma = true;
@@ -415,6 +442,10 @@
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
+      };
+
+      const logDescuentoDebug = (...args) => {
+        console.log("[editar_precios][descuento]", ...args);
       };
 
       const positionQtyPopover = (cell, popover) => {
@@ -459,9 +490,18 @@
           if (!Number.isFinite(id)) return;
           if (!ids.includes(id)) ids.push(id);
         });
+        descuentoPosByLegacyId = {};
+        ids.forEach((id, idx) => {
+          if (!Number.isFinite(id)) return;
+          if (idx >= (columnas || []).length) return;
+          const pos = idx + 1;
+          descuentoPosByLegacyId[id] = pos;
+        });
         return (columnas || []).map((col, idx) => ({
           label: col,
-          id: Number.isFinite(Number(ids[idx])) ? Number(ids[idx]) : null,
+          // Guardamos el grupo/columna (1..N), no id_descuento de fila.
+          id: idx + 1,
+          legacy_id: Number.isFinite(Number(ids[idx])) ? Number(ids[idx]) : null,
           pos: idx + 1,
         }));
       };
@@ -475,13 +515,29 @@
       };
 
       const normalizarIdDescuento = (value, fallback = null) => {
-        const num = Number(value);
-        if (Number.isFinite(num) && descuentoOpciones.some((o) => Number(o.id) === num)) {
-          return Math.trunc(num);
+        const parseGroup = (rawValue) => {
+          const txt = String(rawValue ?? "").trim().toLowerCase();
+          const colMatch = txt.match(/^descuento_(\d+)$/);
+          if (colMatch) {
+            const colPos = Number(colMatch[1]);
+            if (Number.isFinite(colPos)) return Math.trunc(colPos);
+          }
+          const n = Number(rawValue);
+          if (!Number.isFinite(n)) return null;
+          const asNum = Math.trunc(n);
+          if (descuentoOpciones.some((o) => Number(o.id) === asNum)) return asNum;
+          // Compatibilidad con datos viejos que guardaron id_descuento (fila).
+          const mappedPos = Number(descuentoPosByLegacyId[asNum]);
+          if (Number.isFinite(mappedPos)) return Math.trunc(mappedPos);
+          return null;
+        };
+        const fromValue = parseGroup(value);
+        if (Number.isFinite(fromValue)) {
+          return fromValue;
         }
-        const fallbackNum = Number(fallback);
-        if (Number.isFinite(fallbackNum) && descuentoOpciones.some((o) => Number(o.id) === fallbackNum)) {
-          return Math.trunc(fallbackNum);
+        const fromFallback = parseGroup(fallback);
+        if (Number.isFinite(fromFallback)) {
+          return fromFallback;
         }
         return getDescuentoIdPorPos(1);
       };
@@ -538,6 +594,281 @@
         }
         if (/^id_descuento_/i.test(f)) return soporteColumnasDescuentoPlataforma;
         return false;
+      };
+
+      const getMirrorDiscountFields = (baseField = "") => {
+        if (baseField === "id_descuento_mes") {
+          return ["id_descuento_mes_detal", "id_descuento_mes_mayor"];
+        }
+        if (baseField === "id_descuento_cantidad") {
+          return ["id_descuento_cantidad_detal", "id_descuento_cantidad_mayor"];
+        }
+        if (/^id_descuento_mes_(detal|mayor)$/i.test(baseField)) {
+          return ["id_descuento_mes"];
+        }
+        if (/^id_descuento_cantidad_(detal|mayor)$/i.test(baseField)) {
+          return ["id_descuento_cantidad"];
+        }
+        return [];
+      };
+
+      const buildDiscountUpdatePayload = (target = "plataformas", field = "", nextValue = null) => {
+        const canPersistField = (candidateField) =>
+          target === "precios"
+            ? canPersistFieldPerRow(candidateField)
+            : canPersistFieldOnPlatform(candidateField);
+        const payload = {};
+        const addFieldToPayload = (candidateField) => {
+          if (!candidateField) return;
+          if (!canPersistField(candidateField)) return;
+          payload[candidateField] = nextValue;
+        };
+        addFieldToPayload(field);
+        getMirrorDiscountFields(field).forEach(addFieldToPayload);
+        return payload;
+      };
+
+      const syncControlsForDiscountPayload = (target = "plataformas", id = null, payload = {}) => {
+        if (!wrapper || !Number.isFinite(Number(id))) return;
+        const idAttr = target === "precios" ? "data-price" : "data-plat";
+        const idVal = String(Math.trunc(Number(id)));
+        Object.entries(payload || {}).forEach(([field, value]) => {
+          if (/^id_descuento_/i.test(field)) {
+            wrapper
+              .querySelectorAll(
+                `[data-descuento-select="1"][data-target="${target}"][${idAttr}="${idVal}"][data-field="${field}"]`
+              )
+              .forEach((el) => {
+                el.value = String(value);
+                el.dataset.prev = String(value);
+              });
+          }
+          if (/^aplica_descuento_/i.test(field)) {
+            wrapper
+              .querySelectorAll(
+                `[data-descuento-scope="1"][data-target="${target}"][${idAttr}="${idVal}"][data-field="${field}"]`
+              )
+              .forEach((el) => {
+                el.checked = !!value;
+              });
+          }
+        });
+      };
+
+      const syncRowAddDatasetsFromPlatformPayload = (idPlataforma, payload = {}) => {
+        const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
+        rowAdds.forEach((row) => {
+          if (payload.id_descuento_mes != null) row.dataset.descuentoMes = String(payload.id_descuento_mes);
+          if (payload.id_descuento_mes_detal != null)
+            row.dataset.descuentoMesDetal = String(payload.id_descuento_mes_detal);
+          if (payload.id_descuento_mes_mayor != null)
+            row.dataset.descuentoMesMayor = String(payload.id_descuento_mes_mayor);
+          if (payload.id_descuento_cantidad != null)
+            row.dataset.descuentoCant = String(payload.id_descuento_cantidad);
+          if (payload.id_descuento_cantidad_detal != null)
+            row.dataset.descuentoCantDetal = String(payload.id_descuento_cantidad_detal);
+          if (payload.id_descuento_cantidad_mayor != null)
+            row.dataset.descuentoCantMayor = String(payload.id_descuento_cantidad_mayor);
+
+          if (payload.aplica_descuento_mes_detal != null)
+            row.dataset.aplicaDescuentoMesDetal = String(payload.aplica_descuento_mes_detal);
+          if (payload.aplica_descuento_mes_mayor != null)
+            row.dataset.aplicaDescuentoMesMayor = String(payload.aplica_descuento_mes_mayor);
+          if (payload.aplica_descuento_cantidad_detal != null)
+            row.dataset.aplicaDescuentoCantidadDetal = String(payload.aplica_descuento_cantidad_detal);
+          if (payload.aplica_descuento_cantidad_mayor != null)
+            row.dataset.aplicaDescuentoCantidadMayor = String(payload.aplica_descuento_cantidad_mayor);
+        });
+      };
+
+      const saveAllDiscountControls = async () => {
+        if (!wrapper) return;
+        if (!btnSaveAllDiscountsEl) return;
+        const originalText = btnSaveAllDiscountsEl.textContent || "Guardar todo";
+        btnSaveAllDiscountsEl.disabled = true;
+        btnSaveAllDiscountsEl.textContent = "Guardando...";
+        try {
+          const platformUpdates = new Map();
+          const priceUpdates = new Map();
+          const skipped = [];
+          const mergeUpdate = (target, id, payload) => {
+            if (!Object.keys(payload || {}).length) return;
+            const map = target === "precios" ? priceUpdates : platformUpdates;
+            const current = map.get(id) || {};
+            map.set(id, { ...current, ...payload });
+          };
+
+          const selectEls = Array.from(
+            wrapper.querySelectorAll('[data-descuento-select="1"]')
+          );
+          selectEls.forEach((el) => {
+            if (el.disabled) return;
+            const target = String(el.dataset.target || "plataformas");
+            const field = String(el.dataset.field || "");
+            const idPlataforma = Number(el.dataset.plat);
+            const idPrecio = Number(el.dataset.price);
+            const fallbackId = getDescuentoIdPorPos(fallbackPosByDiscountField(field));
+            const nextValue = normalizarIdDescuento(el.value, fallbackId);
+            if (!field || !Number.isFinite(Number(nextValue))) {
+              skipped.push({ type: "select", reason: "invalid-value", field, target });
+              return;
+            }
+            const payload = buildDiscountUpdatePayload(target, field, nextValue);
+            if (!Object.keys(payload).length) {
+              skipped.push({ type: "select", reason: "unsupported-field", field, target });
+              return;
+            }
+            if (target === "precios") {
+              if (!Number.isFinite(idPrecio) || idPrecio <= 0) {
+                skipped.push({ type: "select", reason: "missing-price-id", field, target });
+                return;
+              }
+              mergeUpdate("precios", Math.trunc(idPrecio), payload);
+              return;
+            }
+            if (!Number.isFinite(idPlataforma) || idPlataforma <= 0) {
+              skipped.push({ type: "select", reason: "missing-platform-id", field, target });
+              return;
+            }
+            mergeUpdate("plataformas", Math.trunc(idPlataforma), payload);
+          });
+
+          const scopeEls = Array.from(
+            wrapper.querySelectorAll('[data-descuento-scope="1"]')
+          );
+          scopeEls.forEach((el) => {
+            if (el.disabled) return;
+            const target = String(el.dataset.target || "plataformas");
+            const field = String(el.dataset.field || "");
+            const idPlataforma = Number(el.dataset.plat);
+            const idPrecio = Number(el.dataset.price);
+            const nextValue = !!el.checked;
+            const canPersist =
+              target === "precios"
+                ? canPersistFieldPerRow(field)
+                : canPersistFieldOnPlatform(field);
+            if (!field || !canPersist) {
+              skipped.push({ type: "scope", reason: "unsupported-field", field, target });
+              return;
+            }
+            if (target === "precios") {
+              if (!Number.isFinite(idPrecio) || idPrecio <= 0) {
+                skipped.push({ type: "scope", reason: "missing-price-id", field, target });
+                return;
+              }
+              mergeUpdate("precios", Math.trunc(idPrecio), { [field]: nextValue });
+              return;
+            }
+            if (!Number.isFinite(idPlataforma) || idPlataforma <= 0) {
+              skipped.push({ type: "scope", reason: "missing-platform-id", field, target });
+              return;
+            }
+            mergeUpdate("plataformas", Math.trunc(idPlataforma), { [field]: nextValue });
+          });
+
+          let ok = 0;
+          let fail = 0;
+          const errors = [];
+
+          for (const [idPlataforma, payload] of platformUpdates.entries()) {
+            logDescuentoDebug("bulk:update:start", {
+              target: "plataformas",
+              idPlataforma,
+              payload,
+            });
+            const { error } = await supabase
+              .from("plataformas")
+              .update(payload)
+              .eq("id_plataforma", idPlataforma);
+            if (error) {
+              fail += 1;
+              errors.push({ target: "plataformas", idPlataforma, payload, error });
+              logDescuentoDebug("bulk:update:error", {
+                target: "plataformas",
+                idPlataforma,
+                payload,
+                error: {
+                  code: error?.code || "",
+                  message: error?.message || "",
+                  details: error?.details || "",
+                  hint: error?.hint || "",
+                },
+              });
+              continue;
+            }
+            ok += 1;
+            syncControlsForDiscountPayload("plataformas", idPlataforma, payload);
+            syncRowAddDatasetsFromPlatformPayload(idPlataforma, payload);
+            logDescuentoDebug("bulk:update:ok", {
+              target: "plataformas",
+              idPlataforma,
+              payload,
+            });
+          }
+
+          for (const [idPrecio, payload] of priceUpdates.entries()) {
+            logDescuentoDebug("bulk:update:start", {
+              target: "precios",
+              idPrecio,
+              payload,
+            });
+            const { error } = await supabase
+              .from("precios")
+              .update(payload)
+              .eq("id_precio", idPrecio);
+            if (error) {
+              fail += 1;
+              errors.push({ target: "precios", idPrecio, payload, error });
+              logDescuentoDebug("bulk:update:error", {
+                target: "precios",
+                idPrecio,
+                payload,
+                error: {
+                  code: error?.code || "",
+                  message: error?.message || "",
+                  details: error?.details || "",
+                  hint: error?.hint || "",
+                },
+              });
+              continue;
+            }
+            ok += 1;
+            syncControlsForDiscountPayload("precios", idPrecio, payload);
+            logDescuentoDebug("bulk:update:ok", {
+              target: "precios",
+              idPrecio,
+              payload,
+            });
+          }
+
+          const summary = `Guardado masivo: ${ok} actualizados, ${fail} con error, ${skipped.length} omitidos.`;
+          setEstado(summary);
+          logDescuentoDebug("bulk:update:summary", {
+            ok,
+            fail,
+            skipped,
+            errors,
+            platformRows: platformUpdates.size,
+            priceRows: priceUpdates.size,
+          });
+          if (fail > 0) {
+            alert(`Guardado masivo completado con ${fail} error(es). Revisa la consola.`);
+          }
+        } catch (err) {
+          console.error("bulk save descuentos error", err);
+          logDescuentoDebug("bulk:update:fatal", {
+            error: {
+              code: err?.code || "",
+              message: err?.message || String(err || ""),
+              details: err?.details || "",
+              hint: err?.hint || "",
+            },
+          });
+          alert("No se pudo completar el guardado masivo.");
+        } finally {
+          btnSaveAllDiscountsEl.disabled = false;
+          btnSaveAllDiscountsEl.textContent = originalText;
+        }
       };
 
       const valorDescuento = (row, col) => {
@@ -629,14 +960,14 @@
         const resolvePersistMeta = (preferredField = "", fallbackField = preferredField) => {
           const pref = String(preferredField || "");
           const fallback = String(fallbackField || pref);
-          const canRowPref = Number.isFinite(idPrecio) && canPersistFieldPerRow(pref);
-          if (canRowPref) return { field: pref, target: "precios", supported: true };
           const canPlatPref = canPersistFieldOnPlatform(pref);
           if (canPlatPref) return { field: pref, target: "plataformas", supported: true };
-          const canRowFallback = Number.isFinite(idPrecio) && canPersistFieldPerRow(fallback);
-          if (canRowFallback) return { field: fallback, target: "precios", supported: true };
+          const canRowPref = Number.isFinite(idPrecio) && canPersistFieldPerRow(pref);
+          if (canRowPref) return { field: pref, target: "precios", supported: true };
           const canPlatFallback = canPersistFieldOnPlatform(fallback);
           if (canPlatFallback) return { field: fallback, target: "plataformas", supported: true };
+          const canRowFallback = Number.isFinite(idPrecio) && canPersistFieldPerRow(fallback);
+          if (canRowFallback) return { field: fallback, target: "precios", supported: true };
           return { field: fallback, target: "plataformas", supported: false };
         };
         const selectPersistDefault = resolvePersistMeta(field, field);
@@ -1340,6 +1671,13 @@
               return;
             }
             try {
+              logDescuentoDebug("scope:update:start", {
+                target,
+                field,
+                idPlataforma,
+                idPrecio,
+                nextValue,
+              });
               const query =
                 target === "precios"
                   ? supabase.from("precios").update({ [field]: nextValue }).eq("id_precio", idPrecio)
@@ -1349,6 +1687,13 @@
                       .eq("id_plataforma", idPlataforma);
               const { error } = await query;
               if (error) throw error;
+              logDescuentoDebug("scope:update:ok", {
+                target,
+                field,
+                idPlataforma,
+                idPrecio,
+                nextValue,
+              });
               if (target !== "precios") {
                 const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
                 rowAdds.forEach((row) => {
@@ -1365,6 +1710,19 @@
               }
             } catch (err) {
               console.error("update descuento scope error", err);
+              logDescuentoDebug("scope:update:error", {
+                target,
+                field,
+                idPlataforma,
+                idPrecio,
+                nextValue,
+                error: {
+                  code: err?.code || "",
+                  message: err?.message || String(err || ""),
+                  details: err?.details || "",
+                  hint: err?.hint || "",
+                },
+              });
               descuentoScope.checked = !nextValue;
               alert("No se pudo actualizar el check de descuento.");
             }
@@ -1390,53 +1748,72 @@
           if (target === "precios" && !idPrecio) return;
           if (target !== "precios" && !idPlataforma) return;
           try {
+            const payload = buildDiscountUpdatePayload(target, field, nextValue);
+            if (!Object.keys(payload).length) {
+              logDescuentoDebug("select:update:skip:no-supported-fields", {
+                target,
+                field,
+                idPlataforma,
+                idPrecio,
+                nextValue,
+              });
+              alert("No hay columnas soportadas para guardar este descuento.");
+              descuentoSelect.value = String(prevValue);
+              return;
+            }
+            logDescuentoDebug("select:update:start", {
+              target,
+              field,
+              group,
+              idPlataforma,
+              idPrecio,
+              nextValue,
+              payload,
+            });
             const query =
               target === "precios"
-                ? supabase.from("precios").update({ [field]: nextValue }).eq("id_precio", idPrecio)
+                ? supabase.from("precios").update(payload).eq("id_precio", idPrecio)
                 : supabase
                     .from("plataformas")
-                    .update({ [field]: nextValue })
+                    .update(payload)
                     .eq("id_plataforma", idPlataforma);
             const { error } = await query;
             if (error) throw error;
-            wrapper
-              ?.querySelectorAll(
-                target === "precios"
-                  ? group
-                    ? `[data-descuento-select="1"][data-target="precios"][data-price="${idPrecio}"][data-field="${field}"][data-group="${group}"]`
-                    : `[data-descuento-select="1"][data-target="precios"][data-price="${idPrecio}"][data-field="${field}"]`
-                  : group
-                    ? `[data-descuento-select="1"][data-target="plataformas"][data-plat="${idPlataforma}"][data-field="${field}"][data-group="${group}"]`
-                    : `[data-descuento-select="1"][data-target="plataformas"][data-plat="${idPlataforma}"][data-field="${field}"]`
-              )
-              .forEach((el) => {
-                el.value = String(nextValue);
-                el.dataset.prev = String(nextValue);
-              });
+            logDescuentoDebug("select:update:ok", {
+              target,
+              field,
+              group,
+              idPlataforma,
+              idPrecio,
+              nextValue,
+              payload,
+            });
+            const targetId = target === "precios" ? idPrecio : idPlataforma;
+            syncControlsForDiscountPayload(target, targetId, payload);
             if (target !== "precios") {
-              const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
-              rowAdds.forEach((row) => {
-                if (field === "id_descuento_mes") {
-                  row.dataset.descuentoMes = String(nextValue);
-                  if (group === "detal") row.dataset.descuentoMesDetal = String(nextValue);
-                  if (group === "mayor") row.dataset.descuentoMesMayor = String(nextValue);
-                }
-                if (field === "id_descuento_cantidad") {
-                  row.dataset.descuentoCant = String(nextValue);
-                  if (group === "detal") row.dataset.descuentoCantDetal = String(nextValue);
-                  if (group === "mayor") row.dataset.descuentoCantMayor = String(nextValue);
-                }
-                if (field === "id_descuento_mes_detal") row.dataset.descuentoMesDetal = String(nextValue);
-                if (field === "id_descuento_mes_mayor") row.dataset.descuentoMesMayor = String(nextValue);
-                if (field === "id_descuento_cantidad_detal") row.dataset.descuentoCantDetal = String(nextValue);
-                if (field === "id_descuento_cantidad_mayor") row.dataset.descuentoCantMayor = String(nextValue);
-              });
-              setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+              syncRowAddDatasetsFromPlatformPayload(idPlataforma, payload);
+              setEstado(
+                `Actualizado ${Object.keys(payload).join(", ")} en plataforma #${idPlataforma}.`
+              );
             } else {
-              setEstado(`Actualizado ${field} en precio #${idPrecio}.`);
+              setEstado(`Actualizado ${Object.keys(payload).join(", ")} en precio #${idPrecio}.`);
             }
           } catch (err) {
             console.error("update descuento plataforma error", err);
+            logDescuentoDebug("select:update:error", {
+              target,
+              field,
+              group,
+              idPlataforma,
+              idPrecio,
+              nextValue,
+              error: {
+                code: err?.code || "",
+                message: err?.message || String(err || ""),
+                details: err?.details || "",
+                hint: err?.hint || "",
+              },
+            });
             descuentoSelect.value = String(prevValue);
             if (String(err?.code || "") === "23503") {
               alert(
@@ -2119,6 +2496,7 @@
 
       descuentosModalCloseEl?.addEventListener("click", cerrarModalDescuentos);
       descuentosModalBackdropEl?.addEventListener("click", cerrarModalDescuentos);
+      btnSaveAllDiscountsEl?.addEventListener("click", saveAllDiscountControls);
       document.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape" && !descuentosModalEl?.classList.contains("hidden")) {
           cerrarModalDescuentos();

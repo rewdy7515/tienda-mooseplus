@@ -1500,7 +1500,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
   const { data: plataformas, error: platErr } = await supabaseAdmin
     .from("plataformas")
-    .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre, correo_cliente")
+    .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre, correo_cliente, tarjeta_de_regalo")
     .in("id_plataforma", plataformaIds);
   if (platErr) throw platErr;
   const platInfoById = (plataformas || []).reduce((acc, p) => {
@@ -1672,6 +1672,7 @@ const processOrderFromItems = async ({
     const cantidad = it.cantidad || 0;
     if (cantidad <= 0) continue;
     const platId = Number(price.id_plataforma) || null;
+    const isGiftCardSale = isTrue(platInfoById[platId]?.tarjeta_de_regalo);
     const entregaInmediata = isTrue(platInfoById[platId]?.entrega_inmediata);
     const cuentaMadrePlat = isTrue(platInfoById[platId]?.cuenta_madre);
     const pendienteVenta = !entregaInmediata || cuentaMadrePlat;
@@ -1691,7 +1692,45 @@ const processOrderFromItems = async ({
       cantidad,
     });
 
-    if (price.completa) {
+    if (isGiftCardSale) {
+      const { data: giftCardsStock, error: giftErr } = await supabaseAdmin
+        .from("tarjetas_de_regalo")
+        .select("id_tarjeta_de_regalo, id_plataforma, pin, para_venta, usado")
+        .eq("id_plataforma", platId)
+        .eq("para_venta", true)
+        .eq("usado", false)
+        .order("id_tarjeta_de_regalo", { ascending: true })
+        .limit(stockScanLimit(cantidad));
+      if (giftErr) throw giftErr;
+      const disponibles = (giftCardsStock || []).filter((row) => toPositiveInt(row?.id_tarjeta_de_regalo));
+      const faltantes = Math.max(0, cantidad - disponibles.length);
+      disponibles.slice(0, cantidad).forEach((row) => {
+        asignaciones.push({
+          id_precio: price.id_precio,
+          monto: pickPrecio(price),
+          id_cuenta: null,
+          id_perfil: null,
+          id_sub_cuenta: null,
+          id_tarjeta_de_regalo: row.id_tarjeta_de_regalo,
+          meses: 1,
+          pendiente: false,
+        });
+      });
+      if (faltantes > 0) {
+        for (let i = 0; i < faltantes; i += 1) {
+          pendientes.push({
+            id_precio: price.id_precio,
+            monto: pickPrecio(price),
+            id_cuenta: null,
+            id_perfil: null,
+            id_sub_cuenta: null,
+            id_tarjeta_de_regalo: null,
+            meses: 1,
+            pendiente: true,
+          });
+        }
+      }
+    } else if (price.completa) {
       let cuentasQuery = supabaseAdmin
         .from("cuentas")
         .select("id_cuenta, id_plataforma, ocupado, inactiva")
@@ -2022,6 +2061,7 @@ const processOrderFromItems = async ({
     return {
       id_usuario: idUsuarioVentas,
       id_precio: a.id_precio,
+      id_tarjeta_de_regalo: toPositiveInt(a.id_tarjeta_de_regalo) || null,
       id_cuenta: a.id_cuenta,
       id_perfil: a.id_perfil,
       // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
@@ -2045,9 +2085,29 @@ const processOrderFromItems = async ({
     const { data: ventasRes, error: ventaErr } = await supabaseAdmin
       .from("ventas")
       .insert(ventasToInsert)
-      .select("id_venta, id_cuenta, id_precio");
+      .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
     if (ventaErr) throw ventaErr;
     insertedVentas = ventasRes || [];
+  }
+
+  const giftSoldIds = Array.from(
+    new Set(
+      (insertedVentas || [])
+        .map((row) => toPositiveInt(row?.id_tarjeta_de_regalo))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  );
+  if (giftSoldIds.length) {
+    const { error: updGiftErr } = await supabaseAdmin
+      .from("tarjetas_de_regalo")
+      .update({
+        usado: true,
+        vendido_a: toPositiveInt(idUsuarioVentas) || null,
+        fecha_uso: isoHoy,
+      })
+      .eq("para_venta", true)
+      .in("id_tarjeta_de_regalo", giftSoldIds);
+    if (updGiftErr) throw updGiftErr;
   }
 
   // Historial de ventas (nuevas + renovaciones) con monto como float completo
@@ -2114,10 +2174,23 @@ const processOrderFromItems = async ({
   }
 
   // marca recursos como ocupados
-  const perfilesIds = asignaciones.map((a) => a.id_perfil).filter(Boolean);
-  const cuentasIds = asignaciones
-    .filter((a) => a.id_perfil === null && a.id_cuenta)
-    .map((a) => a.id_cuenta);
+  const perfilesIds = uniqPositiveIds(asignaciones.map((a) => a.id_perfil));
+  const cuentasIds = uniqPositiveIds(
+    asignaciones
+      .filter((a) => a.id_perfil === null && a.id_cuenta)
+      .map((a) => a.id_cuenta),
+  );
+  const cuentasCompletasIds = uniqPositiveIds(
+    asignaciones
+      .filter((a) => {
+        if (a?.id_perfil !== null && a?.id_perfil !== undefined) return false;
+        const cuentaId = toPositiveInt(a?.id_cuenta);
+        if (!cuentaId) return false;
+        const priceInfo = priceMap[a?.id_precio] || {};
+        return isTrue(priceInfo?.completa) && !isTrue(priceInfo?.sub_cuenta);
+      })
+      .map((a) => a.id_cuenta),
+  );
   if (perfilesIds.length) {
     const { error: updPerfErr } = await supabaseAdmin
       .from("perfiles")
@@ -2131,6 +2204,13 @@ const processOrderFromItems = async ({
       .update({ ocupado: true })
       .in("id_cuenta", cuentasIds);
     if (updCtaErr) throw updCtaErr;
+  }
+  if (cuentasCompletasIds.length) {
+    const { error: updCompletaErr } = await supabaseAdmin
+      .from("cuentas")
+      .update({ completa: true })
+      .in("id_cuenta", cuentasCompletasIds);
+    if (updCompletaErr) throw updCompletaErr;
   }
 
   // limpia carrito (desvincula orden para evitar FK)
@@ -3654,6 +3734,7 @@ app.get("/api/inventario", async (req, res) => {
         id_cuenta,
         id_cuenta_miembro,
         id_perfil,
+        id_tarjeta_de_regalo,
         completa,
         cuentas:cuentas!ventas_id_cuenta_fkey(
           id_cuenta,
@@ -3700,11 +3781,41 @@ app.get("/api/inventario", async (req, res) => {
           id_cuenta_miembro,
           perfil_hogar
         ),
-        precios:precios(plan, sub_cuenta, completa)
+        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(
+          id_tarjeta_de_regalo,
+          pin
+        ),
+        precios:precios(plan, sub_cuenta, completa, id_plataforma)
       `
       )
       .eq("id_usuario", idUsuario);
     if (error) throw error;
+
+    const plataformaIds = Array.from(
+      new Set(
+        (data || []).map(
+          (row) =>
+            row?.cuentas?.id_plataforma ||
+            row?.cuentas_miembro?.id_plataforma ||
+            row?.precios?.id_plataforma ||
+            null,
+        ),
+      ),
+    ).filter(Boolean);
+    let plataformaMap = {};
+    if (plataformaIds.length) {
+      const { data: plataformaRows, error: plataformaErr } = await supabaseAdmin
+        .from("plataformas")
+        .select(
+          "id_plataforma, nombre, color_1, color_2, color_3, usa_pines, tarjeta_de_regalo, por_pantalla, por_acceso, correo_cliente, clave_cliente",
+        )
+        .in("id_plataforma", plataformaIds);
+      if (plataformaErr) throw plataformaErr;
+      plataformaMap = (plataformaRows || []).reduce((acc, row) => {
+        acc[row.id_plataforma] = row;
+        return acc;
+      }, {});
+    }
 
     const memberIds = Array.from(
       new Set(
@@ -3729,7 +3840,10 @@ app.get("/api/inventario", async (req, res) => {
     }
 
     const items = (data || []).map((row) => {
-      const plataformaInfo = row.cuentas?.plataformas || row.cuentas_miembro?.plataformas || null;
+      const plataformaId =
+        row.cuentas?.id_plataforma || row.cuentas_miembro?.id_plataforma || row.precios?.id_plataforma || null;
+      const plataformaInfo =
+        row.cuentas?.plataformas || row.cuentas_miembro?.plataformas || plataformaMap[plataformaId] || null;
       const plataforma = plataformaInfo?.nombre || "Sin plataforma";
       const color_1 = plataformaInfo?.color_1 || null;
       const color_2 = plataformaInfo?.color_2 || null;
@@ -3755,6 +3869,7 @@ app.get("/api/inventario", async (req, res) => {
         color_2,
         color_3,
         usa_pines,
+        tarjeta_de_regalo: plataformaInfo?.tarjeta_de_regalo ?? null,
         por_pantalla,
         por_acceso,
         plat_correo_cliente: correo_cliente_flag,
@@ -3763,7 +3878,7 @@ app.get("/api/inventario", async (req, res) => {
         id_venta: row.id_venta,
         nombre_cliente: row.nombre_cliente || "",
         id_precio: row.id_precio || null,
-        id_plataforma: row.cuentas?.id_plataforma || row.cuentas_miembro?.id_plataforma || null,
+        id_plataforma: plataformaId,
         id_cuenta:
           memberId || row.id_cuenta || row.id_cuenta_miembro || row.cuentas?.id_cuenta || null,
         id_perfil: row.id_perfil || row.perfiles?.id_perfil || null,
@@ -3771,7 +3886,7 @@ app.get("/api/inventario", async (req, res) => {
         correo_cliente: row.correo_miembro || "",
         clave: memberCuenta?.clave || cuentaData?.clave || "",
         n_perfil: row.perfiles?.n_perfil ?? null,
-        pin: row.perfiles?.pin ?? null,
+        pin: row.perfiles?.pin ?? row.tarjetas_de_regalo?.pin ?? null,
         perfil_hogar: row.perfiles?.perfil_hogar ?? null,
         fecha_corte: row.fecha_corte,
         venta_perfil: row.cuentas?.venta_perfil ?? row.cuentas_miembro?.venta_perfil,
@@ -3789,6 +3904,7 @@ app.get("/api/inventario", async (req, res) => {
           color_2: item.color_2,
           id_plataforma: item.id_plataforma,
           usa_pines: item.usa_pines,
+          tarjeta_de_regalo: item.tarjeta_de_regalo,
           por_pantalla: item.por_pantalla,
           por_acceso: item.por_acceso,
           plat_correo_cliente: item.plat_correo_cliente,
@@ -3817,6 +3933,7 @@ app.get("/api/inventario", async (req, res) => {
       color_3: payload.color_3 || null,
       id_plataforma: payload.id_plataforma || null,
       usa_pines: payload.usa_pines ?? null,
+      tarjeta_de_regalo: payload.tarjeta_de_regalo ?? null,
       por_pantalla: payload.por_pantalla ?? null,
       por_acceso: payload.por_acceso ?? null,
       plat_correo_cliente: payload.plat_correo_cliente ?? null,
@@ -3883,6 +4000,7 @@ app.get("/api/ventas/orden", async (req, res) => {
         id_perfil,
         id_cuenta_miembro,
         id_precio,
+        id_tarjeta_de_regalo,
         pendiente,
         id_orden,
         correo_miembro,
@@ -3890,6 +4008,7 @@ app.get("/api/ventas/orden", async (req, res) => {
         cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, pin, id_plataforma, venta_perfil, venta_miembro),
         cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, pin, id_plataforma, id_cuenta_madre),
         perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
+        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(id_tarjeta_de_regalo, pin),
         precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)
       `
       )

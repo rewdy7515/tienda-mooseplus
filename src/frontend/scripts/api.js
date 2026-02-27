@@ -153,7 +153,7 @@ export async function loadCatalog() {
         "id_precio, id_plataforma, cantidad, precio_usd_detal, precio_usd_mayor, duracion, completa, plan, region, valor_tarjeta_de_regalo, moneda, sub_cuenta, descripcion_plan"
       )
       .order("id_precio"),
-    supabase.from("descuentos").select("*"),
+    supabase.from("descuentos").select("*").order("meses", { ascending: true }),
   ]);
 
   if (errCat || errPlat || errPre || errDesc) {

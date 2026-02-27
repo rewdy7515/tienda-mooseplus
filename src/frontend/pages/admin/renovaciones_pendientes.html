@@ -333,7 +333,7 @@
           const { data: ventas, error: ventasErr } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, pendiente, suspendido, usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva)",
+              "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, pendiente, suspendido, usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa)",
             )
             .eq("cuenta_pagada_admin", false)
             .order("id_venta", { ascending: false });
@@ -349,6 +349,7 @@
               venta?.cuentas_miembro?.id_cuenta ? venta.cuentas_miembro : venta.cuentas;
             if (!sourceAccount) return;
             if (isTrue(sourceAccount.inactiva)) return;
+            if (!isTrue(sourceAccount.completa)) return;
             const idPlataforma = Number(sourceAccount.id_plataforma || 0);
             if (!idPlataforma) return;
             const idProveedor = Number(sourceAccount.id_proveedor || 0) || null;

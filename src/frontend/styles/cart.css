@@ -530,6 +530,13 @@ body.cart-drawer-open {
   margin: 0 auto;
 }
 
+.cart-meses-static {
+  display: inline-block;
+  color: #6b7280;
+  font-weight: 600;
+  padding: 8px 0;
+}
+
 .cart-price-line {
   display: none;
 }

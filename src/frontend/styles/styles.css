@@ -2090,6 +2090,15 @@ input[type="number"].input-inline {
   align-items: stretch;
 }
 
+#platform-modal .modal-bottom .modal-qty-group.is-single {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+
+#platform-modal .modal-bottom .modal-qty-group.is-single .modal-qty {
+  width: min(100%, 220px);
+}
+
 #platform-modal .modal-bottom .modal-qty {
   width: 100%;
   max-width: none;

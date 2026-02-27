@@ -53,13 +53,12 @@ const getDiscountColumnsFromRows = (rows = []) => {
 };
 
 const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
-  const ids = Array.from(
-    new Set(
-      (rows || [])
-        .map((row) => Number(row?.id_descuento))
-        .filter((n) => Number.isFinite(n)),
-    ),
-  ).sort((a, b) => a - b);
+  const ids = [];
+  (rows || []).forEach((row) => {
+    const id = Number(row?.id_descuento);
+    if (!Number.isFinite(id)) return;
+    if (!ids.includes(id)) ids.push(id);
+  });
   const map = {};
   ids.forEach((id, idx) => {
     if (cols[idx]) map[id] = cols[idx];
@@ -77,15 +76,20 @@ const resolveDiscountColumn = (platform, mode = "months") => {
       ? "id_descuento_mes_detal"
       : "id_descuento_mes_mayor";
   const legacyField = isItemsMode ? "id_descuento_cantidad" : "id_descuento_mes";
-  const raw = platform?.[groupField] ?? platform?.[legacyField];
+  const preferredRaw = platform?.[groupField];
+  const hasPreferredRaw =
+    preferredRaw !== null &&
+    preferredRaw !== undefined &&
+    String(preferredRaw).trim() !== "";
+  const raw = hasPreferredRaw ? preferredRaw : platform?.[legacyField];
   const asText = String(raw || "").trim();
   if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
   const asNum = Number(raw);
   if (Number.isFinite(asNum) && asNum >= 1) {
-    const mapped = discountColumnById[Math.trunc(asNum)];
-    if (mapped) return mapped;
     const direct = `descuento_${Math.trunc(asNum)}`;
     if (discountColumns.includes(direct)) return direct;
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
   }
   return mode === "items" ? "descuento_2" : "descuento_1";
 };
@@ -249,13 +253,13 @@ const getDiscountPercent = (platform, value, mode = "months") => {
 };
 
 const calculateFinalPrice = (basePrice, platform, flags, months, qty) => {
-  const items =
-    flags?.por_pantalla || flags?.por_acceso ? Number(qty) || 1 : 1;
+  const usesItemsFactor =
+    flags?.por_pantalla || flags?.por_acceso || flags?.tarjeta_de_regalo;
+  const items = usesItemsFactor ? Number(qty) || 1 : 1;
   const monthFactor = flags?.tarjeta_de_regalo ? 1 : Number(months) || 1;
-  const itemsDiscount =
-    flags?.por_pantalla || flags?.por_acceso
-      ? getDiscountPercent(platform, items, "items")
-      : 0;
+  const itemsDiscount = usesItemsFactor
+    ? getDiscountPercent(platform, items, "items")
+    : 0;
   const monthsDiscount = flags?.tarjeta_de_regalo
     ? 0
     : getDiscountPercent(platform, monthFactor, "months");
@@ -408,6 +412,10 @@ const renderPrecios = (plataformaId, flags) => {
     btnMonthsPlus,
     btnAdd,
   } = modalEls;
+  const qtyGroupEl =
+    modalQtyMonths?.closest?.(".modal-qty-group") ||
+    modalQtyItems?.closest?.(".modal-qty-group") ||
+    null;
   modalPrecios.innerHTML = "";
   selectedPrecio = null;
   currentQty = 1;
@@ -436,9 +444,11 @@ const renderPrecios = (plataformaId, flags) => {
   if (hideMonths) {
     modalQtyMonths?.classList.add("hidden");
     monthsDiscount?.classList.add("hidden");
+    qtyGroupEl?.classList.add("is-single");
   } else {
     modalQtyMonths?.classList.remove("hidden");
     monthsDiscount?.classList.remove("hidden");
+    qtyGroupEl?.classList.remove("is-single");
   }
   const createPlanInfo = (planName, planDesc) => {
     if (!planDesc) return null;
@@ -467,9 +477,18 @@ const renderPrecios = (plataformaId, flags) => {
       });
     return wrap;
   };
+  const sortByDisplayedPrice = (a, b) => {
+    const priceA = Number(a?.precio_usd_detal);
+    const priceB = Number(b?.precio_usd_detal);
+    const safeA = Number.isFinite(priceA) ? priceA : Number.POSITIVE_INFINITY;
+    const safeB = Number.isFinite(priceB) ? priceB : Number.POSITIVE_INFINITY;
+    if (safeA !== safeB) return safeA - safeB;
+    return (Number(a?.id_precio) || 0) - (Number(b?.id_precio) || 0);
+  };
+
   const opciones = [...(preciosPorPlataforma[plataformaId] || [])]
     .filter((p) => p.precio_usd_detal !== null && p.precio_usd_detal !== undefined)
-    .sort((a, b) => (a.id_precio || 0) - (b.id_precio || 0));
+    .sort(sortByDisplayedPrice);
   if (!opciones.length) {
     modalPrecios.innerHTML =
       '<p class="sin-plataformas">Sin precios configurados.</p>';
@@ -501,7 +520,13 @@ const renderPrecios = (plataformaId, flags) => {
     op?.completa === 1 ||
     op?.completa === "1";
   if (flags.tarjeta_de_regalo) {
-    agrupados = opcionesPorPlan;
+    // En gift cards cada id_precio representa un monto/region distinto.
+    // Si se agrupa por plan (que a veces viene vacío), se colapsan opciones.
+    agrupados = opciones.reduce((acc, opcion, idx) => {
+      const giftKey = `gift_${opcion.id_precio || idx}`;
+      acc[giftKey] = [opcion];
+      return acc;
+    }, {});
   } else {
     agrupados = Object.entries(opcionesPorPlan).reduce((acc, [plan, items]) => {
       const nonComplete = items.find((p) => !isComplete(p));
@@ -516,13 +541,17 @@ const renderPrecios = (plataformaId, flags) => {
       const key = Number(op.id_precio) || op.id_precio;
       if (!completasMap.has(key)) completasMap.set(key, op);
     });
-    const completas = Array.from(completasMap.values());
+    const completas = Array.from(completasMap.values()).sort(sortByDisplayedPrice);
     if (completas.length) {
       agrupados["Cuenta completa"] = completas;
     }
   }
 
-  Object.entries(agrupados).forEach(([plan, items]) => {
+  const groupedEntries = Object.entries(agrupados).sort(
+    ([, itemsA], [, itemsB]) => sortByDisplayedPrice(itemsA?.[0], itemsB?.[0]),
+  );
+
+  groupedEntries.forEach(([plan, items]) => {
     const wrapper = document.createElement("div");
     wrapper.className = "plan-bloque";
     wrapper.setAttribute("role", "button");
