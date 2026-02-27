@@ -278,6 +278,11 @@ main {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
 }
 
+.user-menu.has-inventario-notificacion {
+  outline: 2px solid #22c55e;
+  outline-offset: 2px;
+}
+
 .avatar {
   width: var(--avatar-size);
   height: var(--avatar-size);
@@ -293,13 +298,15 @@ main {
 .user-dropdown {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   background: #fff;
   color: #111;
   border-radius: 10px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
   padding: 8px 0;
-  min-width: 140px;
+  width: 100%;
+  min-width: 100%;
+  box-sizing: border-box;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-5px);
@@ -1882,6 +1889,39 @@ input[type="number"].input-inline {
   width: 90%;
 }
 
+.modal-card-login-required {
+  max-width: 420px;
+  width: 92%;
+}
+
+#login-required-modal .login-required-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding-top: 24px;
+}
+
+#login-required-modal .login-required-message {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#login-required-modal .login-required-message a {
+  color: #0d99ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#login-required-modal #login-required-btn {
+  width: 100%;
+  max-width: 240px;
+}
+
 .modal-renovar-stack {
   display: flex;
   flex-direction: column;
@@ -2238,6 +2278,62 @@ input[type="number"].input-inline {
   border-radius: 12px;
   font-weight: 700;
   margin: 4px 0;
+}
+
+.modal-badge-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-badge-label {
+  display: inline-block;
+}
+
+.modal-badge-help-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.modal-badge-help-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: none;
+  align-items: center;
+  justify-content: center;
+  background: #d1d5db;
+  color: #2f343a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.modal-badge-help-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+  max-width: min(86vw, 320px);
+  background: #50555f;
+  color: #f9fafb;
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px 10px;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  display: none;
+  z-index: 8;
+}
+
+.modal-badge-help-tooltip.is-visible {
+  display: block;
 }
 
 .modal-badge-mobile {

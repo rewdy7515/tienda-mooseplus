@@ -20,6 +20,13 @@ let tooltipDismissBound = false;
 let discountAudienceIsCliente = true;
 let discountColumns = [];
 let discountColumnById = {};
+const PRONTO_STOCK_TOOLTIP_TEXT =
+  "Puedes realizar el pago y en cuanto se agregue mas stock se te hará una entrega automatica. ¡No demoraremos!";
+const loginRequiredModalEl = document.querySelector("#login-required-modal");
+const loginRequiredCloseEl = document.querySelector("#login-required-modal-close");
+const loginRequiredBackdropEl = document.querySelector("#login-required-modal [data-login-required-close]");
+const loginRequiredLinkEl = document.querySelector("#login-required-link");
+const loginRequiredBtnEl = document.querySelector("#login-required-btn");
 
 const isTrueLike = (v) =>
   v === true || v === 1 || v === "1" || String(v || "").toLowerCase() === "true";
@@ -695,6 +702,81 @@ const closeModal = () => {
   document.body.classList.remove("modal-open");
 };
 
+const setModalBadgeContent = ({
+  element,
+  text = "",
+  className = "modal-badge",
+  showHelp = false,
+} = {}) => {
+  if (!element) return;
+  element.className = className || "modal-badge";
+  element.replaceChildren();
+
+  const content = document.createElement("span");
+  content.className = "modal-badge-content";
+
+  const label = document.createElement("span");
+  label.className = "modal-badge-label";
+  label.textContent = text;
+  content.appendChild(label);
+
+  if (showHelp) {
+    const helpWrap = document.createElement("span");
+    helpWrap.className = "modal-badge-help-wrap";
+
+    const helpBtn = document.createElement("button");
+    helpBtn.type = "button";
+    helpBtn.className = "modal-badge-help-icon";
+    helpBtn.textContent = "?";
+    helpBtn.setAttribute("aria-label", "Informacion de entrega");
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "modal-badge-help-tooltip";
+    tooltip.textContent = PRONTO_STOCK_TOOLTIP_TEXT;
+
+    helpBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      document
+        .querySelectorAll(".modal-badge-help-tooltip.is-visible")
+        .forEach((el) => {
+          if (el !== tooltip) el.classList.remove("is-visible");
+        });
+      tooltip.classList.toggle("is-visible");
+    });
+
+    helpWrap.appendChild(helpBtn);
+    helpWrap.appendChild(tooltip);
+    content.appendChild(helpWrap);
+  }
+
+  element.appendChild(content);
+};
+
+const getLoginPageHref = () => new URL("login.html", window.location.href).toString();
+
+const closeLoginRequiredModal = () => {
+  if (!loginRequiredModalEl) return;
+  loginRequiredModalEl.classList.add("hidden");
+  loginRequiredModalEl.setAttribute("aria-hidden", "true");
+  if (modalEls?.modal?.classList.contains("hidden")) {
+    document.body.classList.remove("modal-open");
+  }
+};
+
+const redirectToLoginPage = () => {
+  window.location.href = getLoginPageHref();
+};
+
+const openLoginRequiredModal = () => {
+  if (!loginRequiredModalEl) {
+    redirectToLoginPage();
+    return;
+  }
+  loginRequiredModalEl.classList.remove("hidden");
+  loginRequiredModalEl.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+};
+
 const animateAddToCart = () => {
   const sourceEl = selectedButtonEl || modalEls?.btnAdd || null;
   if (!sourceEl) return;
@@ -794,6 +876,21 @@ export const setDiscountAudience = (isCliente = true) => {
 
 export const initModal = (elements) => {
   modalEls = elements;
+  if (loginRequiredModalEl && loginRequiredModalEl.dataset.bound !== "1") {
+    loginRequiredModalEl.dataset.bound = "1";
+    loginRequiredCloseEl?.addEventListener("click", closeLoginRequiredModal);
+    loginRequiredBackdropEl?.addEventListener("click", closeLoginRequiredModal);
+    loginRequiredLinkEl?.addEventListener("click", (e) => {
+      e.preventDefault();
+      redirectToLoginPage();
+    });
+    loginRequiredBtnEl?.addEventListener("click", redirectToLoginPage);
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (loginRequiredModalEl.classList.contains("hidden")) return;
+      closeLoginRequiredModal();
+    });
+  }
   setMonthsDisplayValue(currentMonths);
   modalTopEl = document.querySelector("#platform-modal .modal-top");
   modalScrollHintEl = document.querySelector("#modal-scroll-hint");
@@ -806,11 +903,16 @@ export const initModal = (elements) => {
     tooltipDismissBound = true;
     document.addEventListener("click", (ev) => {
       const target = ev.target;
-      if (target?.closest(".plan-info-icon") || target?.closest(".plan-tooltip")) {
+      if (
+        target?.closest(".plan-info-icon") ||
+        target?.closest(".plan-tooltip") ||
+        target?.closest(".modal-badge-help-icon") ||
+        target?.closest(".modal-badge-help-tooltip")
+      ) {
         return;
       }
       document
-        .querySelectorAll(".plan-tooltip.is-visible")
+        .querySelectorAll(".plan-tooltip.is-visible, .modal-badge-help-tooltip.is-visible")
         .forEach((el) => el.classList.remove("is-visible"));
     });
   }
@@ -898,10 +1000,10 @@ export const initModal = (elements) => {
   closeBtn?.addEventListener("click", closeModal);
   backdrop?.addEventListener("click", closeModal);
   btnAdd?.addEventListener("click", () => {
-    // Si no hay sesión, redirige a login (requireSession hace redirect)
-    try {
-      requireSession();
-    } catch (err) {
+    const sessionUserId = requireSession();
+    if (!sessionUserId) {
+      closeModal();
+      openLoginRequiredModal();
       return;
     }
     if (!selectedPrecio || !currentPlatform || !selectedPrecio.id_precio) {
@@ -1020,19 +1122,31 @@ export const openModal = (platform) => {
       entrega_inmediata === true ||
       entrega_inmediata === "true" ||
       entrega_inmediata === "1";
-    if (showStock && entrega && (stockByPlatform[id_plataforma] ?? 0) === 0) {
-      modalBadge.textContent = "Pronto mas stock";
-      modalBadge.className = "modal-badge badge-warning";
-    } else if (entrega) {
-      modalBadge.textContent = "Entrega inmediata";
-      modalBadge.className = "modal-badge badge-green";
-    } else {
-      modalBadge.textContent = "Por encargo";
-      modalBadge.className = "modal-badge badge-gray";
-    }
+    const isProntoStock = showStock && entrega && (stockByPlatform[id_plataforma] ?? 0) === 0;
+    const badgeText = isProntoStock
+      ? "Pronto mas stock"
+      : entrega
+      ? "Entrega inmediata"
+      : "Por encargo";
+    const badgeClass = isProntoStock
+      ? "modal-badge badge-warning"
+      : entrega
+      ? "modal-badge badge-green"
+      : "modal-badge badge-gray";
+
+    setModalBadgeContent({
+      element: modalBadge,
+      text: badgeText,
+      className: badgeClass,
+      showHelp: isProntoStock,
+    });
     if (modalBadgeMobile) {
-      modalBadgeMobile.textContent = modalBadge.textContent || "";
-      modalBadgeMobile.className = modalBadge.className || "modal-badge";
+      setModalBadgeContent({
+        element: modalBadgeMobile,
+        text: badgeText,
+        className: badgeClass,
+        showHelp: isProntoStock,
+      });
     }
   }
   currentFlags = {

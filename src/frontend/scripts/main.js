@@ -75,6 +75,8 @@ const HOME_BANNERS_WHEEL_MIN_DOMINANCE = 6;
 const HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT = 26;
 const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
 const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 180;
+const MOBILE_PULL_REFRESH_THRESHOLD_PX = 160;
+const MOBILE_PULL_REFRESH_AXIS_LOCK_PX = 14;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
 const PAGE_LOADER_LOGO_FALLBACK =
   STATIC_HEADER_LOGO_HREF;
@@ -1113,6 +1115,98 @@ const syncHomeBannersViewportSize = () => {
   }
 };
 
+const attachMobilePullToRefresh = () => {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (document.body?.dataset.mobilePullRefreshBound === "1") return;
+
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches === true;
+  const smallScreen = window.matchMedia?.("(max-width: 900px)")?.matches === true;
+  if (!coarsePointer && !smallScreen) return;
+
+  document.body.dataset.mobilePullRefreshBound = "1";
+
+  let active = false;
+  let startX = 0;
+  let startY = 0;
+  let maxDeltaY = 0;
+  let axis = "";
+
+  const reset = () => {
+    active = false;
+    startX = 0;
+    startY = 0;
+    maxDeltaY = 0;
+    axis = "";
+  };
+
+  const isAtTop = () =>
+    (window.scrollY || window.pageYOffset || document.documentElement?.scrollTop || 0) <= 0;
+
+  const canStartGesture = (target) => {
+    if (!isAtTop()) return false;
+    if (document.body.classList.contains("modal-open")) return false;
+    if (document.body.classList.contains("cart-drawer-open")) return false;
+    const element = target instanceof Element ? target : null;
+    if (!element) return true;
+    if (element.closest("input, textarea, select, [contenteditable='true']")) return false;
+    return true;
+  };
+
+  window.addEventListener(
+    "touchstart",
+    (e) => {
+      const touch = e.touches?.item?.(0);
+      if (!touch || !canStartGesture(e.target)) {
+        reset();
+        return;
+      }
+      active = true;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      maxDeltaY = 0;
+      axis = "";
+    },
+    { passive: true },
+  );
+
+  window.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!active) return;
+      const touch = e.touches?.item?.(0);
+      if (!touch) return;
+      const deltaX = touch.clientX - startX;
+      const deltaY = touch.clientY - startY;
+      if (!axis) {
+        const absX = Math.abs(deltaX);
+        const absY = Math.abs(deltaY);
+        if (Math.max(absX, absY) < MOBILE_PULL_REFRESH_AXIS_LOCK_PX) return;
+        axis = absY >= absX ? "y" : "x";
+      }
+      if (axis !== "y") {
+        reset();
+        return;
+      }
+      if (deltaY > 0) {
+        maxDeltaY = Math.max(maxDeltaY, deltaY);
+      }
+    },
+    { passive: true },
+  );
+
+  const onGestureEnd = () => {
+    if (!active) return;
+    if (axis === "y" && isAtTop() && maxDeltaY >= MOBILE_PULL_REFRESH_THRESHOLD_PX) {
+      window.location.reload();
+      return;
+    }
+    reset();
+  };
+
+  window.addEventListener("touchend", onGestureEnd, { passive: true });
+  window.addEventListener("touchcancel", reset, { passive: true });
+};
+
 const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []) => {
   if (!homeBannersWrap || !homeBannersTrack || !homeBannersViewport) return;
   const useMobileBannerImage =
@@ -1835,6 +1929,7 @@ async function init() {
 }
 
 init();
+attachMobilePullToRefresh();
 attachLogout(clearServerSession, clearCachedCart);
 
 // Redirección a la página de carrito

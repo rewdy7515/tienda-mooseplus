@@ -213,6 +213,7 @@ if (!window.__headerActionsInit) {
           });
         }
         if (userMenu) {
+          userMenu.classList.remove("has-inventario-notificacion");
           userMenu.classList.add("hidden");
           userMenu.style.display = "none";
         }
@@ -299,7 +300,11 @@ if (!window.__headerActionsInit) {
         (a) => a.textContent?.trim().toLowerCase().startsWith("notificaciones")
       );
       const notifDot = notifLink?.querySelector(".notify-dot");
-      if (isTrue(user?.notificacion_inventario)) {
+      const hasInventarioNotificacion = isTrue(user?.notificacion_inventario);
+      if (userMenu) {
+        userMenu.classList.toggle("has-inventario-notificacion", hasInventarioNotificacion);
+      }
+      if (hasInventarioNotificacion) {
         if (notifDot) {
           notifDot.classList.remove("hidden");
         }

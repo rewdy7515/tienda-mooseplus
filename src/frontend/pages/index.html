@@ -272,6 +272,29 @@
       </div>
     </div>
 
+    <div id="login-required-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-login-required-close></div>
+      <div class="modal-card modal-card-login-required" role="dialog" aria-modal="true">
+        <button
+          type="button"
+          id="login-required-modal-close"
+          class="modal-close"
+          aria-label="Cerrar"
+        >
+          ×
+        </button>
+        <div class="modal-body login-required-modal-body">
+          <p class="login-required-message">
+            Para agregar items al carrito inicia sesión
+            <a href="login.html" id="login-required-link">aquí</a>
+          </p>
+          <button type="button" id="login-required-btn" class="btn-primary">
+            Iniciar sesión
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="../scripts/main.js"></script>
   </body>
 </html>
