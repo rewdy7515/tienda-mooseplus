@@ -2301,11 +2301,11 @@ input[type="number"].input-inline {
   width: 18px;
   height: 18px;
   border-radius: 999px;
-  border: none;
+  border: 1px solid currentColor;
   align-items: center;
   justify-content: center;
-  background: #d1d5db;
-  color: #2f343a;
+  background: transparent;
+  color: inherit;
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
@@ -2314,22 +2314,25 @@ input[type="number"].input-inline {
 }
 
 .modal-badge-help-tooltip {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 280px;
-  max-width: min(86vw, 320px);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  transform: none;
+  width: min(300px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
   background: #50555f;
   color: #f9fafb;
   white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
   font-size: 12px;
   line-height: 1.35;
   padding: 8px 10px;
   border-radius: 10px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   display: none;
-  z-index: 8;
+  z-index: 2147483647;
 }
 
 .modal-badge-help-tooltip.is-visible {
@@ -2497,23 +2500,25 @@ input[type="number"].input-inline {
 }
 
 .plan-tooltip {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
+  position: fixed;
+  top: 0;
+  left: 0;
   right: auto;
-  transform: translateX(-50%);
-  width: 280px;
-  max-width: 80vw;
+  transform: none;
+  width: min(300px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
   background: #50555f;
   color: #f9fafb;
-  white-space: pre-line;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
   font-size: 12px;
   line-height: 1.35;
   padding: 8px 10px;
   border-radius: 10px;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   display: none;
-  z-index: 2;
+  z-index: 2147483647;
 }
 
 .plan-tooltip.is-visible {

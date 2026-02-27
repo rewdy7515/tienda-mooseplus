@@ -17,6 +17,8 @@ let modalTopEl = null;
 let modalScrollHintEl = null;
 let scrollHintBound = false;
 let tooltipDismissBound = false;
+let floatingTooltipRepositionBound = false;
+let modalTopTooltipScrollBound = false;
 let discountAudienceIsCliente = true;
 let discountColumns = [];
 let discountColumnById = {};
@@ -145,6 +147,48 @@ const updateScrollHint = () => {
     }
   }
   modalScrollHintEl.classList.toggle("is-visible", shouldShow);
+};
+
+const positionFloatingTooltip = (tooltip, triggerBtn) => {
+  if (!tooltip || !triggerBtn) return;
+  requestAnimationFrame(() => {
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const margin = 10;
+    const anchorRect = triggerBtn.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const tooltipWidth = tooltipRect.width || 0;
+    const tooltipHeight = tooltipRect.height || 0;
+    const spacing = 8;
+
+    let left = anchorRect.left + anchorRect.width / 2 - tooltipWidth / 2;
+    left = Math.max(margin, Math.min(left, vw - margin - tooltipWidth));
+
+    let top = anchorRect.bottom + spacing;
+    if (top + tooltipHeight > vh - margin) {
+      top = anchorRect.top - tooltipHeight - spacing;
+    }
+    top = Math.max(margin, Math.min(top, vh - margin - tooltipHeight));
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    tooltip.style.bottom = "auto";
+    tooltip.style.right = "auto";
+    tooltip.style.transform = "none";
+  });
+};
+
+const repositionVisibleFloatingTooltips = () => {
+  const tooltips = document.querySelectorAll(
+    ".modal-badge-help-tooltip.is-visible, .plan-tooltip.is-visible",
+  );
+  tooltips.forEach((tooltip) => {
+    const triggerBtn = tooltip.parentElement?.querySelector(
+      ".modal-badge-help-icon, .plan-info-icon",
+    );
+    if (!triggerBtn) return;
+    positionFloatingTooltip(tooltip, triggerBtn);
+  });
 };
 
 const isBannerViewport = () => {
@@ -419,18 +463,7 @@ const renderPrecios = (plataformaId, flags) => {
           });
         tooltip.classList.toggle("is-visible");
         if (!tooltip.classList.contains("is-visible")) return;
-        requestAnimationFrame(() => {
-          const plan = wrap.closest(".plan-bloque");
-          if (!plan) return;
-          const planRect = plan.getBoundingClientRect();
-          const iconRect = infoBtn.getBoundingClientRect();
-          const top = iconRect.bottom - planRect.top + 2;
-          tooltip.style.top = `${top}px`;
-          tooltip.style.left = "50%";
-          tooltip.style.transform = "translateX(-50%)";
-          tooltip.style.right = "auto";
-          tooltip.style.bottom = "auto";
-        });
+        positionFloatingTooltip(tooltip, infoBtn);
       });
     return wrap;
   };
@@ -742,6 +775,9 @@ const setModalBadgeContent = ({
           if (el !== tooltip) el.classList.remove("is-visible");
         });
       tooltip.classList.toggle("is-visible");
+      if (tooltip.classList.contains("is-visible")) {
+        positionFloatingTooltip(tooltip, helpBtn);
+      }
     });
 
     helpWrap.appendChild(helpBtn);
@@ -898,6 +934,17 @@ export const initModal = (elements) => {
     scrollHintBound = true;
     modalTopEl.addEventListener("scroll", updateScrollHint, { passive: true });
     window.addEventListener("resize", updateScrollHint, { passive: true });
+  }
+  if (!floatingTooltipRepositionBound) {
+    floatingTooltipRepositionBound = true;
+    window.addEventListener("resize", repositionVisibleFloatingTooltips, { passive: true });
+    window.addEventListener("orientationchange", repositionVisibleFloatingTooltips, {
+      passive: true,
+    });
+  }
+  if (modalTopEl && !modalTopTooltipScrollBound) {
+    modalTopTooltipScrollBound = true;
+    modalTopEl.addEventListener("scroll", repositionVisibleFloatingTooltips, { passive: true });
   }
   if (!tooltipDismissBound) {
     tooltipDismissBound = true;
