@@ -339,7 +339,7 @@
             const hasPendiente = rows.some((r) => r.pendiente);
             const showClientInputs =
               FORCE_CLIENT_INPUTS ||
-              (platObj.entrega_inmediata === false && platObj.correo_cliente === true);
+              platObj.correo_cliente === true;
             const showClaveInput = showClientInputs && platObj.clave_cliente === true;
             const showPinColumn = !isRenovacion && isTrue(platObj.usa_pines);
             const showPerfilColumn = !!(platObj.por_acceso || platObj.por_pantalla);
@@ -353,8 +353,16 @@
                 const pinPerfil = normalizeCopyValue(r.pin_perfil);
                 const pinCuenta = normalizeCopyValue(r.pin_cuenta);
                 const pinVenta = resolveVentaPin(r);
-                const hasEntregaData = !!(r.correo || r.clave || pinVenta || r.n_perfil);
-                const requiresClientInputs = showClientInputs && isPendiente && !hasEntregaData;
+                const hasCorreoData = !!normalizeCopyValue(r.correo);
+                const hasClaveData = !!normalizeCopyValue(r.clave);
+                const hasRequiredClientData = showClaveInput
+                  ? hasCorreoData && hasClaveData
+                  : hasCorreoData;
+                const hasEntregaData = showClientInputs
+                  ? hasRequiredClientData
+                  : !!(r.correo || r.clave || pinVenta || r.n_perfil);
+                const requiresClientInputs =
+                  showClientInputs && isPendiente && !hasRequiredClientData;
                 const pinCellHtml = (() => {
                   if (pinPerfil && pinCuenta && pinPerfil !== pinCuenta) {
                     return `
@@ -595,11 +603,17 @@
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
-            const correoCuenta = Number(platId) === 12 ? v.correo_miembro || "" : v.cuentas?.correo || "";
+            const requiresClientCorreo = isTrue(plat.correo_cliente);
+            const correoCuenta = requiresClientCorreo
+              ? v.correo_miembro || ""
+              : Number(platId) === 12
+              ? v.correo_miembro || ""
+              : v.cuentas?.correo || "";
+            const claveCuenta = requiresClientCorreo ? v.clave_miembro || "" : v.cuentas?.clave || "";
             grouped[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
-              clave: v.cuentas?.clave || "",
+              clave: claveCuenta,
               n_perfil: v.perfiles?.n_perfil || "",
               pin_perfil: v.perfiles?.pin || "",
               pin_cuenta: v.cuentas?.pin || "",
@@ -646,11 +660,17 @@
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
-            const correoCuenta = Number(platId) === 12 ? v.correo_miembro || "" : v.cuentas?.correo || "";
+            const requiresClientCorreo = isTrue(plat.correo_cliente);
+            const correoCuenta = requiresClientCorreo
+              ? v.correo_miembro || ""
+              : Number(platId) === 12
+              ? v.correo_miembro || ""
+              : v.cuentas?.correo || "";
+            const claveCuenta = requiresClientCorreo ? v.clave_miembro || "" : v.cuentas?.clave || "";
             groupedNuevas[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
-              clave: v.cuentas?.clave || "",
+              clave: claveCuenta,
               n_perfil: v.perfiles?.n_perfil || "",
               pin_perfil: v.perfiles?.pin || "",
               pin_cuenta: v.cuentas?.pin || "",
