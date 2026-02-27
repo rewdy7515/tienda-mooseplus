@@ -6188,13 +6188,25 @@
           }
           const plataformaId = currentCuentaDetalle.plataformaId;
           const cuentaId = cuentaIdFromBtn || currentCuentaDetalle.id_cuenta;
-          const rowPerfil = currentCuentaDetalle.perfiles?.find(
-            (p) => String(p.id_perfil) === String(btnRepl.dataset.perfil || ""),
+          const ventaIdFromBtn = toPositiveId(
+            btnRepl.dataset.idventa || btnRepl.dataset.idVenta,
           );
+          const rowPerfil =
+            currentCuentaDetalle.perfiles?.find(
+              (p) =>
+                ventaIdFromBtn &&
+                toPositiveId(p.id_venta) === ventaIdFromBtn,
+            ) ||
+            currentCuentaDetalle.perfiles?.find(
+              (p) => String(p.id_perfil) === String(btnRepl.dataset.perfil || ""),
+            );
           const ventaId =
-            rowPerfil?.id_venta ||
-            btnRepl.dataset.idventa ||
-            obtenerVentaPerfil(btnRepl.dataset.perfil);
+            ventaIdFromBtn ||
+            toPositiveId(rowPerfil?.id_venta) ||
+            toPositiveId(obtenerVentaPerfil(btnRepl.dataset.perfil));
+          const perfilAnteriorId = toPositiveId(
+            rowPerfil?.id_perfil || btnRepl.dataset.perfil,
+          );
           if (!ventaId) {
             alert("No se encontró la venta asociada.");
             return;
@@ -6286,13 +6298,36 @@
             throw updVentaErr;
           }
 
-          if (rowPerfil?.id_perfil) {
+          let perfilTieneOtraVenta = false;
+          if (perfilAnteriorId) {
+            const { data: perfilVentasRestantes, error: perfilVentasErr } =
+              await supabase
+                .from("ventas")
+                .select("id_venta")
+                .eq("id_perfil", perfilAnteriorId)
+                .neq("id_venta", ventaId)
+                .limit(1);
+            if (perfilVentasErr) throw perfilVentasErr;
+            perfilTieneOtraVenta = (perfilVentasRestantes || []).length > 0;
+          }
+
+          if (perfilAnteriorId && !perfilTieneOtraVenta) {
             const { error: freeErr } = await supabase
               .from("perfiles")
               .update({ ocupado: false })
-              .eq("id_perfil", rowPerfil.id_perfil);
+              .eq("id_perfil", perfilAnteriorId);
             if (freeErr)
               console.error("[reemplazo] liberar perfil previo error", freeErr);
+          } else if (perfilAnteriorId && perfilTieneOtraVenta) {
+            const { error: keepOccErr } = await supabase
+              .from("perfiles")
+              .update({ ocupado: true })
+              .eq("id_perfil", perfilAnteriorId);
+            if (keepOccErr)
+              console.error(
+                "[reemplazo] mantener perfil previo ocupado error",
+                keepOccErr,
+              );
           }
           if (nuevoPerfil) {
             const { error: occErr } = await supabase
@@ -6311,16 +6346,21 @@
               console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
           }
 
-          const { error: insReemplazoErr } = await supabase.from("reemplazos").insert({
-            id_cuenta: cuentaId,
-            id_perfil: rowPerfil?.id_perfil || null,
-            id_sub_cuenta: null,
-          });
-          if (insReemplazoErr) throw insReemplazoErr;
-          addToReemplazosCache({
-            idCuenta: cuentaId,
-            idPerfil: rowPerfil?.id_perfil || null,
-          });
+          const debeRegistrarReemplazo = !(perfilAnteriorId && perfilTieneOtraVenta);
+          if (debeRegistrarReemplazo) {
+            const { error: insReemplazoErr } = await supabase
+              .from("reemplazos")
+              .insert({
+                id_cuenta: cuentaId,
+                id_perfil: perfilAnteriorId,
+                id_sub_cuenta: null,
+              });
+            if (insReemplazoErr) throw insReemplazoErr;
+            addToReemplazosCache({
+              idCuenta: cuentaId,
+              idPerfil: perfilAnteriorId,
+            });
+          }
 
           try {
             const userIds = pickNotificationUserIds("servicio_reemplazado", {

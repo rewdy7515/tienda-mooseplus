@@ -131,21 +131,6 @@ async function tryHydrateRecoverySession() {
   return { session, error: authErr };
 }
 
-async function syncLegacyPassword(password, email) {
-  if (!email) return;
-  try {
-    const { error } = await supabase
-      .from("usuarios")
-      .update({ clave: password })
-      .ilike("correo", email);
-    if (error) {
-      console.warn("No se pudo sincronizar clave local usuarios.clave", error);
-    }
-  } catch (err) {
-    console.warn("sync usuarios.clave error", err);
-  }
-}
-
 async function handleSubmit(event) {
   event.preventDefault();
   const { hasError, password } = validatePasswords();
@@ -155,9 +140,6 @@ async function handleSubmit(event) {
   try {
     const { error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
-
-    const { data: userResp } = await supabase.auth.getUser();
-    await syncLegacyPassword(password, userResp?.user?.email || "");
 
     setStatus("Clave actualizada correctamente. Redirigiendo...", false);
     await supabase.auth.signOut();

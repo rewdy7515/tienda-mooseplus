@@ -154,14 +154,21 @@ CREATE TABLE public.metodos_de_pago (
   hay_comision boolean,
   imagen text,
   color_fondo text,
+  verificacion_automatica boolean,
   CONSTRAINT metodos_de_pago_pkey PRIMARY KEY (id_metodo_de_pago)
+);
+CREATE TABLE public.metricas_clientes_activos_mes (
+  periodo_mes date NOT NULL,
+  id_usuario bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT metricas_clientes_activos_mes_pkey PRIMARY KEY (periodo_mes, id_usuario),
+  CONSTRAINT metricas_clientes_activos_mes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.metricas_mensuales (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   clientes_activos smallint NOT NULL,
   ventas_activas smallint,
   clientes_nuevos smallint,
-  actualizacion date,
   periodo_mes date,
   ventas_unicas integer,
   clientes_abandonaron integer,
@@ -312,6 +319,16 @@ CREATE TABLE public.precios (
   sub_cuenta boolean,
   detalles text,
   segundo_plan boolean,
+  id_descuento_mes bigint,
+  id_descuento_cantidad bigint,
+  id_descuento_mes_detal bigint,
+  id_descuento_mes_mayor bigint,
+  id_descuento_cantidad_detal bigint,
+  id_descuento_cantidad_mayor bigint,
+  aplica_descuento_mes_detal boolean NOT NULL DEFAULT true,
+  aplica_descuento_mes_mayor boolean NOT NULL DEFAULT true,
+  aplica_descuento_cantidad_detal boolean NOT NULL DEFAULT true,
+  aplica_descuento_cantidad_mayor boolean NOT NULL DEFAULT true,
   CONSTRAINT precios_pkey PRIMARY KEY (id_precio),
   CONSTRAINT precios_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma)
 );
@@ -400,7 +417,6 @@ CREATE TABLE public.testing (
 CREATE TABLE public.usuarios (
   id_usuario bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   nombre text NOT NULL,
-  clave text,
   telefono text,
   apellido text,
   ultima_conexion date,
@@ -453,6 +469,7 @@ CREATE TABLE public.ventas (
   cuenta_nueva boolean,
   nombre_cliente text,
   recordatorio_enviado boolean,
+  cuenta_pagada_admin boolean,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT ventas_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),

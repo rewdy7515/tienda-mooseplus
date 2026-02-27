@@ -56,6 +56,17 @@
         color: #166534;
         font-weight: 700;
       }
+      .registro-cell-content {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .btn-link-registro {
+        padding: 4px 8px;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+      }
       .saldo-wrap {
         display: inline-flex;
         align-items: center;
@@ -152,6 +163,7 @@
       } from "../../scripts/session.js";
       import {
         clearServerSession,
+        createUsuarioSignupLink,
         ensureServerSession,
         loadCurrentUser,
         supabase,
@@ -208,6 +220,16 @@
         if (saldoTextEl) saldoTextEl.textContent = formatSaldo(saldoVal);
         const addBtn = rowWrap.querySelector(".btn-add-saldo");
         if (addBtn) addBtn.dataset.saldo = String(saldoVal);
+      };
+
+      const copyTextToClipboard = async (value) => {
+        const text = String(value || "").trim();
+        if (!text) return false;
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+        return false;
       };
 
       const agregarSaldo = async () => {
@@ -319,6 +341,14 @@
               const telefonoQuickEdit = phoneIsValid ? "0" : "1";
               const correoQuickEdit = email ? "0" : "1";
               const registrado = u.fecha_registro ? "Sí" : "No";
+              const registroBtnHtml =
+                registrado === "No"
+                  ? `<button
+                      type="button"
+                      class="btn-outline btn-link-registro"
+                      data-id="${u.id_usuario}"
+                    >Link registro</button>`
+                  : "";
               return `
                 <tr>
                   <td>${u.id_usuario ?? "-"}</td>
@@ -347,7 +377,12 @@
                       >+</button>
                     </div>
                   </td>
-                  <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">${registrado}</td>
+                  <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">
+                    <span class="registro-cell-content">
+                      <span>${registrado}</span>
+                      ${registroBtnHtml}
+                    </span>
+                  </td>
                 </tr>
               `;
             })
@@ -427,6 +462,34 @@
       };
 
       document.addEventListener("click", async (e) => {
+        const registroBtn = e.target.closest(".btn-link-registro");
+        if (registroBtn) {
+          const idTarget = Number(registroBtn.dataset.id);
+          if (!Number.isFinite(idTarget) || idTarget <= 0) return;
+          const originalText = registroBtn.textContent;
+          registroBtn.disabled = true;
+          registroBtn.textContent = "Generando...";
+          try {
+            const result = await createUsuarioSignupLink(idTarget);
+            if (result?.error) throw new Error(result.error);
+            const url = String(result?.url || "").trim();
+            if (!url) throw new Error("No se pudo generar el link.");
+            const copied = await copyTextToClipboard(url).catch(() => false);
+            if (copied) {
+              alert("Link de registro copiado al portapapeles.");
+            } else {
+              window.prompt("Copia este link de registro:", url);
+            }
+          } catch (err) {
+            console.error("generar link registro error", err);
+            alert(err?.message || "No se pudo generar el link de registro.");
+          } finally {
+            registroBtn.disabled = false;
+            registroBtn.textContent = originalText || "Link registro";
+          }
+          return;
+        }
+
         const addSaldoBtn = e.target.closest(".btn-add-saldo");
         if (addSaldoBtn) {
           openSaldoModal(addSaldoBtn.dataset.id);

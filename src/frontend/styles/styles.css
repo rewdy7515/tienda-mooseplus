@@ -843,7 +843,7 @@ main {
   width: var(--loader-logo-width);
   height: var(--loader-logo-height);
   transform: translate(-50%, -50%);
-  background: url("https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png")
+  background: url("/src/frontend/assets/logo-header-carga/logo-blanco.webp")
     center / contain no-repeat;
 }
 .page-loader__logo::after {

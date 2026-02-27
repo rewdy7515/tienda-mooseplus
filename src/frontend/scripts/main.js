@@ -66,11 +66,13 @@ const HOME_BANNERS_DESIGN_HEIGHT = 828;
 const HOME_BANNERS_MIN_RENDER_WIDTH = 480;
 const HOME_BANNERS_SWIPE_MIN_PX = 36;
 const HOME_BANNERS_SWIPE_RATIO = 0.12;
+const HOME_BANNERS_SWIPE_MAX_PX = 84;
 const HOME_BANNERS_SWIPE_AXIS_LOCK_PX = 12;
 const HOME_BANNERS_CLICK_SUPPRESS_MS = 320;
-const HOME_BANNERS_WHEEL_MIN_DELTA = 32;
-const HOME_BANNERS_WHEEL_AXIS_RATIO = 1.45;
-const HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT = 8;
+const HOME_BANNERS_WHEEL_MIN_DELTA = 16;
+const HOME_BANNERS_WHEEL_AXIS_RATIO = 1.08;
+const HOME_BANNERS_WHEEL_MIN_DOMINANCE = 6;
+const HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT = 26;
 const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
 const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 180;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
@@ -83,6 +85,7 @@ let homeBannersTotalSlides = 0;
 let homeBannersSwipeActive = false;
 let homeBannersSwipePointerId = null;
 let homeBannersSwipeTouchId = null;
+let homeBannersSwipeInputType = "";
 let homeBannersSwipeStartX = 0;
 let homeBannersSwipeStartY = 0;
 let homeBannersSwipeDeltaX = 0;
@@ -92,6 +95,7 @@ let homeBannersSuppressClickUntil = 0;
 let homeBannersWheelAccumX = 0;
 let homeBannersWheelResetTimer = null;
 let homeBannersWheelLastSlideAt = 0;
+let homeBannersWheelDidSlideInGesture = false;
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
@@ -589,8 +593,8 @@ const normalizeBannerRedirect = (value = "") => {
     return currentPath.includes(marker) ? marker : "/";
   };
 
-  // Los banners del admin guardan rutas con este prefijo interno.
-  // En local se conserva /src/frontend/pages/...; en producción se usa /....
+  // Los banners del admin pueden guardar rutas internas con /src/frontend/pages/.
+  // Cuando ya vienen completas se respetan tal cual.
   const toAppRoute = (pathLike = "") => {
     const txt = String(pathLike || "").trim();
     if (!txt) return txt;
@@ -601,14 +605,15 @@ const normalizeBannerRedirect = (value = "") => {
       return prefix === "/" ? `/${rel}` : `${prefix}${rel}`;
     };
 
+    // Si ya viene en ruta absoluta interna del proyecto, respetarla tal cual.
     if (txt.startsWith(HOME_BANNER_ROUTE_PREFIX)) {
-      return joinWithPrefix(txt.slice(HOME_BANNER_ROUTE_PREFIX.length));
+      return txt;
     }
     if (txt.startsWith("/src/frontend/pages/")) {
-      return joinWithPrefix(txt.slice("/src/frontend/pages/".length));
+      return txt;
     }
     if (txt.startsWith("src/frontend/pages/")) {
-      return joinWithPrefix(txt.slice("src/frontend/pages/".length));
+      return `/${txt.replace(/^\/+/, "")}`;
     }
     if (prefix !== "/" && /^\/.+\.html(?:[?#].*)?$/i.test(txt)) {
       return joinWithPrefix(txt.slice(1));
@@ -822,6 +827,7 @@ const attachHomeBannersSwipe = () => {
     homeBannersSwipeActive = false;
     homeBannersSwipePointerId = null;
     homeBannersSwipeTouchId = null;
+    homeBannersSwipeInputType = "";
     homeBannersSwipeStartX = 0;
     homeBannersSwipeStartY = 0;
     homeBannersSwipeDeltaX = 0;
@@ -829,15 +835,21 @@ const attachHomeBannersSwipe = () => {
     homeBannersSwipeAxis = "";
   };
 
-  const beginSwipe = ({ x = 0, y = 0, pointerId = null, touchId = null } = {}) => {
+  const beginSwipe = ({ x = 0, y = 0, pointerId = null, touchId = null, inputType = "" } = {}) => {
     homeBannersSwipeActive = true;
     homeBannersSwipePointerId = pointerId;
     homeBannersSwipeTouchId = touchId;
+    homeBannersSwipeInputType = String(inputType || "");
     homeBannersSwipeStartX = Number.isFinite(Number(x)) ? Number(x) : 0;
     homeBannersSwipeStartY = Number.isFinite(Number(y)) ? Number(y) : 0;
     homeBannersSwipeDeltaX = 0;
     homeBannersSwipeDeltaY = 0;
     homeBannersSwipeAxis = "";
+  };
+
+  const suppressBannerClick = (extraMs = 0) => {
+    const waitMs = Math.max(HOME_BANNERS_CLICK_SUPPRESS_MS, Number(extraMs) || 0);
+    homeBannersSuppressClickUntil = Date.now() + waitMs;
   };
 
   const updateSwipeDeltasAndAxis = ({ x = 0, y = 0 } = {}) => {
@@ -850,25 +862,15 @@ const attachHomeBannersSwipe = () => {
       const absY = Math.abs(homeBannersSwipeDeltaY);
       if (Math.max(absX, absY) < HOME_BANNERS_SWIPE_AXIS_LOCK_PX) return "";
       if (absY > absX) {
-        // Gesto vertical: liberar el control para permitir scroll del HTML.
+        // Gesto vertical: bloquear interacción del banner y dejar scroll del HTML.
         resetSwipeState();
-        return "";
+        return "y";
       }
       homeBannersSwipeAxis = "x";
       stopHomeBannersSlider();
     }
 
     return homeBannersSwipeAxis;
-  };
-
-  const releasePointerCapture = (pointerId) => {
-    if (!Number.isFinite(Number(pointerId))) return;
-    if (typeof homeBannersViewport.releasePointerCapture !== "function") return;
-    try {
-      homeBannersViewport.releasePointerCapture(pointerId);
-    } catch (_) {
-      // Ignorar errores de release en navegadores que no soportan capture real.
-    }
   };
 
   const getTouchById = (touchList, touchId) => {
@@ -883,9 +885,13 @@ const attachHomeBannersSwipe = () => {
   const finalizeSwipe = ({ cancelled = false } = {}) => {
     if (!homeBannersSwipeActive) return;
     const total = Math.max(0, homeBannersTotalSlides);
+    const isMouseSwipe = homeBannersSwipeInputType === "mouse";
     const threshold = Math.max(
       HOME_BANNERS_SWIPE_MIN_PX,
-      Math.round((homeBannersViewport.clientWidth || 0) * HOME_BANNERS_SWIPE_RATIO),
+      Math.min(
+        isMouseSwipe ? 48 : HOME_BANNERS_SWIPE_MAX_PX,
+        Math.round((homeBannersViewport.clientWidth || 0) * HOME_BANNERS_SWIPE_RATIO),
+      ),
     );
     const absDelta = Math.abs(homeBannersSwipeDeltaX);
     const isHorizontalSwipe = homeBannersSwipeAxis === "x";
@@ -895,7 +901,7 @@ const attachHomeBannersSwipe = () => {
       } else {
         homeBannersCurrentIndex = (homeBannersCurrentIndex - 1 + total) % total;
       }
-      homeBannersSuppressClickUntil = Date.now() + HOME_BANNERS_CLICK_SUPPRESS_MS;
+      suppressBannerClick();
     }
 
     setHomeBannersSlide(homeBannersCurrentIndex);
@@ -915,14 +921,8 @@ const attachHomeBannersSwipe = () => {
       y: e.clientY,
       pointerId: e.pointerId,
       touchId: null,
+      inputType: e.pointerType || "mouse",
     });
-    if (typeof homeBannersViewport.setPointerCapture === "function") {
-      try {
-        homeBannersViewport.setPointerCapture(e.pointerId);
-      } catch (_) {
-        // Ignorar errores de capture en navegadores sin soporte completo.
-      }
-    }
   });
 
   homeBannersViewport.addEventListener("pointermove", (e) => {
@@ -939,13 +939,21 @@ const attachHomeBannersSwipe = () => {
 
   homeBannersViewport.addEventListener("pointerup", (e) => {
     if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
-    releasePointerCapture(e.pointerId);
     finalizeSwipe({ cancelled: false });
   });
 
   homeBannersViewport.addEventListener("pointercancel", (e) => {
     if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
-    releasePointerCapture(e.pointerId);
+    finalizeSwipe({ cancelled: true });
+  });
+
+  window.addEventListener("pointerup", (e) => {
+    if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
+    finalizeSwipe({ cancelled: false });
+  });
+
+  window.addEventListener("pointercancel", (e) => {
+    if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
     finalizeSwipe({ cancelled: true });
   });
 
@@ -960,6 +968,7 @@ const attachHomeBannersSwipe = () => {
       y: touch.clientY,
       pointerId: null,
       touchId: touch.identifier,
+      inputType: "touch",
     });
   }, { passive: true });
 
@@ -1003,15 +1012,24 @@ const attachHomeBannersSwipe = () => {
     const deltaY = Number(e.deltaY) || 0;
     const absX = Math.abs(deltaX);
     const absY = Math.abs(deltaY);
+    const isVerticalIntent = absY > absX * 1.02 && absY > 2;
+    if (isVerticalIntent) {
+      // Asegura scroll vertical del body cuando el cursor está sobre el banner.
+      e.preventDefault();
+      window.scrollBy({ top: deltaY, left: 0, behavior: "auto" });
+      return;
+    }
+
     const dominance = absX - absY;
     const isHorizontalIntent =
       absX >= HOME_BANNERS_WHEEL_MIN_DELTA &&
       absX >= absY * HOME_BANNERS_WHEEL_AXIS_RATIO &&
-      dominance >= HOME_BANNERS_WHEEL_MIN_DELTA;
+      dominance >= HOME_BANNERS_WHEEL_MIN_DOMINANCE;
     if (!isHorizontalIntent) return;
     // Si hay deriva vertical apreciable, dejar que el HTML haga scroll.
     if (absY > HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT) return;
 
+    e.preventDefault();
     stopHomeBannersSlider();
 
     homeBannersWheelAccumX += deltaX;
@@ -1021,8 +1039,10 @@ const attachHomeBannersSwipe = () => {
     homeBannersWheelResetTimer = window.setTimeout(() => {
       homeBannersWheelAccumX = 0;
       homeBannersWheelResetTimer = null;
+      homeBannersWheelDidSlideInGesture = false;
     }, HOME_BANNERS_WHEEL_GESTURE_RESET_MS);
 
+    if (homeBannersWheelDidSlideInGesture) return;
     if (Math.abs(homeBannersWheelAccumX) < HOME_BANNERS_WHEEL_MIN_DELTA) return;
     const now = Date.now();
     if (now - homeBannersWheelLastSlideAt < HOME_BANNERS_WHEEL_COOLDOWN_MS) return;
@@ -1034,13 +1054,32 @@ const attachHomeBannersSwipe = () => {
     }
     homeBannersWheelAccumX = 0;
     homeBannersWheelLastSlideAt = now;
-    homeBannersSuppressClickUntil = now + HOME_BANNERS_CLICK_SUPPRESS_MS;
+    homeBannersWheelDidSlideInGesture = true;
+    suppressBannerClick();
     setHomeBannersSlide(homeBannersCurrentIndex);
     startHomeBannersSlider(total, homeBannersCurrentIndex);
   }, { passive: false });
 
   homeBannersViewport.addEventListener("dragstart", (e) => {
     e.preventDefault();
+  });
+
+  homeBannersViewport.addEventListener("click", (e) => {
+    if (Date.now() < homeBannersSuppressClickUntil) return;
+    const target = e.target;
+    if (target && typeof target.closest === "function" && target.closest(".home-banner-card")) {
+      return;
+    }
+    const cards = homeBannersTrack?.querySelectorAll?.(".home-banner-card");
+    const activeCard = cards?.[homeBannersCurrentIndex] || null;
+    if (!activeCard) return;
+    activeCard.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }),
+    );
   });
 };
 
@@ -1174,14 +1213,21 @@ const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []
   syncHomeBannersViewportSize();
   renderHomeBannersDots(unique.length);
 
-  homeBannersTrack.querySelectorAll(".home-banner-card[data-id-plataforma]").forEach((card) => {
+  homeBannersTrack.querySelectorAll(".home-banner-card[data-id-plataforma]").forEach((card, cardIndex) => {
+    const bannerItem = unique[cardIndex] || {};
     card.addEventListener("click", () => {
       if (Date.now() < homeBannersSuppressClickUntil) return;
-      const redirectRaw = String(card.dataset.redirectUrl || "").trim();
+      const redirectRaw = String(
+        bannerItem?.redirect || card.dataset.redirectUrl || "",
+      ).trim();
       if (redirectRaw) {
         if (navigateBannerRedirect(redirectRaw)) {
           return;
         }
+      }
+      const sourceType = String(bannerItem?.sourceType || card.dataset.sourceType || "").trim();
+      if (sourceType === "custom") {
+        return;
       }
       const id = Number(card.dataset.idPlataforma);
       if (!Number.isFinite(id) || id <= 0) return;
@@ -1292,7 +1338,16 @@ const attachPlatformClicks = (onClick) => {
   });
 };
 
-const loadStockSummary = async (_hasSession = false) => {
+const loadStockSummary = async (canLogStock = false) => {
+  const logStock = (...args) => {
+    if (!canLogStock) return;
+    console.log(...args);
+  };
+  const logStockError = (...args) => {
+    if (!canLogStock) return;
+    console.error(...args);
+  };
+
   const [
     { data: perfiles, error: perfErr },
     { data: cuentasMiembro, error: ctaErr },
@@ -1324,7 +1379,7 @@ const loadStockSummary = async (_hasSession = false) => {
       .eq("inactiva", false),
   ]);
   if (perfErr || ctaErr || compErr) {
-    console.error("stock summary error", perfErr || ctaErr || compErr);
+    logStockError("stock summary error", perfErr || ctaErr || compErr);
     return {};
   }
   let stockObj = {};
@@ -1396,48 +1451,48 @@ const loadStockSummary = async (_hasSession = false) => {
   stockObj["1_plan1"] = netflixPlan1;
   stockObj["1_plan2"] = netflixPlan2;
   stockObj[1] = netflixPlan1 + netflixPlan2;
-  console.log("[stock] Netflix plan 1 libres:", netflixPlan1, libresPlan1Correos);
-  console.log("[stock] Netflix plan 2 (hogar actualizado) libres:", netflixPlan2, libresPlan2Correos);
+  logStock("[stock] Netflix plan 1 libres:", netflixPlan1, libresPlan1Correos);
+  logStock("[stock] Netflix plan 2 (hogar actualizado) libres:", netflixPlan2, libresPlan2Correos);
   if (libresPlan1Correos.length) {
-    console.log("[stock] Netflix plan 1 correo libre:", libresPlan1Correos[0]);
+    logStock("[stock] Netflix plan 1 correo libre:", libresPlan1Correos[0]);
   }
   if (libresPlan2Correos.length) {
-    console.log("[stock] Netflix plan 2 correo libre:", libresPlan2Correos[0]);
+    logStock("[stock] Netflix plan 2 correo libre:", libresPlan2Correos[0]);
   }
   if (libresPlan1Perf.length) {
-    console.log("[stock] Netflix plan 1 perfil libre:", libresPlan1Perf[0]);
+    logStock("[stock] Netflix plan 1 perfil libre:", libresPlan1Perf[0]);
   }
   if (libresPlan2Perf.length) {
-    console.log("[stock] Netflix plan 2 perfil libre:", libresPlan2Perf[0]);
+    logStock("[stock] Netflix plan 2 perfil libre:", libresPlan2Perf[0]);
   }
   if (typeof stockObj[2] !== "undefined") {
     const plat2 = libresPorPlataforma[2];
     const nombre2 = plat2?.nombre || "Plataforma 2";
-    console.log("[stock] Plataforma 2 libres:", stockObj[2]);
+    logStock("[stock] Plataforma 2 libres:", stockObj[2]);
     if (plat2?.items?.length) {
-      console.log("[stock] Plataforma 2 libres (detalle):", nombre2, plat2.items);
+      logStock("[stock] Plataforma 2 libres (detalle):", nombre2, plat2.items);
     }
   } else {
-    console.log("[stock] Plataforma 2 libres: 0");
+    logStock("[stock] Plataforma 2 libres: 0");
   }
   if (typeof stockObj[13] !== "undefined") {
     const plat13 = libresPorPlataforma[13];
     const nombre13 = plat13?.nombre || "Plataforma 13";
-    console.log("[stock] Plataforma 13 libres:", stockObj[13]);
+    logStock("[stock] Plataforma 13 libres:", stockObj[13]);
     if (plat13?.items?.length) {
-      console.log("[stock] Plataforma 13 libres (detalle):", nombre13, plat13.items);
+      logStock("[stock] Plataforma 13 libres (detalle):", nombre13, plat13.items);
     }
   } else {
-    console.log("[stock] Plataforma 13 libres: 0");
+    logStock("[stock] Plataforma 13 libres: 0");
   }
   Object.entries(libresPorPlataforma).forEach(([platId, info]) => {
     const nombre = info?.nombre || `Plataforma ${platId}`;
     const items = info?.items || [];
     if (!items.length) {
-      console.log(`[stock] Plataforma ${platId} libres (detalle):`, nombre, []);
+      logStock(`[stock] Plataforma ${platId} libres (detalle):`, nombre, []);
       return;
     }
-    console.log(`[stock] Plataforma ${platId} libres (detalle):`, nombre, items);
+    logStock(`[stock] Plataforma ${platId} libres (detalle):`, nombre, items);
   });
   return stockObj;
 };
@@ -1582,8 +1637,6 @@ async function init() {
       const { data, error } = await supabase.auth.getSession();
       if (error) {
         console.warn("[auth] getSession error", error);
-      } else {
-        console.log("[auth] session", data?.session);
       }
     } catch (err) {
       console.warn("[auth] getSession exception", err);
@@ -1591,7 +1644,6 @@ async function init() {
 
     const currentUser = await loadCurrentUser();
     await applyLoaderAvatar(currentUser || null, currentUser?.id_usuario || requireSession());
-    console.log("[user] currentUser", currentUser);
     const btnAssign = document.querySelector("#btn-assign-client");
     if (usernameEl && currentUser) {
       const fullName = [currentUser.nombre, currentUser.apellido]
@@ -1647,7 +1699,7 @@ async function init() {
     setCachedCart(cartData);
     const [catalog, stockMap, homeBannersResp] = await Promise.all([
       loadCatalog(),
-      loadStockSummary(!!currentUser),
+      loadStockSummary(isAdmin),
       fetchHomeBanners(),
     ]);
     const { categorias, plataformas, precios, descuentos } = catalog;

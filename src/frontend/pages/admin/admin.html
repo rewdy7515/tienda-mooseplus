@@ -70,6 +70,33 @@
         width: 100%;
         box-sizing: border-box;
       }
+      .error-report-group {
+        margin-top: 10px;
+      }
+      .error-report-title {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .error-report-menu {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .error-report-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .error-report-table th,
+      .error-report-table td {
+        white-space: nowrap;
+      }
+      .admin-card.renovaciones-pend {
+        background: #e6d7ff;
+        border-color: #e6d7ff;
+        color: #5b2b89;
+      }
       @media (max-width: 900px) {
         .admin-cuentas-grid {
           grid-template-columns: 1fr;
@@ -104,10 +131,44 @@
           <div class="card-count" id="count-tareas">--</div>
           <p class="card-desc">Pendientes</p>
         </div>
+        <div class="admin-card renovaciones-pend" id="dash-renovaciones-pend">
+          <p class="card-title">Renovaciones pendientes</p>
+          <div class="card-count" id="count-renovaciones-pend">--</div>
+          <p class="card-desc">por renovar</p>
+        </div>
         <div class="admin-dashboard-action hidden" id="dash-dashboard-action">
           <button class="btn-primary admin-action admin-action-dashboard" id="btn-dashboard">
             <span class="card-title">Dashboard</span>
           </button>
+        </div>
+      </div>
+      <div class="admin-actions admin-group error-report-group" data-loading="false">
+        <p class="error-report-title">Reportes de errores</p>
+        <div class="error-report-menu">
+          <button class="btn-outline admin-action" id="btn-reporte-perfil-duplicado">
+            Ventas con id_perfil duplicado
+          </button>
+        </div>
+        <div id="reporte-perfil-duplicado-wrap" class="error-report-wrap hidden">
+          <p class="status" id="reporte-perfil-duplicado-status"></p>
+          <div class="cuenta-table-wrap hidden" id="reporte-perfil-duplicado-table-wrap">
+            <table class="table-base error-report-table">
+              <thead>
+                <tr>
+                  <th>ID Perfil</th>
+                  <th>Repeticiones</th>
+                  <th>ID Venta</th>
+                  <th>Cliente</th>
+                  <th>Plataforma</th>
+                  <th>Correo</th>
+                  <th>Perfil</th>
+                  <th>Estado</th>
+                  <th>Fecha de corte</th>
+                </tr>
+              </thead>
+              <tbody id="reporte-perfil-duplicado-body"></tbody>
+            </table>
+          </div>
         </div>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
@@ -209,7 +270,15 @@
       const countCortesEl = document.querySelector("#count-cortes");
       const countPedidosEl = document.querySelector("#count-pedidos");
       const countTareasEl = document.querySelector("#count-tareas");
+      const countRenovPendEl = document.querySelector("#count-renovaciones-pend");
       const pinesPorComprarEl = document.querySelector("#pines-por-comprar");
+      const btnReportePerfilDuplicado = document.querySelector("#btn-reporte-perfil-duplicado");
+      const reportePerfilDuplicadoWrap = document.querySelector("#reporte-perfil-duplicado-wrap");
+      const reportePerfilDuplicadoStatus = document.querySelector("#reporte-perfil-duplicado-status");
+      const reportePerfilDuplicadoTableWrap = document.querySelector(
+        "#reporte-perfil-duplicado-table-wrap",
+      );
+      const reportePerfilDuplicadoBody = document.querySelector("#reporte-perfil-duplicado-body");
       const adminGroups = Array.from(
         document.querySelectorAll(".admin-actions.admin-group"),
       );
@@ -219,6 +288,7 @@
       const spotifyRenovarBtn = document.querySelector("#btn-renovar-spotify");
       const netflixTable = document.querySelector("#netflix-cuentas-table tbody");
       const netflixStatus = document.querySelector("#netflix-cuentas-status");
+      const btnUsuarios = document.querySelector("#btn-usuarios");
       const btnOrdenes = document.querySelector("#btn-ordenes");
       const dashDashboardAction = document.querySelector("#dash-dashboard-action");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
@@ -227,8 +297,8 @@
       const modalRenovarNo = document.querySelector("#spotify-renovar-no");
       const modalRenovarMonto = document.querySelector("#spotify-renovar-monto");
       const modalRenovarCopy = document.querySelector("#spotify-renovar-copy");
-      const DASHBOARD_ALLOWED_USER_ID = 23;
       let currentUserId = null;
+      let isCurrentUserSuperAdmin = false;
 
       const getMonthStart = () => {
         const now = new Date();
@@ -275,6 +345,207 @@
         });
       };
 
+      const setPerfilDuplicadoStatus = (msg = "") => {
+        if (reportePerfilDuplicadoStatus) reportePerfilDuplicadoStatus.textContent = msg;
+      };
+
+      const clearPerfilDuplicadoReport = () => {
+        if (reportePerfilDuplicadoBody) reportePerfilDuplicadoBody.innerHTML = "";
+        reportePerfilDuplicadoTableWrap?.classList.add("hidden");
+      };
+
+      const chunkArray = (list = [], size = 500) => {
+        const out = [];
+        for (let i = 0; i < list.length; i += size) {
+          out.push(list.slice(i, i + size));
+        }
+        return out;
+      };
+
+      const fetchRowsByIds = async ({ table, idField, select, ids = [] }) => {
+        const uniqueIds = Array.from(
+          new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)),
+        );
+        if (!uniqueIds.length) return [];
+        const chunks = chunkArray(uniqueIds, 400);
+        const rows = [];
+        for (const group of chunks) {
+          const { data, error } = await supabase
+            .from(table)
+            .select(select)
+            .in(idField, group);
+          if (error) throw error;
+          rows.push(...(data || []));
+        }
+        return rows;
+      };
+
+      const fetchVentasPerfilReportRows = async () => {
+        const pageSize = 1000;
+        const rows = [];
+        let from = 0;
+        while (true) {
+          const to = from + pageSize - 1;
+          const { data, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, pendiente",
+            )
+            .not("id_perfil", "is", null)
+            .order("id_venta", { ascending: false })
+            .range(from, to);
+          if (error) throw error;
+          const chunk = data || [];
+          rows.push(...chunk);
+          if (chunk.length < pageSize) break;
+          from += pageSize;
+        }
+        return rows;
+      };
+
+      const resolveVentaEstado = (venta = {}) => {
+        if (isTrue(venta?.suspendido)) return "Suspendido";
+        if (isTrue(venta?.pendiente)) return "Pendiente";
+        const fechaCorte = String(venta?.fecha_corte || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaCorte)) return "Activa";
+        return fechaCorte < getTodayLocal() ? "Vencida" : "Activa";
+      };
+
+      const loadPerfilDuplicadoReport = async () => {
+        if (!reportePerfilDuplicadoWrap) return;
+        reportePerfilDuplicadoWrap.classList.remove("hidden");
+        clearPerfilDuplicadoReport();
+        setPerfilDuplicadoStatus("Cargando ventas con id_perfil duplicado...");
+        try {
+          const ventasRows = await fetchVentasPerfilReportRows();
+          const grouped = new Map();
+          (ventasRows || []).forEach((row) => {
+            const perfilId = Number(row?.id_perfil);
+            if (!Number.isFinite(perfilId) || perfilId <= 0) return;
+            if (!grouped.has(perfilId)) grouped.set(perfilId, []);
+            grouped.get(perfilId).push(row);
+          });
+
+          const duplicatedGroups = Array.from(grouped.entries())
+            .filter(([, rows]) => (rows || []).length > 1)
+            .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+          if (!duplicatedGroups.length) {
+            setPerfilDuplicadoStatus("No se encontraron ventas con id_perfil duplicado.");
+            return;
+          }
+
+          const duplicatedRows = duplicatedGroups.flatMap(([idPerfil, rows]) =>
+            (rows || []).map((row) => ({
+              ...row,
+              id_perfil: Number(idPerfil),
+              repeticiones: rows.length,
+            })),
+          );
+
+          const userIds = duplicatedRows.map((r) => r.id_usuario);
+          const cuentaIds = duplicatedRows.flatMap((r) => [
+            r.id_cuenta,
+            r.id_cuenta_miembro,
+          ]);
+          const usuarios = await fetchRowsByIds({
+            table: "usuarios",
+            idField: "id_usuario",
+            select: "id_usuario, nombre, apellido",
+            ids: userIds,
+          });
+          const perfiles = await fetchRowsByIds({
+            table: "perfiles",
+            idField: "id_perfil",
+            select: "id_perfil, n_perfil",
+            ids: duplicatedRows.map((r) => r.id_perfil),
+          });
+          const cuentas = await fetchRowsByIds({
+            table: "cuentas",
+            idField: "id_cuenta",
+            select: "id_cuenta, correo, id_plataforma",
+            ids: cuentaIds,
+          });
+          const userMap = (usuarios || []).reduce((acc, user) => {
+            acc[user.id_usuario] = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
+            return acc;
+          }, {});
+          const cuentaMap = (cuentas || []).reduce((acc, cuenta) => {
+            acc[cuenta.id_cuenta] = cuenta;
+            return acc;
+          }, {});
+          const perfilMap = (perfiles || []).reduce((acc, perfil) => {
+            acc[perfil.id_perfil] = perfil?.n_perfil ?? null;
+            return acc;
+          }, {});
+
+          const plataformaIds = duplicatedRows.map((row) => {
+            const idPlatCuenta = Number(cuentaMap[row?.id_cuenta]?.id_plataforma);
+            if (Number.isFinite(idPlatCuenta) && idPlatCuenta > 0) return idPlatCuenta;
+            const idPlatCuentaMiembro = Number(
+              cuentaMap[row?.id_cuenta_miembro]?.id_plataforma,
+            );
+            return Number.isFinite(idPlatCuentaMiembro) && idPlatCuentaMiembro > 0
+              ? idPlatCuentaMiembro
+              : null;
+          });
+          const plataformas = await fetchRowsByIds({
+            table: "plataformas",
+            idField: "id_plataforma",
+            select: "id_plataforma, nombre",
+            ids: plataformaIds,
+          });
+          const plataformaMap = (plataformas || []).reduce((acc, plat) => {
+            acc[plat.id_plataforma] = plat?.nombre || "";
+            return acc;
+          }, {});
+
+          const html = duplicatedRows
+            .sort((a, b) => {
+              if (Number(a.id_perfil) !== Number(b.id_perfil)) {
+                return Number(a.id_perfil) - Number(b.id_perfil);
+              }
+              return Number(b.id_venta) - Number(a.id_venta);
+            })
+            .map((row) => {
+              const cuenta =
+                cuentaMap[row.id_cuenta] ||
+                cuentaMap[row.id_cuenta_miembro] ||
+                {};
+              const idPlat = Number(cuenta?.id_plataforma) || null;
+              const plataforma = idPlat ? plataformaMap[idPlat] || `Plataforma ${idPlat}` : "-";
+              const cliente = userMap[row.id_usuario] || `Usuario ${row.id_usuario || "-"}`;
+              const correo = cuenta?.correo || "-";
+              const nPerfil = perfilMap[row.id_perfil];
+              const estado = resolveVentaEstado(row);
+              return `
+                <tr>
+                  <td>${row.id_perfil}</td>
+                  <td>${row.repeticiones}</td>
+                  <td>#${row.id_venta}</td>
+                  <td>${escapeHtml(cliente)}</td>
+                  <td>${escapeHtml(plataforma)}</td>
+                  <td>${escapeHtml(correo)}</td>
+                  <td>${nPerfil ?? "-"}</td>
+                  <td>${estado}</td>
+                  <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
+                </tr>
+              `;
+            })
+            .join("");
+
+          if (reportePerfilDuplicadoBody) reportePerfilDuplicadoBody.innerHTML = html;
+          reportePerfilDuplicadoTableWrap?.classList.remove("hidden");
+          setPerfilDuplicadoStatus(
+            `Perfiles duplicados: ${duplicatedGroups.length}. Ventas afectadas: ${duplicatedRows.length}.`,
+          );
+        } catch (err) {
+          console.error("load perfil duplicado report error", err);
+          clearPerfilDuplicadoReport();
+          setPerfilDuplicadoStatus("No se pudo cargar el reporte.");
+        }
+      };
+
       async function loadCounts() {
         try {
           const today = getTodayLocal();
@@ -286,6 +557,7 @@
             { count: cortesReemplazosCount, error: cortesReemplazosErr },
             { count: pedidosCount, error: pedidosErr },
             { count: tareasCount, error: tareasErr },
+            { count: renovPendCount, error: renovPendErr },
           ] = await Promise.all([
             supabase
               .from("reportes")
@@ -315,17 +587,23 @@
             supabase
               .from("tareas_asignadas")
               .select("id_tarea_asignada", { count: "exact", head: true }),
+            supabase
+              .from("ventas")
+              .select("id_venta", { count: "exact", head: true })
+              .eq("cuenta_pagada_admin", false),
           ]);
           if (repErr) throw repErr;
           if (cortesVentasErr) throw cortesVentasErr;
           if (cortesReemplazosErr) throw cortesReemplazosErr;
           if (pedidosErr) throw pedidosErr;
           if (tareasErr) throw tareasErr;
+          if (renovPendErr) throw renovPendErr;
           const cortesCount = (cortesVentasCount ?? 0) + (cortesReemplazosCount ?? 0);
           if (countReportesEl) countReportesEl.textContent = repCount ?? 0;
           if (countCortesEl) countCortesEl.textContent = cortesCount ?? 0;
           if (countPedidosEl) countPedidosEl.textContent = pedidosCount ?? 0;
           if (countTareasEl) countTareasEl.textContent = tareasCount ?? 0;
+          if (countRenovPendEl) countRenovPendEl.textContent = renovPendCount ?? 0;
 
           if (pinesPorComprarEl) {
             const [
@@ -361,6 +639,7 @@
           if (countCortesEl) countCortesEl.textContent = "-";
           if (countPedidosEl) countPedidosEl.textContent = "-";
           if (countTareasEl) countTareasEl.textContent = "-";
+          if (countRenovPendEl) countRenovPendEl.textContent = "-";
           if (pinesPorComprarEl) pinesPorComprarEl.textContent = "Pines por comprar: -";
         }
       }
@@ -484,7 +763,8 @@
           currentUserId = user?.id_usuario || null;
           const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
           const isSuperAdmin = isTrue(user?.permiso_superadmin);
-          const canViewDashboard = Number(currentUserId) === DASHBOARD_ALLOWED_USER_ID;
+          isCurrentUserSuperAdmin = isSuperAdmin;
+          const canViewDashboard = isSuperAdmin;
           if (adminLink) {
             adminLink.classList.toggle("hidden", !isAdmin);
             adminLink.style.display = isAdmin ? "block" : "none";
@@ -496,6 +776,10 @@
           if (btnOrdenes) {
             btnOrdenes.classList.toggle("hidden", !isSuperAdmin);
             btnOrdenes.style.display = isSuperAdmin ? "inline-flex" : "none";
+          }
+          if (btnUsuarios) {
+            btnUsuarios.classList.toggle("hidden", !isSuperAdmin);
+            btnUsuarios.style.display = isSuperAdmin ? "inline-flex" : "none";
           }
           if (!isAdmin) {
             document.querySelector("main .status").textContent =
@@ -522,6 +806,12 @@
       });
       document.querySelector("#dash-tareas")?.addEventListener("click", () => {
         window.location.href = "tareas.html";
+      });
+      document.querySelector("#dash-renovaciones-pend")?.addEventListener("click", () => {
+        window.location.href = "renovaciones_pendientes.html";
+      });
+      btnReportePerfilDuplicado?.addEventListener("click", () => {
+        loadPerfilDuplicadoReport();
       });
 
       init();
@@ -554,6 +844,7 @@
       });
 
       document.getElementById("btn-usuarios")?.addEventListener("click", () => {
+        if (!isCurrentUserSuperAdmin) return;
         window.location.href = "usuarios.html";
       });
       document.getElementById("btn-ordenes")?.addEventListener("click", () => {

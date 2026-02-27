@@ -1,4 +1,8 @@
-import { supabase } from "./api.js";
+import {
+  completeSignupWithRegistrationToken,
+  supabase,
+  validateSignupRegistrationToken,
+} from "./api.js";
 import { attachLogoHome } from "./session.js";
 import { loadPaginaBranding } from "./branding.js";
 import { initAuthCaptcha } from "./auth-captcha.js";
@@ -31,6 +35,8 @@ let phoneMaxDigits = null;
 let phonePattern = "";
 let captchaController = null;
 let captchaInitPromise = null;
+const signupToken = new URLSearchParams(window.location.search || "").get("registro_token") || "";
+let signupTokenContext = null;
 
 const limitMessage = () =>
   phoneMaxDigits ? `Puedes escribir hasta ${phoneMaxDigits} dígitos` : "";
@@ -57,6 +63,33 @@ function setLoading(isLoading) {
   submitBtn.disabled = isLoading;
   submitBtn.textContent = isLoading ? "Registrando..." : "Registrarse";
 }
+
+const setFormDisabled = (disabled) => {
+  Object.values(fields).forEach((input) => {
+    if (input) input.disabled = !!disabled;
+  });
+  toggleButtons.forEach((btn) => {
+    btn.disabled = !!disabled;
+  });
+  if (submitBtn) submitBtn.disabled = !!disabled;
+};
+
+const preloadSignupTokenContext = async () => {
+  if (!signupToken) return null;
+  const result = await validateSignupRegistrationToken(signupToken);
+  if (result?.error) {
+    setFormDisabled(true);
+    setStatus("Este link de registro es inválido o venció. Solicita uno nuevo.", true);
+    return null;
+  }
+
+  signupTokenContext = result;
+  const usuario = result?.usuario || {};
+  if (!fields.nombre.value && usuario?.nombre) fields.nombre.value = String(usuario.nombre);
+  if (!fields.apellido.value && usuario?.apellido) fields.apellido.value = String(usuario.apellido);
+  if (!fields.correo.value && usuario?.correo) fields.correo.value = String(usuario.correo);
+  return result;
+};
 
 async function correoExiste(correo) {
   const { data, error } = await supabase
@@ -143,15 +176,28 @@ async function handleSubmit(e) {
   setLoading(true);
 
   try {
-    const existente = await correoExiste(correo);
-    const correoLibre = !existente;
-    const reutilizar =
-      existente && (existente.fecha_registro === null || typeof existente.fecha_registro === "undefined");
-    if (!correoLibre && !reutilizar) {
-      errors.correo.innerHTML =
-        'Este correo ya está registrado. <a class="link-inline" href="login.html">Inicia sesión</a>';
-      fields.correo.classList.add("input-error");
-      return;
+    const tokenFlow = !!signupToken;
+    let existente = null;
+    let reutilizar = false;
+
+    if (tokenFlow) {
+      const valid = await validateSignupRegistrationToken(signupToken);
+      if (valid?.error) {
+        throw new Error(valid.error || "El link de registro no es válido.");
+      }
+      signupTokenContext = valid;
+    } else {
+      existente = await correoExiste(correo);
+      const correoLibre = !existente;
+      reutilizar =
+        existente &&
+        (existente.fecha_registro === null || typeof existente.fecha_registro === "undefined");
+      if (!correoLibre && !reutilizar) {
+        errors.correo.innerHTML =
+          'Este correo ya está registrado. <a class="link-inline" href="login.html">Inicia sesión</a>';
+        fields.correo.classList.add("input-error");
+        return;
+      }
     }
 
     const phoneDial = iti?.getSelectedCountryData?.()?.dialCode;
@@ -164,7 +210,7 @@ async function handleSubmit(e) {
       (phoneDial ? `+${phoneDial} ${telefono}` : telefono);
 
     // 1) Registrar en Auth de Supabase
-    const { data: authData, error: authErr } = await supabase.auth.signUp({
+    const { error: authErr } = await supabase.auth.signUp({
       email: correo.trim(),
       password: clave,
       options: {
@@ -184,32 +230,47 @@ async function handleSubmit(e) {
     }
 
     // 2) Registrar en tabla usuarios
-    const today = new Date().toISOString().slice(0, 10);
-    let data = null;
-    let error = null;
-    if (reutilizar && existente?.id_usuario) {
-      const upd = await supabase
-        .from("usuarios")
-        .update({ nombre, apellido, telefono: phoneFull, correo, clave, fecha_registro: today })
-        .eq("id_usuario", existente.id_usuario)
-        .select("id_usuario")
-        .single();
-      data = upd.data;
-      error = upd.error;
+    let idUsuarioCreado = null;
+    if (tokenFlow) {
+      const completeRes = await completeSignupWithRegistrationToken({
+        token: signupToken,
+        nombre,
+        apellido,
+        telefono: phoneFull,
+        correo,
+      });
+      if (completeRes?.error) {
+        throw new Error(completeRes.error);
+      }
+      idUsuarioCreado = Number(completeRes?.id_usuario) || null;
     } else {
-      const ins = await supabase
-        .from("usuarios")
-        .insert({ nombre, apellido, telefono: phoneFull, correo, clave, fecha_registro: today })
-        .select("id_usuario")
-        .single();
-      data = ins.data;
-      error = ins.error;
+      const today = new Date().toISOString().slice(0, 10);
+      let data = null;
+      let error = null;
+      if (reutilizar && existente?.id_usuario) {
+        const upd = await supabase
+          .from("usuarios")
+          .update({ nombre, apellido, telefono: phoneFull, correo, fecha_registro: today })
+          .eq("id_usuario", existente.id_usuario)
+          .select("id_usuario")
+          .single();
+        data = upd.data;
+        error = upd.error;
+      } else {
+        const ins = await supabase
+          .from("usuarios")
+          .insert({ nombre, apellido, telefono: phoneFull, correo, fecha_registro: today })
+          .select("id_usuario")
+          .single();
+        data = ins.data;
+        error = ins.error;
+      }
+      if (error) throw error;
+      idUsuarioCreado = Number(data?.id_usuario) || null;
     }
 
-    if (error) throw error;
-
-    if (!data?.id_usuario) {
-      throw new Error("No se pudo obtener el usuario creado");
+    if (!idUsuarioCreado) {
+      throw new Error("No se pudo obtener el usuario creado.");
     }
 
     setStatus("Registro exitoso. Revisa tu correo para confirmar.", false);
@@ -218,7 +279,7 @@ async function handleSubmit(e) {
     }, 800);
   } catch (err) {
     console.error("signup error", err);
-    setStatus("No se pudo completar el registro. Intenta de nuevo.", true);
+    setStatus(err?.message || "No se pudo completar el registro. Intenta de nuevo.", true);
   } finally {
     setLoading(false);
     captchaController?.reset();
@@ -236,6 +297,13 @@ function init() {
   attachLogoHome();
   loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
     console.warn("signup branding load error", err);
+  });
+  preloadSignupTokenContext().catch((err) => {
+    console.error("signup token preload error", err);
+    if (signupToken) {
+      setFormDisabled(true);
+      setStatus("No se pudo validar el link de registro.", true);
+    }
   });
   if (fields.telefono && window.intlTelInput) {
     iti = window.intlTelInput(fields.telefono, {

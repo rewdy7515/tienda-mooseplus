@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Renovaciones pendientes</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .rp-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 10px 0 14px;
+      }
+      .rp-toolbar .status {
+        margin: 0;
+      }
+      .rp-platform-block + .rp-platform-block {
+        margin-top: 12px;
+      }
+      .rp-check-cell {
+        text-align: center;
+      }
+      .rp-check-cell input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+      }
+      .rp-modal-card {
+        width: min(96vw, 1080px);
+        max-height: 86vh;
+        overflow: auto;
+      }
+      .rp-modal-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 10px;
+      }
+      .rp-modal-group {
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 10px;
+        background: #f8fafc;
+      }
+      .rp-modal-group-title {
+        margin: 0 0 8px;
+        font-size: 16px;
+        font-weight: 800;
+      }
+      .rp-modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .rp-modal-input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Renovaciones pendientes</h2>
+      <div class="rp-toolbar">
+        <button type="button" id="btn-rp-renovar" class="btn-primary" disabled>Renovar</button>
+        <p id="rp-selection-status" class="status">Selecciona cuentas para renovar.</p>
+      </div>
+      <p id="rp-status" class="status">Cargando renovaciones pendientes...</p>
+      <div id="rp-tablas"></div>
+    </main>
+
+    <div id="rp-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card rp-modal-card">
+        <button type="button" class="modal-close" id="btn-rp-modal-close" aria-label="Cerrar">×</button>
+        <h3 style="margin: 0;">Costo individual de renovacion</h3>
+        <p class="status" id="rp-modal-status"></p>
+        <div id="rp-modal-groups" class="rp-modal-groups"></div>
+        <div class="rp-modal-actions">
+          <button type="button" id="btn-rp-modal-cancel" class="btn-outline">Cancelar</button>
+          <button type="button" id="btn-rp-modal-confirm" class="btn-primary">Renovar</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const adminLink = document.querySelector(".admin-link");
+      const statusEl = document.querySelector("#rp-status");
+      const selectionStatusEl = document.querySelector("#rp-selection-status");
+      const tablasEl = document.querySelector("#rp-tablas");
+      const btnRenovarEl = document.querySelector("#btn-rp-renovar");
+      const modalEl = document.querySelector("#rp-modal");
+      const modalBackdropEl = modalEl?.querySelector(".modal-backdrop");
+      const modalCloseEl = document.querySelector("#btn-rp-modal-close");
+      const modalCancelEl = document.querySelector("#btn-rp-modal-cancel");
+      const modalConfirmEl = document.querySelector("#btn-rp-modal-confirm");
+      const modalStatusEl = document.querySelector("#rp-modal-status");
+      const modalGroupsEl = document.querySelector("#rp-modal-groups");
+
+      const ventasMap = new Map();
+      const selectedVentas = new Set();
+
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      const setStatus = (msg = "") => {
+        if (statusEl) statusEl.textContent = msg;
+      };
+      const setSelectionStatus = (msg = "") => {
+        if (selectionStatusEl) selectionStatusEl.textContent = msg;
+      };
+      const setModalStatus = (msg = "") => {
+        if (modalStatusEl) modalStatusEl.textContent = msg;
+      };
+
+      const normalizeSelectedVentas = () => {
+        const ids = Array.from(selectedVentas);
+        ids.forEach((idVenta) => {
+          if (!ventasMap.has(idVenta)) selectedVentas.delete(idVenta);
+        });
+      };
+
+      const updateRenovarButton = () => {
+        const total = selectedVentas.size;
+        if (btnRenovarEl) {
+          btnRenovarEl.disabled = total <= 0;
+          btnRenovarEl.textContent = total > 0 ? `Renovar (${total})` : "Renovar";
+        }
+        if (total <= 0) {
+          setSelectionStatus("Selecciona cuentas para renovar.");
+        } else {
+          setSelectionStatus(`${total} cuenta${total === 1 ? "" : "s"} seleccionada${total === 1 ? "" : "s"}.`);
+        }
+      };
+
+      const groupRowsByPlatform = (rows = []) => {
+        const map = new Map();
+        rows.forEach((row) => {
+          const key = Number(row?.id_plataforma) || 0;
+          if (!key) return;
+          if (!map.has(key)) {
+            map.set(key, {
+              id_plataforma: key,
+              nombre: row.plataforma || `Plataforma ${key}`,
+              color_1: row.color_1 || "",
+              rows: [],
+            });
+          }
+          map.get(key).rows.push(row);
+        });
+        return Array.from(map.values()).sort((a, b) =>
+          String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"),
+        );
+      };
+
+      const renderTables = (groups = []) => {
+        if (!tablasEl) return;
+        if (!groups.length) {
+          tablasEl.innerHTML = "";
+          setStatus("No hay renovaciones pendientes.");
+          return;
+        }
+        setStatus("");
+        tablasEl.innerHTML = groups
+          .map((group) => {
+            const rowsHtml = (group.rows || [])
+              .map((row) => {
+                const checked = selectedVentas.has(row.id_venta) ? "checked" : "";
+                return `
+                  <tr>
+                    <td>#${String(row.id_venta).padStart(4, "0")}</td>
+                    <td>${escapeHtml(row.cliente || "-")}</td>
+                    <td>${escapeHtml(row.correo || "-")}</td>
+                    <td>${escapeHtml(row.clave || "-")}</td>
+                    <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
+                    <td data-provider-venta="${row.id_venta}">${escapeHtml(row.proveedor || "-")}</td>
+                    <td class="rp-check-cell">
+                      <input type="checkbox" class="rp-row-check" data-venta="${row.id_venta}" ${checked} />
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+            return `
+              <section class="proximas-bloque rp-platform-block">
+                <h3 class="proximas-title">${escapeHtml(group.nombre)}</h3>
+                <div class="cuenta-table-wrap">
+                  <table class="table-base"${group.color_1 ? ` style="--table-header-bg:${group.color_1};"` : ""}>
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Cliente</th>
+                        <th>Correo</th>
+                        <th>Clave</th>
+                        <th>Fecha Corte</th>
+                        <th>Proveedor</th>
+                        <th>Accion</th>
+                      </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                  </table>
+                </div>
+              </section>
+            `;
+          })
+          .join("");
+      };
+
+      const getSelectedRows = () =>
+        Array.from(selectedVentas)
+          .map((idVenta) => ventasMap.get(idVenta))
+          .filter(Boolean);
+
+      const buildModalHtml = (selectedRows = []) => {
+        const grouped = groupRowsByPlatform(selectedRows);
+        if (!grouped.length) return '<p class="status">No hay cuentas seleccionadas.</p>';
+        return grouped
+          .map((group) => {
+            const rows = (group.rows || [])
+              .map((row) => {
+                const providerValue = escapeHtml(row.proveedor || "");
+                return `
+                  <tr>
+                    <td>#${String(row.id_venta).padStart(4, "0")}</td>
+                    <td>${escapeHtml(row.cliente || "-")}</td>
+                    <td>${escapeHtml(row.correo || "-")}</td>
+                    <td>${escapeHtml(row.clave || "-")}</td>
+                    <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
+                    <td>
+                      <input
+                        type="number"
+                        class="form-input rp-modal-input rp-modal-costo"
+                        data-venta="${row.id_venta}"
+                        step="0.01"
+                        min="0"
+                        inputmode="decimal"
+                        placeholder="0.00"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        class="form-input rp-modal-input rp-modal-proveedor"
+                        data-venta="${row.id_venta}"
+                        value="${providerValue}"
+                        placeholder="Proveedor"
+                      />
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+            return `
+              <section class="rp-modal-group">
+                <h4 class="rp-modal-group-title">${escapeHtml(group.nombre)}</h4>
+                <div class="cuenta-table-wrap">
+                  <table class="table-base"${group.color_1 ? ` style="--table-header-bg:${group.color_1};"` : ""}>
+                    <thead>
+                      <tr>
+                        <th>ID Venta</th>
+                        <th>Cliente</th>
+                        <th>Correo</th>
+                        <th>Clave</th>
+                        <th>Fecha Corte</th>
+                        <th>Costo individual de renovacion</th>
+                        <th>Proveedor</th>
+                      </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                  </table>
+                </div>
+              </section>
+            `;
+          })
+          .join("");
+      };
+
+      const openModal = () => {
+        const selectedRows = getSelectedRows();
+        if (!selectedRows.length) {
+          setSelectionStatus("Selecciona al menos una cuenta para renovar.");
+          return;
+        }
+        if (modalGroupsEl) modalGroupsEl.innerHTML = buildModalHtml(selectedRows);
+        setModalStatus("");
+        modalEl?.classList.remove("hidden");
+        modalEl?.setAttribute("aria-hidden", "false");
+        document.body.classList.add("modal-open");
+      };
+
+      const closeModal = () => {
+        modalEl?.classList.add("hidden");
+        modalEl?.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("modal-open");
+        if (modalGroupsEl) modalGroupsEl.innerHTML = "";
+        setModalStatus("");
+      };
+
+      const loadRows = async () => {
+        try {
+          const user = await loadCurrentUser();
+          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          if (adminLink) {
+            adminLink.classList.toggle("hidden", !isAdmin);
+            adminLink.style.display = isAdmin ? "block" : "none";
+          }
+          if (!isAdmin) {
+            setStatus("No tienes permisos para administrar renovaciones.");
+            if (tablasEl) tablasEl.innerHTML = "";
+            if (btnRenovarEl) btnRenovarEl.disabled = true;
+            return;
+          }
+
+          const { data: ventas, error: ventasErr } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, pendiente, suspendido, usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva)",
+            )
+            .eq("cuenta_pagada_admin", false)
+            .order("id_venta", { ascending: false });
+          if (ventasErr) throw ventasErr;
+
+          const normalizedRows = [];
+          const providerIds = new Set();
+          const platformIds = new Set();
+          (ventas || []).forEach((venta) => {
+            const idVenta = Number(venta?.id_venta || 0);
+            if (!idVenta) return;
+            const sourceAccount =
+              venta?.cuentas_miembro?.id_cuenta ? venta.cuentas_miembro : venta.cuentas;
+            if (!sourceAccount) return;
+            if (isTrue(sourceAccount.inactiva)) return;
+            const idPlataforma = Number(sourceAccount.id_plataforma || 0);
+            if (!idPlataforma) return;
+            const idProveedor = Number(sourceAccount.id_proveedor || 0) || null;
+            const cliente = [venta?.usuarios?.nombre, venta?.usuarios?.apellido]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
+            normalizedRows.push({
+              id_venta: idVenta,
+              id_plataforma: idPlataforma,
+              id_proveedor: idProveedor,
+              cliente: cliente || `Usuario ${venta?.id_usuario || "-"}`,
+              correo: sourceAccount.correo || "",
+              clave: sourceAccount.clave || "",
+              fecha_corte: venta?.fecha_corte || "",
+            });
+            platformIds.add(idPlataforma);
+            if (idProveedor) providerIds.add(idProveedor);
+          });
+
+          let plataformasMap = {};
+          if (platformIds.size) {
+            const { data: plataformas, error: platErr } = await supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre, color_1")
+              .in("id_plataforma", Array.from(platformIds));
+            if (platErr) throw platErr;
+            plataformasMap = (plataformas || []).reduce((acc, platform) => {
+              acc[platform.id_plataforma] = platform;
+              return acc;
+            }, {});
+          }
+
+          let proveedoresMap = {};
+          if (providerIds.size) {
+            const { data: proveedores, error: provErr } = await supabase
+              .from("proveedores")
+              .select("id_proveedor, nombre")
+              .in("id_proveedor", Array.from(providerIds));
+            if (provErr) throw provErr;
+            proveedoresMap = (proveedores || []).reduce((acc, provider) => {
+              acc[provider.id_proveedor] = provider?.nombre || "";
+              return acc;
+            }, {});
+          }
+
+          const rowsWithNames = normalizedRows.map((row) => {
+            const platform = plataformasMap[row.id_plataforma] || {};
+            return {
+              ...row,
+              plataforma: platform.nombre || `Plataforma ${row.id_plataforma}`,
+              color_1: platform.color_1 || "",
+              proveedor: row.id_proveedor ? proveedoresMap[row.id_proveedor] || "-" : "-",
+            };
+          });
+
+          ventasMap.clear();
+          rowsWithNames.forEach((row) => {
+            ventasMap.set(row.id_venta, row);
+          });
+          normalizeSelectedVentas();
+
+          const grouped = groupRowsByPlatform(rowsWithNames).map((group) => ({
+            ...group,
+            rows: (group.rows || []).sort((a, b) => {
+              if (String(a.fecha_corte || "") !== String(b.fecha_corte || "")) {
+                return String(a.fecha_corte || "").localeCompare(String(b.fecha_corte || ""));
+              }
+              return Number(a.id_venta) - Number(b.id_venta);
+            }),
+          }));
+          renderTables(grouped);
+          updateRenovarButton();
+        } catch (err) {
+          console.error("load renovaciones pendientes error", err);
+          setStatus("No se pudieron cargar las renovaciones pendientes.");
+          if (tablasEl) tablasEl.innerHTML = "";
+          updateRenovarButton();
+        }
+      };
+
+      tablasEl?.addEventListener("change", (event) => {
+        const check = event.target.closest(".rp-row-check");
+        if (!check) return;
+        const idVenta = Number(check.dataset.venta || 0);
+        if (!idVenta) return;
+        if (check.checked) {
+          selectedVentas.add(idVenta);
+        } else {
+          selectedVentas.delete(idVenta);
+        }
+        updateRenovarButton();
+      });
+
+      btnRenovarEl?.addEventListener("click", () => {
+        openModal();
+      });
+      modalCloseEl?.addEventListener("click", closeModal);
+      modalCancelEl?.addEventListener("click", closeModal);
+      modalBackdropEl?.addEventListener("click", closeModal);
+
+      modalConfirmEl?.addEventListener("click", () => {
+        const selectedRows = getSelectedRows();
+        if (!selectedRows.length) {
+          setModalStatus("Selecciona al menos una cuenta.");
+          return;
+        }
+        const payload = [];
+        for (const row of selectedRows) {
+          const costInput = modalGroupsEl?.querySelector(
+            `.rp-modal-costo[data-venta="${row.id_venta}"]`,
+          );
+          const providerInput = modalGroupsEl?.querySelector(
+            `.rp-modal-proveedor[data-venta="${row.id_venta}"]`,
+          );
+          const costo = Number(String(costInput?.value || "").trim().replace(",", "."));
+          const proveedor = String(providerInput?.value || "").trim();
+          if (!Number.isFinite(costo) || costo < 0) {
+            costInput?.focus();
+            setModalStatus(`Costo invalido para la venta #${String(row.id_venta).padStart(4, "0")}.`);
+            return;
+          }
+          if (!proveedor) {
+            providerInput?.focus();
+            setModalStatus(`Proveedor requerido para la venta #${String(row.id_venta).padStart(4, "0")}.`);
+            return;
+          }
+          payload.push({
+            id_venta: row.id_venta,
+            id_plataforma: row.id_plataforma,
+            costo_renovacion: costo,
+            proveedor,
+          });
+        }
+
+        payload.forEach((item) => {
+          const row = ventasMap.get(item.id_venta);
+          if (row) row.proveedor = item.proveedor;
+          const providerCell = tablasEl?.querySelector(
+            `td[data-provider-venta="${item.id_venta}"]`,
+          );
+          if (providerCell) providerCell.textContent = item.proveedor;
+        });
+
+        selectedVentas.clear();
+        updateRenovarButton();
+        setSelectionStatus(`Renovaciones preparadas: ${payload.length}.`);
+        closeModal();
+      });
+
+      loadRows();
+    </script>
+  </body>
+</html>

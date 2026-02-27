@@ -14,7 +14,14 @@ const normalizeApiBase = (value) => {
   return "";
 };
 
+const canUseApiBaseOverride = () => {
+  if (typeof window === "undefined") return false;
+  const host = String(window.location.hostname || "").trim().toLowerCase();
+  return host === "localhost" || host === "127.0.0.1";
+};
+
 const readApiBaseOverride = () => {
+  if (!canUseApiBaseOverride()) return "";
   if (typeof window === "undefined") return "";
   try {
     const query = new URLSearchParams(window.location.search || "").get("api_base");
@@ -98,83 +105,37 @@ const isTransientCartBackendError = (status, bodyText = "") => {
 };
 
 export async function loadCatalog() {
+  const normalizePlataformaRow = (row = {}) => {
+    const idDescMesBase = row.id_descuento_mes ?? 1;
+    const idDescCantidadBase = row.id_descuento_cantidad ?? 2;
+    const isExplicitFalse = (value) =>
+      value === false || value === 0 || value === "0" || value === "false" || value === "f";
+    return {
+      ...row,
+      id_descuento_mes: idDescMesBase,
+      id_descuento_cantidad: idDescCantidadBase,
+      id_descuento_mes_detal: row.id_descuento_mes_detal ?? idDescMesBase,
+      id_descuento_mes_mayor: row.id_descuento_mes_mayor ?? idDescMesBase,
+      id_descuento_cantidad_detal: row.id_descuento_cantidad_detal ?? idDescCantidadBase,
+      id_descuento_cantidad_mayor: row.id_descuento_cantidad_mayor ?? idDescCantidadBase,
+      aplica_descuento_mes_detal: isExplicitFalse(row.aplica_descuento_mes_detal) ? false : true,
+      aplica_descuento_mes_mayor: isExplicitFalse(row.aplica_descuento_mes_mayor) ? false : true,
+      aplica_descuento_cantidad_detal: isExplicitFalse(row.aplica_descuento_cantidad_detal)
+        ? false
+        : true,
+      aplica_descuento_cantidad_mayor: isExplicitFalse(row.aplica_descuento_cantidad_mayor)
+        ? false
+        : true,
+    };
+  };
+
   const fetchPlataformasCatalog = async () => {
-    const fullSelect =
-      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
-    const idsAndGroupsSelect =
-      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor";
-    const idsSelect =
-      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad";
-    const baseSelect =
-      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos";
-    const full = await supabase.from("plataformas").select(fullSelect).order("nombre");
-    if (!full.error) return full;
-    const msg = String(full.error?.message || "");
-    if (
-      !/id_descuento_mes|id_descuento_cantidad|id_descuento_mes_detal|id_descuento_mes_mayor|id_descuento_cantidad_detal|id_descuento_cantidad_mayor|aplica_descuento_mes_detal|aplica_descuento_mes_mayor|aplica_descuento_cantidad_detal|aplica_descuento_cantidad_mayor/i.test(
-        msg
-      )
-    ) {
-      return full;
-    }
-    const noChecks = await supabase
-      .from("plataformas")
-      .select(idsAndGroupsSelect)
-      .order("nombre");
-    if (!noChecks.error) {
-      return {
-        ...noChecks,
-        data: (noChecks.data || []).map((p) => ({
-          ...p,
-          id_descuento_mes_detal: p.id_descuento_mes_detal ?? p.id_descuento_mes ?? 1,
-          id_descuento_mes_mayor: p.id_descuento_mes_mayor ?? p.id_descuento_mes ?? 1,
-          id_descuento_cantidad_detal:
-            p.id_descuento_cantidad_detal ?? p.id_descuento_cantidad ?? 2,
-          id_descuento_cantidad_mayor:
-            p.id_descuento_cantidad_mayor ?? p.id_descuento_cantidad ?? 2,
-          aplica_descuento_mes_detal: true,
-          aplica_descuento_mes_mayor: true,
-          aplica_descuento_cantidad_detal: true,
-          aplica_descuento_cantidad_mayor: true,
-        })),
-      };
-    }
-    const noGroups = await supabase.from("plataformas").select(idsSelect).order("nombre");
-    if (!noGroups.error) {
-      return {
-        ...noGroups,
-        data: (noGroups.data || []).map((p) => ({
-          ...p,
-          id_descuento_mes: p.id_descuento_mes ?? 1,
-          id_descuento_cantidad: p.id_descuento_cantidad ?? 2,
-          id_descuento_mes_detal: p.id_descuento_mes ?? 1,
-          id_descuento_mes_mayor: p.id_descuento_mes ?? 1,
-          id_descuento_cantidad_detal: p.id_descuento_cantidad ?? 2,
-          id_descuento_cantidad_mayor: p.id_descuento_cantidad ?? 2,
-          aplica_descuento_mes_detal: true,
-          aplica_descuento_mes_mayor: true,
-          aplica_descuento_cantidad_detal: true,
-          aplica_descuento_cantidad_mayor: true,
-        })),
-      };
-    }
-    const base = await supabase.from("plataformas").select(baseSelect).order("nombre");
+    // `select("*")` evita 400 por columnas opcionales no presentes en algunos entornos.
+    const base = await supabase.from("plataformas").select("*").order("nombre");
     if (base.error) return base;
     return {
       ...base,
-      data: (base.data || []).map((p) => ({
-        ...p,
-        id_descuento_mes: 1,
-        id_descuento_cantidad: 2,
-        id_descuento_mes_detal: 1,
-        id_descuento_mes_mayor: 1,
-        id_descuento_cantidad_detal: 2,
-        id_descuento_cantidad_mayor: 2,
-        aplica_descuento_mes_detal: true,
-        aplica_descuento_mes_mayor: true,
-        aplica_descuento_cantidad_detal: true,
-        aplica_descuento_cantidad_mayor: true,
-      })),
+      data: (base.data || []).map(normalizePlataformaRow),
     };
   };
 
@@ -278,6 +239,75 @@ export async function updateHomeBanner(idBanner, payload = {}) {
   }
 }
 
+export async function createUsuarioSignupLink(idUsuarioTarget) {
+  await ensureServerSession();
+  try {
+    const id_usuario = requireSession();
+    const target = Number(idUsuarioTarget);
+    if (!Number.isFinite(target) || target <= 0) {
+      return { error: "id_usuario inválido" };
+    }
+
+    const res = await fetch(
+      `${API_BASE}/api/usuarios/${encodeURIComponent(target)}/signup-link`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id_usuario }),
+      },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo generar el link de registro." };
+    }
+    return data;
+  } catch (err) {
+    console.error("createUsuarioSignupLink error", err);
+    return { error: err.message };
+  }
+}
+
+export async function validateSignupRegistrationToken(token) {
+  try {
+    const value = String(token || "").trim();
+    if (!value) return { error: "Token requerido." };
+    const res = await fetch(
+      `${API_BASE}/api/signup-link/validate?token=${encodeURIComponent(value)}`,
+      {
+        credentials: "include",
+      },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo validar el token." };
+    }
+    return data;
+  } catch (err) {
+    console.error("validateSignupRegistrationToken error", err);
+    return { error: err.message };
+  }
+}
+
+export async function completeSignupWithRegistrationToken(payload = {}) {
+  try {
+    const res = await fetch(`${API_BASE}/api/signup-link/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo completar el registro con token." };
+    }
+    return data;
+  } catch (err) {
+    console.error("completeSignupWithRegistrationToken error", err);
+    return { error: err.message };
+  }
+}
+
 // Enviar delta de cantidad (+ agrega / - resta). Si la cantidad resultante es <= 0 se borra el item, y si no quedan items se elimina el carrito.
 export async function sendCartDelta(idPrecio, delta, meses, extra = {}) {
   await ensureServerSession();
@@ -324,7 +354,6 @@ export async function fetchCart() {
     const id = requireSession();
     const url = `${API_BASE}/api/cart?id_usuario=${encodeURIComponent(id)}`;
     const startedAt = Date.now();
-    console.log("[fetchCart] request", { url, apiBase: API_BASE, id_usuario: id });
     let res = null;
     let data = null;
     let lastErrText = "";
@@ -335,13 +364,6 @@ export async function fetchCart() {
         credentials: "include",
       });
       const elapsedMs = Date.now() - startedAt;
-      console.log("[fetchCart] response", {
-        attempt,
-        status: res.status,
-        ok: res.ok,
-        elapsedMs,
-        contentType: res.headers.get("content-type"),
-      });
 
       if (res.ok) {
         data = await res.json();
@@ -366,10 +388,6 @@ export async function fetchCart() {
       return { items: [] };
     }
 
-    console.log("[fetchCart] parsed", {
-      hasCarrito: Boolean(data?.carrito),
-      items: Array.isArray(data?.items) ? data.items.length : 0,
-    });
     return data;
   } catch (err) {
     console.error("No se pudo obtener el carrito:", err, {
@@ -773,13 +791,26 @@ export async function updateTestingFlag(value) {
   }
 }
 
-export async function startSession(idUsuario) {
+export async function startSession(_idUsuario) {
   try {
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr) {
+      console.error("startSession getSession error", sessionErr);
+      return { error: "No se pudo leer la sesión de auth" };
+    }
+    const accessToken = String(sessionData?.session?.access_token || "").trim();
+    if (!accessToken) {
+      return { error: "Sesión de auth no disponible" };
+    }
+
     const res = await fetch(`${API_BASE}/api/session`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
       credentials: "include",
-      body: JSON.stringify({ id_usuario: idUsuario }),
+      body: "{}",
     });
     if (!res.ok) {
       const text = await res.text();
@@ -808,7 +839,11 @@ export async function clearServerSession() {
 
 export async function ensureServerSession() {
   const id = requireSession();
-  await startSession(id);
+  const result = await startSession(id);
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+  return result;
 }
 
 export async function loadCurrentUser() {

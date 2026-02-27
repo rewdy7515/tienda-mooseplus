@@ -160,7 +160,7 @@ async function handleLogin(event) {
     // 2) Buscar usuario en tabla usuarios por correo (para id_usuario)
     const { data: user, error } = await supabase
       .from("usuarios")
-      .select("id_usuario, clave, acceso_cliente, permiso_admin, permiso_superadmin")
+      .select("id_usuario, acceso_cliente, permiso_admin, permiso_superadmin")
       .ilike("correo", email)
       .maybeSingle();
 
@@ -176,14 +176,20 @@ async function handleLogin(event) {
       return;
     }
 
-    // 3) Setear sesión local con id_usuario de la tabla
+    // 3) Establecer cookie de sesión backend con token real de Supabase Auth
+    const serverSession = await startSession(user.id_usuario);
+    if (serverSession?.error) {
+      setStatus("No se pudo establecer la sesión segura. Intenta de nuevo.", true);
+      return;
+    }
+
+    // 4) Setear sesión local con id_usuario de la tabla
     setSessionUserId(user.id_usuario);
     setSessionRoles({
       acceso_cliente: user.acceso_cliente,
       permiso_admin: user.permiso_admin,
       permiso_superadmin: user.permiso_superadmin,
     });
-    await startSession(user.id_usuario);
 
     try {
       const cartData = await fetchCart();

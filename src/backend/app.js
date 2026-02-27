@@ -15,9 +15,37 @@ const {
 } = require("../frontend/scripts/notification-templates-core");
 
 const app = express();
+const ALLOWED_CORS_ORIGINS = (() => {
+  const defaults = [
+    "https://mooseplus.com",
+    "https://www.mooseplus.com",
+    "http://localhost:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5500",
+  ];
+  const fromEnv = String(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return Array.from(new Set([...defaults, ...fromEnv]));
+})();
+
+const isAllowedCorsOrigin = (origin = "") => {
+  const value = String(origin || "").trim();
+  if (!value) return false;
+  if (ALLOWED_CORS_ORIGINS.includes(value)) return true;
+  return /^https:\/\/([a-z0-9-]+\.)*mooseplus\.com$/i.test(value);
+};
+
 app.use(
   cors({
-    origin: true,
+    origin: (origin, callback) => {
+      if (!origin || isAllowedCorsOrigin(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   })
 );
@@ -1191,7 +1219,25 @@ app.get("/", async (req, res) => {
 });
 
 const AUTH_REQUIRED = "AUTH_REQUIRED";
+const ADMIN_REQUIRED = "ADMIN_REQUIRED";
+const SESSION_COOKIE_NAME = "session_user_id";
+const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
+  path: "/",
+};
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
+const SIGNUP_TOKEN_TTL_SEC = Math.max(
+  300,
+  Number(process.env.SIGNUP_TOKEN_TTL_SEC) || 24 * 60 * 60,
+);
+const SIGNUP_TOKEN_SECRET = String(
+  process.env.SIGNUP_TOKEN_SECRET ||
+    process.env.REGISTRATION_LINK_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    "",
+).trim();
 
 const todayInVenezuela = () => {
   // Retorna fecha actual en huso horario de Venezuela (America/Caracas) en formato YYYY-MM-DD
@@ -1230,6 +1276,111 @@ const toPositiveInt = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.trunc(parsed);
+};
+
+const encodeBase64Url = (input) =>
+  Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+const decodeBase64Url = (input) => {
+  const normalized = String(input || "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const padding = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+  return Buffer.from(`${normalized}${padding}`, "base64");
+};
+
+const tokenError = (code, message) => {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+};
+
+const getSignupTokenSecret = () => {
+  if (!SIGNUP_TOKEN_SECRET) {
+    throw tokenError(
+      "SIGNUP_TOKEN_SECRET_MISSING",
+      "SIGNUP_TOKEN_SECRET no está configurado en el backend.",
+    );
+  }
+  return SIGNUP_TOKEN_SECRET;
+};
+
+const signSignupTokenPayload = (payloadPart) => {
+  const secret = getSignupTokenSecret();
+  const digest = crypto.createHmac("sha256", secret).update(payloadPart).digest();
+  return encodeBase64Url(digest);
+};
+
+const buildSignupRegistrationToken = (idUsuario) => {
+  const uid = toPositiveInt(idUsuario);
+  if (!uid) throw tokenError("INVALID_UID", "id_usuario inválido.");
+  const nowSec = Math.floor(Date.now() / 1000);
+  const payload = {
+    v: 1,
+    uid,
+    iat: nowSec,
+    exp: nowSec + SIGNUP_TOKEN_TTL_SEC,
+    nonce: crypto.randomBytes(16).toString("hex"),
+  };
+  const payloadPart = encodeBase64Url(JSON.stringify(payload));
+  const signaturePart = signSignupTokenPayload(payloadPart);
+  return `${payloadPart}.${signaturePart}`;
+};
+
+const verifySignupRegistrationToken = (tokenValue) => {
+  const token = String(tokenValue || "").trim();
+  if (!token) throw tokenError("TOKEN_REQUIRED", "Token requerido.");
+  const parts = token.split(".");
+  if (parts.length !== 2) throw tokenError("TOKEN_INVALID", "Token inválido.");
+  const [payloadPart, signaturePart] = parts;
+  if (!payloadPart || !signaturePart) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  const expectedSig = signSignupTokenPayload(payloadPart);
+  const receivedSigBuffer = Buffer.from(signaturePart, "utf8");
+  const expectedSigBuffer = Buffer.from(expectedSig, "utf8");
+  if (
+    receivedSigBuffer.length !== expectedSigBuffer.length ||
+    !crypto.timingSafeEqual(receivedSigBuffer, expectedSigBuffer)
+  ) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(decodeBase64Url(payloadPart).toString("utf8"));
+  } catch (_err) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  const uid = toPositiveInt(payload?.uid);
+  const exp = Number(payload?.exp);
+  const iat = Number(payload?.iat);
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  if (!uid || !Number.isFinite(exp) || !Number.isFinite(iat)) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  if (iat > nowSec + 300) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  if (exp <= nowSec) {
+    throw tokenError("TOKEN_EXPIRED", "El link de registro ya venció.");
+  }
+
+  return { uid, exp, iat };
+};
+
+const signupTokenErrorStatus = (code) => {
+  if (code === "TOKEN_EXPIRED") return 410;
+  if (code === "TOKEN_INVALID" || code === "TOKEN_REQUIRED") return 400;
+  if (code === "SIGNUP_TOKEN_SECRET_MISSING") return 500;
+  return 500;
 };
 
 const buildReemplazosBlocklist = (rows) => {
@@ -1397,6 +1548,9 @@ const processOrderFromItems = async ({
   const referenciaNum = Number.isFinite(Number(referencia)) ? Number(referencia) : null;
   const archivosArr = Array.isArray(archivos) ? archivos : [];
   const comprobanteHist = archivosArr?.[0] || null;
+  const isCuentaCompletaByFlags = (cuentaRow) =>
+    !!cuentaRow && !isTrue(cuentaRow?.venta_perfil) && !isTrue(cuentaRow?.venta_miembro);
+  const cuentaFlagsById = {};
 
   // Renovaciones (no asignan stock nuevo)
   const renovaciones = (items || []).filter((it) => it.renovacion === true && it.id_venta);
@@ -1405,7 +1559,9 @@ const processOrderFromItems = async ({
   if (idsVentasRenovar.length) {
     const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta, fecha_corte, id_cuenta, id_usuario")
+      .select(
+        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, cuenta_principal:cuentas!ventas_id_cuenta_fkey(venta_perfil, venta_miembro), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(venta_perfil, venta_miembro)"
+      )
       .in("id_venta", idsVentasRenovar);
     if (ventErr) throw ventErr;
     (ventasExistentes || []).forEach((v) => {
@@ -1419,17 +1575,26 @@ const processOrderFromItems = async ({
     const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
     const base = pickPrecio(price) * cantidadVal * mesesVal;
     const monto = Number(base.toFixed(2));
-    const fechaBaseSrc = ventaMap[it.id_venta]?.fecha_corte || isoHoy;
+    const ventaAnt = ventaMap[it.id_venta] || {};
+    const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
+    const isCuentaCompletaRenov =
+      isCuentaCompletaByFlags(cuentaVenta) ||
+      (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
+    const fechaBaseSrc = ventaAnt?.fecha_corte || isoHoy;
     const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
+    const updatePayload = {
+      fecha_pago: isoHoy,
+      fecha_corte,
+      monto,
+      id_orden: ordenId,
+      renovacion: true,
+    };
+    if (isCuentaCompletaRenov) {
+      updatePayload.cuenta_pagada_admin = false;
+    }
     return supabaseAdmin
       .from("ventas")
-      .update({
-        fecha_pago: isoHoy,
-        fecha_corte,
-        monto,
-        id_orden: ordenId,
-        renovacion: true,
-      })
+      .update(updatePayload)
       .eq("id_venta", it.id_venta);
   });
   if (renovPromises.length) {
@@ -1794,13 +1959,16 @@ const processOrderFromItems = async ({
   if (assignedCuentaIds.length) {
     const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
       .from("cuentas")
-      .select("id_cuenta, id_plataforma, inactiva")
+      .select("id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro")
       .in("id_cuenta", assignedCuentaIds);
     if (ctaValErr) throw ctaValErr;
     const bad = (cuentasAsignadas || []).find((c) => isInactive(c.inactiva));
     if (bad) {
       throw new Error("Se intentó asignar una cuenta inactiva.");
     }
+    (cuentasAsignadas || []).forEach((c) => {
+      cuentaFlagsById[c.id_cuenta] = c;
+    });
     const cuentaPlatMap = (cuentasAsignadas || []).reduce((acc, c) => {
       acc[c.id_cuenta] = c.id_plataforma;
       return acc;
@@ -1846,6 +2014,11 @@ const processOrderFromItems = async ({
       platInfo.correo_cliente === "true" ||
       platInfo.correo_cliente === 1 ||
       platInfo.correo_cliente === "1";
+    const cuentaId = toPositiveInt(a.id_cuenta);
+    const cuentaFlags = cuentaId ? cuentaFlagsById[cuentaId] || null : null;
+    const isCuentaCompletaVenta = cuentaFlags
+      ? isCuentaCompletaByFlags(cuentaFlags)
+      : isCompleta && !isTrue(priceInfo.sub_cuenta);
     return {
       id_usuario: idUsuarioVentas,
       id_precio: a.id_precio,
@@ -1860,6 +2033,7 @@ const processOrderFromItems = async ({
       fecha_pago: isoHoy,
       renovacion: false,
       completa: isCompleta && isCorreoCliente ? true : null,
+      cuenta_pagada_admin: isCuentaCompletaVenta ? false : null,
     };
   });
   console.log("[checkout] asignaciones", asignaciones);
@@ -1988,7 +2162,7 @@ const processOrderFromItems = async ({
   return { ventasCount: ventasToInsert.length, pendientesCount: pendientes.length };
 };
 
-// Usa el id de usuario autenticado que envíe el cliente.
+// Usa solo el id de usuario autenticado en cookie httpOnly.
 const parseSessionUserId = (req) => {
   const raw = req?.headers?.cookie || "";
   const parts = raw.split(";").map((c) => c.trim().split("="));
@@ -1996,20 +2170,114 @@ const parseSessionUserId = (req) => {
     if (k) acc[k] = decodeURIComponent(v || "");
     return acc;
   }, {});
-  const id = Number(cookieMap.session_user_id);
+  const id = Number(cookieMap[SESSION_COOKIE_NAME]);
   return !Number.isNaN(id) && id > 0 ? id : null;
 };
 
-const getOrCreateUsuario = async (req) => {
-  const fromSession = parseSessionUserId(req);
-  if (fromSession) return fromSession;
-  const incomingId = Number(req?.body?.id_usuario || req?.query?.id_usuario);
-  if (!Number.isNaN(incomingId) && incomingId > 0) {
-    return incomingId;
+const getBearerTokenFromRequest = (req) => {
+  const authHeader = String(req.get("authorization") || "").trim();
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
+};
+
+const resolveUsuarioFromAuthToken = async (token) => {
+  const accessToken = String(token || "").trim();
+  if (!accessToken) {
+    const err = new Error(AUTH_REQUIRED);
+    err.code = AUTH_REQUIRED;
+    throw err;
   }
-  const err = new Error(AUTH_REQUIRED);
-  err.code = AUTH_REQUIRED;
-  throw err;
+
+  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(accessToken);
+  if (authErr || !authData?.user) {
+    const err = new Error(AUTH_REQUIRED);
+    err.code = AUTH_REQUIRED;
+    throw err;
+  }
+
+  const authEmail = String(authData.user.email || "")
+    .trim()
+    .toLowerCase();
+  const authUserId = String(authData.user.id || "").trim();
+  if (!authUserId) {
+    const err = new Error(AUTH_REQUIRED);
+    err.code = AUTH_REQUIRED;
+    throw err;
+  }
+  if (!authEmail) {
+    const err = new Error(AUTH_REQUIRED);
+    err.code = AUTH_REQUIRED;
+    throw err;
+  }
+
+  const { data: byAuthRows, error: byAuthErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("id_usuario")
+    .eq("id_auth", authUserId)
+    .limit(2);
+  if (byAuthErr) throw byAuthErr;
+  if (Array.isArray(byAuthRows) && byAuthRows.length > 1) {
+    const err = new Error("USER_AUTH_DUPLICATED");
+    err.code = "USER_AUTH_DUPLICATED";
+    throw err;
+  }
+  if (Array.isArray(byAuthRows) && byAuthRows.length === 1) {
+    const idUsuarioByAuth = Number(byAuthRows[0]?.id_usuario);
+    if (Number.isFinite(idUsuarioByAuth) && idUsuarioByAuth > 0) {
+      return idUsuarioByAuth;
+    }
+  }
+
+  const { data: rows, error: rowsErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("id_usuario, correo, id_auth")
+    .ilike("correo", authEmail)
+    .limit(2);
+  if (rowsErr) throw rowsErr;
+
+  if (!Array.isArray(rows) || !rows.length) {
+    const err = new Error("USER_NOT_LINKED");
+    err.code = "USER_NOT_LINKED";
+    throw err;
+  }
+  if (rows.length > 1) {
+    const err = new Error("USER_EMAIL_DUPLICATED");
+    err.code = "USER_EMAIL_DUPLICATED";
+    throw err;
+  }
+
+  const idUsuario = Number(rows[0]?.id_usuario);
+  const idAuthGuard = String(rows[0]?.id_auth || "").trim();
+  if (idAuthGuard && idAuthGuard !== authUserId) {
+    const err = new Error("USER_NOT_LINKED");
+    err.code = "USER_NOT_LINKED";
+    throw err;
+  }
+  if (!Number.isFinite(idUsuario) || idUsuario <= 0) {
+    const err = new Error(AUTH_REQUIRED);
+    err.code = AUTH_REQUIRED;
+    throw err;
+  }
+  if (!idAuthGuard) {
+    const { error: linkErr } = await supabaseAdmin
+      .from("usuarios")
+      .update({ id_auth: authUserId })
+      .eq("id_usuario", idUsuario)
+      .is("id_auth", null);
+    if (linkErr) {
+      if (String(linkErr.code || "") === "23505") {
+        const err = new Error("USER_AUTH_DUPLICATED");
+        err.code = "USER_AUTH_DUPLICATED";
+        throw err;
+      }
+      throw linkErr;
+    }
+  }
+  return idUsuario;
+};
+
+const getOrCreateUsuario = async (req) => {
+  return getSessionUsuario(req);
 };
 
 const getSessionUsuario = async (req) => {
@@ -2032,8 +2300,8 @@ const requireAdminSession = async (req) => {
   if (permErr) throw permErr;
   const isAdmin = isTrue(permRow?.permiso_admin) || isTrue(permRow?.permiso_superadmin);
   if (!isAdmin) {
-    const err = new Error("ADMIN_REQUIRED");
-    err.code = "ADMIN_REQUIRED";
+    const err = new Error(ADMIN_REQUIRED);
+    err.code = ADMIN_REQUIRED;
     throw err;
   }
   return idUsuario;
@@ -2162,8 +2430,7 @@ app.post("/api/cart/item", async (req, res) => {
   }
 
   try {
-    const bodyUserId = req.body?.id_usuario || null;
-    const idUsuario = (await getOrCreateUsuario(req)) || bodyUserId;
+    const idUsuario = await getOrCreateUsuario(req);
     if (!idUsuario) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
@@ -3164,22 +3431,208 @@ app.put("/api/home-banners/:id_banner", jsonParser, async (req, res) => {
   }
 });
 
-// Sesión: setea cookie httpOnly con el id de usuario
-app.post("/api/session", async (req, res) => {
-  const { id_usuario } = req.body || {};
-  const parsed = Number(id_usuario);
-  if (!parsed || Number.isNaN(parsed)) {
-    return res.status(400).json({ error: "id_usuario es requerido" });
+// Genera link de registro firmado para un usuario existente (solo admin/superadmin)
+app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const idUsuarioTarget = toPositiveInt(req.params?.id_usuario);
+    if (!idUsuarioTarget) {
+      return res.status(400).json({ error: "id_usuario inválido." });
+    }
+
+    const { data: targetRow, error: targetErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, fecha_registro")
+      .eq("id_usuario", idUsuarioTarget)
+      .maybeSingle();
+    if (targetErr) throw targetErr;
+    if (!targetRow) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+    if (targetRow?.fecha_registro) {
+      return res.status(409).json({ error: "El usuario ya está registrado." });
+    }
+
+    const token = buildSignupRegistrationToken(idUsuarioTarget);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expiresAtIso = new Date((nowSec + SIGNUP_TOKEN_TTL_SEC) * 1000).toISOString();
+    const originHeader = String(req.get("origin") || "").trim().replace(/\/+$/g, "");
+    const baseUrl =
+      /^https?:\/\/[^/]+$/i.test(originHeader) && originHeader
+        ? originHeader
+        : `${req.protocol}://${req.get("host")}`;
+    const signupUrl = new URL("/src/frontend/pages/signup.html", baseUrl);
+    signupUrl.searchParams.set("registro_token", token);
+
+    return res.json({
+      ok: true,
+      url: signupUrl.toString(),
+      expires_at: expiresAtIso,
+      expires_in_sec: SIGNUP_TOKEN_TTL_SEC,
+    });
+  } catch (err) {
+    console.error("[usuarios/signup-link] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "ADMIN_REQUIRED") {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    if (err?.code === "SIGNUP_TOKEN_SECRET_MISSING") {
+      return res
+        .status(500)
+        .json({ error: "Token de registro no configurado en el backend." });
+    }
+    return res.status(500).json({ error: err?.message || "No se pudo generar el link de registro." });
   }
-  res.cookie("session_user_id", parsed, {
-    httpOnly: true,
-    sameSite: "lax",
-  });
-  res.json({ ok: true });
+});
+
+// Valida token de link de registro y devuelve el usuario objetivo
+app.get("/api/signup-link/validate", async (req, res) => {
+  try {
+    const token = String(req.query?.token || "").trim();
+    const payload = verifySignupRegistrationToken(token);
+    const { data: targetRow, error: targetErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, nombre, apellido, correo, fecha_registro")
+      .eq("id_usuario", payload.uid)
+      .maybeSingle();
+    if (targetErr) throw targetErr;
+    if (!targetRow) {
+      return res.status(404).json({ error: "Usuario del link no encontrado." });
+    }
+    if (targetRow?.fecha_registro) {
+      return res.status(409).json({ error: "El usuario del link ya está registrado." });
+    }
+
+    return res.json({
+      ok: true,
+      id_usuario: targetRow.id_usuario,
+      usuario: {
+        nombre: String(targetRow?.nombre || "").trim(),
+        apellido: String(targetRow?.apellido || "").trim(),
+        correo: String(targetRow?.correo || "").trim().toLowerCase(),
+      },
+      expires_at: new Date(payload.exp * 1000).toISOString(),
+    });
+  } catch (err) {
+    if (
+      err?.code === "TOKEN_INVALID" ||
+      err?.code === "TOKEN_REQUIRED" ||
+      err?.code === "TOKEN_EXPIRED" ||
+      err?.code === "SIGNUP_TOKEN_SECRET_MISSING"
+    ) {
+      return res.status(signupTokenErrorStatus(err.code)).json({ error: err.message });
+    }
+    console.error("[signup-link/validate] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudo validar el token." });
+  }
+});
+
+// Completa registro usando token firmado: siempre vincula al id_usuario del token
+app.post("/api/signup-link/complete", async (req, res) => {
+  try {
+    const token = String(req.body?.token || "").trim();
+    const payload = verifySignupRegistrationToken(token);
+
+    const nombre = String(req.body?.nombre || "").trim();
+    const apellido = String(req.body?.apellido || "").trim();
+    const telefono = String(req.body?.telefono || "").trim();
+    const correo = String(req.body?.correo || "")
+      .trim()
+      .toLowerCase();
+
+    if (!nombre || !apellido || !telefono || !correo) {
+      return res
+        .status(400)
+        .json({ error: "nombre, apellido, telefono y correo son requeridos." });
+    }
+
+    const { data: targetRow, error: targetErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, fecha_registro")
+      .eq("id_usuario", payload.uid)
+      .maybeSingle();
+    if (targetErr) throw targetErr;
+    if (!targetRow) {
+      return res.status(404).json({ error: "Usuario del link no encontrado." });
+    }
+    if (targetRow?.fecha_registro) {
+      return res.status(409).json({ error: "El usuario del link ya está registrado." });
+    }
+
+    const { data: correoUso, error: correoErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario")
+      .ilike("correo", correo)
+      .neq("id_usuario", payload.uid)
+      .limit(1);
+    if (correoErr) throw correoErr;
+    if (Array.isArray(correoUso) && correoUso.length) {
+      return res.status(409).json({ error: "Ese correo ya está asociado a otro usuario." });
+    }
+
+    const { data: updated, error: updErr } = await supabaseAdmin
+      .from("usuarios")
+      .update({
+        nombre,
+        apellido,
+        telefono,
+        correo,
+        fecha_registro: todayInVenezuela(),
+      })
+      .eq("id_usuario", payload.uid)
+      .select("id_usuario")
+      .maybeSingle();
+    if (updErr) throw updErr;
+    if (!updated?.id_usuario) {
+      return res.status(500).json({ error: "No se pudo completar el registro." });
+    }
+
+    return res.json({ ok: true, id_usuario: updated.id_usuario });
+  } catch (err) {
+    if (
+      err?.code === "TOKEN_INVALID" ||
+      err?.code === "TOKEN_REQUIRED" ||
+      err?.code === "TOKEN_EXPIRED" ||
+      err?.code === "SIGNUP_TOKEN_SECRET_MISSING"
+    ) {
+      return res.status(signupTokenErrorStatus(err.code)).json({ error: err.message });
+    }
+    console.error("[signup-link/complete] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudo completar el registro." });
+  }
+});
+
+// Sesión: setea cookie httpOnly con el id de usuario autenticado en Supabase Auth.
+app.post("/api/session", async (req, res) => {
+  try {
+    const token = getBearerTokenFromRequest(req);
+    const idUsuario = await resolveUsuarioFromAuthToken(token);
+    res.cookie(SESSION_COOKIE_NAME, idUsuario, SESSION_COOKIE_OPTIONS);
+    return res.json({ ok: true, id_usuario: idUsuario });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "USER_NOT_LINKED") {
+      return res.status(403).json({ error: "Usuario de auth no vinculado en usuarios." });
+    }
+    if (err?.code === "USER_EMAIL_DUPLICATED") {
+      return res.status(409).json({ error: "Correo duplicado en usuarios. Contacta soporte." });
+    }
+    if (err?.code === "USER_AUTH_DUPLICATED") {
+      return res
+        .status(409)
+        .json({ error: "La cuenta auth está vinculada a más de un usuario. Contacta soporte." });
+    }
+    console.error("[session] error", err);
+    return res.status(500).json({ error: "No se pudo establecer la sesión." });
+  }
 });
 
 app.delete("/api/session", (_req, res) => {
-  res.clearCookie("session_user_id", { httpOnly: true, sameSite: "lax" });
+  res.clearCookie(SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS);
   res.json({ ok: true });
 });
 
@@ -3502,8 +3955,7 @@ app.post("/api/admin/import-cuentas", async (req, res) => {
   };
 
   try {
-    const idUsuario = await getOrCreateUsuario(req);
-    if (!idUsuario) throw new Error("Usuario no autenticado");
+    await requireAdminSession(req);
 
     const normalized = rows
       .map((r) => {
@@ -3584,6 +4036,9 @@ app.post("/api/admin/import-cuentas", async (req, res) => {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -3599,7 +4054,7 @@ app.post("/api/admin/import-clientes", async (req, res) => {
     v === true || v === "true" || v === "1" || v === 1 || v === "t" || v === "on";
 
   try {
-    const idUsuario = Number(req.body?.id_usuario) || null;
+    await requireAdminSession(req);
 
     const makeNameKey = (nombre, apellido) =>
       `${(nombre || "").trim().toLowerCase()}|${(apellido || "").trim().toLowerCase()}`;
@@ -3783,6 +4238,12 @@ app.post("/api/admin/import-clientes", async (req, res) => {
     });
   } catch (err) {
     console.error("[admin:import-clientes] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -3794,6 +4255,7 @@ app.post("/api/admin/import-fechas", async (req, res) => {
     return res.status(400).json({ error: "rows es requerido" });
   }
   try {
+    await requireAdminSession(req);
     const normalized = rows
       .map((r) => {
         const rawVenta = (r.id_venta || "").toString().replace(/#/g, "").trim();
@@ -3824,6 +4286,12 @@ app.post("/api/admin/import-fechas", async (req, res) => {
     res.json({ ok: true, actualizadas: normalized.length });
   } catch (err) {
     console.error("[admin:import-fechas] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -3839,8 +4307,7 @@ app.post("/api/admin/import-pines", async (req, res) => {
     v === true || v === "true" || v === "1" || v === 1 || v === "t" || v === "on";
 
   try {
-    const idUsuario = await getOrCreateUsuario(req);
-    if (!idUsuario) throw new Error("Usuario no autenticado");
+    await requireAdminSession(req);
 
     const normalized = rows
       .map((r) => ({
@@ -3911,6 +4378,9 @@ app.post("/api/admin/import-pines", async (req, res) => {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -3974,8 +4444,7 @@ app.post("/api/admin/import-contactos", async (req, res) => {
     normalizeFullName(`${(nombre || "").trim()} ${(apellido || "").trim()}`.trim());
 
   try {
-    const idUsuario = await getOrCreateUsuario(req);
-    if (!idUsuario) throw new Error("Usuario no autenticado");
+    await requireAdminSession(req);
 
     const normalized = rows
       .map((r) => {
@@ -4109,6 +4578,9 @@ app.post("/api/admin/import-contactos", async (req, res) => {
     console.error("[admin:import-contactos] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
     }
     res.status(500).json({ error: err.message });
   }

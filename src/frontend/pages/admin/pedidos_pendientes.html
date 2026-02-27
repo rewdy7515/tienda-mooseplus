@@ -145,6 +145,19 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .pp-platform-title {
+        display: inline-block;
+        margin: 0;
+        font-size: clamp(1.9rem, 4vw, 2.6rem);
+        line-height: 1.08;
+        font-weight: 900;
+      }
+      .pp-platform-title.is-link {
+        text-decoration: none;
+      }
+      .pp-platform-title.is-link:hover {
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
@@ -241,6 +254,20 @@
       };
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const hasPerfilId = (val) => Number.isFinite(Number(val)) && Number(val) > 0;
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      const toExternalHref = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        if (/^https?:\/\//i.test(raw)) return raw;
+        if (/^[a-z]+:\/\//i.test(raw)) return "";
+        return `https://${raw}`;
+      };
       const toPositiveId = (value) => {
         const parsed = Number(value);
         if (!Number.isFinite(parsed) || parsed <= 0) return null;
@@ -430,6 +457,9 @@
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
             const showTipo = String(payload.id_plataforma || "") === "9";
+            const platformHref = toExternalHref(payload.link_pagina);
+            const platformName = escapeHtml(payload.nombre || "Plataforma");
+            const platformTitleStyle = payload.color_1 ? ` style="color:${payload.color_1};"` : "";
             const groups = Object.values(payload.groups || {});
             const tablesHtml = groups
               .map((group) => {
@@ -543,7 +573,13 @@
               .join("");
             return `
               <div class="proximas-bloque"${headerStyle}>
-                <h3 class="proximas-title">${payload.nombre}</h3>
+                <h3 class="proximas-title">
+                  ${
+                    platformHref
+                      ? `<a class="pp-platform-title is-link" href="${escapeHtml(platformHref)}"${platformTitleStyle}>${platformName}</a>`
+                      : `<span class="pp-platform-title"${platformTitleStyle}>${platformName}</span>`
+                  }
+                </h3>
                 ${tablesHtml}
               </div>
             `;
@@ -663,7 +699,9 @@
           if (platIds.length) {
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
-              .select("id_plataforma, nombre, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines")
+              .select(
+                "id_plataforma, nombre, color_1, link_pagina, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines",
+              )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
             platMap = (plats || []).reduce((acc, p) => {
@@ -713,6 +751,7 @@
                   platInfo.usa_pines === "1",
                 groups: {},
                 color_1: platInfo.color_1 || null,
+                link_pagina: platInfo.link_pagina || "",
               };
             const motherId = isCompleta ? "sin-madre" : v.id_cuenta || "sin-madre";
             if (!grouped[platId].groups[motherId]) {
