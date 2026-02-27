@@ -3129,6 +3129,8 @@ input[type="number"].input-inline {
   display: block;
   object-fit: cover;
   image-rendering: auto;
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 
 .home-banners-dots {

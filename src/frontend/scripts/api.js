@@ -100,18 +100,63 @@ const isTransientCartBackendError = (status, bodyText = "") => {
 export async function loadCatalog() {
   const fetchPlataformasCatalog = async () => {
     const fullSelect =
-      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+    const idsAndGroupsSelect =
+      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor";
+    const idsSelect =
+      "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos, id_descuento_mes, id_descuento_cantidad";
     const baseSelect =
       "id_plataforma, id_categoria, nombre, imagen, banner, posicion, por_pantalla, por_acceso, tarjeta_de_regalo, entrega_inmediata, descuento_meses, mostrar_stock, no_disponible, num_max_dispositivos";
     const full = await supabase.from("plataformas").select(fullSelect).order("nombre");
     if (!full.error) return full;
     const msg = String(full.error?.message || "");
     if (
-      !/id_descuento_mes|id_descuento_cantidad|aplica_descuento_mes_detal|aplica_descuento_mes_mayor|aplica_descuento_cantidad_detal|aplica_descuento_cantidad_mayor/i.test(
+      !/id_descuento_mes|id_descuento_cantidad|id_descuento_mes_detal|id_descuento_mes_mayor|id_descuento_cantidad_detal|id_descuento_cantidad_mayor|aplica_descuento_mes_detal|aplica_descuento_mes_mayor|aplica_descuento_cantidad_detal|aplica_descuento_cantidad_mayor/i.test(
         msg
       )
     ) {
       return full;
+    }
+    const noChecks = await supabase
+      .from("plataformas")
+      .select(idsAndGroupsSelect)
+      .order("nombre");
+    if (!noChecks.error) {
+      return {
+        ...noChecks,
+        data: (noChecks.data || []).map((p) => ({
+          ...p,
+          id_descuento_mes_detal: p.id_descuento_mes_detal ?? p.id_descuento_mes ?? 1,
+          id_descuento_mes_mayor: p.id_descuento_mes_mayor ?? p.id_descuento_mes ?? 1,
+          id_descuento_cantidad_detal:
+            p.id_descuento_cantidad_detal ?? p.id_descuento_cantidad ?? 2,
+          id_descuento_cantidad_mayor:
+            p.id_descuento_cantidad_mayor ?? p.id_descuento_cantidad ?? 2,
+          aplica_descuento_mes_detal: true,
+          aplica_descuento_mes_mayor: true,
+          aplica_descuento_cantidad_detal: true,
+          aplica_descuento_cantidad_mayor: true,
+        })),
+      };
+    }
+    const noGroups = await supabase.from("plataformas").select(idsSelect).order("nombre");
+    if (!noGroups.error) {
+      return {
+        ...noGroups,
+        data: (noGroups.data || []).map((p) => ({
+          ...p,
+          id_descuento_mes: p.id_descuento_mes ?? 1,
+          id_descuento_cantidad: p.id_descuento_cantidad ?? 2,
+          id_descuento_mes_detal: p.id_descuento_mes ?? 1,
+          id_descuento_mes_mayor: p.id_descuento_mes ?? 1,
+          id_descuento_cantidad_detal: p.id_descuento_cantidad ?? 2,
+          id_descuento_cantidad_mayor: p.id_descuento_cantidad ?? 2,
+          aplica_descuento_mes_detal: true,
+          aplica_descuento_mes_mayor: true,
+          aplica_descuento_cantidad_detal: true,
+          aplica_descuento_cantidad_mayor: true,
+        })),
+      };
     }
     const base = await supabase.from("plataformas").select(baseSelect).order("nombre");
     if (base.error) return base;
@@ -121,6 +166,10 @@ export async function loadCatalog() {
         ...p,
         id_descuento_mes: 1,
         id_descuento_cantidad: 2,
+        id_descuento_mes_detal: 1,
+        id_descuento_mes_mayor: 1,
+        id_descuento_cantidad_detal: 2,
+        id_descuento_cantidad_mayor: 2,
         aplica_descuento_mes_detal: true,
         aplica_descuento_mes_mayor: true,
         aplica_descuento_cantidad_detal: true,

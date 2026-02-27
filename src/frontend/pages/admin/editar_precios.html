@@ -228,6 +228,43 @@
         background: #fff;
         font-size: 12px;
       }
+      .descuento-scope-label {
+        font-size: 10px;
+        font-weight: 700;
+        color: #6b7280;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+      .descuento-pair-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        width: 100%;
+      }
+      .descuento-pair-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .descuento-pair-check {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 6px;
+        font-size: 11px;
+        color: #6b7280;
+      }
+      .descuento-pair-check input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        accent-color: #16a34a;
+        cursor: pointer;
+      }
+      .descuento-pair-check input[type="checkbox"]:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
       .descuento-help {
         width: 26px;
         height: 26px;
@@ -352,6 +389,10 @@
       let descuentosFilas = [];
       let soporteColumnasDescuentoPlataforma = true;
       let soporteChecksDescuentoPlataforma = true;
+      let soporteColumnasDescuentoPorGrupo = true;
+      let soporteDescuentoFilaIds = true;
+      let soporteDescuentoFilaGrupo = true;
+      let soporteDescuentoFilaChecks = true;
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
@@ -412,8 +453,48 @@
               mayorField: "aplica_descuento_cantidad_mayor",
             };
 
+      const resolveDiscountGroupFields = (field = "") =>
+        field === "id_descuento_mes"
+          ? {
+              legacyField: "id_descuento_mes",
+              detalField: "id_descuento_mes_detal",
+              mayorField: "id_descuento_mes_mayor",
+            }
+          : {
+              legacyField: "id_descuento_cantidad",
+              detalField: "id_descuento_cantidad_detal",
+              mayorField: "id_descuento_cantidad_mayor",
+            };
+
+      const fallbackPosByDiscountField = (field = "") =>
+        /cantidad/i.test(String(field || "")) ? 2 : 1;
+
       const isExplicitFalse = (v) =>
         v === false || v === 0 || v === "0" || String(v || "").toLowerCase() === "false";
+
+      const isSet = (v) => v !== undefined && v !== null && v !== "";
+
+      const canPersistFieldPerRow = (field = "") => {
+        const f = String(field || "");
+        if (!f) return false;
+        if (/^aplica_descuento_/i.test(f)) return soporteDescuentoFilaChecks;
+        if (/^id_descuento_.*_(detal|mayor)$/i.test(f)) {
+          return soporteDescuentoFilaIds && soporteDescuentoFilaGrupo;
+        }
+        if (/^id_descuento_/i.test(f)) return soporteDescuentoFilaIds;
+        return false;
+      };
+
+      const canPersistFieldOnPlatform = (field = "") => {
+        const f = String(field || "");
+        if (!f) return false;
+        if (/^aplica_descuento_/i.test(f)) return soporteChecksDescuentoPlataforma;
+        if (/^id_descuento_.*_(detal|mayor)$/i.test(f)) {
+          return soporteColumnasDescuentoPlataforma && soporteColumnasDescuentoPorGrupo;
+        }
+        if (/^id_descuento_/i.test(f)) return soporteColumnasDescuentoPlataforma;
+        return false;
+      };
 
       const valorDescuento = (row, col) => {
         const raw = Number(row?.[col]);
@@ -492,18 +573,145 @@
 
       const renderDescuentoCell = (platMeta = {}, field, value) => {
         const idPlataforma = platMeta.id_plataforma;
-        const fallbackId = getDescuentoIdPorPos(field === "id_descuento_cantidad" ? 2 : 1);
+        const idPrecio = Number(platMeta.id_precio);
+        const isPlat9 = Number(idPlataforma) === 9;
+        const fallbackId = getDescuentoIdPorPos(fallbackPosByDiscountField(field));
         const selected = normalizarIdDescuento(value, fallbackId);
         const hasValidOptions = descuentoOpciones.some((o) => Number.isFinite(Number(o.id)));
-        const selectEnabled = soporteColumnasDescuentoPlataforma && hasValidOptions;
         const { detalField, mayorField } = resolveScopeFields(field);
+        const { detalField: detalIdField, mayorField: mayorIdField } = resolveDiscountGroupFields(field);
         const detalEnabled = !isExplicitFalse(platMeta?.[detalField]);
         const mayorEnabled = !isExplicitFalse(platMeta?.[mayorField]);
+        const resolvePersistMeta = (preferredField = "", fallbackField = preferredField) => {
+          const pref = String(preferredField || "");
+          const fallback = String(fallbackField || pref);
+          const canRowPref = Number.isFinite(idPrecio) && canPersistFieldPerRow(pref);
+          if (canRowPref) return { field: pref, target: "precios", supported: true };
+          const canPlatPref = canPersistFieldOnPlatform(pref);
+          if (canPlatPref) return { field: pref, target: "plataformas", supported: true };
+          const canRowFallback = Number.isFinite(idPrecio) && canPersistFieldPerRow(fallback);
+          if (canRowFallback) return { field: fallback, target: "precios", supported: true };
+          const canPlatFallback = canPersistFieldOnPlatform(fallback);
+          if (canPlatFallback) return { field: fallback, target: "plataformas", supported: true };
+          return { field: fallback, target: "plataformas", supported: false };
+        };
+        const selectPersistDefault = resolvePersistMeta(field, field);
+        const detalScopePersist = resolvePersistMeta(detalField, detalField);
+        const mayorScopePersist = resolvePersistMeta(mayorField, mayorField);
+        const selectEnabled = hasValidOptions && selectPersistDefault.supported;
         const title = !hasValidOptions
           ? "No hay IDs válidos en descuentos para guardar."
-          : soporteColumnasDescuentoPlataforma
-          ? "Selecciona la columna de descuentos"
-          : "Faltan columnas id_descuento_mes/id_descuento_cantidad en plataformas";
+          : selectPersistDefault.supported
+            ? "Selecciona la columna de descuentos"
+            : "Faltan columnas id_descuento_mes/id_descuento_cantidad en plataformas/precios";
+        const haySoporteGrupo =
+          (Number.isFinite(idPrecio) && soporteDescuentoFilaGrupo) || soporteColumnasDescuentoPorGrupo;
+        const titlePorGrupo = !haySoporteGrupo
+          ? "Faltan columnas id_descuento_*_detal/id_descuento_*_mayor en plataformas/precios."
+          : title;
+
+        if (isPlat9) {
+          const detalPersist = resolvePersistMeta(detalIdField, field);
+          const mayorPersist = resolvePersistMeta(mayorIdField, field);
+          const detalUsaGrupo = detalPersist.field === detalIdField;
+          const mayorUsaGrupo = mayorPersist.field === mayorIdField;
+          const detalleValue = normalizarIdDescuento(
+            detalUsaGrupo ? platMeta?.[detalIdField] : selected,
+            selected
+          );
+          const mayorValue = normalizarIdDescuento(
+            mayorUsaGrupo ? platMeta?.[mayorIdField] : selected,
+            selected
+          );
+          const detalSelectEnabled = hasValidOptions && detalPersist.supported;
+          const mayorSelectEnabled = hasValidOptions && mayorPersist.supported;
+          return `
+            <td class="precio-cell descuento-config">
+              <div class="descuento-cell-wrap">
+                <div class="descuento-inline">
+                  <div class="descuento-pair-grid">
+                    <label class="descuento-pair-item">
+                      <span class="descuento-scope-label">Detal</span>
+                      <select
+                        class="descuento-select"
+                        data-descuento-select="1"
+                        data-field="${detalPersist.field}"
+                        data-target="${detalPersist.target}"
+                        data-group="detal"
+                        data-plat="${idPlataforma}"
+                        data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
+                        data-prev="${detalleValue ?? ""}"
+                        title="${titlePorGrupo}"
+                        ${detalSelectEnabled ? "" : "disabled"}
+                      >
+                        ${descuentoOpciones
+                          .map(
+                            (opt) =>
+                              `<option value="${opt.id ?? ""}" ${detalleValue === opt.id ? "selected" : ""} ${
+                                Number.isFinite(Number(opt.id)) ? "" : "disabled"
+                              }>${opt.label}</option>`
+                          )
+                          .join("")}
+                      </select>
+                      <label class="descuento-pair-check">
+                        <input
+                          type="checkbox"
+                          data-descuento-scope="1"
+                          data-plat="${idPlataforma}"
+                          data-field="${detalField}"
+                          data-target="${detalScopePersist.target}"
+                          data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
+                          ${detalScopePersist.supported ? "" : "disabled"}
+                          ${detalEnabled ? "checked" : ""}
+                        />
+                        <span>Aplicar</span>
+                      </label>
+                    </label>
+                    <label class="descuento-pair-item">
+                      <span class="descuento-scope-label">Mayor</span>
+                      <select
+                        class="descuento-select"
+                        data-descuento-select="1"
+                        data-field="${mayorPersist.field}"
+                        data-target="${mayorPersist.target}"
+                        data-group="mayor"
+                        data-plat="${idPlataforma}"
+                        data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
+                        data-prev="${mayorValue ?? ""}"
+                        title="${titlePorGrupo}"
+                        ${mayorSelectEnabled ? "" : "disabled"}
+                      >
+                        ${descuentoOpciones
+                          .map(
+                            (opt) =>
+                              `<option value="${opt.id ?? ""}" ${mayorValue === opt.id ? "selected" : ""} ${
+                                Number.isFinite(Number(opt.id)) ? "" : "disabled"
+                              }>${opt.label}</option>`
+                          )
+                          .join("")}
+                      </select>
+                      <label class="descuento-pair-check">
+                        <input
+                          type="checkbox"
+                          data-descuento-scope="1"
+                          data-plat="${idPlataforma}"
+                          data-field="${mayorField}"
+                          data-target="${mayorScopePersist.target}"
+                          data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
+                          ${mayorScopePersist.supported ? "" : "disabled"}
+                          ${mayorEnabled ? "checked" : ""}
+                        />
+                        <span>Aplicar</span>
+                      </label>
+                    </label>
+                  </div>
+                  <button type="button" class="descuento-help" data-descuento-help="1" aria-label="Ver tabla de descuentos">?</button>
+                </div>
+              </div>
+            </td>
+          `;
+        }
+
         return `
           <td class="precio-cell descuento-config">
             <div class="descuento-cell-wrap">
@@ -511,8 +719,10 @@
                 <select
                   class="descuento-select"
                   data-descuento-select="1"
-                  data-field="${field}"
+                  data-field="${selectPersistDefault.field}"
+                  data-target="${selectPersistDefault.target}"
                   data-plat="${idPlataforma}"
+                  data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
                   data-prev="${selected ?? ""}"
                   title="${title}"
                   ${selectEnabled ? "" : "disabled"}
@@ -537,6 +747,9 @@
                     data-descuento-scope="1"
                     data-plat="${idPlataforma}"
                     data-field="${detalField}"
+                    data-target="${detalScopePersist.target}"
+                    data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
+                    ${detalScopePersist.supported ? "" : "disabled"}
                     ${detalEnabled ? "checked" : ""}
                   />
                 </label>
@@ -546,6 +759,9 @@
                     data-descuento-scope="1"
                     data-plat="${idPlataforma}"
                     data-field="${mayorField}"
+                    data-target="${mayorScopePersist.target}"
+                    data-price="${Number.isFinite(idPrecio) ? idPrecio : ""}"
+                    ${mayorScopePersist.supported ? "" : "disabled"}
                     ${mayorEnabled ? "checked" : ""}
                   />
                 </label>
@@ -557,6 +773,8 @@
 
       const renderTabla = (titulo, precios, platFlags = {}, platMeta = {}, planKey = null, planOptions = []) => {
         const esGift = !!platMeta.tarjeta_de_regalo;
+        const descuentoMesHeader = "Descuento mes";
+        const descuentoCantHeader = "Descuento cant.";
         const descuentoMes = normalizarIdDescuento(
           platMeta.id_descuento_mes,
           getDescuentoIdPorPos(1)
@@ -565,6 +783,95 @@
           platMeta.id_descuento_cantidad,
           getDescuentoIdPorPos(2)
         );
+        const descuentoMesDetal = normalizarIdDescuento(
+          platMeta.id_descuento_mes_detal,
+          descuentoMes
+        );
+        const descuentoMesMayor = normalizarIdDescuento(
+          platMeta.id_descuento_mes_mayor,
+          descuentoMes
+        );
+        const descuentoCantDetal = normalizarIdDescuento(
+          platMeta.id_descuento_cantidad_detal,
+          descuentoCant
+        );
+        const descuentoCantMayor = normalizarIdDescuento(
+          platMeta.id_descuento_cantidad_mayor,
+          descuentoCant
+        );
+        const platMetaConDescuento = {
+          ...platMeta,
+          id_descuento_mes: descuentoMes,
+          id_descuento_cantidad: descuentoCant,
+          id_descuento_mes_detal: descuentoMesDetal,
+          id_descuento_mes_mayor: descuentoMesMayor,
+          id_descuento_cantidad_detal: descuentoCantDetal,
+          id_descuento_cantidad_mayor: descuentoCantMayor,
+        };
+        const resolveDescuentoMetaFila = (precio = {}) => {
+          const baseMes = platMetaConDescuento.id_descuento_mes;
+          const baseCant = platMetaConDescuento.id_descuento_cantidad;
+          const baseMesDetal = platMetaConDescuento.id_descuento_mes_detal;
+          const baseMesMayor = platMetaConDescuento.id_descuento_mes_mayor;
+          const baseCantDetal = platMetaConDescuento.id_descuento_cantidad_detal;
+          const baseCantMayor = platMetaConDescuento.id_descuento_cantidad_mayor;
+          return {
+            ...platMetaConDescuento,
+            id_precio: Number(precio?.id_precio),
+            id_descuento_mes: normalizarIdDescuento(
+              soporteDescuentoFilaIds && isSet(precio?.id_descuento_mes)
+                ? precio.id_descuento_mes
+                : baseMes,
+              baseMes
+            ),
+            id_descuento_cantidad: normalizarIdDescuento(
+              soporteDescuentoFilaIds && isSet(precio?.id_descuento_cantidad)
+                ? precio.id_descuento_cantidad
+                : baseCant,
+              baseCant
+            ),
+            id_descuento_mes_detal: normalizarIdDescuento(
+              soporteDescuentoFilaIds && soporteDescuentoFilaGrupo && isSet(precio?.id_descuento_mes_detal)
+                ? precio.id_descuento_mes_detal
+                : baseMesDetal,
+              baseMesDetal
+            ),
+            id_descuento_mes_mayor: normalizarIdDescuento(
+              soporteDescuentoFilaIds && soporteDescuentoFilaGrupo && isSet(precio?.id_descuento_mes_mayor)
+                ? precio.id_descuento_mes_mayor
+                : baseMesMayor,
+              baseMesMayor
+            ),
+            id_descuento_cantidad_detal: normalizarIdDescuento(
+              soporteDescuentoFilaIds && soporteDescuentoFilaGrupo && isSet(precio?.id_descuento_cantidad_detal)
+                ? precio.id_descuento_cantidad_detal
+                : baseCantDetal,
+              baseCantDetal
+            ),
+            id_descuento_cantidad_mayor: normalizarIdDescuento(
+              soporteDescuentoFilaIds && soporteDescuentoFilaGrupo && isSet(precio?.id_descuento_cantidad_mayor)
+                ? precio.id_descuento_cantidad_mayor
+                : baseCantMayor,
+              baseCantMayor
+            ),
+            aplica_descuento_mes_detal:
+              soporteDescuentoFilaChecks && isSet(precio?.aplica_descuento_mes_detal)
+                ? !isExplicitFalse(precio.aplica_descuento_mes_detal)
+                : !isExplicitFalse(platMetaConDescuento?.aplica_descuento_mes_detal),
+            aplica_descuento_mes_mayor:
+              soporteDescuentoFilaChecks && isSet(precio?.aplica_descuento_mes_mayor)
+                ? !isExplicitFalse(precio.aplica_descuento_mes_mayor)
+                : !isExplicitFalse(platMetaConDescuento?.aplica_descuento_mes_mayor),
+            aplica_descuento_cantidad_detal:
+              soporteDescuentoFilaChecks && isSet(precio?.aplica_descuento_cantidad_detal)
+                ? !isExplicitFalse(precio.aplica_descuento_cantidad_detal)
+                : !isExplicitFalse(platMetaConDescuento?.aplica_descuento_cantidad_detal),
+            aplica_descuento_cantidad_mayor:
+              soporteDescuentoFilaChecks && isSet(precio?.aplica_descuento_cantidad_mayor)
+                ? !isExplicitFalse(precio.aplica_descuento_cantidad_mayor)
+                : !isExplicitFalse(platMetaConDescuento?.aplica_descuento_cantidad_mayor),
+          };
+        };
         const planOpts = (planOptions || []).filter(Boolean);
         const sorted = [...precios].sort((a, b) => {
           const aComp = a.completa ? 1 : 0;
@@ -579,6 +886,7 @@
         });
         const rows = sorted
           .map((p) => {
+            const descuentoMetaFila = resolveDescuentoMetaFila(p);
             if (esGift) {
               return `
               <tr>
@@ -614,8 +922,8 @@
                     deleteLabel: "Eliminar precio mayor",
                   })}
                 </td>
-                ${renderDescuentoCell(platMeta, "id_descuento_mes", descuentoMes)}
-                ${renderDescuentoCell(platMeta, "id_descuento_cantidad", descuentoCant)}
+                ${renderDescuentoCell(descuentoMetaFila, "id_descuento_mes", descuentoMetaFila.id_descuento_mes)}
+                ${renderDescuentoCell(descuentoMetaFila, "id_descuento_cantidad", descuentoMetaFila.id_descuento_cantidad)}
               </tr>
             `;
             }
@@ -671,8 +979,8 @@
                     deleteLabel: "Eliminar precio mayor",
                   })}
                 </td>
-                ${renderDescuentoCell(platMeta, "id_descuento_mes", descuentoMes)}
-                ${renderDescuentoCell(platMeta, "id_descuento_cantidad", descuentoCant)}
+                ${renderDescuentoCell(descuentoMetaFila, "id_descuento_mes", descuentoMetaFila.id_descuento_mes)}
+                ${renderDescuentoCell(descuentoMetaFila, "id_descuento_cantidad", descuentoMetaFila.id_descuento_cantidad)}
               </tr>
             `;
           })
@@ -687,13 +995,13 @@
                   ${esGift ? "<th>Valor</th><th>Región</th>" : "<th>Plan</th><th>Duración</th>"}
                   <th>Precio USD detal</th>
                   <th>Precio USD mayor</th>
-                  <th>Descuento mes</th>
-                  <th>Descuento cant.</th>
+                  <th>${descuentoMesHeader}</th>
+                  <th>${descuentoCantHeader}</th>
                 </tr>
               </thead>
               <tbody>
                 ${rows || `<tr><td colspan="7">Sin precios</td></tr>`}
-                <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-descuento-mes="${descuentoMes}" data-descuento-cant="${descuentoCant}" data-aplica-descuento-mes-detal="${!isExplicitFalse(platMeta?.aplica_descuento_mes_detal)}" data-aplica-descuento-mes-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_mes_mayor)}" data-aplica-descuento-cantidad-detal="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_detal)}" data-aplica-descuento-cantidad-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_mayor)}">
+                <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-descuento-mes="${descuentoMes}" data-descuento-cant="${descuentoCant}" data-descuento-mes-detal="${descuentoMesDetal}" data-descuento-mes-mayor="${descuentoMesMayor}" data-descuento-cant-detal="${descuentoCantDetal}" data-descuento-cant-mayor="${descuentoCantMayor}" data-aplica-descuento-mes-detal="${!isExplicitFalse(platMeta?.aplica_descuento_mes_detal)}" data-aplica-descuento-mes-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_mes_mayor)}" data-aplica-descuento-cantidad-detal="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_detal)}" data-aplica-descuento-cantidad-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_mayor)}">
                   <td colspan="7" style="text-align:center; font-weight:700;">+</td>
                 </tr>
               </tbody>
@@ -714,6 +1022,12 @@
 
       const cargar = async () => {
         try {
+          soporteColumnasDescuentoPlataforma = true;
+          soporteChecksDescuentoPlataforma = true;
+          soporteColumnasDescuentoPorGrupo = true;
+          soporteDescuentoFilaIds = true;
+          soporteDescuentoFilaGrupo = true;
+          soporteDescuentoFilaChecks = true;
           const { data: descuentosData, error: descuentosErr } = await supabase
             .from("descuentos")
             .select("*")
@@ -725,8 +1039,12 @@
 
           let plataformas = [];
           let platErr = null;
+          const selectPlataformasConDescuentosGrupo =
+            "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
           const selectPlataformasConDescuentos =
             "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo, id_descuento_mes, id_descuento_cantidad, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+          const selectPlataformasConIdsGrupo =
+            "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor";
           const selectPlataformasConIds =
             "id_plataforma, nombre, por_pantalla, por_acceso, tarjeta_de_regalo, id_descuento_mes, id_descuento_cantidad";
           const selectPlataformasBase =
@@ -734,7 +1052,21 @@
 
           ({ data: plataformas, error: platErr } = await supabase
             .from("plataformas")
-            .select(selectPlataformasConDescuentos));
+            .select(selectPlataformasConDescuentosGrupo));
+
+          if (platErr) {
+            const msg = String(platErr.message || "");
+            if (
+              /id_descuento_mes_detal|id_descuento_mes_mayor|id_descuento_cantidad_detal|id_descuento_cantidad_mayor/i.test(
+                msg
+              )
+            ) {
+              soporteColumnasDescuentoPorGrupo = false;
+              ({ data: plataformas, error: platErr } = await supabase
+                .from("plataformas")
+                .select(selectPlataformasConDescuentos));
+            }
+          }
 
           if (platErr) {
             const msg = String(platErr.message || "");
@@ -744,9 +1076,12 @@
               )
             ) {
               soporteChecksDescuentoPlataforma = false;
+              const selectSinChecks = soporteColumnasDescuentoPorGrupo
+                ? selectPlataformasConIdsGrupo
+                : selectPlataformasConIds;
               ({ data: plataformas, error: platErr } = await supabase
                 .from("plataformas")
-                .select(selectPlataformasConIds));
+                .select(selectSinChecks));
               if (!platErr) {
                 plataformas = (plataformas || []).map((p) => ({
                   ...p,
@@ -754,11 +1089,20 @@
                   aplica_descuento_mes_mayor: true,
                   aplica_descuento_cantidad_detal: true,
                   aplica_descuento_cantidad_mayor: true,
+                  id_descuento_mes_detal:
+                    p.id_descuento_mes_detal ?? p.id_descuento_mes,
+                  id_descuento_mes_mayor:
+                    p.id_descuento_mes_mayor ?? p.id_descuento_mes,
+                  id_descuento_cantidad_detal:
+                    p.id_descuento_cantidad_detal ?? p.id_descuento_cantidad,
+                  id_descuento_cantidad_mayor:
+                    p.id_descuento_cantidad_mayor ?? p.id_descuento_cantidad,
                 }));
               }
             } else if (/id_descuento_mes|id_descuento_cantidad/i.test(msg)) {
               soporteColumnasDescuentoPlataforma = false;
               soporteChecksDescuentoPlataforma = false;
+              soporteColumnasDescuentoPorGrupo = false;
               ({ data: plataformas, error: platErr } = await supabase
                 .from("plataformas")
                 .select(selectPlataformasBase));
@@ -767,6 +1111,10 @@
                   ...p,
                   id_descuento_mes: getDescuentoIdPorPos(1),
                   id_descuento_cantidad: getDescuentoIdPorPos(2),
+                  id_descuento_mes_detal: getDescuentoIdPorPos(1),
+                  id_descuento_mes_mayor: getDescuentoIdPorPos(1),
+                  id_descuento_cantidad_detal: getDescuentoIdPorPos(2),
+                  id_descuento_cantidad_mayor: getDescuentoIdPorPos(2),
                   aplica_descuento_mes_detal: true,
                   aplica_descuento_mes_mayor: true,
                   aplica_descuento_cantidad_detal: true,
@@ -776,10 +1124,91 @@
             }
           }
           if (platErr) throw platErr;
+          plataformas = (plataformas || []).map((p) => {
+            const descuentoMes = normalizarIdDescuento(
+              p.id_descuento_mes,
+              getDescuentoIdPorPos(1)
+            );
+            const descuentoCant = normalizarIdDescuento(
+              p.id_descuento_cantidad,
+              getDescuentoIdPorPos(2)
+            );
+            return {
+              ...p,
+              id_descuento_mes: descuentoMes,
+              id_descuento_cantidad: descuentoCant,
+              id_descuento_mes_detal: normalizarIdDescuento(p.id_descuento_mes_detal, descuentoMes),
+              id_descuento_mes_mayor: normalizarIdDescuento(p.id_descuento_mes_mayor, descuentoMes),
+              id_descuento_cantidad_detal: normalizarIdDescuento(
+                p.id_descuento_cantidad_detal,
+                descuentoCant
+              ),
+              id_descuento_cantidad_mayor: normalizarIdDescuento(
+                p.id_descuento_cantidad_mayor,
+                descuentoCant
+              ),
+            };
+          });
 
-          const { data: precios, error: priceErr } = await supabase
+          let precios = [];
+          let priceErr = null;
+          const selectPreciosConDescuentosGrupoChecks =
+            "id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+          const selectPreciosConDescuentosChecks =
+            "id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region, id_descuento_mes, id_descuento_cantidad, aplica_descuento_mes_detal, aplica_descuento_mes_mayor, aplica_descuento_cantidad_detal, aplica_descuento_cantidad_mayor";
+          const selectPreciosConDescuentosGrupo =
+            "id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region, id_descuento_mes, id_descuento_cantidad, id_descuento_mes_detal, id_descuento_mes_mayor, id_descuento_cantidad_detal, id_descuento_cantidad_mayor";
+          const selectPreciosConDescuentosBase =
+            "id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region, id_descuento_mes, id_descuento_cantidad";
+          const selectPreciosBase =
+            "id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region";
+
+          ({ data: precios, error: priceErr } = await supabase
             .from("precios")
-            .select("id_precio, id_plataforma, plan, cantidad, duracion, precio_usd_detal, precio_usd_mayor, completa, valor_tarjeta_de_regalo, moneda, region");
+            .select(selectPreciosConDescuentosGrupoChecks));
+
+          if (priceErr) {
+            const msg = String(priceErr.message || "");
+            if (
+              /id_descuento_mes_detal|id_descuento_mes_mayor|id_descuento_cantidad_detal|id_descuento_cantidad_mayor/i.test(
+                msg
+              )
+            ) {
+              soporteDescuentoFilaGrupo = false;
+              ({ data: precios, error: priceErr } = await supabase
+                .from("precios")
+                .select(selectPreciosConDescuentosChecks));
+            }
+          }
+
+          if (priceErr) {
+            const msg = String(priceErr.message || "");
+            if (
+              /aplica_descuento_mes_detal|aplica_descuento_mes_mayor|aplica_descuento_cantidad_detal|aplica_descuento_cantidad_mayor/i.test(
+                msg
+              )
+            ) {
+              soporteDescuentoFilaChecks = false;
+              const selectSinChecks = soporteDescuentoFilaGrupo
+                ? selectPreciosConDescuentosGrupo
+                : selectPreciosConDescuentosBase;
+              ({ data: precios, error: priceErr } = await supabase
+                .from("precios")
+                .select(selectSinChecks));
+            }
+          }
+
+          if (priceErr) {
+            const msg = String(priceErr.message || "");
+            if (/id_descuento_mes|id_descuento_cantidad/i.test(msg)) {
+              soporteDescuentoFilaIds = false;
+              soporteDescuentoFilaGrupo = false;
+              soporteDescuentoFilaChecks = false;
+              ({ data: precios, error: priceErr } = await supabase
+                .from("precios")
+                .select(selectPreciosBase));
+            }
+          }
           if (priceErr) throw priceErr;
           const planOptionsByPlat = (precios || []).reduce((acc, p) => {
             if (!acc[p.id_plataforma]) acc[p.id_plataforma] = new Set();
@@ -819,21 +1248,32 @@
           if (wrapper) {
             wrapper.innerHTML = blocks.join("");
           }
-          if (!soporteColumnasDescuentoPlataforma && !soporteChecksDescuentoPlataforma) {
-            setEstado(
-              "Faltan columnas en plataformas: id_descuento_* y aplica_descuento_*."
+          const warnings = [];
+          if (!soporteColumnasDescuentoPorGrupo) {
+            warnings.push(
+              "Faltan columnas por grupo en plataformas: id_descuento_*_detal/id_descuento_*_mayor."
             );
-          } else if (!soporteColumnasDescuentoPlataforma) {
-            setEstado(
-              "Faltan columnas en plataformas: id_descuento_mes y id_descuento_cantidad."
-            );
-          } else if (!soporteChecksDescuentoPlataforma) {
-            setEstado(
-              "Faltan columnas de check en plataformas: aplica_descuento_*."
-            );
-          } else {
-            setEstado("");
           }
+          if (!soporteColumnasDescuentoPlataforma && !soporteChecksDescuentoPlataforma) {
+            warnings.push("Faltan columnas en plataformas: id_descuento_* y aplica_descuento_*.");
+          } else if (!soporteColumnasDescuentoPlataforma) {
+            warnings.push("Faltan columnas en plataformas: id_descuento_mes y id_descuento_cantidad.");
+          } else if (!soporteChecksDescuentoPlataforma) {
+            warnings.push("Faltan columnas de check en plataformas: aplica_descuento_*.");
+          }
+          if (!soporteDescuentoFilaIds) {
+            warnings.push("Faltan columnas en precios: id_descuento_mes/id_descuento_cantidad.");
+          } else {
+            if (!soporteDescuentoFilaGrupo) {
+              warnings.push(
+                "Faltan columnas por grupo en precios: id_descuento_*_detal/id_descuento_*_mayor."
+              );
+            }
+            if (!soporteDescuentoFilaChecks) {
+              warnings.push("Faltan columnas de check en precios: aplica_descuento_*.");
+            }
+          }
+          setEstado(warnings.join(" "));
           attachPrecioEditors();
         } catch (err) {
           console.error("editar precios init error", err);
@@ -846,32 +1286,37 @@
           const descuentoScope = e.target.closest('[data-descuento-scope="1"]');
           if (descuentoScope) {
             const idPlataforma = Number(descuentoScope.dataset.plat);
+            const idPrecio = Number(descuentoScope.dataset.price);
             const field = String(descuentoScope.dataset.field || "");
+            const target = String(descuentoScope.dataset.target || "plataformas");
             const nextValue = !!descuentoScope.checked;
-            if (!idPlataforma || !field) return;
+            if (!field || (target === "precios" && !idPrecio) || (target !== "precios" && !idPlataforma)) {
+              return;
+            }
             try {
-              const { error } = await supabase
-                .from("plataformas")
-                .update({ [field]: nextValue })
-                .eq("id_plataforma", idPlataforma);
+              const query =
+                target === "precios"
+                  ? supabase.from("precios").update({ [field]: nextValue }).eq("id_precio", idPrecio)
+                  : supabase
+                      .from("plataformas")
+                      .update({ [field]: nextValue })
+                      .eq("id_plataforma", idPlataforma);
+              const { error } = await query;
               if (error) throw error;
-              wrapper
-                ?.querySelectorAll(
-                  `[data-descuento-scope="1"][data-plat="${idPlataforma}"][data-field="${field}"]`
-                )
-                .forEach((el) => {
-                  el.checked = nextValue;
+              if (target !== "precios") {
+                const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
+                rowAdds.forEach((row) => {
+                  if (field === "aplica_descuento_mes_detal") row.dataset.aplicaDescuentoMesDetal = String(nextValue);
+                  if (field === "aplica_descuento_mes_mayor") row.dataset.aplicaDescuentoMesMayor = String(nextValue);
+                  if (field === "aplica_descuento_cantidad_detal")
+                    row.dataset.aplicaDescuentoCantidadDetal = String(nextValue);
+                  if (field === "aplica_descuento_cantidad_mayor")
+                    row.dataset.aplicaDescuentoCantidadMayor = String(nextValue);
                 });
-              const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
-              rowAdds.forEach((row) => {
-                if (field === "aplica_descuento_mes_detal") row.dataset.aplicaDescuentoMesDetal = String(nextValue);
-                if (field === "aplica_descuento_mes_mayor") row.dataset.aplicaDescuentoMesMayor = String(nextValue);
-                if (field === "aplica_descuento_cantidad_detal")
-                  row.dataset.aplicaDescuentoCantidadDetal = String(nextValue);
-                if (field === "aplica_descuento_cantidad_mayor")
-                  row.dataset.aplicaDescuentoCantidadMayor = String(nextValue);
-              });
-              setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+                setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+              } else {
+                setEstado(`Actualizado ${field} en precio #${idPrecio}.`);
+              }
             } catch (err) {
               console.error("update descuento scope error", err);
               descuentoScope.checked = !nextValue;
@@ -883,8 +1328,11 @@
           const descuentoSelect = e.target.closest('[data-descuento-select="1"]');
           if (!descuentoSelect) return;
           const idPlataforma = Number(descuentoSelect.dataset.plat);
+          const idPrecio = Number(descuentoSelect.dataset.price);
           const field = String(descuentoSelect.dataset.field || "");
-          const fallbackId = getDescuentoIdPorPos(field === "id_descuento_cantidad" ? 2 : 1);
+          const target = String(descuentoSelect.dataset.target || "plataformas");
+          const group = String(descuentoSelect.dataset.group || "").trim().toLowerCase();
+          const fallbackId = getDescuentoIdPorPos(fallbackPosByDiscountField(field));
           const nextValue = normalizarIdDescuento(descuentoSelect.value, fallbackId);
           const prevValue = normalizarIdDescuento(descuentoSelect.dataset.prev, fallbackId);
           if (!Number.isFinite(Number(nextValue))) {
@@ -892,27 +1340,55 @@
             descuentoSelect.value = String(prevValue ?? "");
             return;
           }
-          if (!idPlataforma || !field || !nextValue) return;
+          if (!field || !nextValue) return;
+          if (target === "precios" && !idPrecio) return;
+          if (target !== "precios" && !idPlataforma) return;
           try {
-            const { error } = await supabase
-              .from("plataformas")
-              .update({ [field]: nextValue })
-              .eq("id_plataforma", idPlataforma);
+            const query =
+              target === "precios"
+                ? supabase.from("precios").update({ [field]: nextValue }).eq("id_precio", idPrecio)
+                : supabase
+                    .from("plataformas")
+                    .update({ [field]: nextValue })
+                    .eq("id_plataforma", idPlataforma);
+            const { error } = await query;
             if (error) throw error;
             wrapper
               ?.querySelectorAll(
-                `[data-descuento-select="1"][data-plat="${idPlataforma}"][data-field="${field}"]`
+                target === "precios"
+                  ? group
+                    ? `[data-descuento-select="1"][data-target="precios"][data-price="${idPrecio}"][data-field="${field}"][data-group="${group}"]`
+                    : `[data-descuento-select="1"][data-target="precios"][data-price="${idPrecio}"][data-field="${field}"]`
+                  : group
+                    ? `[data-descuento-select="1"][data-target="plataformas"][data-plat="${idPlataforma}"][data-field="${field}"][data-group="${group}"]`
+                    : `[data-descuento-select="1"][data-target="plataformas"][data-plat="${idPlataforma}"][data-field="${field}"]`
               )
               .forEach((el) => {
                 el.value = String(nextValue);
                 el.dataset.prev = String(nextValue);
               });
-            const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
-            rowAdds.forEach((row) => {
-              if (field === "id_descuento_mes") row.dataset.descuentoMes = String(nextValue);
-              if (field === "id_descuento_cantidad") row.dataset.descuentoCant = String(nextValue);
-            });
-            setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+            if (target !== "precios") {
+              const rowAdds = wrapper?.querySelectorAll(`.row-add[data-plat="${idPlataforma}"]`) || [];
+              rowAdds.forEach((row) => {
+                if (field === "id_descuento_mes") {
+                  row.dataset.descuentoMes = String(nextValue);
+                  if (group === "detal") row.dataset.descuentoMesDetal = String(nextValue);
+                  if (group === "mayor") row.dataset.descuentoMesMayor = String(nextValue);
+                }
+                if (field === "id_descuento_cantidad") {
+                  row.dataset.descuentoCant = String(nextValue);
+                  if (group === "detal") row.dataset.descuentoCantDetal = String(nextValue);
+                  if (group === "mayor") row.dataset.descuentoCantMayor = String(nextValue);
+                }
+                if (field === "id_descuento_mes_detal") row.dataset.descuentoMesDetal = String(nextValue);
+                if (field === "id_descuento_mes_mayor") row.dataset.descuentoMesMayor = String(nextValue);
+                if (field === "id_descuento_cantidad_detal") row.dataset.descuentoCantDetal = String(nextValue);
+                if (field === "id_descuento_cantidad_mayor") row.dataset.descuentoCantMayor = String(nextValue);
+              });
+              setEstado(`Actualizado ${field} en plataforma #${idPlataforma}.`);
+            } else {
+              setEstado(`Actualizado ${field} en precio #${idPrecio}.`);
+            }
           } catch (err) {
             console.error("update descuento plataforma error", err);
             descuentoSelect.value = String(prevValue);
@@ -1023,8 +1499,30 @@
                 addRow.dataset.descuentoCant,
                 getDescuentoIdPorPos(2)
               );
+              const descuentoMesDetal = normalizarIdDescuento(
+                addRow.dataset.descuentoMesDetal,
+                descuentoMes
+              );
+              const descuentoMesMayor = normalizarIdDescuento(
+                addRow.dataset.descuentoMesMayor,
+                descuentoMes
+              );
+              const descuentoCantDetal = normalizarIdDescuento(
+                addRow.dataset.descuentoCantDetal,
+                descuentoCant
+              );
+              const descuentoCantMayor = normalizarIdDescuento(
+                addRow.dataset.descuentoCantMayor,
+                descuentoCant
+              );
               const platMetaForRow = {
                 id_plataforma: Number(platId),
+                id_descuento_mes: descuentoMes,
+                id_descuento_cantidad: descuentoCant,
+                id_descuento_mes_detal: descuentoMesDetal,
+                id_descuento_mes_mayor: descuentoMesMayor,
+                id_descuento_cantidad_detal: descuentoCantDetal,
+                id_descuento_cantidad_mayor: descuentoCantMayor,
                 aplica_descuento_mes_detal: aplicaMesDetal,
                 aplica_descuento_mes_mayor: aplicaMesMayor,
                 aplica_descuento_cantidad_detal: aplicaCantidadDetal,
@@ -1036,6 +1534,22 @@
                   plan: plan || null,
                   completa: false,
                 };
+                if (soporteDescuentoFilaIds) {
+                  payload.id_descuento_mes = descuentoMes;
+                  payload.id_descuento_cantidad = descuentoCant;
+                  if (soporteDescuentoFilaGrupo) {
+                    payload.id_descuento_mes_detal = descuentoMesDetal;
+                    payload.id_descuento_mes_mayor = descuentoMesMayor;
+                    payload.id_descuento_cantidad_detal = descuentoCantDetal;
+                    payload.id_descuento_cantidad_mayor = descuentoCantMayor;
+                  }
+                }
+                if (soporteDescuentoFilaChecks) {
+                  payload.aplica_descuento_mes_detal = aplicaMesDetal;
+                  payload.aplica_descuento_mes_mayor = aplicaMesMayor;
+                  payload.aplica_descuento_cantidad_detal = aplicaCantidadDetal;
+                  payload.aplica_descuento_cantidad_mayor = aplicaCantidadMayor;
+                }
                 const { data, error } = await supabase
                   .from("precios")
                   .insert(payload)
@@ -1045,6 +1559,10 @@
                 const tbody = addRow.closest("tbody");
                 if (!tbody) return;
                 const tr = document.createElement("tr");
+                const descuentoMetaNuevaFila = {
+                  ...platMetaForRow,
+                  id_precio: Number(data.id_precio),
+                };
                 if (esGift) {
                   tr.innerHTML = `
                     <td data-id="${data.id_precio}" data-field="cantidad" class="precio-cell" data-completa="${data.completa ? "true" : "false"}" data-porpantalla="${por_pantalla}" data-poracceso="${por_acceso}" data-cantidad="${data.cantidad ?? ""}">
@@ -1067,8 +1585,8 @@
                       <span class="precio-text">-</span>
                       ${renderActions({ editLabel: "Editar precio mayor" })}
                     </td>
-                    ${renderDescuentoCell(platMetaForRow, "id_descuento_mes", descuentoMes)}
-                    ${renderDescuentoCell(platMetaForRow, "id_descuento_cantidad", descuentoCant)}
+                    ${renderDescuentoCell(descuentoMetaNuevaFila, "id_descuento_mes", descuentoMes)}
+                    ${renderDescuentoCell(descuentoMetaNuevaFila, "id_descuento_cantidad", descuentoCant)}
                   `;
                 } else {
                   tr.innerHTML = `
@@ -1104,8 +1622,8 @@
                       <span class="precio-text">-</span>
                       ${renderActions({ editLabel: "Editar precio mayor" })}
                     </td>
-                    ${renderDescuentoCell(platMetaForRow, "id_descuento_mes", descuentoMes)}
-                    ${renderDescuentoCell(platMetaForRow, "id_descuento_cantidad", descuentoCant)}
+                    ${renderDescuentoCell(descuentoMetaNuevaFila, "id_descuento_mes", descuentoMes)}
+                    ${renderDescuentoCell(descuentoMetaNuevaFila, "id_descuento_cantidad", descuentoCant)}
                   `;
                 }
                 tbody.insertBefore(tr, addRow);

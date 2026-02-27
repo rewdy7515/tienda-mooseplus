@@ -55,8 +55,6 @@ const testingBtn = document.querySelector("#btn-testing-toggle");
 const missingDataWrap = document.querySelector("#missing-data-wrap");
 const missingDataBtn = document.querySelector("#missing-data-btn");
 const tasaActualEl = document.querySelector("#tasa-actual");
-const activeOrderWrap = document.querySelector("#active-order-wrap");
-const activeOrderLink = document.querySelector("#active-order-link");
 const pageLoaderLogoEl = document.querySelector(".page-loader__logo");
 const homeBannersWrap = document.querySelector("#home-banners");
 const homeBannersViewport = document.querySelector(".home-banners-viewport");
@@ -68,11 +66,13 @@ const HOME_BANNERS_DESIGN_HEIGHT = 828;
 const HOME_BANNERS_MIN_RENDER_WIDTH = 480;
 const HOME_BANNERS_SWIPE_MIN_PX = 36;
 const HOME_BANNERS_SWIPE_RATIO = 0.12;
+const HOME_BANNERS_SWIPE_AXIS_LOCK_PX = 12;
 const HOME_BANNERS_CLICK_SUPPRESS_MS = 320;
-const HOME_BANNERS_WHEEL_MIN_DELTA = 28;
-const HOME_BANNERS_WHEEL_AXIS_RATIO = 0.85;
+const HOME_BANNERS_WHEEL_MIN_DELTA = 32;
+const HOME_BANNERS_WHEEL_AXIS_RATIO = 1.45;
+const HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT = 8;
 const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
-const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 190;
+const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 180;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
 const PAGE_LOADER_LOGO_FALLBACK =
   STATIC_HEADER_LOGO_HREF;
@@ -82,13 +82,16 @@ let homeBannersCurrentIndex = 0;
 let homeBannersTotalSlides = 0;
 let homeBannersSwipeActive = false;
 let homeBannersSwipePointerId = null;
+let homeBannersSwipeTouchId = null;
 let homeBannersSwipeStartX = 0;
+let homeBannersSwipeStartY = 0;
 let homeBannersSwipeDeltaX = 0;
+let homeBannersSwipeDeltaY = 0;
+let homeBannersSwipeAxis = "";
 let homeBannersSuppressClickUntil = 0;
 let homeBannersWheelAccumX = 0;
 let homeBannersWheelResetTimer = null;
 let homeBannersWheelLastSlideAt = 0;
-let homeBannersWheelDidSlideInGesture = false;
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
@@ -818,8 +821,63 @@ const attachHomeBannersSwipe = () => {
   const resetSwipeState = () => {
     homeBannersSwipeActive = false;
     homeBannersSwipePointerId = null;
+    homeBannersSwipeTouchId = null;
     homeBannersSwipeStartX = 0;
+    homeBannersSwipeStartY = 0;
     homeBannersSwipeDeltaX = 0;
+    homeBannersSwipeDeltaY = 0;
+    homeBannersSwipeAxis = "";
+  };
+
+  const beginSwipe = ({ x = 0, y = 0, pointerId = null, touchId = null } = {}) => {
+    homeBannersSwipeActive = true;
+    homeBannersSwipePointerId = pointerId;
+    homeBannersSwipeTouchId = touchId;
+    homeBannersSwipeStartX = Number.isFinite(Number(x)) ? Number(x) : 0;
+    homeBannersSwipeStartY = Number.isFinite(Number(y)) ? Number(y) : 0;
+    homeBannersSwipeDeltaX = 0;
+    homeBannersSwipeDeltaY = 0;
+    homeBannersSwipeAxis = "";
+  };
+
+  const updateSwipeDeltasAndAxis = ({ x = 0, y = 0 } = {}) => {
+    if (!homeBannersSwipeActive) return "";
+    homeBannersSwipeDeltaX = Number(x) - homeBannersSwipeStartX;
+    homeBannersSwipeDeltaY = Number(y) - homeBannersSwipeStartY;
+
+    if (!homeBannersSwipeAxis) {
+      const absX = Math.abs(homeBannersSwipeDeltaX);
+      const absY = Math.abs(homeBannersSwipeDeltaY);
+      if (Math.max(absX, absY) < HOME_BANNERS_SWIPE_AXIS_LOCK_PX) return "";
+      if (absY > absX) {
+        // Gesto vertical: liberar el control para permitir scroll del HTML.
+        resetSwipeState();
+        return "";
+      }
+      homeBannersSwipeAxis = "x";
+      stopHomeBannersSlider();
+    }
+
+    return homeBannersSwipeAxis;
+  };
+
+  const releasePointerCapture = (pointerId) => {
+    if (!Number.isFinite(Number(pointerId))) return;
+    if (typeof homeBannersViewport.releasePointerCapture !== "function") return;
+    try {
+      homeBannersViewport.releasePointerCapture(pointerId);
+    } catch (_) {
+      // Ignorar errores de release en navegadores que no soportan capture real.
+    }
+  };
+
+  const getTouchById = (touchList, touchId) => {
+    if (!touchList || touchId === null || touchId === undefined) return null;
+    for (let i = 0; i < touchList.length; i += 1) {
+      const touch = touchList.item(i);
+      if (touch && touch.identifier === touchId) return touch;
+    }
+    return null;
   };
 
   const finalizeSwipe = ({ cancelled = false } = {}) => {
@@ -830,7 +888,8 @@ const attachHomeBannersSwipe = () => {
       Math.round((homeBannersViewport.clientWidth || 0) * HOME_BANNERS_SWIPE_RATIO),
     );
     const absDelta = Math.abs(homeBannersSwipeDeltaX);
-    if (!cancelled && total > 1 && absDelta >= threshold) {
+    const isHorizontalSwipe = homeBannersSwipeAxis === "x";
+    if (!cancelled && isHorizontalSwipe && total > 1 && absDelta >= threshold) {
       if (homeBannersSwipeDeltaX < 0) {
         homeBannersCurrentIndex = (homeBannersCurrentIndex + 1) % total;
       } else {
@@ -849,92 +908,140 @@ const attachHomeBannersSwipe = () => {
   homeBannersViewport.addEventListener("pointerdown", (e) => {
     const total = Math.max(0, homeBannersTotalSlides);
     if (total <= 1) return;
+    if (e.pointerType === "touch") return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    homeBannersSwipeActive = true;
-    homeBannersSwipePointerId = e.pointerId;
-    homeBannersSwipeStartX = e.clientX;
-    homeBannersSwipeDeltaX = 0;
-    stopHomeBannersSlider();
-    try {
-      homeBannersViewport.setPointerCapture(e.pointerId);
-    } catch (_err) {
-      // noop
+    beginSwipe({
+      x: e.clientX,
+      y: e.clientY,
+      pointerId: e.pointerId,
+      touchId: null,
+    });
+    if (typeof homeBannersViewport.setPointerCapture === "function") {
+      try {
+        homeBannersViewport.setPointerCapture(e.pointerId);
+      } catch (_) {
+        // Ignorar errores de capture en navegadores sin soporte completo.
+      }
     }
   });
 
   homeBannersViewport.addEventListener("pointermove", (e) => {
     if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
-    homeBannersSwipeDeltaX = e.clientX - homeBannersSwipeStartX;
-  });
+    const axis = updateSwipeDeltasAndAxis({
+      x: e.clientX,
+      y: e.clientY,
+    });
+    if (axis === "x") {
+      // Evita que el browser secuestre el gesto horizontal y cancele el swipe.
+      e.preventDefault();
+    }
+  }, { passive: false });
 
   homeBannersViewport.addEventListener("pointerup", (e) => {
     if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
+    releasePointerCapture(e.pointerId);
     finalizeSwipe({ cancelled: false });
-    try {
-      homeBannersViewport.releasePointerCapture(e.pointerId);
-    } catch (_err) {
-      // noop
-    }
   });
 
   homeBannersViewport.addEventListener("pointercancel", (e) => {
     if (!homeBannersSwipeActive || e.pointerId !== homeBannersSwipePointerId) return;
+    releasePointerCapture(e.pointerId);
     finalizeSwipe({ cancelled: true });
-    try {
-      homeBannersViewport.releasePointerCapture(e.pointerId);
-    } catch (_err) {
-      // noop
-    }
   });
 
-  homeBannersViewport.addEventListener(
-    "wheel",
-    (e) => {
-      const total = Math.max(0, homeBannersTotalSlides);
-      if (total <= 1) return;
+  homeBannersViewport.addEventListener("touchstart", (e) => {
+    const total = Math.max(0, homeBannersTotalSlides);
+    if (total <= 1) return;
+    if (homeBannersSwipeActive) return;
+    const touch = e.changedTouches?.item(0);
+    if (!touch) return;
+    beginSwipe({
+      x: touch.clientX,
+      y: touch.clientY,
+      pointerId: null,
+      touchId: touch.identifier,
+    });
+  }, { passive: true });
 
-      const deltaX = Number(e.deltaX) || 0;
-      const deltaY = Number(e.deltaY) || 0;
-      const absX = Math.abs(deltaX);
-      const absY = Math.abs(deltaY);
-      const isHorizontalIntent =
-        absX >= Math.max(HOME_BANNERS_WHEEL_MIN_DELTA, absY * HOME_BANNERS_WHEEL_AXIS_RATIO);
-      if (!isHorizontalIntent) return;
-      // No secuestrar el scroll vertical de la página cuando el gesto trae componente Y.
-      if (absY > 6) return;
-
+  homeBannersViewport.addEventListener("touchmove", (e) => {
+    if (!homeBannersSwipeActive || homeBannersSwipeTouchId === null) return;
+    const touch = getTouchById(e.touches, homeBannersSwipeTouchId);
+    if (!touch) return;
+    const axis = updateSwipeDeltasAndAxis({
+      x: touch.clientX,
+      y: touch.clientY,
+    });
+    if (axis === "x") {
       e.preventDefault();
-      stopHomeBannersSlider();
+    }
+  }, { passive: false });
 
-      homeBannersWheelAccumX += deltaX;
-      if (homeBannersWheelResetTimer) {
-        window.clearTimeout(homeBannersWheelResetTimer);
-      }
-      homeBannersWheelResetTimer = window.setTimeout(() => {
-        homeBannersWheelAccumX = 0;
-        homeBannersWheelResetTimer = null;
-        homeBannersWheelDidSlideInGesture = false;
-      }, HOME_BANNERS_WHEEL_GESTURE_RESET_MS);
+  homeBannersViewport.addEventListener("touchend", (e) => {
+    if (!homeBannersSwipeActive || homeBannersSwipeTouchId === null) return;
+    const touch = getTouchById(e.changedTouches, homeBannersSwipeTouchId);
+    if (!touch) return;
+    homeBannersSwipeDeltaX = touch.clientX - homeBannersSwipeStartX;
+    homeBannersSwipeDeltaY = touch.clientY - homeBannersSwipeStartY;
+    finalizeSwipe({ cancelled: false });
+  });
 
-      if (Math.abs(homeBannersWheelAccumX) < HOME_BANNERS_WHEEL_MIN_DELTA) return;
-      if (homeBannersWheelDidSlideInGesture) return;
-      const now = Date.now();
-      if (now - homeBannersWheelLastSlideAt < HOME_BANNERS_WHEEL_COOLDOWN_MS) return;
+  homeBannersViewport.addEventListener("touchcancel", (e) => {
+    if (!homeBannersSwipeActive || homeBannersSwipeTouchId === null) return;
+    const touch = getTouchById(e.changedTouches, homeBannersSwipeTouchId);
+    if (touch) {
+      homeBannersSwipeDeltaX = touch.clientX - homeBannersSwipeStartX;
+      homeBannersSwipeDeltaY = touch.clientY - homeBannersSwipeStartY;
+    }
+    finalizeSwipe({ cancelled: true });
+  });
 
-      if (homeBannersWheelAccumX > 0) {
-        homeBannersCurrentIndex = (homeBannersCurrentIndex + 1) % total;
-      } else {
-        homeBannersCurrentIndex = (homeBannersCurrentIndex - 1 + total) % total;
-      }
+  homeBannersViewport.addEventListener("wheel", (e) => {
+    const total = Math.max(0, homeBannersTotalSlides);
+    if (total <= 1) return;
+
+    const deltaX = Number(e.deltaX) || 0;
+    const deltaY = Number(e.deltaY) || 0;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+    const dominance = absX - absY;
+    const isHorizontalIntent =
+      absX >= HOME_BANNERS_WHEEL_MIN_DELTA &&
+      absX >= absY * HOME_BANNERS_WHEEL_AXIS_RATIO &&
+      dominance >= HOME_BANNERS_WHEEL_MIN_DELTA;
+    if (!isHorizontalIntent) return;
+    // Si hay deriva vertical apreciable, dejar que el HTML haga scroll.
+    if (absY > HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT) return;
+
+    stopHomeBannersSlider();
+
+    homeBannersWheelAccumX += deltaX;
+    if (homeBannersWheelResetTimer) {
+      window.clearTimeout(homeBannersWheelResetTimer);
+    }
+    homeBannersWheelResetTimer = window.setTimeout(() => {
       homeBannersWheelAccumX = 0;
-      homeBannersWheelLastSlideAt = now;
-      homeBannersWheelDidSlideInGesture = true;
-      homeBannersSuppressClickUntil = now + HOME_BANNERS_CLICK_SUPPRESS_MS;
-      setHomeBannersSlide(homeBannersCurrentIndex);
-      startHomeBannersSlider(total, homeBannersCurrentIndex);
-    },
-    { passive: false },
-  );
+      homeBannersWheelResetTimer = null;
+    }, HOME_BANNERS_WHEEL_GESTURE_RESET_MS);
+
+    if (Math.abs(homeBannersWheelAccumX) < HOME_BANNERS_WHEEL_MIN_DELTA) return;
+    const now = Date.now();
+    if (now - homeBannersWheelLastSlideAt < HOME_BANNERS_WHEEL_COOLDOWN_MS) return;
+
+    if (homeBannersWheelAccumX > 0) {
+      homeBannersCurrentIndex = (homeBannersCurrentIndex + 1) % total;
+    } else {
+      homeBannersCurrentIndex = (homeBannersCurrentIndex - 1 + total) % total;
+    }
+    homeBannersWheelAccumX = 0;
+    homeBannersWheelLastSlideAt = now;
+    homeBannersSuppressClickUntil = now + HOME_BANNERS_CLICK_SUPPRESS_MS;
+    setHomeBannersSlide(homeBannersCurrentIndex);
+    startHomeBannersSlider(total, homeBannersCurrentIndex);
+  }, { passive: false });
+
+  homeBannersViewport.addEventListener("dragstart", (e) => {
+    e.preventDefault();
+  });
 };
 
 const syncHomeBannersViewportSize = () => {
@@ -1048,6 +1155,7 @@ const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []
           <img
             src="${escapeHtml(item.image)}"
             alt="${escapeHtml(item.nombre)}"
+            draggable="false"
             loading="${idx === 0 ? "eager" : "lazy"}"
             fetchpriority="${idx === 0 ? "high" : "auto"}"
             sizes="(max-width: 700px) calc(100vw - 24px), min(1650px, calc(100vw - 40px))"
@@ -1370,44 +1478,6 @@ const checkMissingDataNotice = async (currentUser) => {
   }
 };
 
-const loadActiveOrderNotice = async (currentUser) => {
-  if (!activeOrderWrap || !activeOrderLink) return;
-  const userId = Number(currentUser?.id_usuario);
-  if (!Number.isFinite(userId) || userId <= 0) {
-    activeOrderWrap.classList.add("hidden");
-    activeOrderLink.removeAttribute("href");
-    return;
-  }
-  try {
-    const { data, error } = await supabase
-      .from("ordenes")
-      .select("id_orden, id_carrito, recargar_saldo, checkout_finalizado")
-      .eq("id_usuario", userId)
-      .eq("checkout_finalizado", false)
-      .or("orden_cancelada.is.null,orden_cancelada.eq.false")
-      .order("id_orden", { ascending: false })
-      .limit(1);
-    if (error) throw error;
-    const orden = Array.isArray(data) && data.length ? data[0] : null;
-    const idOrden = Number(orden?.id_orden);
-    if (!Number.isFinite(idOrden) || idOrden <= 0) {
-      activeOrderWrap.classList.add("hidden");
-      activeOrderLink.removeAttribute("href");
-      return;
-    }
-    const isSaldoOrder = isTrue(orden?.recargar_saldo) && !orden?.id_carrito;
-    const href = isSaldoOrder
-      ? `checkout.html?id_orden=${encodeURIComponent(idOrden)}&from=saldo`
-      : `checkout.html?id_orden=${encodeURIComponent(idOrden)}`;
-    activeOrderLink.href = href;
-    activeOrderWrap.classList.remove("hidden");
-  } catch (err) {
-    console.error("active order notice error", err);
-    activeOrderWrap.classList.add("hidden");
-    activeOrderLink.removeAttribute("href");
-  }
-};
-
 const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
   if (!recordatoriosPendientesWrap || !recordatoriosPendientesList || !recordatoriosPendientesEmpty) return;
   if (!isSuperadmin) {
@@ -1568,7 +1638,6 @@ async function init() {
       testingBtn.classList.toggle("hidden", !isSuper);
       testingBtn.style.display = isSuper ? "inline-flex" : "none";
     }
-    await loadActiveOrderNotice(currentUser);
     await checkMissingDataNotice(currentUser);
     await loadPendingReminderDates({ isSuperadmin: isSuper });
     await loadPendingReminderNoPhoneClients({ isSuperadmin: isSuper });

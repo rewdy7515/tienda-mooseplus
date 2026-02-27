@@ -59,7 +59,16 @@ const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
 };
 
 const resolveDiscountColumn = (platform, mode = "months") => {
-  const raw = mode === "items" ? platform?.id_descuento_cantidad : platform?.id_descuento_mes;
+  const isItemsMode = mode === "items";
+  const groupField = isItemsMode
+    ? discountAudienceIsCliente
+      ? "id_descuento_cantidad_detal"
+      : "id_descuento_cantidad_mayor"
+    : discountAudienceIsCliente
+      ? "id_descuento_mes_detal"
+      : "id_descuento_mes_mayor";
+  const legacyField = isItemsMode ? "id_descuento_cantidad" : "id_descuento_mes";
+  const raw = platform?.[groupField] ?? platform?.[legacyField];
   const asText = String(raw || "").trim();
   if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
   const asNum = Number(raw);
@@ -979,6 +988,10 @@ export const openModal = (platform) => {
     id_descuento,
     id_descuento_mes,
     id_descuento_cantidad,
+    id_descuento_mes_detal,
+    id_descuento_mes_mayor,
+    id_descuento_cantidad_detal,
+    id_descuento_cantidad_mayor,
     aplica_descuento_mes_detal,
     aplica_descuento_mes_mayor,
     aplica_descuento_cantidad_detal,
@@ -1047,6 +1060,10 @@ export const openModal = (platform) => {
     id_descuento: null,
     id_descuento_mes,
     id_descuento_cantidad,
+    id_descuento_mes_detal: id_descuento_mes_detal ?? id_descuento_mes,
+    id_descuento_mes_mayor: id_descuento_mes_mayor ?? id_descuento_mes,
+    id_descuento_cantidad_detal: id_descuento_cantidad_detal ?? id_descuento_cantidad,
+    id_descuento_cantidad_mayor: id_descuento_cantidad_mayor ?? id_descuento_cantidad,
     aplica_descuento_mes_detal: !isFalseLike(aplica_descuento_mes_detal),
     aplica_descuento_mes_mayor: !isFalseLike(aplica_descuento_mes_mayor),
     aplica_descuento_cantidad_detal: !isFalseLike(aplica_descuento_cantidad_detal),
