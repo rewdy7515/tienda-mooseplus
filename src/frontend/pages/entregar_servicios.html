@@ -350,10 +350,11 @@
               .map((r) => {
                 const perfilTxt = r.perfil || "";
                 const isPendiente = r.pendiente;
-                const requiresClientInputs = showClientInputs && isPendiente;
                 const pinPerfil = normalizeCopyValue(r.pin_perfil);
                 const pinCuenta = normalizeCopyValue(r.pin_cuenta);
                 const pinVenta = resolveVentaPin(r);
+                const hasEntregaData = !!(r.correo || r.clave || pinVenta || r.n_perfil);
+                const requiresClientInputs = showClientInputs && isPendiente && !hasEntregaData;
                 const pinCellHtml = (() => {
                   if (pinPerfil && pinCuenta && pinPerfil !== pinCuenta) {
                     return `
@@ -374,7 +375,6 @@
                   }
                   return "";
                 })();
-                const hasEntregaData = !!(r.correo || r.clave || pinVenta || r.n_perfil);
                 const copyText = isRenovacion
                   ? buildRenovacionMensaje(r, r.fecha_corte, r.plataforma)
                   : requiresClientInputs
@@ -842,7 +842,7 @@
                 .from("perfiles")
                 .select("id_perfil, id_cuenta, n_perfil")
                 .eq("id_cuenta", motherFromClient)
-                .eq("ocupado", false)
+                .or("ocupado.is.null,ocupado.eq.false")
                 .order("n_perfil", { ascending: true })
                 .limit(40);
               if (pErr) throw pErr;
@@ -862,7 +862,7 @@
                 .select("id_perfil, id_cuenta, n_perfil, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, cuenta_madre, inactiva)")
                 .eq("cuentas.id_plataforma", platIdNum)
                 .eq("cuentas.cuenta_madre", true)
-                .eq("ocupado", false)
+                .or("ocupado.is.null,ocupado.eq.false")
                 .order("id_cuenta", { ascending: true })
                 .order("n_perfil", { ascending: true });
               if (requireMadreActiva) {
