@@ -553,7 +553,15 @@ const renderPrecios = (plataformaId, flags) => {
       stockPlan = Number(stockByPlatform[`${plataformaId}_completas`]) || 0;
     }
     const planFallback = flags.por_acceso ? "Acceso" : "Perfil";
-    const planName = onlyComplete
+    const opcionBase = items[0];
+    const cardValue = String(opcionBase?.valor_tarjeta_de_regalo || "").trim();
+    const cardCurrency = String(opcionBase?.moneda || "").trim();
+    const cardLabel = [cardValue, cardCurrency].filter(Boolean).join(" ").trim();
+    const planName = flags.tarjeta_de_regalo
+      ? cardLabel
+        ? `Pin de ${cardLabel}`
+        : "Pin"
+      : onlyComplete
       ? "Cuenta completa"
       : plan || planFallback;
     let planDesc = items
@@ -566,7 +574,6 @@ const renderPrecios = (plataformaId, flags) => {
         planDesc = `- Incluyen ${maxDevices} ${unit}`;
       }
     }
-    const opcionBase = items[0];
     const priceValue = Number(opcionBase?.precio_usd_detal) || 0;
     const appendPriceAndStock = (titleEl, stockLineText) => {
       const priceEl = document.createElement("span");
@@ -598,7 +605,9 @@ const renderPrecios = (plataformaId, flags) => {
     };
 
     if (showStock) {
-      const stockLabel = onlyComplete
+      const stockLabel = flags.tarjeta_de_regalo
+        ? "Pines disponibles"
+        : onlyComplete
         ? "Disponibles"
         : flags.por_acceso
         ? "Accesos disponibles"

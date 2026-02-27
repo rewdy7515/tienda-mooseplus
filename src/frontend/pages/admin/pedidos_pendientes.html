@@ -721,6 +721,7 @@
             const servicio = precio.plan ? `${platName} - ${precio.plan}` : platName;
             const isCompleta =
               v.completa === true || v.completa === "true" || v.completa === 1 || v.completa === "1";
+            const isPlat11 = Number(platId) === 11;
             if (!grouped[platId])
               grouped[platId] = {
                 id_plataforma: platId,
@@ -782,7 +783,7 @@
               perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
               n_perfil: v.perfiles?.n_perfil || null,
               id_plataforma: platId,
-              cuenta_madre: grouped[platId].cuenta_madre && !isCompleta,
+              cuenta_madre: grouped[platId].cuenta_madre && !isCompleta && !isPlat11,
               completa: isCompleta,
               por_acceso: grouped[platId].por_acceso,
               usa_pines: grouped[platId].usa_pines,
@@ -817,12 +818,14 @@
         const existingMadreId = btn?.dataset?.idCuenta || "";
         const existingPerfilId = btn?.dataset?.idPerfil || "";
         const isCompleta = btn?.dataset?.completa === "true";
-        const cuentaMadreFlag = btn?.dataset?.cuentaMadre === "true" && !isCompleta;
         const mesesContratados = Number(btn?.dataset?.meses || 1);
         const costoActivacion = Number(activationData?.costo);
         const proveedorId = Number(activationData?.idProveedor);
         const idPlataformaNum = Number(idPlataforma);
         const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
+        const forceCuentaCompleta = idPlataformaNum === 11;
+        const cuentaMadreFlag =
+          btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
         const requireMadreActiva = idPlataformaNum === 9;
         const { data: reemplazosBloqueados, error: replErr } = await loadReemplazosBloqueados();
         if (replErr) throw replErr;
@@ -850,6 +853,11 @@
             dominio_de: idUsuario ? Number(idUsuario) : null,
             id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
           };
+          if (forceCuentaCompleta) {
+            updateCuenta.id_cuenta_madre = null;
+            updateCuenta.venta_perfil = false;
+            updateCuenta.venta_miembro = false;
+          }
           if (Number.isFinite(proveedorId) && proveedorId > 0) {
             updateCuenta.id_proveedor = proveedorId;
           }
@@ -873,6 +881,11 @@
             id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
             id_proveedor: Number.isFinite(proveedorId) && proveedorId > 0 ? proveedorId : null,
           };
+          if (forceCuentaCompleta) {
+            insertCuenta.id_cuenta_madre = null;
+            insertCuenta.venta_perfil = false;
+            insertCuenta.venta_miembro = false;
+          }
           const { data: cuentaNueva, error: cuentaErr } = await supabase
             .from("cuentas")
             .insert(insertCuenta)
@@ -973,11 +986,15 @@
         const nextIso = toYMD(next);
         const updateVenta = {
           pendiente: false,
-          id_cuenta: cuentaMadreId || null,
-          id_cuenta_miembro: nuevaCuentaId,
-          id_perfil: perfilId || null,
+          id_cuenta: forceCuentaCompleta ? nuevaCuentaId : cuentaMadreId || null,
+          id_cuenta_miembro: forceCuentaCompleta ? null : nuevaCuentaId,
+          id_perfil: forceCuentaCompleta ? null : perfilId || null,
           cuenta_nueva: false,
         };
+        if (forceCuentaCompleta) {
+          updateVenta.correo_miembro = correoCuenta || null;
+          updateVenta.clave_miembro = claveCuenta || null;
+        }
         if (ventaSinFechaCorte) {
           updateVenta.fecha_corte = nextIso;
         }

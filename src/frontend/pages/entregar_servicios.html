@@ -337,14 +337,16 @@
           .map((platObj) => {
             const rows = platObj.rows || [];
             const hasPendiente = rows.some((r) => r.pendiente);
+            const platId = Number(rows?.[0]?.id_plataforma || "");
             const showClientInputs =
               FORCE_CLIENT_INPUTS ||
-              platObj.correo_cliente === true;
-            const showClaveInput = showClientInputs && platObj.clave_cliente === true;
+              platObj.correo_cliente === true ||
+              platId === 9;
+            const showClaveInput =
+              showClientInputs && (platObj.clave_cliente === true || platId === 9);
             const showPinColumn = !isRenovacion && isTrue(platObj.usa_pines);
             const showPerfilColumn = !!(platObj.por_acceso || platObj.por_pantalla);
             const perfilHeader = platObj.por_acceso ? "Acceso" : "Perfil";
-            const platId = Number(rows?.[0]?.id_plataforma || "");
             const showTipoColumn = !isRenovacion && platId === 9;
             const body = rows
               .map((r) => {
@@ -598,18 +600,26 @@
             const usaPines = !!plat.usa_pines;
             const ventaPerfil = v.cuentas?.venta_perfil;
             const ventaMiembro = v.cuentas?.venta_miembro;
+            const isPendienteVenta = !!v.pendiente;
             const perfilTxt = porAcceso
               ? "1 acceso"
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
+            const cuentaCliente = v.cuentas_miembro || null;
             const requiresClientCorreo = isTrue(plat.correo_cliente);
-            const correoCuenta = requiresClientCorreo
+            const correoCuenta = isPendienteVenta
               ? v.correo_miembro || ""
+              : requiresClientCorreo
+              ? v.correo_miembro || cuentaCliente?.correo || ""
               : Number(platId) === 12
               ? v.correo_miembro || ""
               : v.cuentas?.correo || "";
-            const claveCuenta = requiresClientCorreo ? v.clave_miembro || "" : v.cuentas?.clave || "";
+            const claveCuenta = isPendienteVenta
+              ? v.clave_miembro || ""
+              : requiresClientCorreo
+              ? v.clave_miembro || cuentaCliente?.clave || ""
+              : v.cuentas?.clave || "";
             grouped[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
@@ -626,7 +636,7 @@
               venta_miembro: ventaMiembro,
               perfil_hogar: v.perfiles?.perfil_hogar,
               perfil: perfilTxt,
-              pendiente: !!v.pendiente,
+              pendiente: isPendienteVenta,
             });
           });
 
@@ -655,18 +665,26 @@
             const usaPines = !!plat.usa_pines;
             const ventaPerfil = v.cuentas?.venta_perfil;
             const ventaMiembro = v.cuentas?.venta_miembro;
+            const isPendienteVenta = !!v.pendiente;
             const perfilTxt = porAcceso
               ? "1 acceso"
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
+            const cuentaCliente = v.cuentas_miembro || null;
             const requiresClientCorreo = isTrue(plat.correo_cliente);
-            const correoCuenta = requiresClientCorreo
+            const correoCuenta = isPendienteVenta
               ? v.correo_miembro || ""
+              : requiresClientCorreo
+              ? v.correo_miembro || cuentaCliente?.correo || ""
               : Number(platId) === 12
               ? v.correo_miembro || ""
               : v.cuentas?.correo || "";
-            const claveCuenta = requiresClientCorreo ? v.clave_miembro || "" : v.cuentas?.clave || "";
+            const claveCuenta = isPendienteVenta
+              ? v.clave_miembro || ""
+              : requiresClientCorreo
+              ? v.clave_miembro || cuentaCliente?.clave || ""
+              : v.cuentas?.clave || "";
             groupedNuevas[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
@@ -683,7 +701,7 @@
               venta_miembro: ventaMiembro,
               perfil_hogar: v.perfiles?.perfil_hogar,
               perfil: perfilTxt,
-              pendiente: !!v.pendiente,
+              pendiente: isPendienteVenta,
             });
           });
 
@@ -802,6 +820,7 @@
         const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
         const platIdNum = Number(platId);
         const hasPlatId = Number.isFinite(platIdNum) && platIdNum > 0;
+        const forceCuentaCompleta = platIdNum === 11;
         const platInfo = platById[platId] || {};
         const needsClave = isTrue(platInfo?.clave_cliente);
         if (!correoVal) {
@@ -820,7 +839,7 @@
           const { data: reemplazosBloqueados, error: replErr } =
             await loadReemplazosBloqueados();
           if (replErr) throw replErr;
-          const needsMadre = platInfo.cuenta_madre === true;
+          const needsMadre = platInfo.cuenta_madre === true && !forceCuentaCompleta;
           const requireMadreActiva = platIdNum === 9;
           let assignCuenta = null;
           let assignPerfil = null;
@@ -829,12 +848,53 @@
 
           const { data: cuentasFound, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, id_cuenta_madre, clave")
+            .select("id_cuenta, id_cuenta_madre, id_plataforma, clave")
             .eq("correo", correoVal)
             .order("id_cuenta", { ascending: true })
             .limit(1);
           if (cErr) throw cErr;
           cuentaExist = cuentasFound?.[0] || null;
+
+          if (forceCuentaCompleta) {
+            if (cuentaExist?.id_cuenta) {
+              const updateCuenta = {
+                id_plataforma: hasPlatId ? platIdNum : cuentaExist.id_plataforma || null,
+                inactiva: false,
+                ocupado: false,
+                id_cuenta_madre: null,
+                venta_perfil: false,
+                venta_miembro: false,
+              };
+              if (claveVal && claveVal !== (cuentaExist.clave || "")) {
+                updateCuenta.clave = claveVal;
+              }
+              const { error: updCuentaErr } = await supabase
+                .from("cuentas")
+                .update(updateCuenta)
+                .eq("id_cuenta", cuentaExist.id_cuenta);
+              if (updCuentaErr) throw updCuentaErr;
+              clientCuentaId = cuentaExist.id_cuenta;
+            } else {
+              const insertCuenta = {
+                correo: correoVal,
+                clave: claveVal || null,
+                id_plataforma: hasPlatId ? platIdNum : null,
+                inactiva: false,
+                ocupado: false,
+                id_cuenta_madre: null,
+                venta_perfil: false,
+                venta_miembro: false,
+              };
+              const { data: newCuenta, error: newCuentaErr } = await supabase
+                .from("cuentas")
+                .insert(insertCuenta)
+                .select("id_cuenta")
+                .single();
+              if (newCuentaErr) throw newCuentaErr;
+              clientCuentaId = newCuenta?.id_cuenta || null;
+              cuentaExist = clientCuentaId ? { id_cuenta: clientCuentaId, clave: claveVal || null } : null;
+            }
+          }
 
           if (needsMadre) {
             clientCuentaId = cuentaExist?.id_cuenta || null;
@@ -925,9 +985,15 @@
           }
 
           const payload = { correo_miembro: correoVal };
-          if (needsClave && claveVal) payload.clave_miembro = claveVal;
-          if (assignCuenta) payload.id_cuenta = assignCuenta;
-          if (assignPerfil) payload.id_perfil = assignPerfil;
+          if ((needsClave || forceCuentaCompleta) && claveVal) payload.clave_miembro = claveVal;
+          if (forceCuentaCompleta) {
+            payload.id_cuenta = clientCuentaId || null;
+            payload.id_perfil = null;
+            payload.id_cuenta_miembro = null;
+          } else {
+            if (assignCuenta) payload.id_cuenta = assignCuenta;
+            if (assignPerfil) payload.id_perfil = assignPerfil;
+          }
           if (platIdNum === 9) payload.cuenta_nueva = tipoVal === "nueva";
 
           const { error } = await supabase

@@ -3652,9 +3652,29 @@ app.get("/api/inventario", async (req, res) => {
         fecha_corte,
         id_precio,
         id_cuenta,
+        id_cuenta_miembro,
         id_perfil,
         completa,
         cuentas:cuentas!ventas_id_cuenta_fkey(
+          id_cuenta,
+          id_plataforma,
+          correo,
+          clave,
+          venta_perfil,
+          venta_miembro,
+          plataformas(
+            nombre,
+            color_1,
+            color_2,
+            color_3,
+            usa_pines,
+            por_pantalla,
+            por_acceso,
+            correo_cliente,
+            clave_cliente
+          )
+        ),
+        cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(
           id_cuenta,
           id_plataforma,
           correo,
@@ -3688,11 +3708,13 @@ app.get("/api/inventario", async (req, res) => {
 
     const memberIds = Array.from(
       new Set(
-        (data || [])
-          .map((row) => row.perfiles?.id_cuenta_miembro)
-          .filter(Boolean),
+        (data || []).flatMap((row) => [
+          row?.id_cuenta_miembro,
+          row?.perfiles?.id_cuenta_miembro,
+          row?.cuentas_miembro?.id_cuenta,
+        ]),
       ),
-    );
+    ).filter(Boolean);
     let memberCuentaMap = {};
     if (memberIds.length) {
       const { data: memberCuentas, error: memberErr } = await supabaseAdmin
@@ -3707,20 +3729,26 @@ app.get("/api/inventario", async (req, res) => {
     }
 
     const items = (data || []).map((row) => {
-      const plataforma = row.cuentas?.plataformas?.nombre || "Sin plataforma";
-      const color_1 = row.cuentas?.plataformas?.color_1 || null;
-      const color_2 = row.cuentas?.plataformas?.color_2 || null;
-      const color_3 = row.cuentas?.plataformas?.color_3 || null;
-      const usa_pines = row.cuentas?.plataformas?.usa_pines ?? null;
-      const por_pantalla = row.cuentas?.plataformas?.por_pantalla ?? null;
-      const por_acceso = row.cuentas?.plataformas?.por_acceso ?? null;
-      const correo_cliente_flag = row.cuentas?.plataformas?.correo_cliente ?? null;
-      const clave_cliente_flag = row.cuentas?.plataformas?.clave_cliente ?? null;
+      const plataformaInfo = row.cuentas?.plataformas || row.cuentas_miembro?.plataformas || null;
+      const plataforma = plataformaInfo?.nombre || "Sin plataforma";
+      const color_1 = plataformaInfo?.color_1 || null;
+      const color_2 = plataformaInfo?.color_2 || null;
+      const color_3 = plataformaInfo?.color_3 || null;
+      const usa_pines = plataformaInfo?.usa_pines ?? null;
+      const por_pantalla = plataformaInfo?.por_pantalla ?? null;
+      const por_acceso = plataformaInfo?.por_acceso ?? null;
+      const correo_cliente_flag = plataformaInfo?.correo_cliente ?? null;
+      const clave_cliente_flag = plataformaInfo?.clave_cliente ?? null;
       const isCompleta = isTrue(row?.completa) || isTrue(row?.precios?.completa);
       const plan = (row.precios?.plan || "").trim() || (isCompleta ? "Cuenta completa" : "Sin plan");
       const sub_cuenta = row.precios?.sub_cuenta ?? null;
-      const memberId = row.perfiles?.id_cuenta_miembro || null;
-      const memberCuenta = memberId ? memberCuentaMap[memberId] : null;
+      const memberId =
+        row.id_cuenta_miembro ||
+        row.perfiles?.id_cuenta_miembro ||
+        row.cuentas_miembro?.id_cuenta ||
+        null;
+      const memberCuenta = memberId ? memberCuentaMap[memberId] || row.cuentas_miembro : null;
+      const cuentaData = row.cuentas || row.cuentas_miembro || null;
       return {
         plataforma,
         color_1,
@@ -3735,18 +3763,19 @@ app.get("/api/inventario", async (req, res) => {
         id_venta: row.id_venta,
         nombre_cliente: row.nombre_cliente || "",
         id_precio: row.id_precio || null,
-        id_plataforma: row.cuentas?.id_plataforma || null,
-        id_cuenta: memberId || row.id_cuenta || row.cuentas?.id_cuenta || null,
+        id_plataforma: row.cuentas?.id_plataforma || row.cuentas_miembro?.id_plataforma || null,
+        id_cuenta:
+          memberId || row.id_cuenta || row.id_cuenta_miembro || row.cuentas?.id_cuenta || null,
         id_perfil: row.id_perfil || row.perfiles?.id_perfil || null,
-        correo: memberCuenta?.correo || row.cuentas?.correo || "",
+        correo: memberCuenta?.correo || cuentaData?.correo || "",
         correo_cliente: row.correo_miembro || "",
-        clave: memberCuenta?.clave || row.cuentas?.clave || "",
+        clave: memberCuenta?.clave || cuentaData?.clave || "",
         n_perfil: row.perfiles?.n_perfil ?? null,
         pin: row.perfiles?.pin ?? null,
         perfil_hogar: row.perfiles?.perfil_hogar ?? null,
         fecha_corte: row.fecha_corte,
-        venta_perfil: row.cuentas?.venta_perfil,
-        venta_miembro: row.cuentas?.venta_miembro,
+        venta_perfil: row.cuentas?.venta_perfil ?? row.cuentas_miembro?.venta_perfil,
+        venta_miembro: row.cuentas?.venta_miembro ?? row.cuentas_miembro?.venta_miembro,
         completa: isCompleta,
         sub_cuenta,
       };
@@ -3852,12 +3881,14 @@ app.get("/api/ventas/orden", async (req, res) => {
         renovacion,
         fecha_corte,
         id_perfil,
+        id_cuenta_miembro,
         id_precio,
         pendiente,
         id_orden,
         correo_miembro,
         clave_miembro,
         cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, pin, id_plataforma, venta_perfil, venta_miembro),
+        cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, pin, id_plataforma, id_cuenta_madre),
         perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
         precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)
       `

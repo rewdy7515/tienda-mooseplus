@@ -63,14 +63,33 @@
         font-size: 16px;
       }
       .precio-table {
-        width: 100%;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
+        table-layout: auto;
+      }
+      .precio-table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
       }
       .precio-table th,
       .precio-table td {
         border: 1px solid #e5e7eb;
         padding: 8px;
         text-align: left;
+        min-width: 130px;
+        white-space: nowrap;
+        overflow: hidden;
+        vertical-align: middle;
+      }
+      .precio-table td.precio-cell,
+      .precio-table td.plan-cell {
+        overflow: visible;
+      }
+      .precio-table td.plan-cell {
+        min-width: 220px;
       }
       .precio-table th {
         background: var(--table-header-bg, #2c2f36);
@@ -135,10 +154,10 @@
         background: #dc2626;
       }
       .qty-popover {
-        position: absolute;
-        top: 100%;
+        position: fixed;
+        top: 0;
         left: 0;
-        z-index: 10;
+        z-index: 2147483647;
         background: #fff;
         border: 1px solid #d1d5db;
         border-radius: 10px;
@@ -204,7 +223,7 @@
         color: #fff;
       }
       .descuento-config {
-        min-width: 170px;
+        min-width: 290px;
         padding-right: 8px;
       }
       .descuento-inline {
@@ -237,7 +256,7 @@
       }
       .descuento-pair-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
         gap: 6px;
         width: 100%;
       }
@@ -396,6 +415,31 @@
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
+      };
+
+      const positionQtyPopover = (cell, popover) => {
+        if (!cell || !popover) return;
+        requestAnimationFrame(() => {
+          const margin = 10;
+          const spacing = 6;
+          const cellRect = cell.getBoundingClientRect();
+          const popRect = popover.getBoundingClientRect();
+          const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+          const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+
+          let left = cellRect.left;
+          if (left + popRect.width > vw - margin) left = vw - margin - popRect.width;
+          if (left < margin) left = margin;
+
+          let top = cellRect.bottom + spacing;
+          if (top + popRect.height > vh - margin) {
+            top = cellRect.top - popRect.height - spacing;
+          }
+          if (top < margin) top = margin;
+
+          popover.style.left = `${Math.round(left)}px`;
+          popover.style.top = `${Math.round(top)}px`;
+        });
       };
 
       const obtenerColumnasDescuento = (rows = []) => {
@@ -988,24 +1032,26 @@
         return `
           <div class="precio-block">
             <h3>${titulo}</h3>
-            <table class="table-base precio-table">
-              <thead>
-                <tr>
-                  <th>Cantidad</th>
-                  ${esGift ? "<th>Valor</th><th>Región</th>" : "<th>Plan</th><th>Duración</th>"}
-                  <th>Precio USD detal</th>
-                  <th>Precio USD mayor</th>
-                  <th>${descuentoMesHeader}</th>
-                  <th>${descuentoCantHeader}</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows || `<tr><td colspan="7">Sin precios</td></tr>`}
-                <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-descuento-mes="${descuentoMes}" data-descuento-cant="${descuentoCant}" data-descuento-mes-detal="${descuentoMesDetal}" data-descuento-mes-mayor="${descuentoMesMayor}" data-descuento-cant-detal="${descuentoCantDetal}" data-descuento-cant-mayor="${descuentoCantMayor}" data-aplica-descuento-mes-detal="${!isExplicitFalse(platMeta?.aplica_descuento_mes_detal)}" data-aplica-descuento-mes-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_mes_mayor)}" data-aplica-descuento-cantidad-detal="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_detal)}" data-aplica-descuento-cantidad-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_mayor)}">
-                  <td colspan="7" style="text-align:center; font-weight:700;">+</td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="precio-table-scroll">
+              <table class="table-base precio-table">
+                <thead>
+                  <tr>
+                    <th>Cantidad</th>
+                    ${esGift ? "<th>Valor</th><th>Región</th>" : "<th>Plan</th><th>Duración</th>"}
+                    <th>Precio USD detal</th>
+                    <th>Precio USD mayor</th>
+                    <th>${descuentoMesHeader}</th>
+                    <th>${descuentoCantHeader}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows || `<tr><td colspan="7">Sin precios</td></tr>`}
+                  <tr class="row-add" data-add="true" data-plat="${platMeta.id_plataforma}" data-plan="${planKey || ""}" data-gift="${esGift}" data-porpantalla="${platFlags.por_pantalla ? "true" : "false"}" data-poracceso="${platFlags.por_acceso ? "true" : "false"}" data-descuento-mes="${descuentoMes}" data-descuento-cant="${descuentoCant}" data-descuento-mes-detal="${descuentoMesDetal}" data-descuento-mes-mayor="${descuentoMesMayor}" data-descuento-cant-detal="${descuentoCantDetal}" data-descuento-cant-mayor="${descuentoCantMayor}" data-aplica-descuento-mes-detal="${!isExplicitFalse(platMeta?.aplica_descuento_mes_detal)}" data-aplica-descuento-mes-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_mes_mayor)}" data-aplica-descuento-cantidad-detal="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_detal)}" data-aplica-descuento-cantidad-mayor="${!isExplicitFalse(platMeta?.aplica_descuento_cantidad_mayor)}">
+                    <td colspan="7" style="text-align:center; font-weight:700;">+</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         `;
       };
@@ -1675,12 +1721,14 @@
 
           // cerrar ediciones anteriores
           wrapper.querySelectorAll(".qty-popover").forEach((p) => p.remove());
-          wrapper.querySelectorAll(".precio-cell input").forEach((inp) => {
-            const spanText = inp.dataset.original || inp.value;
+          wrapper.querySelectorAll(".precio-cell .inline-edit").forEach((editWrap) => {
+            const inp = editWrap.querySelector("input");
+            if (!inp) return;
+            const spanText = inp.dataset.original || inp.value || "-";
             const span = document.createElement("span");
             span.className = "precio-text";
             span.textContent = spanText;
-            inp.replaceWith(span);
+            editWrap.replaceWith(span);
           });
           wrapper.querySelectorAll(".precio-edit").forEach((b) => (b.textContent = "✏️"));
 
@@ -1731,6 +1779,7 @@
               </div>
             `;
             cell.appendChild(pop);
+            positionQtyPopover(cell, pop);
             btn.textContent = "💾";
 
             const qtyInput = pop.querySelector(".qty-input");
@@ -1765,7 +1814,10 @@
                     por_pantalla: cell.dataset.porpantalla === "true",
                     por_acceso: cell.dataset.poracceso === "true",
                   };
-                  const flagsFormat = { por_pantalla: flags.porpantalla, por_acceso: flags.poracceso };
+                  const flagsFormat = {
+                    por_pantalla: flags.por_pantalla,
+                    por_acceso: flags.por_acceso,
+                  };
                   exitEdit(cell, formatCantidad(qty, flagsFormat, completaFlag));
                   setEstado("Cantidad actualizada.");
                 } catch (err) {
@@ -1821,6 +1873,7 @@
             const saveBtn = wrap.querySelector(".inline-save");
             span.replaceWith(wrap);
             btn.classList.add("hidden");
+            if (input) input.dataset.original = span.textContent;
             input?.focus();
             const save = async () => {
               const qty = parseInt(input.value, 10);
@@ -1886,6 +1939,7 @@
               </div>
             `;
             cell.appendChild(pop);
+            positionQtyPopover(cell, pop);
             btn.textContent = "💾";
 
             const qtyInput = pop.querySelector(".qty-input");
@@ -1964,6 +2018,7 @@
               </div>
             `;
             cell.appendChild(pop);
+            positionQtyPopover(cell, pop);
             btn.textContent = "💾";
             const inputReg = pop.querySelector("input");
             inputReg?.focus();
@@ -2016,6 +2071,7 @@
           const saveBtn = wrap.querySelector(".inline-save");
           span.replaceWith(wrap);
           btn.classList.add("hidden");
+          if (input) input.dataset.original = span.textContent;
           input?.focus();
           input?.select();
           const savePrice = async () => {
