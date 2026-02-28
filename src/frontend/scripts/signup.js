@@ -1,5 +1,4 @@
 import {
-  completeSignupWithRegistrationToken,
   supabase,
   validateSignupRegistrationToken,
 } from "./api.js";
@@ -32,12 +31,19 @@ const goLoginBtn = document.getElementById("signup-login-link");
 const signupCardEl = document.getElementById("signup-card");
 const signupFlowEl = document.getElementById("signup-flow");
 const signupSuccessStepEl = document.getElementById("signup-success-step");
+const signupSuccessEmailEl = document.getElementById("signup-success-email");
+const signupSuccessStatusEl = document.getElementById("signup-success-status");
+const signupResendBtn = document.getElementById("signup-resend-btn");
 let iti = null;
 const toggleButtons = document.querySelectorAll(".toggle-password");
 let phoneMaxDigits = null;
 let phonePattern = "";
 let captchaController = null;
 let captchaInitPromise = null;
+const RESEND_COOLDOWN_SECONDS = 15;
+let resendCountdownTimer = null;
+let resendSecondsLeft = 0;
+let resendTargetEmail = "";
 const signupToken =
   new URLSearchParams(window.location.search || "").get("t") ||
   new URLSearchParams(window.location.search || "").get("registro_token") ||
@@ -74,21 +80,69 @@ function setStatus(msg, isError = false) {
   statusEl.classList.toggle("is-success", !isError);
 }
 
-function showSignupSuccessView() {
+function setSignupSuccessStatus(message = "", isError = false) {
+  if (!signupSuccessStatusEl) return;
+  signupSuccessStatusEl.textContent = message;
+  signupSuccessStatusEl.classList.toggle("is-error", !!message && isError);
+  signupSuccessStatusEl.classList.toggle("is-success", !!message && !isError);
+}
+
+function setSignupSuccessEmail(correo = "") {
+  if (!signupSuccessEmailEl) return;
+  const email = String(correo || "").trim().toLowerCase();
+  signupSuccessEmailEl.textContent = email ? `Correo: ${email}` : "";
+}
+
+function clearResendCountdownTimer() {
+  if (!resendCountdownTimer) return;
+  clearInterval(resendCountdownTimer);
+  resendCountdownTimer = null;
+}
+
+function updateResendButtonState() {
+  if (!signupResendBtn) return;
+  if (resendSecondsLeft > 0) {
+    signupResendBtn.disabled = true;
+    signupResendBtn.textContent = `Reenviar (${resendSecondsLeft}s)`;
+    return;
+  }
+  signupResendBtn.disabled = false;
+  signupResendBtn.textContent = "Reenviar";
+}
+
+function startResendCooldown(seconds = RESEND_COOLDOWN_SECONDS) {
+  clearResendCountdownTimer();
+  resendSecondsLeft = Math.max(0, Number(seconds) || 0);
+  updateResendButtonState();
+  if (resendSecondsLeft <= 0) return;
+
+  resendCountdownTimer = window.setInterval(() => {
+    resendSecondsLeft = Math.max(0, resendSecondsLeft - 1);
+    updateResendButtonState();
+    if (resendSecondsLeft <= 0) {
+      clearResendCountdownTimer();
+    }
+  }, 1000);
+}
+
+function showSignupSuccessView(options = {}) {
   setStatus("", false);
+  const correo = String(options?.correo || "").trim().toLowerCase();
+  if (correo) resendTargetEmail = correo;
+  setSignupSuccessEmail(resendTargetEmail);
+  setSignupSuccessStatus(options?.status || "", options?.isError === true);
+  if (options?.startCooldown !== false) {
+    startResendCooldown(RESEND_COOLDOWN_SECONDS);
+  } else {
+    clearResendCountdownTimer();
+    resendSecondsLeft = 0;
+    updateResendButtonState();
+  }
   signupCardEl?.classList.add("signup-success-only");
   signupFlowEl?.classList.add("is-success");
   setTimeout(() => {
     signupSuccessStepEl?.focus();
   }, 250);
-}
-
-function setCorreoYaRegistradoError() {
-  if (!errors?.correo || !fields?.correo) return;
-  errors.correo.innerHTML =
-    'Correo ya registrado. <a class="link-inline" href="login.html">Inicia sesión aquí</a>';
-  fields.correo.classList.add("input-error");
-  setStatus("", false);
 }
 
 function normalizeErrorMessage(err) {
@@ -154,14 +208,65 @@ const preloadSignupTokenContext = async () => {
   return result;
 };
 
-async function correoExiste(correo) {
-  const { data, error } = await supabase
-    .from("usuarios")
-    .select("id_usuario, fecha_registro")
-    .ilike("correo", correo)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
+async function resendSignupConfirmation(correo, captchaToken) {
+  const email = String(correo || "").trim().toLowerCase();
+  if (!email) return { ok: false };
+  try {
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo: getSignupEmailRedirectUrl(),
+        captchaToken,
+      },
+    });
+    if (error) return { ok: false, error };
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+async function requestResendToken() {
+  const ctrl = captchaController || (captchaInitPromise ? await captchaInitPromise : null);
+  if (!ctrl || !ctrl.enabled) {
+    return "";
+  }
+  return ctrl.ensureToken();
+}
+
+async function handleResendButtonClick() {
+  if (resendSecondsLeft > 0) return;
+  const correo = String(resendTargetEmail || fields.correo?.value || "")
+    .trim()
+    .toLowerCase();
+  if (!correo) {
+    setSignupSuccessStatus("No se pudo detectar el correo para reenviar.", true);
+    return;
+  }
+
+  const captchaToken = await requestResendToken();
+  if (!captchaToken) {
+    setSignupSuccessStatus("Completa el captcha para reenviar la confirmación.", true);
+    return;
+  }
+
+  if (signupResendBtn) {
+    signupResendBtn.disabled = true;
+    signupResendBtn.textContent = "Reenviando...";
+  }
+
+  const resent = await resendSignupConfirmation(correo, captchaToken);
+  startResendCooldown(RESEND_COOLDOWN_SECONDS);
+  if (resent?.ok) {
+    setSignupSuccessStatus("Te reenviamos el correo de verificación.", false);
+  } else {
+    setSignupSuccessStatus(
+      "No se pudo reenviar en este intento. Vuelve a intentarlo en unos segundos.",
+      true,
+    );
+  }
+  captchaController?.reset();
 }
 
 async function handleSubmit(e) {
@@ -240,8 +345,6 @@ async function handleSubmit(e) {
 
   try {
     const tokenFlow = !!signupToken;
-    let existente = null;
-    let reutilizar = false;
 
     if (tokenFlow) {
       const valid = await validateSignupRegistrationToken(signupToken);
@@ -249,16 +352,6 @@ async function handleSubmit(e) {
         throw new Error(valid.error || "El link de registro no es válido.");
       }
       signupTokenContext = valid;
-    } else {
-      existente = await correoExiste(correo);
-      const correoLibre = !existente;
-      reutilizar =
-        existente &&
-        (existente.fecha_registro === null || typeof existente.fecha_registro === "undefined");
-      if (!correoLibre && !reutilizar) {
-        setCorreoYaRegistradoError();
-        return;
-      }
     }
 
     const phoneDial = iti?.getSelectedCountryData?.()?.dialCode;
@@ -277,6 +370,7 @@ async function handleSubmit(e) {
           apellido,
           telefono: phoneDigits,
           phone: phoneDigits,
+          signup_registration_token: tokenFlow ? signupToken : undefined,
         },
         captchaToken,
       },
@@ -286,56 +380,28 @@ async function handleSubmit(e) {
       throw authErr;
     }
 
-    // 2) Registrar en tabla usuarios
-    let idUsuarioCreado = null;
-    if (tokenFlow) {
-      const completeRes = await completeSignupWithRegistrationToken({
-        token: signupToken,
-        nombre,
-        apellido,
-        telefono: phoneDigits,
-        correo,
-      });
-      if (completeRes?.error) {
-        throw new Error(completeRes.error);
-      }
-      idUsuarioCreado = Number(completeRes?.id_usuario) || null;
-    } else {
-      const today = new Date().toISOString().slice(0, 10);
-      let data = null;
-      let error = null;
-      if (reutilizar && existente?.id_usuario) {
-        const upd = await supabase
-          .from("usuarios")
-          .update({ nombre, apellido, telefono: phoneDigits, correo, fecha_registro: today })
-          .eq("id_usuario", existente.id_usuario)
-          .select("id_usuario")
-          .single();
-        data = upd.data;
-        error = upd.error;
-      } else {
-        const ins = await supabase
-          .from("usuarios")
-          .insert({ nombre, apellido, telefono: phoneDigits, correo, fecha_registro: today })
-          .select("id_usuario")
-          .single();
-        data = ins.data;
-        error = ins.error;
-      }
-      if (error) throw error;
-      idUsuarioCreado = Number(data?.id_usuario) || null;
-    }
-
-    if (!idUsuarioCreado) {
-      throw new Error("No se pudo obtener el usuario creado.");
-    }
-
-    showSignupSuccessView();
+    // 2) No se actualiza tabla `usuarios` aquí.
+    //    Se completa/vincula al confirmar correo y abrir sesión (endpoint /api/session).
+    showSignupSuccessView({
+      correo,
+      status:
+        "Te enviamos un correo de verificación. Revisa tu bandeja de entrada y la carpeta de spam.",
+      isError: false,
+      startCooldown: true,
+    });
   } catch (err) {
     console.error("signup error", err);
     const msg = normalizeErrorMessage(err);
-    if (msg.includes("user already registered")) {
-      setCorreoYaRegistradoError();
+    if (msg.includes("user already registered") || msg.includes("email not confirmed")) {
+      const resent = await resendSignupConfirmation(correo, captchaToken);
+      showSignupSuccessView({
+        correo,
+        status: resent?.ok
+          ? "Este correo aún no está confirmado. Te reenviamos el enlace de verificación."
+          : "Este correo aún no está confirmado. No se pudo reenviar el enlace en este intento.",
+        isError: !resent?.ok,
+        startCooldown: true,
+      });
       return;
     }
     setStatus(translateSignupError(err), true);
@@ -352,7 +418,7 @@ function init() {
   });
 
   if (signupSuccessPreviewMode) {
-    showSignupSuccessView();
+    showSignupSuccessView({ startCooldown: false });
     return;
   }
 
@@ -470,6 +536,7 @@ function init() {
   }
 
   form?.addEventListener("submit", handleSubmit);
+  signupResendBtn?.addEventListener("click", handleResendButtonClick);
   goLoginBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     window.location.href = "login.html";

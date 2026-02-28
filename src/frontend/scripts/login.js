@@ -174,29 +174,33 @@ async function handleLogin(event) {
       return;
     }
 
-    // 2) Buscar usuario en tabla usuarios por correo (para id_usuario)
+    // 2) Establecer cookie de sesión backend con token real de Supabase Auth.
+    //    Aquí se vincula/crea el registro en `usuarios` si aún no existía.
+    const serverSession = await startSession();
+    if (serverSession?.error) {
+      setStatus("No se pudo establecer la sesión segura. Intenta de nuevo.", true);
+      return;
+    }
+    const idUsuarioServer = Number(serverSession?.id_usuario) || 0;
+    if (!idUsuarioServer) {
+      setStatus("No se pudo identificar tu usuario. Intenta de nuevo.", true);
+      return;
+    }
+
+    // 3) Cargar usuario final desde tabla `usuarios`
     const { data: user, error } = await supabase
       .from("usuarios")
       .select("id_usuario, acceso_cliente, permiso_admin, permiso_superadmin")
-      .ilike("correo", email)
+      .eq("id_usuario", idUsuarioServer)
       .maybeSingle();
 
     if (error) {
       throw error;
     }
 
-    // Si no existe en tabla usuarios, avisar para registro
+    // Si no existe en tabla usuarios, avisar y cortar
     if (!user) {
-      emailError.innerHTML =
-        'Este correo no está registrado en usuarios. <a class="link-inline" href="signup.html">Regístrate</a>';
-      emailInput.classList.add("input-error");
-      return;
-    }
-
-    // 3) Establecer cookie de sesión backend con token real de Supabase Auth
-    const serverSession = await startSession(user.id_usuario);
-    if (serverSession?.error) {
-      setStatus("No se pudo establecer la sesión segura. Intenta de nuevo.", true);
+      setStatus("No se pudo cargar tu usuario. Intenta nuevamente.", true);
       return;
     }
 

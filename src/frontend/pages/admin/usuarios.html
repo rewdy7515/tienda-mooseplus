@@ -302,17 +302,17 @@
       const buildSignupInviteMessage = (linkValue) => {
         const link = String(linkValue || "").trim();
         return [
-          "*Registrate en nuestra Pagina Web*",
+          "*Regístrate en nuestra Pagina Web*",
           "",
           `Link: ${link}`,
           "",
-          "*Al registrarte con este link podrás:*",
+          "*Al registrarte podrás:*",
           "",
-          "📦 Ver todos tus servicios activos.",
-          "🛍️ Comprar y renovar a *cualquier hora* con *verificación de pago automatizado*.",
-          "🚨 *Reportar* y recibir *soluciones inmediatas* de ciertos reportes.",
+          "   📦 Ver todos tus servicios activos.",
+          "   🛍️ Comprar y renovar a *cualquier hora* con *verificación de pagos automatizado*.",
+          "   🚨 *Reportar* y recibir *soluciones inmediatas* de ciertos reportes.",
           "",
-          "_Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartir este link._",
+          "_Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartirlo._",
         ].join("\n");
       };
 

@@ -1343,7 +1343,7 @@ const buildSignupRegistrationToken = (idUsuario) => {
   return `${payloadPart}.${signaturePart}`;
 };
 
-const verifySignupRegistrationToken = (tokenValue) => {
+const verifySignupRegistrationToken = (tokenValue, options = {}) => {
   const token = String(tokenValue || "").trim();
   if (!token) throw tokenError("TOKEN_REQUIRED", "Token requerido.");
   const parts = token.split(".");
@@ -1406,7 +1406,10 @@ const verifySignupRegistrationToken = (tokenValue) => {
   if (iatRaw !== undefined && iatRaw !== null && Number.isFinite(iat) && iat > nowSec + 300) {
     throw tokenError("TOKEN_INVALID", "Token inválido.");
   }
-  if (exp <= nowSec) throw tokenError("TOKEN_EXPIRED", "El link de registro ya venció.");
+  const allowExpired = options?.allowExpired === true;
+  if (!allowExpired && exp <= nowSec) {
+    throw tokenError("TOKEN_EXPIRED", "El link de registro ya venció.");
+  }
 
   return { uid, exp, iat };
 };
@@ -2325,70 +2328,238 @@ const resolveUsuarioFromAuthToken = async (token) => {
     throw err;
   }
 
+  const asCodeError = (code, message = code) => {
+    const err = new Error(message);
+    err.code = code;
+    return err;
+  };
+  const normalizeText = (value) => String(value || "").trim();
+  const normalizePhoneDigits = (value) => normalizeText(value).replace(/\D+/g, "");
+  const normalizeEmail = (value) => normalizeText(value).toLowerCase();
+  const mapUniqueUsuariosError = (dbErr) => {
+    if (String(dbErr?.code || "") !== "23505") return "";
+    const detail = `${dbErr?.message || ""} ${dbErr?.details || ""} ${dbErr?.hint || ""}`.toLowerCase();
+    if (detail.includes("id_auth")) return "USER_AUTH_DUPLICATED";
+    if (detail.includes("correo")) return "USER_EMAIL_DUPLICATED";
+    return "USER_AUTH_DUPLICATED";
+  };
+  const throwIfUniqueUsuariosError = (dbErr) => {
+    const mappedCode = mapUniqueUsuariosError(dbErr);
+    if (mappedCode) throw asCodeError(mappedCode);
+  };
+
+  const rawMeta =
+    authData.user?.user_metadata && typeof authData.user.user_metadata === "object"
+      ? authData.user.user_metadata
+      : {};
+  const displayName = normalizeText(rawMeta.display_name || rawMeta.full_name || rawMeta.name);
+  let metaNombre = normalizeText(rawMeta.nombre);
+  let metaApellido = normalizeText(rawMeta.apellido);
+  if (displayName && (!metaNombre || !metaApellido)) {
+    const parts = displayName.split(/\s+/).filter(Boolean);
+    if (!metaNombre && parts.length) metaNombre = parts[0];
+    if (!metaApellido && parts.length > 1) metaApellido = parts.slice(1).join(" ");
+  }
+  const emailLocal = normalizeText(authEmail.split("@")[0]).replace(/[._-]+/g, " ");
+  if (emailLocal && !metaNombre) {
+    const parts = emailLocal.split(/\s+/).filter(Boolean);
+    if (parts.length) metaNombre = parts[0];
+    if (!metaApellido && parts.length > 1) metaApellido = parts.slice(1).join(" ");
+  }
+  const metaTelefono = normalizePhoneDigits(
+    rawMeta.telefono || rawMeta.phone || rawMeta.phone_number || rawMeta.num_telefono,
+  );
+  const signupRegistrationToken = normalizeText(
+    rawMeta.signup_registration_token || rawMeta.registro_token || rawMeta.registration_token,
+  );
+
+  const buildUsuarioPatch = (currentRow, options = {}) => {
+    const forceProfile = options?.forceProfile === true;
+    const patch = {};
+
+    const currentCorreo = normalizeEmail(currentRow?.correo);
+    if (currentCorreo !== authEmail) {
+      patch.correo = authEmail;
+    }
+    if (!currentRow?.fecha_registro) {
+      patch.fecha_registro = todayInVenezuela();
+    }
+    const currentTelefono = normalizePhoneDigits(currentRow?.telefono);
+    if (metaTelefono && currentTelefono !== metaTelefono) {
+      patch.telefono = metaTelefono;
+    }
+    if (metaNombre && (forceProfile || !normalizeText(currentRow?.nombre))) {
+      patch.nombre = metaNombre;
+    }
+    if (metaApellido && (forceProfile || !normalizeText(currentRow?.apellido))) {
+      patch.apellido = metaApellido;
+    }
+    return patch;
+  };
+
+  const updateUsuarioPatch = async (idUsuario, patch) => {
+    if (!patch || !Object.keys(patch).length) return;
+    const { error: updErr } = await supabaseAdmin
+      .from("usuarios")
+      .update(patch)
+      .eq("id_usuario", idUsuario);
+    if (updErr) {
+      throwIfUniqueUsuariosError(updErr);
+      throw updErr;
+    }
+  };
+
+  const ensureAuthLinked = async (idUsuario, currentIdAuth) => {
+    const idAuthGuard = normalizeText(currentIdAuth);
+    if (idAuthGuard && idAuthGuard !== authUserId) {
+      throw asCodeError("USER_NOT_LINKED");
+    }
+    if (idAuthGuard === authUserId) return;
+
+    const { data: linkRow, error: linkErr } = await supabaseAdmin
+      .from("usuarios")
+      .update({ id_auth: authUserId })
+      .eq("id_usuario", idUsuario)
+      .is("id_auth", null)
+      .select("id_usuario, id_auth")
+      .maybeSingle();
+    if (linkErr) {
+      throwIfUniqueUsuariosError(linkErr);
+      throw linkErr;
+    }
+    if (linkRow) return;
+
+    const { data: verifyRow, error: verifyErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, id_auth")
+      .eq("id_usuario", idUsuario)
+      .maybeSingle();
+    if (verifyErr) throw verifyErr;
+    const afterAuth = normalizeText(verifyRow?.id_auth);
+    if (!afterAuth || afterAuth !== authUserId) {
+      throw asCodeError("USER_AUTH_DUPLICATED");
+    }
+  };
+
+  const fetchUsuariosByCorreo = async (correo, excludeId = null) => {
+    let query = supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, correo, id_auth, nombre, apellido, telefono, fecha_registro")
+      .ilike("correo", correo)
+      .limit(2);
+    if (excludeId) {
+      query = query.neq("id_usuario", excludeId);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  };
+
   const { data: byAuthRows, error: byAuthErr } = await supabaseAdmin
     .from("usuarios")
-    .select("id_usuario")
+    .select("id_usuario, correo, id_auth, nombre, apellido, telefono, fecha_registro")
     .eq("id_auth", authUserId)
     .limit(2);
   if (byAuthErr) throw byAuthErr;
   if (Array.isArray(byAuthRows) && byAuthRows.length > 1) {
-    const err = new Error("USER_AUTH_DUPLICATED");
-    err.code = "USER_AUTH_DUPLICATED";
-    throw err;
+    throw asCodeError("USER_AUTH_DUPLICATED");
   }
   if (Array.isArray(byAuthRows) && byAuthRows.length === 1) {
     const idUsuarioByAuth = Number(byAuthRows[0]?.id_usuario);
     if (Number.isFinite(idUsuarioByAuth) && idUsuarioByAuth > 0) {
+      const patch = buildUsuarioPatch(byAuthRows[0], { forceProfile: false });
+      await updateUsuarioPatch(idUsuarioByAuth, patch);
       return idUsuarioByAuth;
     }
   }
 
-  const { data: rows, error: rowsErr } = await supabaseAdmin
-    .from("usuarios")
-    .select("id_usuario, correo, id_auth")
-    .ilike("correo", authEmail)
-    .limit(2);
-  if (rowsErr) throw rowsErr;
+  if (signupRegistrationToken) {
+    let tokenPayload = null;
+    try {
+      tokenPayload = verifySignupRegistrationToken(signupRegistrationToken, { allowExpired: true });
+    } catch (_err) {
+      tokenPayload = null;
+    }
+    const idUsuarioToken = toPositiveInt(tokenPayload?.uid);
+    if (!idUsuarioToken) {
+      throw asCodeError("USER_NOT_LINKED");
+    }
 
-  if (!Array.isArray(rows) || !rows.length) {
-    const err = new Error("USER_NOT_LINKED");
-    err.code = "USER_NOT_LINKED";
-    throw err;
-  }
-  if (rows.length > 1) {
-    const err = new Error("USER_EMAIL_DUPLICATED");
-    err.code = "USER_EMAIL_DUPLICATED";
-    throw err;
-  }
-
-  const idUsuario = Number(rows[0]?.id_usuario);
-  const idAuthGuard = String(rows[0]?.id_auth || "").trim();
-  if (idAuthGuard && idAuthGuard !== authUserId) {
-    const err = new Error("USER_NOT_LINKED");
-    err.code = "USER_NOT_LINKED";
-    throw err;
-  }
-  if (!Number.isFinite(idUsuario) || idUsuario <= 0) {
-    const err = new Error(AUTH_REQUIRED);
-    err.code = AUTH_REQUIRED;
-    throw err;
-  }
-  if (!idAuthGuard) {
-    const { error: linkErr } = await supabaseAdmin
+    const { data: targetRow, error: targetErr } = await supabaseAdmin
       .from("usuarios")
-      .update({ id_auth: authUserId })
-      .eq("id_usuario", idUsuario)
-      .is("id_auth", null);
-    if (linkErr) {
-      if (String(linkErr.code || "") === "23505") {
-        const err = new Error("USER_AUTH_DUPLICATED");
-        err.code = "USER_AUTH_DUPLICATED";
-        throw err;
-      }
-      throw linkErr;
+      .select("id_usuario, correo, id_auth, nombre, apellido, telefono, fecha_registro")
+      .eq("id_usuario", idUsuarioToken)
+      .maybeSingle();
+    if (targetErr) throw targetErr;
+    if (!targetRow) {
+      throw asCodeError("USER_NOT_LINKED");
+    }
+
+    const conflictingEmailRows = await fetchUsuariosByCorreo(authEmail, idUsuarioToken);
+    if (conflictingEmailRows.length) {
+      throw asCodeError("USER_EMAIL_DUPLICATED");
+    }
+
+    await ensureAuthLinked(idUsuarioToken, targetRow.id_auth);
+    const patch = buildUsuarioPatch(targetRow, { forceProfile: true });
+    await updateUsuarioPatch(idUsuarioToken, patch);
+    return idUsuarioToken;
+  }
+
+  const rows = await fetchUsuariosByCorreo(authEmail);
+  if (rows.length > 1) {
+    throw asCodeError("USER_EMAIL_DUPLICATED");
+  }
+  if (rows.length === 1) {
+    const row = rows[0];
+    const idUsuario = Number(row?.id_usuario);
+    if (!Number.isFinite(idUsuario) || idUsuario <= 0) {
+      throw asCodeError(AUTH_REQUIRED);
+    }
+    await ensureAuthLinked(idUsuario, row.id_auth);
+    const patch = buildUsuarioPatch(row, { forceProfile: false });
+    await updateUsuarioPatch(idUsuario, patch);
+    return idUsuario;
+  }
+
+  const insertPayload = {
+    nombre: metaNombre || "Cliente",
+    apellido: metaApellido || null,
+    telefono: metaTelefono || null,
+    correo: authEmail,
+    id_auth: authUserId,
+    fecha_registro: todayInVenezuela(),
+    acceso_cliente: true,
+  };
+  const { data: insertedRow, error: insertErr } = await supabaseAdmin
+    .from("usuarios")
+    .insert(insertPayload)
+    .select("id_usuario")
+    .maybeSingle();
+  if (insertErr) {
+    throwIfUniqueUsuariosError(insertErr);
+    throw insertErr;
+  }
+
+  const insertedId = Number(insertedRow?.id_usuario);
+  if (Number.isFinite(insertedId) && insertedId > 0) {
+    return insertedId;
+  }
+
+  const { data: fallbackAuthRows, error: fallbackAuthErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("id_usuario")
+    .eq("id_auth", authUserId)
+    .limit(2);
+  if (fallbackAuthErr) throw fallbackAuthErr;
+  if (Array.isArray(fallbackAuthRows) && fallbackAuthRows.length === 1) {
+    const fallbackId = Number(fallbackAuthRows[0]?.id_usuario);
+    if (Number.isFinite(fallbackId) && fallbackId > 0) {
+      return fallbackId;
     }
   }
-  return idUsuario;
+
+  throw asCodeError("USER_NOT_LINKED");
 };
 
 const getOrCreateUsuario = async (req) => {

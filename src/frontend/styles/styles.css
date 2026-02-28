@@ -3454,6 +3454,7 @@ input[type="number"].input-inline {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-top: 0 !important;
   background:
     radial-gradient(circle at 20% 20%, #e6ecff, transparent 35%),
     radial-gradient(circle at 80% 0%, #ffe5f0, transparent 30%),
@@ -3561,7 +3562,10 @@ input[type="number"].input-inline {
 
 /* Auth visual polish (login/signup) */
 .auth-page:is(.login-page, .signup-page) .auth-container {
+  min-height: 100vh;
   padding: 40px 16px;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .auth-page:is(.login-page, .signup-page) .auth-card {
@@ -3573,6 +3577,8 @@ input[type="number"].input-inline {
   box-shadow:
     0 22px 48px rgba(15, 23, 42, 0.14),
     0 2px 0 rgba(15, 23, 42, 0.03);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .auth-page:is(.login-page, .signup-page) .auth-logo {
@@ -3744,6 +3750,30 @@ input[type="number"].input-inline {
   color: #334155;
 }
 
+.signup-success-email {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.signup-success-status {
+  min-height: 20px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.signup-success-status.is-error {
+  color: #c0392b;
+}
+
+.signup-success-status.is-success {
+  color: #1e8449;
+}
+
+.signup-resend-btn {
+  min-width: 170px;
+  margin-top: 4px;
+}
+
 .signup-success-icon {
   width: 70px;
   height: 70px;
@@ -3807,6 +3837,10 @@ input[type="number"].input-inline {
 }
 
 @media (max-width: 480px) {
+  .auth-page:is(.login-page, .signup-page) .auth-container {
+    min-height: 100svh;
+    padding: 20px 12px;
+  }
   .auth-page:is(.login-page, .signup-page) .auth-card {
     padding: 26px 20px 20px;
     border-radius: 18px;
