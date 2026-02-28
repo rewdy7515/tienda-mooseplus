@@ -38,6 +38,19 @@ const isAllowedCorsOrigin = (origin = "") => {
   return /^https:\/\/([a-z0-9-]+\.)*mooseplus\.com$/i.test(value);
 };
 
+const isAllowedPublicRedirectUrl = (rawUrl = "") => {
+  const value = String(rawUrl || "").trim();
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    if (!/^https?:$/i.test(parsed.protocol)) return false;
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    return /^([a-z0-9-]+\.)*mooseplus\.com$/i.test(host);
+  } catch (_err) {
+    return false;
+  }
+};
+
 const PUBLIC_SITE_URL = (() => {
   const raw = String(process.env.PUBLIC_SITE_URL || process.env.SITE_URL || "https://mooseplus.com")
     .trim()
@@ -1246,6 +1259,8 @@ const SIGNUP_TOKEN_SECRET = String(
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     "",
 ).trim();
+const SIGNUP_RESEND_COOLDOWN_MS = 15 * 1000;
+const signupResendCooldownMap = new Map();
 
 const todayInVenezuela = () => {
   // Retorna fecha actual en huso horario de Venezuela (America/Caracas) en formato YYYY-MM-DD
@@ -3765,6 +3780,57 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
         .json({ error: "Token de registro no configurado en el backend." });
     }
     return res.status(500).json({ error: err?.message || "No se pudo generar el link de registro." });
+  }
+});
+
+// Reenvía confirmación de signup vía service role (sin captcha de cliente).
+app.post("/api/auth/resend-signup-confirmation", async (req, res) => {
+  try {
+    const email = String(req.body?.email || "")
+      .trim()
+      .toLowerCase();
+    const redirectToRaw = String(req.body?.redirect_to || "").trim();
+    const emailRedirectTo = isAllowedPublicRedirectUrl(redirectToRaw)
+      ? redirectToRaw
+      : `${PUBLIC_SITE_URL}/login.html`;
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: "Correo inválido." });
+    }
+
+    const nowMs = Date.now();
+    const lastMs = Number(signupResendCooldownMap.get(email) || 0);
+    const waitMs = SIGNUP_RESEND_COOLDOWN_MS - (nowMs - lastMs);
+    if (waitMs > 0) {
+      return res.status(429).json({
+        error: `Espera ${Math.ceil(waitMs / 1000)}s antes de reenviar.`,
+      });
+    }
+    signupResendCooldownMap.set(email, nowMs);
+
+    const { error } = await supabaseAdmin.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo,
+      },
+    });
+    if (error) {
+      console.error("[auth/resend-signup-confirmation] resend error", {
+        email,
+        message: error?.message || "",
+        code: error?.code || "",
+        status: error?.status || "",
+      });
+      return res
+        .status(500)
+        .json({ error: error?.message || "No se pudo reenviar la confirmación." });
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[auth/resend-signup-confirmation] unexpected error", err);
+    return res.status(500).json({ error: "No se pudo reenviar la confirmación." });
   }
 });
 

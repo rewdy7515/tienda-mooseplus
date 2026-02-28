@@ -1,4 +1,5 @@
 import {
+  API_BASE,
   supabase,
   validateSignupRegistrationToken,
 } from "./api.js";
@@ -51,13 +52,10 @@ const signupToken =
 const signupSuccessPreviewMode =
   new URLSearchParams(window.location.search || "").get("preview_success") === "1";
 let signupTokenContext = null;
+const SIGNUP_CONFIRM_REDIRECT_URL = "https://mooseplus.com/login.html";
 
 function getSignupEmailRedirectUrl() {
-  try {
-    return new URL("login.html?email_confirmed=1", window.location.href).toString();
-  } catch (_err) {
-    return "";
-  }
+  return SIGNUP_CONFIRM_REDIRECT_URL;
 }
 
 const limitMessage = () =>
@@ -130,7 +128,7 @@ function showSignupSuccessView(options = {}) {
   const correo = String(options?.correo || "").trim().toLowerCase();
   if (correo) resendTargetEmail = correo;
   setSignupSuccessEmail(resendTargetEmail);
-  setSignupSuccessStatus(options?.status || "", options?.isError === true);
+  setSignupSuccessStatus("", false);
   if (options?.startCooldown !== false) {
     startResendCooldown(RESEND_COOLDOWN_SECONDS);
   } else {
@@ -208,31 +206,45 @@ const preloadSignupTokenContext = async () => {
   return result;
 };
 
-async function resendSignupConfirmation(correo, captchaToken) {
+async function resendSignupConfirmation(correo) {
   const email = String(correo || "").trim().toLowerCase();
   if (!email) return { ok: false };
   try {
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email,
-      options: {
-        emailRedirectTo: getSignupEmailRedirectUrl(),
-        captchaToken,
+    const res = await fetch(`${API_BASE}/api/auth/resend-signup-confirmation`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
+      credentials: "include",
+      body: JSON.stringify({
+        email,
+        redirect_to: getSignupEmailRedirectUrl(),
+      }),
     });
-    if (error) return { ok: false, error };
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const error = new Error(String(body?.error || "No se pudo reenviar la confirmación."));
+      error.status = res.status;
+      console.error("[signup] resend confirmation error", {
+        email,
+        message: String(body?.error || "No se pudo reenviar la confirmación."),
+        code: String(body?.code || ""),
+        status: res.status,
+      });
+      return { ok: false, error };
+    }
+
     return { ok: true };
   } catch (error) {
+    console.error("[signup] resend confirmation exception", {
+      email,
+      message: error?.message || "",
+      code: error?.code || "",
+      status: error?.status || "",
+    });
     return { ok: false, error };
   }
-}
-
-async function requestResendToken() {
-  const ctrl = captchaController || (captchaInitPromise ? await captchaInitPromise : null);
-  if (!ctrl || !ctrl.enabled) {
-    return "";
-  }
-  return ctrl.ensureToken();
 }
 
 async function handleResendButtonClick() {
@@ -240,33 +252,21 @@ async function handleResendButtonClick() {
   const correo = String(resendTargetEmail || fields.correo?.value || "")
     .trim()
     .toLowerCase();
-  if (!correo) {
-    setSignupSuccessStatus("No se pudo detectar el correo para reenviar.", true);
-    return;
-  }
-
-  const captchaToken = await requestResendToken();
-  if (!captchaToken) {
-    setSignupSuccessStatus("Completa el captcha para reenviar la confirmación.", true);
-    return;
-  }
+  if (!correo) return;
 
   if (signupResendBtn) {
     signupResendBtn.disabled = true;
     signupResendBtn.textContent = "Reenviando...";
   }
 
-  const resent = await resendSignupConfirmation(correo, captchaToken);
-  startResendCooldown(RESEND_COOLDOWN_SECONDS);
-  if (resent?.ok) {
-    setSignupSuccessStatus("Te reenviamos el correo de verificación.", false);
-  } else {
-    setSignupSuccessStatus(
-      "No se pudo reenviar en este intento. Vuelve a intentarlo en unos segundos.",
-      true,
-    );
+  const resent = await resendSignupConfirmation(correo);
+  if (!resent?.ok) {
+    console.error("[signup] resend click failed", {
+      email: correo,
+      error: resent?.error || null,
+    });
   }
-  captchaController?.reset();
+  startResendCooldown(RESEND_COOLDOWN_SECONDS);
 }
 
 async function handleSubmit(e) {
@@ -359,7 +359,7 @@ async function handleSubmit(e) {
     const phoneDigits = `${phoneDialDigits}${telefono}`.replace(/\D+/g, "") || telefono;
 
     // 1) Registrar en Auth de Supabase
-    const { error: authErr } = await supabase.auth.signUp({
+    const { data: authSignupData, error: authErr } = await supabase.auth.signUp({
       email: correo.trim(),
       password: clave,
       options: {
@@ -376,30 +376,39 @@ async function handleSubmit(e) {
       },
     });
     if (authErr) {
-      console.error("auth.signUp error", authErr);
+      console.error("[signup] signUp error", {
+        email: correo.trim(),
+        message: authErr?.message || "",
+        code: authErr?.code || "",
+        status: authErr?.status || "",
+      });
       throw authErr;
     }
+    console.log("[signup] signUp ok", {
+      email: correo.trim(),
+      user_id: authSignupData?.user?.id || null,
+      email_confirmed_at: authSignupData?.user?.email_confirmed_at || null,
+    });
 
     // 2) No se actualiza tabla `usuarios` aquí.
     //    Se completa/vincula al confirmar correo y abrir sesión (endpoint /api/session).
     showSignupSuccessView({
       correo,
-      status:
-        "Te enviamos un correo de verificación. Revisa tu bandeja de entrada y la carpeta de spam.",
-      isError: false,
       startCooldown: true,
     });
   } catch (err) {
     console.error("signup error", err);
     const msg = normalizeErrorMessage(err);
     if (msg.includes("user already registered") || msg.includes("email not confirmed")) {
-      const resent = await resendSignupConfirmation(correo, captchaToken);
+      const resent = await resendSignupConfirmation(correo);
+      if (!resent?.ok) {
+        console.error("[signup] auto resend after duplicate/unconfirmed failed", {
+          email: correo,
+          error: resent?.error || null,
+        });
+      }
       showSignupSuccessView({
         correo,
-        status: resent?.ok
-          ? "Este correo aún no está confirmado. Te reenviamos el enlace de verificación."
-          : "Este correo aún no está confirmado. No se pudo reenviar el enlace en este intento.",
-        isError: !resent?.ok,
         startCooldown: true,
       });
       return;
