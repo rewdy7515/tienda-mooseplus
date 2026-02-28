@@ -227,6 +227,7 @@
       const saldoModalCloseBtn = document.querySelector("#saldo-modal-close");
       const PAGE_SIZE = 10;
       let saldoTargetUserId = null;
+      const registroPendingMessages = new Map();
       let usuariosRows = [];
       let usuariosFilteredRows = [];
       let currentPage = 1;
@@ -273,10 +274,29 @@
         const text = String(value || "").trim();
         if (!text) return false;
         if (navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(text);
-          return true;
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch (_err) {
+            // fallback abajo
+          }
         }
-        return false;
+        try {
+          const area = document.createElement("textarea");
+          area.value = text;
+          area.setAttribute("readonly", "readonly");
+          area.style.position = "fixed";
+          area.style.top = "-9999px";
+          area.style.left = "-9999px";
+          document.body.appendChild(area);
+          area.focus();
+          area.select();
+          const ok = document.execCommand("copy");
+          document.body.removeChild(area);
+          return !!ok;
+        } catch (_err) {
+          return false;
+        }
       };
 
       const buildSignupInviteMessage = (linkValue) => {
@@ -616,23 +636,42 @@
           registroBtn.disabled = true;
           registroBtn.textContent = "Generando...";
           try {
-            const result = await createUsuarioSignupLink(idTarget);
-            if (result?.error) throw new Error(result.error);
-            const url = String(result?.url || "").trim();
-            if (!url) throw new Error("No se pudo generar el link.");
-            const message = buildSignupInviteMessage(url);
+            const pendingMessage = String(registroPendingMessages.get(idTarget) || "").trim();
+            let message = pendingMessage;
+            if (!message) {
+              const result = await createUsuarioSignupLink(idTarget);
+              if (result?.error) throw new Error(result.error);
+              const url = String(result?.url || "").trim();
+              if (!url) throw new Error("No se pudo generar el link.");
+              message = buildSignupInviteMessage(url);
+            }
             const copied = await copyTextToClipboard(message).catch(() => false);
             if (copied) {
-              alert("Mensaje de registro copiado al portapapeles.");
+              registroPendingMessages.delete(idTarget);
+              registroBtn.textContent = "Copiado";
+              setTimeout(() => {
+                if (registroBtn.isConnected) {
+                  registroBtn.textContent = originalText || "Link registro";
+                }
+              }, 1200);
             } else {
-              window.prompt("Copia este mensaje de registro:", message);
+              registroPendingMessages.set(idTarget, message);
+              registroBtn.textContent = "Copiar ahora";
             }
           } catch (err) {
             console.error("generar link registro error", err);
-            alert(err?.message || "No se pudo generar el link de registro.");
+            registroPendingMessages.delete(idTarget);
+            registroBtn.textContent = "Error";
+            setTimeout(() => {
+              if (registroBtn.isConnected) {
+                registroBtn.textContent = originalText || "Link registro";
+              }
+            }, 1400);
           } finally {
             registroBtn.disabled = false;
-            registroBtn.textContent = originalText || "Link registro";
+            if (registroBtn.textContent === "Generando...") {
+              registroBtn.textContent = originalText || "Link registro";
+            }
           }
           return;
         }

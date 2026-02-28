@@ -3744,6 +3744,22 @@ input[type="number"].input-inline {
   color: #334155;
 }
 
+.signup-success-icon {
+  width: 70px;
+  height: 70px;
+  display: block;
+  margin: 2px auto 8px;
+  background-color: #2a81d2;
+  -webkit-mask-image: url("https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/481664-2.png");
+  mask-image: url("https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/481664-2.png");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
 .auth-page.signup-page .auth-card.signup-success-only .auth-logo,
 .auth-page.signup-page .auth-card.signup-success-only .auth-title,
 .auth-page.signup-page .auth-card.signup-success-only .auth-subtitle {
@@ -3751,7 +3767,35 @@ input[type="number"].input-inline {
 }
 
 .auth-page.signup-page .auth-card.signup-success-only {
+  width: fit-content;
+  max-width: calc(100vw - 32px);
   text-align: center;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .signup-flow {
+  width: fit-content;
+  max-width: calc(100vw - 88px);
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .signup-flow-track {
+  width: auto;
+  display: block;
+  transform: none !important;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .signup-flow-step {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .signup-flow-step-form {
+  display: none;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .signup-success-main {
+  max-width: min(38ch, calc(100vw - 96px));
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .auth-page.signup-page .auth-card.signup-success-only .signup-flow-step-success {
