@@ -16,128 +16,143 @@
     data-captcha-site-key="dd68463a-0bc6-4dde-962c-aaa4535240fc"
   >
     <main class="auth-container">
-      <section class="auth-card">
+      <section class="auth-card" id="signup-card">
         <img src="../assets/logo-header-carga/logo-blanco.webp" class="auth-logo" alt="Logo" />
         <h1 class="auth-title">Crea tu cuenta</h1>
         <p class="auth-subtitle">Completa tus datos para registrarte.</p>
+        <div class="signup-flow" id="signup-flow">
+          <div class="signup-flow-track">
+            <section class="signup-flow-step signup-flow-step-form">
+              <form class="auth-form" id="signup-form">
+                <label for="signup-nombre" class="form-label required">Nombre</label>
+                <input id="signup-nombre" name="nombre" class="form-input" type="text" required />
+                <p id="nombre-error" class="input-message"></p>
 
-        <form class="auth-form" id="signup-form">
-          <label for="signup-nombre" class="form-label required">Nombre</label>
-          <input id="signup-nombre" name="nombre" class="form-input" type="text" required />
-          <p id="nombre-error" class="input-message"></p>
+                <label for="signup-apellido" class="form-label required">Apellido</label>
+                <input id="signup-apellido" name="apellido" class="form-input" type="text" required />
+                <p id="apellido-error" class="input-message"></p>
 
-          <label for="signup-apellido" class="form-label required">Apellido</label>
-          <input id="signup-apellido" name="apellido" class="form-input" type="text" required />
-          <p id="apellido-error" class="input-message"></p>
+                <label for="signup-telefono" class="form-label required">Teléfono</label>
+                <input
+                  id="signup-telefono"
+                  name="telefono"
+                  class="form-input"
+                  type="tel"
+                  required
+                />
+                <p id="telefono-error" class="input-message"></p>
 
-          <label for="signup-telefono" class="form-label required">Teléfono</label>
-          <input
-            id="signup-telefono"
-            name="telefono"
-            class="form-input"
-            type="tel"
-            required
-          />
-          <p id="telefono-error" class="input-message"></p>
+                <label for="signup-correo" class="form-label required">Correo electrónico</label>
+                <input
+                  id="signup-correo"
+                  name="correo"
+                  class="form-input"
+                  type="email"
+                  placeholder="usuario@correo.com"
+                  autocomplete="email"
+                  required
+                />
+                <p id="correo-error" class="input-message"></p>
 
-          <label for="signup-correo" class="form-label required">Correo electrónico</label>
-          <input
-            id="signup-correo"
-            name="correo"
-            class="form-input"
-            type="email"
-            placeholder="usuario@correo.com"
-            autocomplete="email"
-            required
-          />
-          <p id="correo-error" class="input-message"></p>
+                <label for="signup-clave" class="form-label required">Clave</label>
+                <div class="input-with-toggle">
+                  <input
+                    id="signup-clave"
+                    name="clave"
+                    class="form-input"
+                    type="password"
+                    placeholder="••••••••"
+                    autocomplete="new-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="toggle-password"
+                    data-target="signup-clave"
+                    aria-label="Mostrar clave"
+                    aria-pressed="false"
+                  >
+                    <svg class="icon-eye icon-open" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M12 5c-4.5 0-8.4 2.9-10 7 1.6 4.1 5.5 7 10 7s8.4-2.9 10-7c-1.6-4.1-5.5-7-10-7Zm0 12c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5Z"
+                      />
+                      <circle cx="12" cy="12" r="2.4" />
+                    </svg>
+                    <svg class="icon-eye icon-closed" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M3.3 2.3 2 3.6 5.2 6.8C3.6 8 2.2 9.7 1.4 12c1.6 4.1 5.5 7 10 7 2 0 3.8-.5 5.4-1.4l3 3 1.3-1.3L3.3 2.3Zm7.2 7.2 2.9 2.9a2.9 2.9 0 0 1-2.9-2.9Z"
+                      />
+                      <path
+                        d="M13.6 8.4a2.9 2.9 0 0 1 1.3 3.4l2.9 2.9c1.3-.9 2.5-2.2 3.2-3.7-1.6-4.1-5.5-7-10-7-.8 0-1.5.1-2.2.2l1.9 1.9a2.9 2.9 0 0 1 2.9 2.3Z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <p id="clave-error" class="input-message"></p>
 
-          <label for="signup-clave" class="form-label required">Clave</label>
-          <div class="input-with-toggle">
-            <input
-              id="signup-clave"
-              name="clave"
-              class="form-input"
-              type="password"
-              placeholder="••••••••"
-              autocomplete="new-password"
-              required
-            />
-            <button
-              type="button"
-              class="toggle-password"
-              data-target="signup-clave"
-              aria-label="Mostrar clave"
-              aria-pressed="false"
+                <label for="signup-clave2" class="form-label required">Confirmación de clave</label>
+                <div class="input-with-toggle">
+                  <input
+                    id="signup-clave2"
+                    name="clave2"
+                    class="form-input"
+                    type="password"
+                    placeholder="••••••••"
+                    autocomplete="new-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    class="toggle-password"
+                    data-target="signup-clave2"
+                    aria-label="Mostrar clave"
+                    aria-pressed="false"
+                  >
+                    <svg class="icon-eye icon-open" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M12 5c-4.5 0-8.4 2.9-10 7 1.6 4.1 5.5 7 10 7s8.4-2.9 10-7c-1.6-4.1-5.5-7-10-7Zm0 12c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5Z"
+                      />
+                      <circle cx="12" cy="12" r="2.4" />
+                    </svg>
+                    <svg class="icon-eye icon-closed" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M3.3 2.3 2 3.6 5.2 6.8C3.6 8 2.2 9.7 1.4 12c1.6 4.1 5.5 7 10 7 2 0 3.8-.5 5.4-1.4l3 3 1.3-1.3L3.3 2.3Zm7.2 7.2 2.9 2.9a2.9 2.9 0 0 1-2.9-2.9Z"
+                      />
+                      <path
+                        d="M13.6 8.4a2.9 2.9 0 0 1 1.3 3.4l2.9 2.9c1.3-.9 2.5-2.2 3.2-3.7-1.6-4.1-5.5-7-10-7-.8 0-1.5.1-2.2.2l1.9 1.9a2.9 2.9 0 0 1 2.9 2.3Z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <p id="clave2-error" class="input-message"></p>
+                <div class="auth-captcha-wrap">
+                  <div id="signup-captcha" class="auth-captcha"></div>
+                  <p id="signup-captcha-error" class="input-message"></p>
+                </div>
+
+                <button type="submit" class="btn-primary auth-submit" id="signup-submit">
+                  Registrarse
+                </button>
+              </form>
+
+              <p id="signup-status" class="input-message status-message"></p>
+
+              <p class="auth-secondary">
+                ¿Ya tienes cuenta? Inicia sesión <a href="login.html" id="signup-login-link">aquí</a>
+              </p>
+            </section>
+            <section
+              class="signup-flow-step signup-flow-step-success"
+              id="signup-success-step"
+              tabindex="-1"
             >
-              <svg class="icon-eye icon-open" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 5c-4.5 0-8.4 2.9-10 7 1.6 4.1 5.5 7 10 7s8.4-2.9 10-7c-1.6-4.1-5.5-7-10-7Zm0 12c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5Z"
-                />
-                <circle cx="12" cy="12" r="2.4" />
-              </svg>
-              <svg class="icon-eye icon-closed" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M3.3 2.3 2 3.6 5.2 6.8C3.6 8 2.2 9.7 1.4 12c1.6 4.1 5.5 7 10 7 2 0 3.8-.5 5.4-1.4l3 3 1.3-1.3L3.3 2.3Zm7.2 7.2 2.9 2.9a2.9 2.9 0 0 1-2.9-2.9Z"
-                />
-                <path
-                  d="M13.6 8.4a2.9 2.9 0 0 1 1.3 3.4l2.9 2.9c1.3-.9 2.5-2.2 3.2-3.7-1.6-4.1-5.5-7-10-7-.8 0-1.5.1-2.2.2l1.9 1.9a2.9 2.9 0 0 1 2.9 2.3Z"
-                />
-              </svg>
-            </button>
+              <p class="signup-success-text signup-success-main">
+                Revisa tu bandeja de entrada para verificar tu correo. Si no lo ves en unos
+                minutos, revisa también tu carpeta de spam o correo no deseado.
+              </p>
+            </section>
           </div>
-          <p id="clave-error" class="input-message"></p>
-
-          <label for="signup-clave2" class="form-label required">Confirmación de clave</label>
-          <div class="input-with-toggle">
-            <input
-              id="signup-clave2"
-              name="clave2"
-              class="form-input"
-              type="password"
-              placeholder="••••••••"
-              autocomplete="new-password"
-              required
-            />
-            <button
-              type="button"
-              class="toggle-password"
-              data-target="signup-clave2"
-              aria-label="Mostrar clave"
-              aria-pressed="false"
-            >
-              <svg class="icon-eye icon-open" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M12 5c-4.5 0-8.4 2.9-10 7 1.6 4.1 5.5 7 10 7s8.4-2.9 10-7c-1.6-4.1-5.5-7-10-7Zm0 12c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5Z"
-                />
-                <circle cx="12" cy="12" r="2.4" />
-              </svg>
-              <svg class="icon-eye icon-closed" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M3.3 2.3 2 3.6 5.2 6.8C3.6 8 2.2 9.7 1.4 12c1.6 4.1 5.5 7 10 7 2 0 3.8-.5 5.4-1.4l3 3 1.3-1.3L3.3 2.3Zm7.2 7.2 2.9 2.9a2.9 2.9 0 0 1-2.9-2.9Z"
-                />
-                <path
-                  d="M13.6 8.4a2.9 2.9 0 0 1 1.3 3.4l2.9 2.9c1.3-.9 2.5-2.2 3.2-3.7-1.6-4.1-5.5-7-10-7-.8 0-1.5.1-2.2.2l1.9 1.9a2.9 2.9 0 0 1 2.9 2.3Z"
-                />
-              </svg>
-            </button>
-          </div>
-          <p id="clave2-error" class="input-message"></p>
-          <div class="auth-captcha-wrap">
-            <div id="signup-captcha" class="auth-captcha"></div>
-            <p id="signup-captcha-error" class="input-message"></p>
-          </div>
-
-          <button type="submit" class="btn-primary auth-submit" id="signup-submit">
-            Registrarse
-          </button>
-        </form>
-
-        <p id="signup-status" class="input-message status-message"></p>
-
-        <p class="auth-secondary">
-          ¿Ya tienes cuenta? Inicia sesión <a href="login.html" id="signup-login-link">aquí</a>
-        </p>
+        </div>
       </section>
     </main>
 

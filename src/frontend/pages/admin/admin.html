@@ -557,7 +557,7 @@
             { count: cortesReemplazosCount, error: cortesReemplazosErr },
             { count: pedidosCount, error: pedidosErr },
             { count: tareasCount, error: tareasErr },
-            { count: renovPendCount, error: renovPendErr },
+            { data: renovPendRows, error: renovPendErr },
           ] = await Promise.all([
             supabase
               .from("reportes")
@@ -589,7 +589,9 @@
               .select("id_tarea_asignada", { count: "exact", head: true }),
             supabase
               .from("ventas")
-              .select("id_venta", { count: "exact", head: true })
+              .select(
+                "id_venta, id_cuenta, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, inactiva, completa), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, inactiva, completa)",
+              )
               .eq("cuenta_pagada_admin", false),
           ]);
           if (repErr) throw repErr;
@@ -598,6 +600,16 @@
           if (pedidosErr) throw pedidosErr;
           if (tareasErr) throw tareasErr;
           if (renovPendErr) throw renovPendErr;
+          const renovPendCount = (renovPendRows || []).filter((venta) => {
+            const idVenta = Number(venta?.id_venta || 0);
+            if (!idVenta) return false;
+            const sourceAccount =
+              venta?.cuentas_miembro?.id_cuenta ? venta.cuentas_miembro : venta.cuentas;
+            if (!sourceAccount) return false;
+            if (isTrue(sourceAccount.inactiva)) return false;
+            if (!isTrue(sourceAccount.completa)) return false;
+            return true;
+          }).length;
           const cortesCount = (cortesVentasCount ?? 0) + (cortesReemplazosCount ?? 0);
           if (countReportesEl) countReportesEl.textContent = repCount ?? 0;
           if (countCortesEl) countCortesEl.textContent = cortesCount ?? 0;

@@ -29,14 +29,30 @@ const errors = {
 const statusEl = document.getElementById("signup-status");
 const submitBtn = document.getElementById("signup-submit");
 const goLoginBtn = document.getElementById("signup-login-link");
+const signupCardEl = document.getElementById("signup-card");
+const signupFlowEl = document.getElementById("signup-flow");
+const signupSuccessStepEl = document.getElementById("signup-success-step");
 let iti = null;
 const toggleButtons = document.querySelectorAll(".toggle-password");
 let phoneMaxDigits = null;
 let phonePattern = "";
 let captchaController = null;
 let captchaInitPromise = null;
-const signupToken = new URLSearchParams(window.location.search || "").get("registro_token") || "";
+const signupToken =
+  new URLSearchParams(window.location.search || "").get("t") ||
+  new URLSearchParams(window.location.search || "").get("registro_token") ||
+  "";
+const signupSuccessPreviewMode =
+  new URLSearchParams(window.location.search || "").get("preview_success") === "1";
 let signupTokenContext = null;
+
+function getSignupEmailRedirectUrl() {
+  try {
+    return new URL("login.html?email_confirmed=1", window.location.href).toString();
+  } catch (_err) {
+    return "";
+  }
+}
 
 const limitMessage = () =>
   phoneMaxDigits ? `Puedes escribir hasta ${phoneMaxDigits} dígitos` : "";
@@ -56,6 +72,53 @@ function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
   statusEl.classList.toggle("is-error", isError);
   statusEl.classList.toggle("is-success", !isError);
+}
+
+function showSignupSuccessView() {
+  setStatus("", false);
+  signupCardEl?.classList.add("signup-success-only");
+  signupFlowEl?.classList.add("is-success");
+  setTimeout(() => {
+    signupSuccessStepEl?.focus();
+  }, 250);
+}
+
+function setCorreoYaRegistradoError() {
+  if (!errors?.correo || !fields?.correo) return;
+  errors.correo.innerHTML =
+    'Correo ya registrado. <a class="link-inline" href="login.html">Inicia sesión aquí</a>';
+  fields.correo.classList.add("input-error");
+  setStatus("", false);
+}
+
+function normalizeErrorMessage(err) {
+  return String(err?.message || err?.error_description || err?.error || "")
+    .trim()
+    .toLowerCase();
+}
+
+function translateSignupError(err) {
+  const msg = normalizeErrorMessage(err);
+  if (!msg) return "No se pudo completar el registro. Intenta de nuevo.";
+  if (msg.includes("password is known to be weak")) {
+    return "La contraseña es demasiado débil o fácil de adivinar. Usa una más segura.";
+  }
+  if (msg.includes("password should be at least")) {
+    return "La contraseña no cumple con el mínimo de caracteres.";
+  }
+  if (msg.includes("user already registered")) {
+    return "Este correo ya está registrado. Inicia sesión.";
+  }
+  if (msg.includes("email not confirmed")) {
+    return "Debes confirmar tu correo antes de continuar.";
+  }
+  if (msg.includes("captcha") || msg.includes("challenge")) {
+    return "No se pudo validar el captcha. Intenta nuevamente.";
+  }
+  if (msg.includes("invalid email")) {
+    return "El correo no es válido.";
+  }
+  return "No se pudo completar el registro. Intenta de nuevo.";
 }
 
 function setLoading(isLoading) {
@@ -193,33 +256,27 @@ async function handleSubmit(e) {
         existente &&
         (existente.fecha_registro === null || typeof existente.fecha_registro === "undefined");
       if (!correoLibre && !reutilizar) {
-        errors.correo.innerHTML =
-          'Este correo ya está registrado. <a class="link-inline" href="login.html">Inicia sesión</a>';
-        fields.correo.classList.add("input-error");
+        setCorreoYaRegistradoError();
         return;
       }
     }
 
     const phoneDial = iti?.getSelectedCountryData?.()?.dialCode;
-    const phoneFull =
-      (iti?.getNumber &&
-        iti.getNumber(
-          window.intlTelInputUtils?.numberFormat?.E164 ??
-            window.intlTelInputUtils?.numberFormat?.E164
-        )) ||
-      (phoneDial ? `+${phoneDial} ${telefono}` : telefono);
+    const phoneDialDigits = String(phoneDial || "").replace(/\D+/g, "");
+    const phoneDigits = `${phoneDialDigits}${telefono}`.replace(/\D+/g, "") || telefono;
 
     // 1) Registrar en Auth de Supabase
     const { error: authErr } = await supabase.auth.signUp({
       email: correo.trim(),
       password: clave,
       options: {
+        emailRedirectTo: getSignupEmailRedirectUrl(),
         data: {
           display_name: `${nombre} ${apellido}`.trim(),
           nombre,
           apellido,
-          telefono: phoneFull,
-          phone: phoneFull,
+          telefono: phoneDigits,
+          phone: phoneDigits,
         },
         captchaToken,
       },
@@ -236,7 +293,7 @@ async function handleSubmit(e) {
         token: signupToken,
         nombre,
         apellido,
-        telefono: phoneFull,
+        telefono: phoneDigits,
         correo,
       });
       if (completeRes?.error) {
@@ -250,7 +307,7 @@ async function handleSubmit(e) {
       if (reutilizar && existente?.id_usuario) {
         const upd = await supabase
           .from("usuarios")
-          .update({ nombre, apellido, telefono: phoneFull, correo, fecha_registro: today })
+          .update({ nombre, apellido, telefono: phoneDigits, correo, fecha_registro: today })
           .eq("id_usuario", existente.id_usuario)
           .select("id_usuario")
           .single();
@@ -259,7 +316,7 @@ async function handleSubmit(e) {
       } else {
         const ins = await supabase
           .from("usuarios")
-          .insert({ nombre, apellido, telefono: phoneFull, correo, fecha_registro: today })
+          .insert({ nombre, apellido, telefono: phoneDigits, correo, fecha_registro: today })
           .select("id_usuario")
           .single();
         data = ins.data;
@@ -273,13 +330,15 @@ async function handleSubmit(e) {
       throw new Error("No se pudo obtener el usuario creado.");
     }
 
-    setStatus("Registro exitoso. Revisa tu correo para confirmar.", false);
-    setTimeout(() => {
-      window.location.href = "login.html";
-    }, 800);
+    showSignupSuccessView();
   } catch (err) {
     console.error("signup error", err);
-    setStatus(err?.message || "No se pudo completar el registro. Intenta de nuevo.", true);
+    const msg = normalizeErrorMessage(err);
+    if (msg.includes("user already registered")) {
+      setCorreoYaRegistradoError();
+      return;
+    }
+    setStatus(translateSignupError(err), true);
   } finally {
     setLoading(false);
     captchaController?.reset();
@@ -287,16 +346,22 @@ async function handleSubmit(e) {
 }
 
 function init() {
+  attachLogoHome();
+  loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
+    console.warn("signup branding load error", err);
+  });
+
+  if (signupSuccessPreviewMode) {
+    showSignupSuccessView();
+    return;
+  }
+
   captchaInitPromise = initAuthCaptcha({
     containerId: "signup-captcha",
     errorId: "signup-captcha-error",
   }).then((ctrl) => {
     captchaController = ctrl;
     return ctrl;
-  });
-  attachLogoHome();
-  loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
-    console.warn("signup branding load error", err);
   });
   preloadSignupTokenContext().catch((err) => {
     console.error("signup token preload error", err);

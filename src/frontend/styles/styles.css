@@ -3700,6 +3700,68 @@ input[type="number"].input-inline {
   border-color: #0ea5a8;
 }
 
+.signup-flow {
+  width: 100%;
+  overflow: hidden;
+}
+
+.signup-flow-track {
+  width: 200%;
+  display: flex;
+  align-items: flex-start;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.signup-flow-step {
+  width: 50%;
+  box-sizing: border-box;
+  flex: 0 0 50%;
+}
+
+.signup-flow.is-success .signup-flow-track {
+  transform: translateX(-50%);
+}
+
+.signup-flow-step-success {
+  text-align: center;
+  padding: 16px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.signup-success-text {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.signup-success-main {
+  font-size: 15px;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .auth-logo,
+.auth-page.signup-page .auth-card.signup-success-only .auth-title,
+.auth-page.signup-page .auth-card.signup-success-only .auth-subtitle {
+  display: none;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only {
+  text-align: center;
+}
+
+.auth-page.signup-page .auth-card.signup-success-only .signup-flow-step-success {
+  padding: 4px 0 2px;
+}
+
+.signup-flow-step-success:focus {
+  outline: none;
+}
+
 @media (max-width: 480px) {
   .auth-page:is(.login-page, .signup-page) .auth-card {
     padding: 26px 20px 20px;

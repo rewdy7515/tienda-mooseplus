@@ -38,6 +38,14 @@ const isAllowedCorsOrigin = (origin = "") => {
   return /^https:\/\/([a-z0-9-]+\.)*mooseplus\.com$/i.test(value);
 };
 
+const PUBLIC_SITE_URL = (() => {
+  const raw = String(process.env.PUBLIC_SITE_URL || process.env.SITE_URL || "https://mooseplus.com")
+    .trim()
+    .replace(/\/+$/g, "");
+  if (/^https?:\/\/[^/]+$/i.test(raw)) return raw;
+  return "https://mooseplus.com";
+})();
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -1315,19 +1323,23 @@ const signSignupTokenPayload = (payloadPart) => {
   return encodeBase64Url(digest);
 };
 
+const signSignupTokenCompact = (payloadPart) => {
+  const secret = getSignupTokenSecret();
+  // 128-bit MAC truncado: suficientemente fuerte y más corto para URLs.
+  const digest = crypto.createHmac("sha256", secret).update(payloadPart).digest().subarray(0, 16);
+  return encodeBase64Url(digest);
+};
+
 const buildSignupRegistrationToken = (idUsuario) => {
   const uid = toPositiveInt(idUsuario);
   if (!uid) throw tokenError("INVALID_UID", "id_usuario inválido.");
   const nowSec = Math.floor(Date.now() / 1000);
-  const payload = {
-    v: 1,
-    uid,
-    iat: nowSec,
-    exp: nowSec + SIGNUP_TOKEN_TTL_SEC,
-    nonce: crypto.randomBytes(16).toString("hex"),
-  };
-  const payloadPart = encodeBase64Url(JSON.stringify(payload));
-  const signaturePart = signSignupTokenPayload(payloadPart);
+  const exp = nowSec + SIGNUP_TOKEN_TTL_SEC;
+  // Formato compacto: {uid,exp} en base36 + firma corta.
+  const uidPart = uid.toString(36);
+  const expPart = exp.toString(36);
+  const payloadPart = `${uidPart}.${expPart}`;
+  const signaturePart = signSignupTokenCompact(payloadPart);
   return `${payloadPart}.${signaturePart}`;
 };
 
@@ -1335,43 +1347,66 @@ const verifySignupRegistrationToken = (tokenValue) => {
   const token = String(tokenValue || "").trim();
   if (!token) throw tokenError("TOKEN_REQUIRED", "Token requerido.");
   const parts = token.split(".");
-  if (parts.length !== 2) throw tokenError("TOKEN_INVALID", "Token inválido.");
-  const [payloadPart, signaturePart] = parts;
-  if (!payloadPart || !signaturePart) {
-    throw tokenError("TOKEN_INVALID", "Token inválido.");
-  }
-
-  const expectedSig = signSignupTokenPayload(payloadPart);
-  const receivedSigBuffer = Buffer.from(signaturePart, "utf8");
-  const expectedSigBuffer = Buffer.from(expectedSig, "utf8");
-  if (
-    receivedSigBuffer.length !== expectedSigBuffer.length ||
-    !crypto.timingSafeEqual(receivedSigBuffer, expectedSigBuffer)
-  ) {
-    throw tokenError("TOKEN_INVALID", "Token inválido.");
-  }
-
-  let payload = null;
-  try {
-    payload = JSON.parse(decodeBase64Url(payloadPart).toString("utf8"));
-  } catch (_err) {
-    throw tokenError("TOKEN_INVALID", "Token inválido.");
-  }
-
-  const uid = toPositiveInt(payload?.uid);
-  const exp = Number(payload?.exp);
-  const iat = Number(payload?.iat);
+  let uid = null;
+  let exp = null;
+  let iatRaw = null;
+  let iat = null;
   const nowSec = Math.floor(Date.now() / 1000);
 
-  if (!uid || !Number.isFinite(exp) || !Number.isFinite(iat)) {
+  if (parts.length === 3) {
+    const [uidPart, expPart, signaturePart] = parts;
+    if (!uidPart || !expPart || !signaturePart) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    const payloadPart = `${uidPart}.${expPart}`;
+    const expectedSig = signSignupTokenCompact(payloadPart);
+    const receivedSigBuffer = Buffer.from(signaturePart, "utf8");
+    const expectedSigBuffer = Buffer.from(expectedSig, "utf8");
+    if (
+      receivedSigBuffer.length !== expectedSigBuffer.length ||
+      !crypto.timingSafeEqual(receivedSigBuffer, expectedSigBuffer)
+    ) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    const uidDecoded = parseInt(uidPart, 36);
+    const expDecoded = parseInt(expPart, 36);
+    uid = toPositiveInt(uidDecoded);
+    exp = Number.isFinite(expDecoded) ? expDecoded : null;
+  } else if (parts.length === 2) {
+    // Legacy: payload JSON base64url + firma sha256 completa.
+    const [payloadPart, signaturePart] = parts;
+    if (!payloadPart || !signaturePart) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    const expectedSig = signSignupTokenPayload(payloadPart);
+    const receivedSigBuffer = Buffer.from(signaturePart, "utf8");
+    const expectedSigBuffer = Buffer.from(expectedSig, "utf8");
+    if (
+      receivedSigBuffer.length !== expectedSigBuffer.length ||
+      !crypto.timingSafeEqual(receivedSigBuffer, expectedSigBuffer)
+    ) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+
+    let payload = null;
+    try {
+      payload = JSON.parse(decodeBase64Url(payloadPart).toString("utf8"));
+    } catch (_err) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    uid = toPositiveInt(payload?.u ?? payload?.uid);
+    exp = Number(payload?.e ?? payload?.exp);
+    iatRaw = payload?.iat;
+    iat = Number(iatRaw);
+  } else {
     throw tokenError("TOKEN_INVALID", "Token inválido.");
   }
-  if (iat > nowSec + 300) {
+
+  if (!uid || !Number.isFinite(exp)) throw tokenError("TOKEN_INVALID", "Token inválido.");
+  if (iatRaw !== undefined && iatRaw !== null && Number.isFinite(iat) && iat > nowSec + 300) {
     throw tokenError("TOKEN_INVALID", "Token inválido.");
   }
-  if (exp <= nowSec) {
-    throw tokenError("TOKEN_EXPIRED", "El link de registro ya venció.");
-  }
+  if (exp <= nowSec) throw tokenError("TOKEN_EXPIRED", "El link de registro ya venció.");
 
   return { uid, exp, iat };
 };
@@ -3536,13 +3571,8 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
     const token = buildSignupRegistrationToken(idUsuarioTarget);
     const nowSec = Math.floor(Date.now() / 1000);
     const expiresAtIso = new Date((nowSec + SIGNUP_TOKEN_TTL_SEC) * 1000).toISOString();
-    const originHeader = String(req.get("origin") || "").trim().replace(/\/+$/g, "");
-    const baseUrl =
-      /^https?:\/\/[^/]+$/i.test(originHeader) && originHeader
-        ? originHeader
-        : `${req.protocol}://${req.get("host")}`;
-    const signupUrl = new URL("/src/frontend/pages/signup.html", baseUrl);
-    signupUrl.searchParams.set("registro_token", token);
+    const signupUrl = new URL("/signup.html", PUBLIC_SITE_URL);
+    signupUrl.searchParams.set("t", token);
 
     return res.json({
       ok: true,
@@ -3617,7 +3647,7 @@ app.post("/api/signup-link/complete", async (req, res) => {
 
     const nombre = String(req.body?.nombre || "").trim();
     const apellido = String(req.body?.apellido || "").trim();
-    const telefono = String(req.body?.telefono || "").trim();
+    const telefono = String(req.body?.telefono || "").replace(/\D+/g, "").trim();
     const correo = String(req.body?.correo || "")
       .trim()
       .toLowerCase();

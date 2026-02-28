@@ -12,6 +12,15 @@
         flex-direction: column;
         gap: 12px;
       }
+      .usuarios-tools {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .usuarios-search {
+        width: min(100%, 420px);
+      }
       .usuarios-table {
         width: 100%;
       }
@@ -101,6 +110,19 @@
         gap: 8px;
         justify-content: flex-end;
       }
+      .usuarios-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .usuarios-page-label {
+        font-weight: 600;
+      }
+      .usuarios-page-btn {
+        min-width: 40px;
+      }
     </style>
   </head>
   <body>
@@ -112,6 +134,15 @@
       <div class="usuarios-wrapper">
         <p id="usuarios-status" class="status">Cargando usuarios...</p>
         <p id="usuarios-phone-stat" class="status"></p>
+        <div class="usuarios-tools">
+          <input
+            type="text"
+            id="usuarios-search"
+            class="form-input usuarios-search"
+            placeholder="Buscar cliente por nombre y apellido"
+            autocomplete="off"
+          />
+        </div>
         <div class="cuenta-table-wrap">
           <table class="table-base usuarios-table">
             <thead>
@@ -126,6 +157,11 @@
             </thead>
             <tbody id="usuarios-body"></tbody>
           </table>
+        </div>
+        <div class="usuarios-pagination hidden" id="usuarios-pagination">
+          <button type="button" class="btn-outline usuarios-page-btn" id="usuarios-page-prev" aria-label="Página anterior">←</button>
+          <span class="usuarios-page-label" id="usuarios-page-label">Página 1 de 1</span>
+          <button type="button" class="btn-outline usuarios-page-btn" id="usuarios-page-next" aria-label="Página siguiente">→</button>
         </div>
       </div>
     </main>
@@ -179,12 +215,21 @@
       const statusEl = document.querySelector("#usuarios-status");
       const tbodyEl = document.querySelector("#usuarios-body");
       const phoneStatEl = document.querySelector("#usuarios-phone-stat");
+      const searchInputEl = document.querySelector("#usuarios-search");
+      const paginationEl = document.querySelector("#usuarios-pagination");
+      const pagePrevBtn = document.querySelector("#usuarios-page-prev");
+      const pageNextBtn = document.querySelector("#usuarios-page-next");
+      const pageLabelEl = document.querySelector("#usuarios-page-label");
       const saldoModal = document.querySelector("#saldo-modal");
       const saldoInput = document.querySelector("#saldo-input");
       const saldoCancelBtn = document.querySelector("#saldo-cancel-btn");
       const saldoAddBtn = document.querySelector("#saldo-add-btn");
       const saldoModalCloseBtn = document.querySelector("#saldo-modal-close");
+      const PAGE_SIZE = 10;
       let saldoTargetUserId = null;
+      let usuariosRows = [];
+      let usuariosFilteredRows = [];
+      let currentPage = 1;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -213,13 +258,15 @@
       };
 
       const updateSaldoInRow = (userId, saldoVal) => {
-        const rowWrap = tbodyEl?.querySelector(`.saldo-wrap[data-id="${userId}"]`);
-        if (!rowWrap) return;
-        rowWrap.dataset.saldo = String(saldoVal);
-        const saldoTextEl = rowWrap.querySelector(".saldo-text");
-        if (saldoTextEl) saldoTextEl.textContent = formatSaldo(saldoVal);
-        const addBtn = rowWrap.querySelector(".btn-add-saldo");
-        if (addBtn) addBtn.dataset.saldo = String(saldoVal);
+        const uid = Number(userId) || 0;
+        if (!uid) return;
+        usuariosRows = (usuariosRows || []).map((row) =>
+          Number(row?.id_usuario) === uid ? { ...row, saldo: saldoVal } : row,
+        );
+        usuariosFilteredRows = (usuariosFilteredRows || []).map((row) =>
+          Number(row?.id_usuario) === uid ? { ...row, saldo: saldoVal } : row,
+        );
+        renderCurrentPage();
       };
 
       const copyTextToClipboard = async (value) => {
@@ -230,6 +277,23 @@
           return true;
         }
         return false;
+      };
+
+      const buildSignupInviteMessage = (linkValue) => {
+        const link = String(linkValue || "").trim();
+        return [
+          "*Registrate en nuestra Pagina Web*",
+          "",
+          `Link: ${link}`,
+          "",
+          "*Al registrarte con este link podrás:*",
+          "",
+          "📦 Ver todos tus servicios activos.",
+          "🛍️ Comprar y renovar a *cualquier hora* con *verificación de pago automatizado*.",
+          "🚨 *Reportar* y recibir *soluciones inmediatas* de ciertos reportes.",
+          "",
+          "_Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartir este link._",
+        ].join("\n");
       };
 
       const agregarSaldo = async () => {
@@ -293,6 +357,119 @@
         return full || "-";
       };
 
+      const normalizeText = (value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
+
+      const buildUsuarioRowHtml = (u) => {
+        const cliente = formatCliente(u);
+        const tel = String(u.telefono || "").trim();
+        const email = String(u.correo || "").trim();
+        const saldoNum = Number(u?.saldo);
+        const saldoVal = Number.isFinite(saldoNum) ? saldoNum : 0;
+        const saldoTxt = formatSaldo(saldoVal);
+        const phoneIsValid = !!tel && /^\d+$/.test(tel);
+        const telefonoQuickEdit = phoneIsValid ? "0" : "1";
+        const correoQuickEdit = email ? "0" : "1";
+        const registrado = u.fecha_registro ? "Sí" : "No";
+        const registroBtnHtml =
+          registrado === "No"
+            ? `<button
+                type="button"
+                class="btn-outline btn-link-registro"
+                data-id="${u.id_usuario}"
+              >Link registro</button>`
+            : "";
+        return `
+          <tr>
+            <td>${u.id_usuario ?? "-"}</td>
+            <td>${cliente}</td>
+            <td>
+              <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="telefono" data-quick-edit="${telefonoQuickEdit}">
+                <span class="usuarios-text">${tel || "-"}</span>
+                <button type="button" class="btn-outline btn-edit">✏️</button>
+              </div>
+            </td>
+            <td>
+              <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="correo" data-quick-edit="${correoQuickEdit}">
+                <span class="usuarios-text">${email || "-"}</span>
+                <button type="button" class="btn-outline btn-edit">✏️</button>
+              </div>
+            </td>
+            <td>
+              <div class="saldo-wrap" data-id="${u.id_usuario}" data-saldo="${saldoVal}">
+                <span class="saldo-text">${saldoTxt}</span>
+                <button
+                  type="button"
+                  class="btn-outline btn-add-saldo"
+                  data-id="${u.id_usuario}"
+                  data-saldo="${saldoVal}"
+                  title="Agregar saldo"
+                >+</button>
+              </div>
+            </td>
+            <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">
+              <span class="registro-cell-content">
+                <span>${registrado}</span>
+                ${registroBtnHtml}
+              </span>
+            </td>
+          </tr>
+        `;
+      };
+
+      const renderPagination = () => {
+        const totalRows = usuariosFilteredRows.length;
+        const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+        if (pageLabelEl) pageLabelEl.textContent = `Página ${currentPage} de ${totalPages}`;
+        if (pagePrevBtn) pagePrevBtn.disabled = currentPage <= 1;
+        if (pageNextBtn) pageNextBtn.disabled = currentPage >= totalPages;
+        if (paginationEl) paginationEl.classList.toggle("hidden", !usuariosRows.length);
+      };
+
+      const renderCurrentPage = () => {
+        if (!tbodyEl) return;
+        const totalRows = usuariosFilteredRows.length;
+        if (!totalRows) {
+          tbodyEl.innerHTML =
+            '<tr><td colspan="6" class="status">No hay usuarios que coincidan con la búsqueda.</td></tr>';
+          renderPagination();
+          return;
+        }
+        const start = (currentPage - 1) * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+        const pageRows = usuariosFilteredRows.slice(start, end);
+        tbodyEl.innerHTML = pageRows.map((u) => buildUsuarioRowHtml(u)).join("");
+        renderPagination();
+      };
+
+      const applySearchFilter = ({ resetPage = false } = {}) => {
+        if (resetPage) currentPage = 1;
+        const q = normalizeText(searchInputEl?.value || "");
+        usuariosFilteredRows = (usuariosRows || []).filter((row) => {
+          if (!q) return true;
+          const name = normalizeText(row?.nombre || "");
+          const lastName = normalizeText(row?.apellido || "");
+          const full = normalizeText(`${row?.nombre || ""} ${row?.apellido || ""}`);
+          return name.includes(q) || lastName.includes(q) || full.includes(q);
+        });
+        renderCurrentPage();
+        if (!usuariosRows.length) {
+          setStatus("No hay usuarios registrados.");
+          return;
+        }
+        if (q && !usuariosFilteredRows.length) {
+          setStatus("No se encontraron usuarios con ese nombre/apellido.");
+          return;
+        }
+        setStatus("");
+      };
+
       const init = async () => {
         try {
           await ensureServerSession();
@@ -313,82 +490,24 @@
             .order("nombre", { ascending: true })
             .order("apellido", { ascending: true });
           if (error) throw error;
-          const rows = data || [];
-          if (!rows.length) {
+          usuariosRows = data || [];
+          if (!usuariosRows.length) {
             setStatus("No hay usuarios registrados.");
             if (tbodyEl) tbodyEl.innerHTML = "";
             if (phoneStatEl) phoneStatEl.textContent = "";
+            if (paginationEl) paginationEl.classList.add("hidden");
             return;
           }
-          const invalidPhones = rows.filter((u) => {
+          const invalidPhones = usuariosRows.filter((u) => {
             const raw = String(u?.telefono ?? "").trim();
             if (!raw) return true;
             return !/^\d+$/.test(raw);
           });
-          const pct = Math.round((invalidPhones.length / rows.length) * 1000) / 10;
+          const pct = Math.round((invalidPhones.length / usuariosRows.length) * 1000) / 10;
           if (phoneStatEl) {
-            phoneStatEl.textContent = `Usuarios sin teléfono válido: ${invalidPhones.length} de ${rows.length} (${pct}%)`;
+            phoneStatEl.textContent = `Usuarios sin teléfono válido: ${invalidPhones.length} de ${usuariosRows.length} (${pct}%)`;
           }
-          const html = rows
-            .map((u) => {
-              const cliente = formatCliente(u);
-              const tel = String(u.telefono || "").trim();
-              const email = String(u.correo || "").trim();
-              const saldoNum = Number(u?.saldo);
-              const saldoVal = Number.isFinite(saldoNum) ? saldoNum : 0;
-              const saldoTxt = formatSaldo(saldoVal);
-              const phoneIsValid = !!tel && /^\d+$/.test(tel);
-              const telefonoQuickEdit = phoneIsValid ? "0" : "1";
-              const correoQuickEdit = email ? "0" : "1";
-              const registrado = u.fecha_registro ? "Sí" : "No";
-              const registroBtnHtml =
-                registrado === "No"
-                  ? `<button
-                      type="button"
-                      class="btn-outline btn-link-registro"
-                      data-id="${u.id_usuario}"
-                    >Link registro</button>`
-                  : "";
-              return `
-                <tr>
-                  <td>${u.id_usuario ?? "-"}</td>
-                  <td>${cliente}</td>
-                  <td>
-                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="telefono" data-quick-edit="${telefonoQuickEdit}">
-                      <span class="usuarios-text">${tel || "-"}</span>
-                      <button type="button" class="btn-outline btn-edit">✏️</button>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="usuarios-edit-wrap" data-id="${u.id_usuario}" data-field="correo" data-quick-edit="${correoQuickEdit}">
-                      <span class="usuarios-text">${email || "-"}</span>
-                      <button type="button" class="btn-outline btn-edit">✏️</button>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="saldo-wrap" data-id="${u.id_usuario}" data-saldo="${saldoVal}">
-                      <span class="saldo-text">${saldoTxt}</span>
-                      <button
-                        type="button"
-                        class="btn-outline btn-add-saldo"
-                        data-id="${u.id_usuario}"
-                        data-saldo="${saldoVal}"
-                        title="Agregar saldo"
-                      >+</button>
-                    </div>
-                  </td>
-                  <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">
-                    <span class="registro-cell-content">
-                      <span>${registrado}</span>
-                      ${registroBtnHtml}
-                    </span>
-                  </td>
-                </tr>
-              `;
-            })
-            .join("");
-          if (tbodyEl) tbodyEl.innerHTML = html;
-          setStatus("");
+          applySearchFilter({ resetPage: true });
         } catch (err) {
           console.error("usuarios error", err);
           setStatus("No se pudieron cargar los usuarios.");
@@ -396,6 +515,24 @@
       };
 
       init();
+
+      searchInputEl?.addEventListener("input", () => {
+        if (!usuariosRows.length) return;
+        applySearchFilter({ resetPage: true });
+      });
+
+      pagePrevBtn?.addEventListener("click", () => {
+        if (currentPage <= 1) return;
+        currentPage -= 1;
+        renderCurrentPage();
+      });
+
+      pageNextBtn?.addEventListener("click", () => {
+        const totalPages = Math.max(1, Math.ceil((usuariosFilteredRows.length || 0) / PAGE_SIZE));
+        if (currentPage >= totalPages) return;
+        currentPage += 1;
+        renderCurrentPage();
+      });
 
       const startEdit = (wrap) => {
         if (!wrap || wrap.querySelector(".usuarios-edit-input")) return;
@@ -454,6 +591,15 @@
             .update(payload)
             .eq("id_usuario", id);
           if (error) throw error;
+          const uid = Number(id) || 0;
+          if (uid) {
+            usuariosRows = (usuariosRows || []).map((row) =>
+              Number(row?.id_usuario) === uid ? { ...row, [field]: nextVal || null } : row,
+            );
+            usuariosFilteredRows = (usuariosFilteredRows || []).map((row) =>
+              Number(row?.id_usuario) === uid ? { ...row, [field]: nextVal || null } : row,
+            );
+          }
           finishEdit(wrap, nextVal);
         } catch (err) {
           console.error("usuarios update error", err);
@@ -474,11 +620,12 @@
             if (result?.error) throw new Error(result.error);
             const url = String(result?.url || "").trim();
             if (!url) throw new Error("No se pudo generar el link.");
-            const copied = await copyTextToClipboard(url).catch(() => false);
+            const message = buildSignupInviteMessage(url);
+            const copied = await copyTextToClipboard(message).catch(() => false);
             if (copied) {
-              alert("Link de registro copiado al portapapeles.");
+              alert("Mensaje de registro copiado al portapapeles.");
             } else {
-              window.prompt("Copia este link de registro:", url);
+              window.prompt("Copia este mensaje de registro:", message);
             }
           } catch (err) {
             console.error("generar link registro error", err);

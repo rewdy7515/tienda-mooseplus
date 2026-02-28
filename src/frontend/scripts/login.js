@@ -40,6 +40,13 @@ function setLoading(isLoading) {
   submitBtn.textContent = isLoading ? "Iniciando..." : "Iniciar sesión";
 }
 
+function maybeShowEmailConfirmedMessage() {
+  const params = new URLSearchParams(window.location.search || "");
+  const confirmed = String(params.get("email_confirmed") || "").trim();
+  if (confirmed !== "1") return;
+  setStatus("Correo verificado. Ahora inicia sesión.", false);
+}
+
 function getResetRedirectUrl() {
   return new URL("restablecer_clave.html", window.location.href).toString();
 }
@@ -130,6 +137,10 @@ async function handleLogin(event) {
     });
     if (authErr) {
       const msg = (authErr.message || "").toLowerCase();
+      if (msg.includes("email not confirmed")) {
+        setStatus("Debes verificar tu correo antes de iniciar sesión.", true);
+        return;
+      }
       if (msg.includes("invalid login credentials")) {
         try {
           const { data: userRow } = await supabase
@@ -154,6 +165,12 @@ async function handleLogin(event) {
         return;
       }
       setStatus("No se pudo iniciar sesión. Intenta de nuevo.", true);
+      return;
+    }
+
+    if (!authData?.user?.email_confirmed_at) {
+      await supabase.auth.signOut().catch(() => {});
+      setStatus("Debes verificar tu correo antes de iniciar sesión.", true);
       return;
     }
 
@@ -230,6 +247,7 @@ function initSignupRedirect() {
 }
 
 function init() {
+  maybeShowEmailConfirmedMessage();
   captchaInitPromise = initAuthCaptcha({
     containerId: "login-captcha",
     errorId: "login-captcha-error",
