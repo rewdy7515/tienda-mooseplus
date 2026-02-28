@@ -931,7 +931,13 @@ export const setDescuentos = (rows = []) => {
       const row = { ...d };
       Object.keys(row).forEach((k) => {
         if (/^descuento_/i.test(String(k))) {
-          row[k] = Number(row[k]) || 0;
+          const raw = row[k];
+          if (raw === null || raw === undefined || raw === "") {
+            row[k] = null;
+            return;
+          }
+          const num = Number(raw);
+          row[k] = Number.isFinite(num) ? num : null;
         }
       });
       acc[meses] = row;

@@ -73,6 +73,7 @@ CREATE TABLE public.cuentas (
   venta_dominio boolean,
   cuenta_madre boolean,
   pin integer,
+  completa boolean,
   CONSTRAINT cuentas_pkey PRIMARY KEY (id_cuenta),
   CONSTRAINT cuentas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT cuentas_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
@@ -297,10 +298,12 @@ CREATE TABLE public.plataformas (
   aplica_descuento_mes_mayor boolean NOT NULL DEFAULT true,
   aplica_descuento_cantidad_detal boolean NOT NULL DEFAULT true,
   aplica_descuento_cantidad_mayor boolean NOT NULL DEFAULT true,
+  id_descuento_mes_detal bigint,
+  id_descuento_mes_mayor bigint,
+  id_descuento_cantidad_detal bigint,
+  id_descuento_cantidad_mayor bigint,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
-  CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria),
-  CONSTRAINT plataformas_id_descuento_mes_fkey FOREIGN KEY (id_descuento_mes) REFERENCES public.descuentos(id_descuento),
-  CONSTRAINT plataformas_id_descuento_cantidad_fkey FOREIGN KEY (id_descuento_cantidad) REFERENCES public.descuentos(id_descuento)
+  CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );
 CREATE TABLE public.precios (
   id_precio bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
