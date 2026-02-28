@@ -1259,7 +1259,7 @@ const SIGNUP_TOKEN_SECRET = String(
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     "",
 ).trim();
-const SIGNUP_RESEND_COOLDOWN_MS = 15 * 1000;
+const SIGNUP_RESEND_COOLDOWN_MS = 60 * 1000;
 const signupResendCooldownMap = new Map();
 
 const todayInVenezuela = () => {
