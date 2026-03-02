@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mi perfil</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/css/intlTelInput.css"
+    />
     <link rel="stylesheet" href="../styles/styles.css" />
     <style>
       .perfil-wrap.categorias-dinamicas {
@@ -79,6 +83,16 @@
         min-width: 0;
         box-sizing: border-box;
         justify-self: center;
+      }
+      .perfil-form .iti {
+        width: 92%;
+        max-width: 520px;
+        min-width: 0;
+        justify-self: center;
+      }
+      .perfil-form .iti .form-input {
+        width: 100%;
+        max-width: none;
       }
       .perfil-form .form-label {
         width: 92%;
@@ -232,6 +246,8 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/intlTelInput.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/utils.js"></script>
     <script type="module" src="../scripts/mi_perfil.js"></script>
   </body>
 </html>

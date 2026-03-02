@@ -2349,7 +2349,17 @@ const resolveUsuarioFromAuthToken = async (token) => {
     return err;
   };
   const normalizeText = (value) => String(value || "").trim();
-  const normalizePhoneDigits = (value) => normalizeText(value).replace(/\D+/g, "");
+  const normalizePhoneDigits = (value) => {
+    const digits = normalizeText(value)
+      .replace(/\D+/g, "")
+      .replace(/^0+/, "");
+    if (!digits) return "";
+    if (digits.startsWith("58")) {
+      const national = digits.slice(2).replace(/^0+/, "");
+      return national ? `58${national}` : "58";
+    }
+    return digits;
+  };
   const normalizeEmail = (value) => normalizeText(value).toLowerCase();
   const mapUniqueUsuariosError = (dbErr) => {
     if (String(dbErr?.code || "") !== "23505") return "";
@@ -2400,7 +2410,7 @@ const resolveUsuarioFromAuthToken = async (token) => {
       patch.fecha_registro = todayInVenezuela();
     }
     const currentTelefono = normalizePhoneDigits(currentRow?.telefono);
-    if (metaTelefono && currentTelefono !== metaTelefono) {
+    if (metaTelefono && (forceProfile || !currentTelefono)) {
       patch.telefono = metaTelefono;
     }
     if (metaNombre && (forceProfile || !normalizeText(currentRow?.nombre))) {
@@ -3882,9 +3892,21 @@ app.post("/api/signup-link/complete", async (req, res) => {
     const token = String(req.body?.token || "").trim();
     const payload = verifySignupRegistrationToken(token);
 
+    const normalizeSignupPhone = (value) => {
+      const digits = String(value || "")
+        .replace(/\D+/g, "")
+        .replace(/^0+/, "");
+      if (!digits) return "";
+      if (digits.startsWith("58")) {
+        const national = digits.slice(2).replace(/^0+/, "");
+        return national ? `58${national}` : "58";
+      }
+      return digits;
+    };
+
     const nombre = String(req.body?.nombre || "").trim();
     const apellido = String(req.body?.apellido || "").trim();
-    const telefono = String(req.body?.telefono || "").replace(/\D+/g, "").trim();
+    const telefono = normalizeSignupPhone(req.body?.telefono);
     const correo = String(req.body?.correo || "")
       .trim()
       .toLowerCase();

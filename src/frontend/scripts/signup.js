@@ -60,6 +60,34 @@ function getSignupEmailRedirectUrl() {
 
 const limitMessage = () =>
   phoneMaxDigits ? `Puedes escribir hasta ${phoneMaxDigits} dígitos` : "";
+const LEADING_ZERO_PHONE_MESSAGE = "El número no debe empezar con 0.";
+
+const normalizePhoneDigits = (value) =>
+  String(value || "")
+    .replace(/\D+/g, "")
+    .replace(/^0+/, "");
+
+const normalizePhoneByDialCode = (rawValue, rawDialCode = "") => {
+  const digits = normalizePhoneDigits(rawValue);
+  const dialDigits = normalizePhoneDigits(rawDialCode);
+  if (!digits) return "";
+  if (!dialDigits) return digits;
+  if (digits.startsWith(dialDigits)) {
+    const national = digits.slice(dialDigits.length).replace(/^0+/, "");
+    return national ? `${dialDigits}${national}` : dialDigits;
+  }
+  return `${dialDigits}${digits.replace(/^0+/, "")}`;
+};
+
+const extractLocalPhoneDigits = (rawValue, rawDialCode = "") => {
+  const digits = normalizePhoneDigits(rawValue);
+  const dialDigits = normalizePhoneDigits(rawDialCode);
+  if (!digits) return "";
+  if (dialDigits && digits.startsWith(dialDigits)) {
+    return digits.slice(dialDigits.length).replace(/^0+/, "");
+  }
+  return digits.replace(/^0+/, "");
+};
 
 function clearMessages() {
   Object.values(errors).forEach((el) => {
@@ -275,7 +303,14 @@ async function handleSubmit(e) {
 
   const nombre = fields.nombre.value.trim();
   const apellido = fields.apellido.value.trim();
-  const telefono = fields.telefono.value.replace(/\D+/g, "");
+  const phoneDial = iti?.getSelectedCountryData?.()?.dialCode;
+  const phoneDialDigits = normalizePhoneDigits(phoneDial || "");
+  const telefonoRawDigits = String(fields.telefono.value || "").replace(/\D+/g, "");
+  const telefonoRawNational =
+    phoneDialDigits && telefonoRawDigits.startsWith(phoneDialDigits)
+      ? telefonoRawDigits.slice(phoneDialDigits.length)
+      : telefonoRawDigits;
+  const telefono = extractLocalPhoneDigits(fields.telefono.value, phoneDialDigits);
   const correo = fields.correo.value.trim().toLowerCase();
   const clave = fields.clave.value;
   const clave2 = fields.clave2.value;
@@ -291,12 +326,16 @@ async function handleSubmit(e) {
     fields.apellido.classList.add("input-error");
     hasError = true;
   }
-  if (!telefono) {
+  if (telefonoRawNational.startsWith("0")) {
+    errors.telefono.textContent = LEADING_ZERO_PHONE_MESSAGE;
+    fields.telefono.classList.add("input-error");
+    hasError = true;
+  } else if (!telefono) {
     errors.telefono.textContent = "El número es obligatorio.";
     fields.telefono.classList.add("input-error");
     hasError = true;
   }
-  const digitsOnly = telefono.replace(/\D+/g, "");
+  const digitsOnly = telefono;
   if (phoneMaxDigits && digitsOnly.length > 0 && digitsOnly.length < phoneMaxDigits) {
     errors.telefono.textContent = "Numero de telefono incompleto";
     fields.telefono.classList.add("input-error");
@@ -354,9 +393,7 @@ async function handleSubmit(e) {
       signupTokenContext = valid;
     }
 
-    const phoneDial = iti?.getSelectedCountryData?.()?.dialCode;
-    const phoneDialDigits = String(phoneDial || "").replace(/\D+/g, "");
-    const phoneDigits = `${phoneDialDigits}${telefono}`.replace(/\D+/g, "") || telefono;
+    const phoneDigits = normalizePhoneByDialCode(telefono, phoneDialDigits) || telefono;
 
     // 1) Registrar en Auth de Supabase
     const { data: authSignupData, error: authErr } = await supabase.auth.signUp({
@@ -512,7 +549,8 @@ function init() {
     fields.telefono.addEventListener("countrychange", updatePlaceholder);
 
     fields.telefono.addEventListener("input", () => {
-      let digits = fields.telefono.value.replace(/\D+/g, "");
+      const dialDigits = normalizePhoneDigits(iti?.getSelectedCountryData?.()?.dialCode || "");
+      let digits = extractLocalPhoneDigits(fields.telefono.value, dialDigits);
       if (phoneMaxDigits && digits.length > phoneMaxDigits) {
         digits = digits.slice(0, phoneMaxDigits);
         fields.telefono.value = digits;
@@ -521,7 +559,8 @@ function init() {
         return;
       } else if (
         errors.telefono.textContent === limitMessage() ||
-        errors.telefono.textContent === "Numero de telefono incompleto"
+        errors.telefono.textContent === "Numero de telefono incompleto" ||
+        errors.telefono.textContent === LEADING_ZERO_PHONE_MESSAGE
       ) {
         errors.telefono.textContent = "";
         fields.telefono.classList.remove("input-error");
@@ -535,13 +574,31 @@ function init() {
       }
     });
     fields.telefono.addEventListener("blur", () => {
-      const digits = fields.telefono.value.replace(/\D+/g, "");
+      const dialDigits = normalizePhoneDigits(iti?.getSelectedCountryData?.()?.dialCode || "");
+      const digits = extractLocalPhoneDigits(fields.telefono.value, dialDigits);
       if (!digits) return;
       if (phoneMaxDigits && digits.length < phoneMaxDigits) {
         errors.telefono.textContent = "Numero de telefono incompleto";
         fields.telefono.classList.add("input-error");
       }
     });
+  } else if (fields.telefono) {
+    const normalizeTelefonoFallback = () => {
+      const rawDigits = String(fields.telefono.value || "").replace(/\D+/g, "");
+      const digits = extractLocalPhoneDigits(fields.telefono.value);
+      fields.telefono.value = digits;
+      if (rawDigits.startsWith("0")) {
+        errors.telefono.textContent = LEADING_ZERO_PHONE_MESSAGE;
+        fields.telefono.classList.add("input-error");
+        return;
+      }
+      if (errors.telefono.textContent === LEADING_ZERO_PHONE_MESSAGE) {
+        errors.telefono.textContent = "";
+        fields.telefono.classList.remove("input-error");
+      }
+    };
+    fields.telefono.addEventListener("input", normalizeTelefonoFallback);
+    fields.telefono.addEventListener("blur", normalizeTelefonoFallback);
   }
 
   form?.addEventListener("submit", handleSubmit);

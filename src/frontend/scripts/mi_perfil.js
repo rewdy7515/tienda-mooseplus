@@ -36,6 +36,10 @@ let savedBgColor = DEFAULT_BG_COLOR;
 let pendingAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let pendingBgColor = DEFAULT_BG_COLOR;
 let savedRecordatorioDiasAntes = null;
+let savedTelefonoDigits = "";
+let telefonoIti = null;
+let telefonoMaxDigits = null;
+let telefonoPattern = "";
 
 const setInput = (el, value) => {
   if (!el) return;
@@ -66,6 +70,185 @@ const parseRecordatorioDias = (value) => {
     return { valid: false, value: null };
   }
   return { valid: true, value: parsed };
+};
+
+const normalizePhoneDigits = (value) =>
+  String(value || "")
+    .replace(/\D+/g, "")
+    .replace(/^0+/, "");
+
+const normalizePhoneByDialCode = (rawValue, rawDialCode = "") => {
+  const digits = normalizePhoneDigits(rawValue);
+  const dialDigits = normalizePhoneDigits(rawDialCode);
+  if (!digits) return "";
+  if (!dialDigits) return digits;
+  if (digits.startsWith(dialDigits)) {
+    const national = digits.slice(dialDigits.length).replace(/^0+/, "");
+    return national ? `${dialDigits}${national}` : dialDigits;
+  }
+  return `${dialDigits}${digits.replace(/^0+/, "")}`;
+};
+
+const extractLocalPhoneDigits = (rawValue, rawDialCode = "") => {
+  const digits = normalizePhoneDigits(rawValue);
+  const dialDigits = normalizePhoneDigits(rawDialCode);
+  if (!digits) return "";
+  if (dialDigits && digits.startsWith(dialDigits)) {
+    return digits.slice(dialDigits.length).replace(/^0+/, "");
+  }
+  return digits.replace(/^0+/, "");
+};
+
+const formatTelefonoWithPattern = (digits, pattern) => {
+  if (!pattern) return digits;
+  let result = "";
+  let i = 0;
+  for (const ch of pattern) {
+    if (ch === "X") {
+      if (i >= digits.length) break;
+      result += digits[i++];
+    } else {
+      if (i === 0 || i >= digits.length) continue;
+      result += ch;
+    }
+  }
+  return result;
+};
+
+const computeTelefonoPlaceholderInfo = () => {
+  const utils = window.intlTelInputUtils;
+  if (!utils || !telefonoIti) return { placeholder: "", max: null, pattern: "" };
+  const type = utils.numberType?.MOBILE ?? utils.numberType?.FIXED_LINE_OR_MOBILE;
+  const iso2 = telefonoIti.getSelectedCountryData()?.iso2;
+  const example = iso2 ? utils.getExampleNumber(iso2, true, type) : "";
+  const rawPlaceholder =
+    (telefonoIti?.getNumberPlaceholder && telefonoIti.getNumberPlaceholder(type)) || example || "";
+  const cleaned = rawPlaceholder.replace(/^0+/, "").trim();
+  const placeholderNormalized = cleaned.replace(/[()]/g, "").replace(/\s+/g, "-");
+  const digitsOnly = placeholderNormalized.replace(/\D+/g, "").replace(/^0+/, "");
+  const maxDigits = digitsOnly.length || null;
+  const pattern = placeholderNormalized.replace(/\d/g, "X");
+  return {
+    placeholder: placeholderNormalized || cleaned || rawPlaceholder,
+    max: maxDigits,
+    pattern,
+  };
+};
+
+const updateTelefonoPlaceholder = () => {
+  if (!telefonoInputEl) return;
+  const info = computeTelefonoPlaceholderInfo();
+  telefonoMaxDigits = info.max;
+  telefonoPattern = info.pattern || "";
+  if (info.placeholder) telefonoInputEl.placeholder = info.placeholder;
+  if (telefonoMaxDigits) {
+    const patternLength = telefonoPattern ? telefonoPattern.length : telefonoMaxDigits;
+    telefonoInputEl.maxLength = patternLength;
+  } else {
+    telefonoInputEl.removeAttribute("maxLength");
+  }
+};
+
+const setTelefonoFromUser = (value) => {
+  if (!telefonoInputEl) return;
+  const rawDigits = normalizePhoneDigits(value);
+  const selectedDialDigits = normalizePhoneDigits(
+    telefonoIti?.getSelectedCountryData?.()?.dialCode || "",
+  );
+  const guessedDialDigits = selectedDialDigits || (rawDigits.startsWith("58") ? "58" : "");
+  const digits = normalizePhoneByDialCode(rawDigits, guessedDialDigits);
+  telefonoInputEl.dataset.rawPhone = digits;
+  if (!digits) {
+    telefonoInputEl.value = "";
+    return;
+  }
+
+  let localDigits = digits;
+  if (guessedDialDigits && localDigits.startsWith(guessedDialDigits)) {
+    localDigits = localDigits.slice(guessedDialDigits.length);
+  }
+  localDigits = localDigits.replace(/^0+/, "");
+
+  if (telefonoIti?.setNumber) {
+    try {
+      telefonoIti.setNumber(`+${digits}`);
+    } catch (_err) {
+      // noop
+    }
+  }
+  if (telefonoMaxDigits && localDigits.length > telefonoMaxDigits) {
+    localDigits = localDigits.slice(-telefonoMaxDigits);
+  }
+  const formatted = formatTelefonoWithPattern(localDigits, telefonoPattern);
+  telefonoInputEl.value = formatted || localDigits;
+};
+
+const getTelefonoDigitsForSave = () => {
+  const localDigits = normalizePhoneDigits(telefonoInputEl?.value || "");
+  const dialDigits = normalizePhoneDigits(telefonoIti?.getSelectedCountryData?.()?.dialCode || "");
+  if (localDigits && dialDigits) return normalizePhoneByDialCode(localDigits, dialDigits);
+  if (localDigits) return localDigits;
+
+  const e164Digits = normalizePhoneDigits(telefonoIti?.getNumber?.() || "");
+  if (!e164Digits) return "";
+  if (dialDigits) return normalizePhoneByDialCode(e164Digits, dialDigits);
+  return e164Digits;
+};
+
+const normalizeTelefonoFallbackInput = () => {
+  if (!telefonoInputEl) return;
+  let digits = extractLocalPhoneDigits(telefonoInputEl.value);
+  if (telefonoMaxDigits && digits.length > telefonoMaxDigits) {
+    digits = digits.slice(0, telefonoMaxDigits);
+  }
+  telefonoInputEl.value = digits;
+};
+
+const initTelefonoInput = () => {
+  if (!telefonoInputEl) return;
+  if (!window.intlTelInput) {
+    telefonoInputEl.addEventListener("input", normalizeTelefonoFallbackInput);
+    telefonoInputEl.addEventListener("blur", normalizeTelefonoFallbackInput);
+    return;
+  }
+  telefonoIti = window.intlTelInput(telefonoInputEl, {
+    initialCountry: "ve",
+    preferredCountries: ["ve", "co", "mx", "us", "es"],
+    separateDialCode: true,
+    allowDropdown: true,
+    nationalMode: true,
+    autoPlaceholder: "aggressive",
+    placeholderNumberType: "MOBILE",
+    customPlaceholder: (placeholder) => {
+      const cleaned = placeholder.replace(/^0+/, "").trim();
+      return cleaned || placeholder;
+    },
+    utilsScript: "https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/utils.js",
+  });
+
+  telefonoIti.promise?.then(() => {
+    updateTelefonoPlaceholder();
+    const rawDigits = normalizePhoneDigits(telefonoInputEl.dataset.rawPhone || "");
+    if (rawDigits) setTelefonoFromUser(rawDigits);
+  });
+  updateTelefonoPlaceholder();
+  telefonoInputEl.addEventListener("countrychange", updateTelefonoPlaceholder);
+
+  telefonoInputEl.addEventListener("input", () => {
+    const dialDigits = normalizePhoneDigits(
+      telefonoIti?.getSelectedCountryData?.()?.dialCode || "",
+    );
+    let digits = extractLocalPhoneDigits(telefonoInputEl.value, dialDigits);
+    if (telefonoMaxDigits && digits.length > telefonoMaxDigits) {
+      digits = digits.slice(0, telefonoMaxDigits);
+    }
+    const formatted = formatTelefonoWithPattern(digits, telefonoPattern);
+    telefonoInputEl.value = formatted;
+    if (telefonoMaxDigits) {
+      const patternLength = telefonoPattern ? telefonoPattern.length : telefonoMaxDigits;
+      telefonoInputEl.maxLength = patternLength;
+    }
+  });
 };
 
 const isImageName = (name) =>
@@ -251,7 +434,8 @@ const init = async () => {
     setInput(nombreInputEl, user.nombre);
     setInput(apellidoInputEl, user.apellido);
     setInput(correoInputEl, user.correo);
-    setInput(telefonoInputEl, user.telefono);
+    setTelefonoFromUser(user.telefono);
+    savedTelefonoDigits = normalizePhoneDigits(user.telefono);
     const parsedRecordatorio = parseRecordatorioDias(user.recordatorio_dias_antes);
     savedRecordatorioDiasAntes = parsedRecordatorio.valid ? parsedRecordatorio.value : null;
     setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
@@ -293,6 +477,27 @@ const saveRecordatorioDiasAntes = async () => {
   }
 };
 
+const saveTelefono = async () => {
+  if (!currentUserId || !telefonoInputEl) return;
+  const digits = getTelefonoDigitsForSave();
+  if (digits === savedTelefonoDigits) return;
+
+  try {
+    const { error } = await supabase
+      .from("usuarios")
+      .update({ telefono: digits || null })
+      .eq("id_usuario", currentUserId);
+    if (error) throw error;
+
+    savedTelefonoDigits = digits;
+    setTelefonoFromUser(digits);
+  } catch (err) {
+    console.error("save telefono error", err);
+    alert("No se pudo guardar el numero de telefono.");
+    setTelefonoFromUser(savedTelefonoDigits);
+  }
+};
+
 btnEditarFotoEl?.addEventListener("click", async () => {
   openAvatarModal();
   await loadAvatarOptions();
@@ -318,6 +523,13 @@ avatarModalEl?.addEventListener("click", (e) => {
 
 avatarModalCloseEl?.addEventListener("click", () => closeAvatarModal(true));
 btnAvatarSaveEl?.addEventListener("click", saveAvatarProfile);
+telefonoInputEl?.addEventListener("change", saveTelefono);
+telefonoInputEl?.addEventListener("blur", saveTelefono);
+telefonoInputEl?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  saveTelefono();
+});
 recordatorioDiasInputEl?.addEventListener("change", saveRecordatorioDiasAntes);
 recordatorioDiasInputEl?.addEventListener("blur", saveRecordatorioDiasAntes);
 recordatorioDiasInputEl?.addEventListener("keydown", (e) => {
@@ -326,6 +538,7 @@ recordatorioDiasInputEl?.addEventListener("keydown", (e) => {
   saveRecordatorioDiasAntes();
 });
 
+initTelefonoInput();
 init();
 attachLogoHome();
 attachLogout(clearServerSession);
