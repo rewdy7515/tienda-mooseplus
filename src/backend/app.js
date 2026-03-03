@@ -2747,6 +2747,20 @@ const getCurrentCarrito = async (idUsuario) => {
   return data?.id_carrito || null;
 };
 
+const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const toFiniteMoney = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? roundMoney(num) : null;
+};
+const resolveMontoFinal = ({ montoUsd, usaSaldo, saldoUsuario }) => {
+  const montoBase = toFiniteMoney(montoUsd);
+  if (!Number.isFinite(montoBase)) return null;
+  if (!isTrue(usaSaldo)) return montoBase;
+  const saldo = toFiniteMoney(saldoUsuario);
+  const saldoAplicable = Number.isFinite(saldo) && saldo > 0 ? saldo : 0;
+  return Math.max(0, roundMoney(montoBase - saldoAplicable));
+};
+
 const getOrCreateCarrito = async (idUsuario) => {
   const { data, error } = await runSupabaseQueryWithRetry(
     () =>
@@ -3030,6 +3044,21 @@ app.get("/api/cart", async (_req, res) => {
       "cart:get:carritoInfo",
     );
     if (carritoErr) throw carritoErr;
+    const { data: usuarioInfo, error: userErr } = await runSupabaseQueryWithRetry(
+      () =>
+        supabaseAdmin
+          .from("usuarios")
+          .select("saldo")
+          .eq("id_usuario", idUsuario)
+          .maybeSingle(),
+      "cart:get:usuarioSaldo",
+    );
+    if (userErr) throw userErr;
+    const montoFinalResolved = resolveMontoFinal({
+      montoUsd: carritoInfo?.monto_usd,
+      usaSaldo: carritoInfo?.usa_saldo,
+      saldoUsuario: usuarioInfo?.saldo,
+    });
 
     const { data: items, error: itemErr } = await runSupabaseQueryWithRetry(
       () =>
@@ -3109,7 +3138,7 @@ app.get("/api/cart", async (_req, res) => {
       monto_bs: carritoInfo?.monto_bs ?? null,
       tasa_bs: carritoInfo?.tasa_bs ?? null,
       descuento: carritoInfo?.descuento ?? null,
-      monto_final: carritoInfo?.monto_final ?? null,
+      monto_final: montoFinalResolved,
       usa_saldo: carritoInfo?.usa_saldo ?? null,
       hora: carritoInfo?.hora ?? null,
       fecha: carritoInfo?.fecha ?? null,
@@ -3132,6 +3161,23 @@ app.post("/api/cart/montos", async (req, res) => {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
     const tasa_bs = req.body?.tasa_bs === null ? null : Number(req.body?.tasa_bs);
+    const { data: carritoInfo, error: carritoErr } = await supabaseAdmin
+      .from("carritos")
+      .select("monto_usd, usa_saldo")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (carritoErr) throw carritoErr;
+    const { data: usuarioInfo, error: usuarioErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("saldo")
+      .eq("id_usuario", idUsuario)
+      .maybeSingle();
+    if (usuarioErr) throw usuarioErr;
+    const montoFinal = resolveMontoFinal({
+      montoUsd: carritoInfo?.monto_usd,
+      usaSaldo: carritoInfo?.usa_saldo,
+      saldoUsuario: usuarioInfo?.saldo,
+    });
     const caracasNow = new Date(
       new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
     );
@@ -3146,6 +3192,7 @@ app.post("/api/cart/montos", async (req, res) => {
       .from("carritos")
       .update({
         tasa_bs: Number.isFinite(tasa_bs) ? tasa_bs : null,
+        monto_final: montoFinal,
         hora,
         fecha,
       })
@@ -3170,12 +3217,29 @@ app.post("/api/cart/flags", async (req, res) => {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
     const usa_saldo = isTrue(req.body?.usa_saldo);
+    const { data: carritoInfo, error: cartErr } = await supabaseAdmin
+      .from("carritos")
+      .select("monto_usd")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (cartErr) throw cartErr;
+    const { data: usuarioInfo, error: userErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("saldo")
+      .eq("id_usuario", idUsuario)
+      .maybeSingle();
+    if (userErr) throw userErr;
+    const montoFinal = resolveMontoFinal({
+      montoUsd: carritoInfo?.monto_usd,
+      usaSaldo: usa_saldo,
+      saldoUsuario: usuarioInfo?.saldo,
+    });
     const { error: updErr } = await supabaseAdmin
       .from("carritos")
-      .update({ usa_saldo })
+      .update({ usa_saldo, monto_final: montoFinal })
       .eq("id_carrito", carritoId);
     if (updErr) throw updErr;
-    return res.json({ ok: true, id_carrito: carritoId, usa_saldo });
+    return res.json({ ok: true, id_carrito: carritoId, usa_saldo, monto_final: montoFinal });
   } catch (err) {
     console.error("[cart:flags] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
