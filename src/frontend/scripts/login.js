@@ -17,6 +17,59 @@ let forgotLoading = false;
 let captchaController = null;
 let captchaInitPromise = null;
 
+function isCaptchaAuthFailure(errorLike) {
+  const message = String(errorLike?.message || "").toLowerCase();
+  const code = String(errorLike?.code || "").toLowerCase();
+  return (
+    message.includes("captcha") ||
+    message.includes("challenge") ||
+    code.includes("captcha") ||
+    code.includes("challenge")
+  );
+}
+
+function isAuthSchemaFailure(errorLike) {
+  const message = String(errorLike?.message || "").toLowerCase();
+  return message.includes("database error querying schema") || message.includes("schema");
+}
+
+function logAuthError(scope, err) {
+  console.error(`[login] ${scope} auth error`, {
+    name: err?.name || "",
+    status: Number(err?.status) || 0,
+    code: err?.code || "",
+    message: err?.message || "",
+  });
+}
+
+async function signInWithPasswordSafe({ email, password, captchaToken }) {
+  const signInPayload = { email, password };
+  if (captchaToken) {
+    signInPayload.options = { captchaToken };
+  }
+
+  const firstAttempt = await supabase.auth.signInWithPassword(signInPayload);
+  const firstError = firstAttempt?.error || null;
+  if (!firstError) return firstAttempt;
+
+  logAuthError("signIn:first_attempt", firstError);
+
+  const shouldRetryWithoutCaptcha =
+    Boolean(captchaToken) &&
+    isCaptchaAuthFailure(firstError);
+  if (!shouldRetryWithoutCaptcha) return firstAttempt;
+
+  // En algunos fallos transitorios del proveedor captcha, el login puede
+  // completarse correctamente reintentando sin token.
+  const retryAttempt = await supabase.auth.signInWithPassword({ email, password });
+  if (retryAttempt?.error) {
+    logAuthError("signIn:retry_without_captcha", retryAttempt.error);
+  } else {
+    console.warn("[login] signIn retry without captcha token succeeded");
+  }
+  return retryAttempt;
+}
+
 function clearFeedback() {
   emailError.textContent = "";
   passwordError.textContent = "";
@@ -128,15 +181,21 @@ async function handleLogin(event) {
 
   try {
     // 1) Iniciar sesión en Supabase Auth
-    const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+    const { data: authData, error: authErr } = await signInWithPasswordSafe({
       email,
       password,
-      options: {
-        captchaToken,
-      },
+      captchaToken,
     });
     if (authErr) {
       const msg = (authErr.message || "").toLowerCase();
+      if (isAuthSchemaFailure(authErr)) {
+        setStatus("Error temporal del servidor de autenticación. Intenta de nuevo en unos minutos.", true);
+        return;
+      }
+      if (isCaptchaAuthFailure(authErr)) {
+        setStatus("No se pudo validar el captcha. Recarga la página e intenta de nuevo.", true);
+        return;
+      }
       if (msg.includes("email not confirmed")) {
         setStatus("Debes verificar tu correo antes de iniciar sesión.", true);
         return;
@@ -162,6 +221,10 @@ async function handleLogin(event) {
           passwordError.textContent = "Contraseña incorrecta";
           passwordInput.classList.add("input-error");
         }
+        return;
+      }
+      if (Number(authErr?.status) >= 500) {
+        setStatus("Error temporal del servidor de autenticación. Intenta de nuevo.", true);
         return;
       }
       setStatus("No se pudo iniciar sesión. Intenta de nuevo.", true);

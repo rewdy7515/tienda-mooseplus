@@ -215,6 +215,7 @@
       const modalApellido = document.querySelector("#cn-apellido");
       const modalCorreo = document.querySelector("#cn-correo");
       const modalTelefono = document.querySelector("#cn-telefono");
+      const modalGuardarDefaultText = modalGuardar?.textContent || "Guardar";
       let sugsCounter = 0;
       let suppressBlur = false;
       let usuariosCache = null;
@@ -350,6 +351,53 @@
 
       const hideModal = () => modal && modal.classList.remove("show");
       const showModal = () => modal && modal.classList.add("show");
+      const setModalGuardarLoading = (isLoading = false) => {
+        if (!modalGuardar) return;
+        modalGuardar.disabled = !!isLoading;
+        modalGuardar.classList.toggle("btn-disabled", !!isLoading);
+        modalGuardar.textContent = isLoading ? "Guardando..." : modalGuardarDefaultText;
+      };
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const isTransientCrearClienteError = (err) => {
+        const code = String(err?.code || "").trim().toUpperCase();
+        const status = Number(err?.status || err?.statusCode || 0);
+        const msg = String(err?.message || "").toLowerCase();
+        return (
+          code === "PGRST002" ||
+          status === 503 ||
+          msg.includes("schema cache") ||
+          msg.includes("retrying") ||
+          msg.includes("service unavailable") ||
+          msg.includes("failed to fetch") ||
+          msg.includes("network")
+        );
+      };
+      const getCrearClienteErrorMessage = (err) => {
+        const code = String(err?.code || "").trim().toUpperCase();
+        const msg = String(err?.message || "").trim();
+        if (code === "23505") return "Ese correo ya existe. Usa otro correo.";
+        if (isTransientCrearClienteError(err)) {
+          return "El servicio está temporalmente ocupado. Intenta de nuevo en unos segundos.";
+        }
+        return msg || "No se pudo crear el cliente.";
+      };
+      const insertClienteWithRetry = async (payload, maxRetries = 2) => {
+        let lastError = null;
+        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+          const { data, error } = await supabase
+            .from("usuarios")
+            .insert(payload)
+            .select("id_usuario")
+            .single();
+          if (!error) return data;
+          lastError = error;
+          if (!isTransientCrearClienteError(error) || attempt >= maxRetries) {
+            throw error;
+          }
+          await sleep(350 * (attempt + 1));
+        }
+        throw lastError || new Error("No se pudo crear el cliente.");
+      };
 
       const goStep1 = () => {
         if (modalStep1) modalStep1.style.display = "block";
@@ -450,6 +498,7 @@
       modalApellido?.addEventListener("input", () => titleCaseInput(modalApellido));
 
       modalGuardar?.addEventListener("click", async () => {
+        if (modalGuardar?.disabled) return;
         const nombre = toTitleCase(modalNombre?.value || "").trim();
         const apellido = toTitleCase(modalApellido?.value || "").trim();
         const correo = (modalCorreo?.value || "").trim();
@@ -460,20 +509,19 @@
           alert("Nombre, apellido y correo son obligatorios.");
           return;
         }
+        setModalGuardarLoading(true);
         try {
-          const { data, error } = await supabase
-            .from("usuarios")
-            .insert({
+          const data = await insertClienteWithRetry(
+            {
               nombre,
               apellido,
               correo,
               telefono,
               acceso_cliente: true,
               fecha_registro_admin: fechaRegistroAdmin,
-            })
-            .select("id_usuario")
-            .single();
-          if (error) throw error;
+            },
+            2,
+          );
           const fullName = `${nombre} ${apellido}`.trim();
           if (clienteInput) clienteInput.value = fullName;
           clienteSeleccionadoId = data?.id_usuario || null;
@@ -496,8 +544,17 @@
           modalTelefono && (modalTelefono.value = "");
           alert("Cliente creado correctamente.");
         } catch (err) {
-          console.error("crear cliente error", err);
-          alert("No se pudo crear el cliente.");
+          console.error("crear cliente error", {
+            code: err?.code || "",
+            message: err?.message || "",
+            details: err?.details ?? null,
+            hint: err?.hint ?? null,
+            status: err?.status || err?.statusCode || null,
+            raw: err,
+          });
+          alert(getCrearClienteErrorMessage(err));
+        } finally {
+          setModalGuardarLoading(false);
         }
       });
 

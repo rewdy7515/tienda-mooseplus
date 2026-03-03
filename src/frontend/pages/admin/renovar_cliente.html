@@ -522,70 +522,94 @@
         if (!rows.length) {
           resultadoEl.innerHTML = '<p class="status">Sin ventas para el criterio ingresado.</p>';
           resultadoEl.classList.remove("hidden");
+          if (btnRenovarSeleccion) {
+            btnRenovarSeleccion.disabled = true;
+            btnRenovarSeleccion.classList.add("btn-disabled");
+            btnRenovarSeleccion.classList.add("hidden");
+          }
           return;
         }
-        const showPerfil = rows.some((r) => r.perfil);
-        const showHogar = rows.some((r) => !!r.hogarText);
-        const headCols = [
-          "<th>Plataforma</th>",
-          "<th>ID Venta</th>",
-          "<th>Cliente</th>",
-          showPerfil ? "<th>Perfil</th>" : "",
-          showHogar ? "<th>Perfil hogar</th>" : "",
-          "<th>Estado</th>",
-          "<th>Fecha corte</th>",
-          "<th>Acción</th>",
-        ].join("");
-        const body = rows
-          .map(
-            (r) => `
-            <tr>
-              <td>${r.plataforma || "-"}</td>
-              <td>#${r.id_venta}</td>
-              <td>${r.cliente || "-"}</td>
-              ${showPerfil ? `<td>${r.perfil || "-"}</td>` : ""}
-              ${showHogar ? `<td>${r.hogarText || "-"}</td>` : ""}
-              <td>${resolveEstadoLabel(r.fecha_corte_raw, r.suspendido)}</td>
-              <td>${r.fecha_corte || "-"}</td>
-              <td>
-                <button
-                  type="button"
-                  class="btn-primary btn-renovar-row"
-                  data-cliente="${r.cliente || "-"}"
-                  data-perfil="${r.perfil || "-"}"
-                  data-fecha="${r.fecha_corte_raw || ""}"
-                  data-venta="${r.id_venta || ""}"
-                  data-id-plataforma="${r.id_plataforma || ""}"
-                  data-id-cuenta="${r.id_cuenta || ""}"
-                  data-id-usuario="${r.id_usuario_cliente || ""}"
-                  data-correo="${r.correo || ""}"
-          data-clave="${r.clave || ""}"
-          data-n-perfil="${r.n_perfil || ""}"
-          data-pin="${r.pin || ""}"
-          data-id-precio="${r.id_precio || ""}"
-          data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
-          data-entrega="${r.entrega_inmediata ? "true" : "false"}"
-                  data-suspendido="${r.suspendido ? "true" : "false"}"
-                  data-hogar="${r.hogar_actualizado ? "true" : "false"}"
-                >
-                  Renovar
-                </button>
-              </td>
-            </tr>
-          `
-          )
+        const grouped = rows.reduce((acc, r) => {
+          const key = r.plataforma_nombre || r.plataforma || "Sin plataforma";
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(r);
+          return acc;
+        }, {});
+
+        const bloques = Object.entries(grouped)
+          .map(([plataformaNombre, rowsPlat]) => {
+            const showPerfil = rowsPlat.some((r) => r.perfil);
+            const showHogar = rowsPlat.some((r) => !!r.hogarText);
+            const headCols = [
+              "<th>ID Venta</th>",
+              "<th>Cliente</th>",
+              showPerfil ? "<th>Perfil</th>" : "",
+              showHogar ? "<th>Perfil hogar</th>" : "",
+              "<th>Estado</th>",
+              "<th>Fecha corte</th>",
+              "<th>Acción</th>",
+            ].join("");
+            const body = rowsPlat
+              .map(
+                (r) => `
+                <tr>
+                  <td>#${r.id_venta}</td>
+                  <td>${r.cliente || "-"}</td>
+                  ${showPerfil ? `<td>${r.perfil || "-"}</td>` : ""}
+                  ${showHogar ? `<td>${r.hogarText || "-"}</td>` : ""}
+                  <td>${resolveEstadoLabel(r.fecha_corte_raw, r.suspendido)}</td>
+                  <td>${r.fecha_corte || "-"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="btn-primary btn-renovar-row"
+                      data-cliente="${r.cliente || "-"}"
+                      data-perfil="${r.perfil || "-"}"
+                      data-fecha="${r.fecha_corte_raw || ""}"
+                      data-venta="${r.id_venta || ""}"
+                      data-id-plataforma="${r.id_plataforma || ""}"
+                      data-id-cuenta="${r.id_cuenta || ""}"
+                      data-id-usuario="${r.id_usuario_cliente || ""}"
+                      data-correo="${r.correo || ""}"
+                      data-clave="${r.clave || ""}"
+                      data-n-perfil="${r.n_perfil || ""}"
+                      data-pin="${r.pin || ""}"
+                      data-id-precio="${r.id_precio || ""}"
+                      data-plataforma-nombre="${r.plataforma_nombre || r.plataforma || ""}"
+                      data-entrega="${r.entrega_inmediata ? "true" : "false"}"
+                      data-suspendido="${r.suspendido ? "true" : "false"}"
+                      data-hogar="${r.hogar_actualizado ? "true" : "false"}"
+                    >
+                      Renovar
+                    </button>
+                  </td>
+                </tr>
+              `
+              )
+              .join("");
+            const color = rowsPlat.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+            const styleAttr = tableHeaderStyleAttr(color);
+            return `
+              <div class="proximas-bloque">
+                <h3 class="proximas-title">${plataformaNombre}</h3>
+                <div class="proximas-table-wrap">
+                  <table class="proximas-table table-base"${styleAttr}>
+                    <thead><tr>${headCols}</tr></thead>
+                    <tbody>${body}</tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          })
           .join("");
-        const firstColor = rows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
-        const styleAttr = tableHeaderStyleAttr(firstColor);
-        resultadoEl.innerHTML = `
-          <div class="proximas-table-wrap">
-            <table class="proximas-table table-base"${styleAttr}>
-              <thead><tr>${headCols}</tr></thead>
-              <tbody>${body}</tbody>
-            </table>
-          </div>
-        `;
+
+        resultadoEl.innerHTML = bloques;
         resultadoEl.classList.remove("hidden");
+        if (btnRenovarSeleccion) {
+          btnRenovarSeleccion.disabled = true;
+          btnRenovarSeleccion.classList.add("btn-disabled");
+          btnRenovarSeleccion.classList.add("hidden");
+        }
       };
 
       const renderSugerencias = (items, forceHide = false) => {

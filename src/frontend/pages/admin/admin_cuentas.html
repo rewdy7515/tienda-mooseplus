@@ -1927,6 +1927,9 @@
           pin,
           fecha_corte,
           id_venta,
+          id_perfil,
+          venta_perfil = false,
+          venta_miembro = false,
           platFlags = {},
           showPerfil = true,
           showPin = true,
@@ -1937,13 +1940,32 @@
         const perfilLabel = finalShowPerfil ? getPerfilCellLabel(flags, perfil) : "";
         const pinCell = finalShowPin ? `<td>${pin || ""}</td>` : "";
         const perfilCellFinal = finalShowPerfil ? `<td>${perfilLabel}</td>` : "";
+        const cuentaRelacionadaId = ventaData.id_cuenta || "";
+        const clienteNombreEncoded = encodeURIComponent(usuarioNombre || "");
         const rows = `
           <tr>
             <td>${usuarioNombre || "Vacío"}</td>
             ${perfilCellFinal}
             ${pinCell}
             <td>${renderFechaEditCell(fecha_corte, id_venta)}</td>
-            <td><button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${ventaData.id_cuenta || ""}">Ver cuenta</button></td>
+            <td class="action-cell">
+              <button
+                type="button"
+                class="btn-primary btn-reemplazar-row"
+                data-cuenta="${cuentaRelacionadaId}"
+                data-perfil="${id_perfil || ""}"
+                data-idventa="${id_venta || ""}"
+                data-venta-perfil="${venta_perfil ? "true" : "false"}"
+                data-venta-miembro="${venta_miembro ? "true" : "false"}"
+                data-cliente="${clienteNombreEncoded}"
+                ${cuentaRelacionadaId ? "" : "disabled"}
+              >Reemplazar</button>
+              <button
+                type="button"
+                class="btn-outline btn-ver-cuenta"
+                data-cuenta="${cuentaRelacionadaId}"
+              >Ver cuenta</button>
+            </td>
           </tr>
         `;
         ventaResultadoEl.innerHTML = `
@@ -1979,7 +2001,9 @@
           }
           const { data: venta, error } = await supabase
             .from("ventas")
-            .select("id_venta, id_usuario, id_perfil, id_cuenta, fecha_corte")
+            .select(
+              "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte",
+            )
             .eq("id_venta", idNum)
             .maybeSingle();
           if (error) throw error;
@@ -1987,12 +2011,14 @@
             renderVentaResultado(null, true);
             return false;
           }
+          const cuentaRelacionadaId =
+            venta.id_cuenta || venta.id_cuenta_miembro || null;
           let platFlags = { showPerfil: true, showPin: true };
-          if (venta.id_cuenta) {
+          if (cuentaRelacionadaId) {
             const { data: cuentaRow, error: cuentaErr } = await supabase
               .from("cuentas")
               .select("id_plataforma")
-              .eq("id_cuenta", venta.id_cuenta)
+              .eq("id_cuenta", cuentaRelacionadaId)
               .maybeSingle();
             if (cuentaErr) throw cuentaErr;
             if (cuentaRow?.id_plataforma) {
@@ -2036,7 +2062,8 @@
             perfil,
             pin,
             fecha_corte: venta.fecha_corte || "",
-            id_cuenta: venta.id_cuenta,
+            id_cuenta: cuentaRelacionadaId,
+            id_perfil: venta.id_perfil,
             id_venta: venta.id_venta,
             platFlags,
           });
@@ -3009,6 +3036,11 @@
       });
 
       ventaResultadoEl?.addEventListener("click", (e) => {
+        const replBtn = e.target.closest(".btn-reemplazar-row");
+        if (replBtn) {
+          openReemplazoConfirmModal(replBtn);
+          return;
+        }
         const btn = e.target.closest(".btn-ver-cuenta");
         if (!btn) return;
         const cuentaId = btn.dataset.cuenta;
@@ -6168,14 +6200,19 @@
         const labelInicial = btnRepl.textContent || "Reemplazar";
         const fromClienteTable = !!btnRepl.closest("#cliente-ventas");
         const fromDetalleTable = !!btnRepl.closest("#cuenta-detalle");
+        const fromVentaResultado = !!btnRepl.closest("#venta-resultado");
         const cuentaDetalleInicial = Number(currentCuentaDetalle?.id_cuenta || 0);
         btnRepl.disabled = true;
         btnRepl.classList.add("btn-disabled");
         btnRepl.textContent = "Reemplazando...";
         try {
           const cuentaIdFromBtn = btnRepl.dataset.cuenta || "";
+          if (fromVentaResultado && !cuentaIdFromBtn) {
+            alert("La venta no tiene una cuenta relacionada para reemplazo.");
+            return;
+          }
           if (
-            fromClienteTable &&
+            (fromClienteTable || fromVentaResultado) &&
             cuentaIdFromBtn &&
             (!currentCuentaDetalle ||
               String(currentCuentaDetalle.id_cuenta) !== String(cuentaIdFromBtn))
