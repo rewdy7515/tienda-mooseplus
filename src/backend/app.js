@@ -15,6 +15,14 @@ const {
 } = require("../frontend/scripts/notification-templates-core");
 
 const app = express();
+app.disable("x-powered-by");
+app.use((_, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
 const ALLOWED_CORS_ORIGINS = (() => {
   const defaults = [
     "https://mooseplus.com",
@@ -1089,9 +1097,16 @@ app.get("/api/notificaciones/nuevo-servicio/worker-status", (req, res) => {
 
 app.post("/api/notificaciones/nuevo-servicio/procesar", async (req, res) => {
   try {
+    await requireAdminSession(req);
     const result = await processNuevoServicioNotificationQueue();
     return res.json({ ok: true, ...result });
   } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     console.error("[notificaciones/nuevo-servicio/procesar] error", err);
     return res
       .status(500)
@@ -1101,6 +1116,7 @@ app.post("/api/notificaciones/nuevo-servicio/procesar", async (req, res) => {
 
 app.post("/api/whatsapp/send", async (req, res) => {
   try {
+    await requireAdminSession(req);
     if (!isWhatsappReady()) {
       return res.status(503).json({ error: "WhatsApp no listo" });
     }
@@ -1123,6 +1139,12 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
     return res.json({ ok: true });
   } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     console.error("[whatsapp/send] error", err);
     return res.status(500).json({ error: err.message || "No se pudo enviar el mensaje" });
   }
@@ -1130,6 +1152,7 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
 app.post("/api/whatsapp/send-recordatorio", async (req, res) => {
   try {
+    await requireAdminSession(req);
     if (!isWhatsappReady()) {
       return res.status(503).json({ error: "WhatsApp no listo" });
     }
@@ -1160,6 +1183,12 @@ app.post("/api/whatsapp/send-recordatorio", async (req, res) => {
 
     return res.json({ ok: true, updatedVentas: ventaIds.length });
   } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     console.error("[whatsapp/send-recordatorio] error", err);
     return res
       .status(500)
@@ -1169,6 +1198,7 @@ app.post("/api/whatsapp/send-recordatorio", async (req, res) => {
 
 app.post("/api/whatsapp/recordatorios/enviar", async (req, res) => {
   try {
+    await requireAdminSession(req);
     const result = await sendWhatsappRecordatorios({ source: "manual" });
     const { dateStr } = getCaracasClock();
     ensureDailyRecordatoriosState(dateStr);
@@ -1177,6 +1207,12 @@ app.post("/api/whatsapp/recordatorios/enviar", async (req, res) => {
     }
     return res.json({ ok: true, ...result });
   } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
     if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
       return res.status(409).json({ error: "Ya hay un envío de recordatorios en progreso" });
     }
@@ -1242,11 +1278,55 @@ app.get("/", async (req, res) => {
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const ADMIN_REQUIRED = "ADMIN_REQUIRED";
 const SESSION_COOKIE_NAME = "session_user_id";
+const SESSION_COOKIE_SIGNING_SECRET = String(
+  process.env.SESSION_COOKIE_SECRET ||
+    process.env.SIGNUP_TOKEN_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    "",
+).trim();
 const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax",
   secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
   path: "/",
+};
+const isProdLikeEnv = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+
+const signSessionCookieValue = (idUsuario) => {
+  if (!SESSION_COOKIE_SIGNING_SECRET) return "";
+  const id = Number(idUsuario);
+  if (!Number.isFinite(id) || id <= 0) return "";
+  const payload = String(Math.trunc(id));
+  const signature = crypto
+    .createHmac("sha256", SESSION_COOKIE_SIGNING_SECRET)
+    .update(payload)
+    .digest("hex");
+  return `${payload}.${signature}`;
+};
+
+const parseSignedSessionCookieValue = (rawValue = "") => {
+  const value = String(rawValue || "").trim();
+  if (!value) return null;
+  if (!value.includes(".")) {
+    if (isProdLikeEnv) return null;
+    const legacyId = Number(value);
+    return Number.isFinite(legacyId) && legacyId > 0 ? Math.trunc(legacyId) : null;
+  }
+  if (!SESSION_COOKIE_SIGNING_SECRET) return null;
+  const [payload, signature] = value.split(".");
+  if (!payload || !signature || !/^\d+$/.test(payload) || !/^[a-f0-9]{64}$/i.test(signature)) {
+    return null;
+  }
+  const expected = crypto
+    .createHmac("sha256", SESSION_COOKIE_SIGNING_SECRET)
+    .update(payload)
+    .digest("hex");
+  const expectedBuf = Buffer.from(expected, "utf8");
+  const receivedBuf = Buffer.from(signature.toLowerCase(), "utf8");
+  if (expectedBuf.length !== receivedBuf.length) return null;
+  if (!crypto.timingSafeEqual(expectedBuf, receivedBuf)) return null;
+  const id = Number(payload);
+  return Number.isFinite(id) && id > 0 ? Math.trunc(id) : null;
 };
 const BINANCE_P2P_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 const SIGNUP_TOKEN_TTL_SEC = Math.max(
@@ -1261,6 +1341,7 @@ const SIGNUP_TOKEN_SECRET = String(
 ).trim();
 const SIGNUP_RESEND_COOLDOWN_MS = 60 * 1000;
 const signupResendCooldownMap = new Map();
+const NEW_AUTH_SIGNUP_NOTIFY_USER_ID = 23;
 
 const todayInVenezuela = () => {
   // Retorna fecha actual en huso horario de Venezuela (America/Caracas) en formato YYYY-MM-DD
@@ -2303,8 +2384,7 @@ const parseSessionUserId = (req) => {
     if (k) acc[k] = decodeURIComponent(v || "");
     return acc;
   }, {});
-  const id = Number(cookieMap[SESSION_COOKIE_NAME]);
-  return !Number.isNaN(id) && id > 0 ? id : null;
+  return parseSignedSessionCookieValue(cookieMap[SESSION_COOKIE_NAME]);
 };
 
 const getBearerTokenFromRequest = (req) => {
@@ -2556,6 +2636,36 @@ const resolveUsuarioFromAuthToken = async (token) => {
     fecha_registro: todayInVenezuela(),
     acceso_cliente: true,
   };
+
+  const notifyNewAuthSignup = async (idUsuarioNuevo) => {
+    const targetUserId = Number(NEW_AUTH_SIGNUP_NOTIFY_USER_ID);
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
+    if (!Number.isFinite(Number(idUsuarioNuevo)) || Number(idUsuarioNuevo) <= 0) return;
+
+    const clienteNombre = String(insertPayload.nombre || "").trim();
+    const clienteApellido = String(insertPayload.apellido || "").trim();
+    const cliente = [clienteNombre, clienteApellido].filter(Boolean).join(" ").trim() || "Cliente";
+    const correo = String(insertPayload.correo || authEmail || "").trim().toLowerCase();
+
+    try {
+      const { error: notifErr } = await supabaseAdmin.from("notificaciones").insert({
+        id_usuario: targetUserId,
+        titulo: "Nuevo cliente registrado",
+        mensaje: `${cliente} se ha registrado con el correo ${correo}`,
+        fecha: todayInVenezuela(),
+        leido: false,
+      });
+      if (notifErr) throw notifErr;
+    } catch (err) {
+      console.error("[auth/new-signup] notify admin error", {
+        targetUserId,
+        idUsuarioNuevo,
+        correo,
+        error: err?.message || err,
+      });
+    }
+  };
+
   const { data: insertedRow, error: insertErr } = await supabaseAdmin
     .from("usuarios")
     .insert(insertPayload)
@@ -2568,6 +2678,7 @@ const resolveUsuarioFromAuthToken = async (token) => {
 
   const insertedId = Number(insertedRow?.id_usuario);
   if (Number.isFinite(insertedId) && insertedId > 0) {
+    await notifyNewAuthSignup(insertedId);
     return insertedId;
   }
 
@@ -2580,6 +2691,7 @@ const resolveUsuarioFromAuthToken = async (token) => {
   if (Array.isArray(fallbackAuthRows) && fallbackAuthRows.length === 1) {
     const fallbackId = Number(fallbackAuthRows[0]?.id_usuario);
     if (Number.isFinite(fallbackId) && fallbackId > 0) {
+      await notifyNewAuthSignup(fallbackId);
       return fallbackId;
     }
   }
@@ -3978,7 +4090,11 @@ app.post("/api/session", async (req, res) => {
   try {
     const token = getBearerTokenFromRequest(req);
     const idUsuario = await resolveUsuarioFromAuthToken(token);
-    res.cookie(SESSION_COOKIE_NAME, idUsuario, SESSION_COOKIE_OPTIONS);
+    const cookieValue = signSessionCookieValue(idUsuario);
+    if (!cookieValue) {
+      return res.status(500).json({ error: "Configuración de sesión inválida." });
+    }
+    res.cookie(SESSION_COOKIE_NAME, cookieValue, SESSION_COOKIE_OPTIONS);
     return res.json({ ok: true, id_usuario: idUsuario });
   } catch (err) {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -5035,6 +5151,7 @@ app.post("/api/checkout", async (req, res) => {
     comprobante,
     total: totalCliente,
     tasa_bs,
+    monto_transferido,
     id_usuario_override,
     bypass_verificacion,
     id_admin,
@@ -5114,19 +5231,55 @@ app.post("/api/checkout", async (req, res) => {
       caracasNow.getSeconds()
     )}`;
     const referenciaTrim = String(referencia || "").trim();
-    const requiereVerificacion =
+    const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
+      .from("metodos_de_pago")
+      .select("id_metodo_de_pago, verificacion_automatica, bolivares")
+      .eq("id_metodo_de_pago", id_metodo_de_pago)
+      .maybeSingle();
+    if (metodoPagoErr) throw metodoPagoErr;
+    if (!metodoPagoRow) {
+      return res.status(400).json({ error: "Método de pago inválido." });
+    }
+    const metodoVerificacionAutomatica = isTrue(metodoPagoRow?.verificacion_automatica);
+    const metodoEsBolivares = isTrue(metodoPagoRow?.bolivares);
+    const montoTransferidoNum = Number(
+      String(monto_transferido ?? "")
+        .trim()
+        .replace(",", ".")
+    );
+    const montoTransferido =
+      !metodoEsBolivares && Number.isFinite(montoTransferidoNum) && montoTransferidoNum > 0
+        ? Math.round(montoTransferidoNum * 100) / 100
+        : null;
+    if (!metodoEsBolivares && montoTransferido === null) {
+      return res.status(400).json({ error: "monto_transferido es requerido para este método." });
+    }
+    const requiereVerificacionPago =
       !bypassVerificacion && Number(id_metodo_de_pago) === 1 && referenciaTrim.toUpperCase() !== "SALDO";
-    const en_espera = requiereVerificacion;
+    const requiereEntregaManual = !bypassVerificacion && metodoVerificacionAutomatica === false;
     const monto_bs =
       Number.isFinite(total) && Number.isFinite(tasaBs)
         ? Math.round(total * tasaBs * 100) / 100
         : null;
+    const excedenteTransferido =
+      Number.isFinite(montoTransferido) && Number.isFinite(total)
+        ? Math.round((montoTransferido - total) * 100) / 100
+        : 0;
+    const montoMayor = excedenteTransferido > 0;
+    const requierePendiente = requiereVerificacionPago || requiereEntregaManual || montoMayor;
+    const en_espera = requierePendiente;
     console.log("[checkout] contexto", {
       itemsCount: items?.length || 0,
       total,
       tasaBs,
       monto_bs,
-      requiereVerificacion,
+      monto_transferido: montoTransferido,
+      excedente_transferido: excedenteTransferido,
+      monto_mayor: montoMayor,
+      metodoVerificacionAutomatica,
+      requiereVerificacionPago,
+      requiereEntregaManual,
+      requierePendiente,
       en_espera,
     });
 
@@ -5136,6 +5289,8 @@ app.post("/api/checkout", async (req, res) => {
       total,
       tasa_bs: tasaBs,
       monto_bs,
+      monto_transferido: montoTransferido,
+      monto_mayor: montoMayor,
       id_metodo_de_pago,
       marcado_pago: true,
       referencia,
@@ -5143,7 +5298,7 @@ app.post("/api/checkout", async (req, res) => {
       en_espera,
       hora_orden,
       id_carrito: carritoId,
-      pago_verificado: bypassVerificacion ? true : false,
+      pago_verificado: montoMayor ? false : bypassVerificacion && !requiereEntregaManual ? true : false,
       monto_completo: null,
       checkout_finalizado: true,
     };
@@ -5190,7 +5345,7 @@ app.post("/api/checkout", async (req, res) => {
       throw new Error("No se pudo crear/actualizar la orden");
     }
 
-    if (requiereVerificacion) {
+    if (requierePendiente) {
       try {
         await supabaseAdmin
           .from("carritos")
@@ -5198,7 +5353,14 @@ app.post("/api/checkout", async (req, res) => {
       } catch (cartErr) {
         console.error("[checkout] crear carrito nuevo error", cartErr);
       }
-      return res.json({ ok: true, id_orden: ordenId, total, ventas: 0, pendiente_verificacion: true });
+      return res.json({
+        ok: true,
+        id_orden: ordenId,
+        total,
+        ventas: 0,
+        pendiente_verificacion: true,
+        entrega_manual: requiereEntregaManual,
+      });
     }
 
     const result = await processOrderFromItems({
@@ -5265,7 +5427,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, tasa_bs, pago_verificado, en_espera, orden_cancelada"
+        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, tasa_bs, monto_transferido, monto_mayor, pago_verificado, en_espera, orden_cancelada"
       )
       .eq("id_orden", idOrden)
       .single();
@@ -5285,6 +5447,36 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     }
 
     const idUsuarioVentas = Number(orden?.id_usuario) || idUsuarioSesion;
+    const acreditarExcedenteSaldo = async () => {
+      const montoTransferido = Number(orden?.monto_transferido);
+      const totalOrden = Number(orden?.total);
+      if (!Number.isFinite(montoTransferido) || !Number.isFinite(totalOrden)) {
+        return { acreditado: false, excedente: 0, saldoNuevo: null };
+      }
+      const excedente = Math.round((montoTransferido - totalOrden) * 100) / 100;
+      if (!(excedente > 0)) {
+        return { acreditado: false, excedente: 0, saldoNuevo: null };
+      }
+      const targetUserId = Number(idUsuarioVentas);
+      if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+        return { acreditado: false, excedente: 0, saldoNuevo: null };
+      }
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("saldo")
+        .eq("id_usuario", targetUserId)
+        .maybeSingle();
+      if (userErr) throw userErr;
+      const saldoActual = Number(userRow?.saldo);
+      const saldoBase = Number.isFinite(saldoActual) ? saldoActual : 0;
+      const saldoNuevo = Math.round((saldoBase + excedente) * 100) / 100;
+      const { error: updSaldoErr } = await supabaseAdmin
+        .from("usuarios")
+        .update({ saldo: saldoNuevo })
+        .eq("id_usuario", targetUserId);
+      if (updSaldoErr) throw updSaldoErr;
+      return { acreditado: true, excedente, saldoNuevo };
+    };
     const isOrderAdmin =
       idUsuarioSesion && orden?.id_admin && Number(orden.id_admin) === Number(idUsuarioSesion);
     const sessionAdminId = Number.isFinite(Number(idUsuarioSesion)) ? Number(idUsuarioSesion) : null;
@@ -5308,6 +5500,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     if (ventasErr) throw ventasErr;
     if (ventasExist?.length) {
       const ordenPatch = {};
+      let saldoAcreditadoInfo = { acreditado: false, excedente: 0, saldoNuevo: null };
       if (!orden?.pago_verificado) {
         const { data: pendRows, error: pendErr } = await supabaseAdmin
           .from("ventas")
@@ -5315,6 +5508,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
           .eq("id_orden", idOrden)
           .eq("pendiente", true);
         if (pendErr) throw pendErr;
+        saldoAcreditadoInfo = await acreditarExcedenteSaldo();
         ordenPatch.pago_verificado = true;
         ordenPatch.en_espera = (pendRows || []).length > 0;
       }
@@ -5334,6 +5528,9 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         already_processed: true,
         ventas: ventasExist.length,
         id_admin: idAdminEntrega,
+        saldo_acreditado: saldoAcreditadoInfo.acreditado,
+        excedente_acreditado: saldoAcreditadoInfo.excedente,
+        saldo_nuevo: saldoAcreditadoInfo.saldoNuevo,
       });
     }
     if (!orden?.id_carrito) {
@@ -5378,6 +5575,11 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       pendientes: result.pendientesCount,
     });
 
+    let saldoAcreditadoInfo = { acreditado: false, excedente: 0, saldoNuevo: null };
+    if (!orden?.pago_verificado) {
+      saldoAcreditadoInfo = await acreditarExcedenteSaldo();
+    }
+
     const ordenUpdate = {
       pago_verificado: true,
       en_espera: result.pendientesCount > 0,
@@ -5396,6 +5598,9 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
       id_admin: idAdminEntrega,
+      saldo_acreditado: saldoAcreditadoInfo.acreditado,
+      excedente_acreditado: saldoAcreditadoInfo.excedente,
+      saldo_nuevo: saldoAcreditadoInfo.saldoNuevo,
     });
   } catch (err) {
     console.error("[ordenes/procesar] error", err);

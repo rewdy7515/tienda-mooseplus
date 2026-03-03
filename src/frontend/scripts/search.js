@@ -3,6 +3,14 @@ let inputEl;
 let resultsEl;
 let onSelect;
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 const renderSearch = (term) => {
   if (!resultsEl) return;
   const value = term.trim().toLowerCase();
@@ -21,15 +29,18 @@ const renderSearch = (term) => {
   }
   resultsEl.innerHTML = matches
     .slice(0, 8)
-    .map(
-      (p) => `
-      <div class="search-result-item" data-id="${p.id_plataforma}">
+    .map((p) => {
+      const safeId = escapeHtml(p.id_plataforma);
+      const safeImagen = escapeHtml(p.imagen || "");
+      const safeNombre = escapeHtml(p.nombre || "");
+      return `
+      <div class="search-result-item" data-id="${safeId}">
         <div class="search-result-thumb">
-          <img src="${p.imagen || ""}" alt="${p.nombre}" />
+          <img src="${safeImagen}" alt="${safeNombre}" />
         </div>
-        <div class="search-result-name">${p.nombre}</div>
-      </div>`
-    )
+        <div class="search-result-name">${safeNombre}</div>
+      </div>`;
+    })
     .join("");
   resultsEl.classList.remove("hidden");
 };

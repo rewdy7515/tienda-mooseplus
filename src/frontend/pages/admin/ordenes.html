@@ -43,6 +43,20 @@
         gap: 8px;
         margin: 8px 0 12px;
       }
+      .ordenes-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      .ordenes-page-label {
+        font-weight: 600;
+      }
+      .ordenes-page-btn {
+        min-width: 40px;
+      }
       .btn-filter.is-active {
         background: #111;
         color: #fff;
@@ -80,6 +94,98 @@
       .orden-id-link:focus-visible {
         color: #1e40af;
       }
+      .referencia-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .btn-ver-comprobante {
+        padding: 4px 8px;
+        font-size: 11px;
+        line-height: 1.1;
+      }
+      .comprobantes-por-verificar {
+        margin: 6px 0 14px;
+      }
+      .comprobantes-por-verificar h3 {
+        margin: 0 0 8px;
+      }
+      .comprobante-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .comprobante-modal.hidden {
+        display: none;
+      }
+      .comprobante-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.72);
+      }
+      .comprobante-modal-card {
+        position: relative;
+        z-index: 1;
+        background: #fff;
+        border-radius: 14px;
+        width: min(96vw, 1200px);
+        height: min(92dvh, 900px);
+        max-width: 96vw;
+        max-height: 92dvh;
+        padding: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        overflow: hidden;
+      }
+      .comprobante-modal-close {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        border: 0;
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.08);
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+      }
+      .comprobante-modal-media {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: calc(100% - 28px);
+      }
+      .comprobante-modal-media img {
+        display: block;
+        width: auto;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        border-radius: 10px;
+      }
+      @media (max-width: 768px) {
+        .comprobante-modal-card {
+          width: 98vw;
+          height: 88dvh;
+          padding: 10px;
+          border-radius: 12px;
+        }
+        .comprobante-modal-close {
+          top: 6px;
+          right: 6px;
+          width: 30px;
+          height: 30px;
+          font-size: 20px;
+        }
+        .comprobante-modal-media {
+          height: calc(100% - 34px);
+        }
+      }
     </style>
   </head>
   <body>
@@ -88,6 +194,27 @@
 
     <main class="categorias-dinamicas">
       <h2>Ordenes</h2>
+      <section id="comprobantes-verificar-section" class="comprobantes-por-verificar hidden">
+        <h3>Comprobantes por verificar</h3>
+        <div class="ordenes-table-wrap">
+          <table class="table-base" id="comprobantes-verificar-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Cliente</th>
+                <th>Metodo de pago</th>
+                <th>Monto</th>
+                <th>Referencia</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="comprobantes-verificar-body"></tbody>
+          </table>
+        </div>
+      </section>
       <p id="ordenes-status" class="status">Cargando ordenes...</p>
       <div class="ordenes-filters" id="ordenes-filters">
         <button
@@ -117,7 +244,35 @@
           <tbody id="ordenes-body"></tbody>
         </table>
       </div>
+      <div class="ordenes-pagination hidden" id="ordenes-pagination">
+        <button
+          type="button"
+          class="btn-outline ordenes-page-btn"
+          id="ordenes-page-prev"
+          aria-label="Página anterior"
+        >
+          ←
+        </button>
+        <span class="ordenes-page-label" id="ordenes-page-label">Página 1 de 1</span>
+        <button
+          type="button"
+          class="btn-outline ordenes-page-btn"
+          id="ordenes-page-next"
+          aria-label="Página siguiente"
+        >
+          →
+        </button>
+      </div>
     </main>
+    <div id="comprobante-modal" class="comprobante-modal hidden" aria-hidden="true">
+      <div class="comprobante-modal-backdrop" data-close-comprobante></div>
+      <div class="comprobante-modal-card" role="dialog" aria-modal="true" aria-label="Comprobante">
+        <button type="button" class="comprobante-modal-close" data-close-comprobante>×</button>
+        <div class="comprobante-modal-media">
+          <img id="comprobante-modal-img" alt="Comprobante de pago" />
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
@@ -141,15 +296,29 @@
       const tableWrap = document.querySelector("#ordenes-table-wrap");
       const filterWrap = document.querySelector("#ordenes-filters");
       const tbodyEl = document.querySelector("#ordenes-body");
+      const comprobantesVerificarSectionEl = document.querySelector(
+        "#comprobantes-verificar-section"
+      );
+      const comprobantesVerificarBodyEl = document.querySelector(
+        "#comprobantes-verificar-body"
+      );
+      const paginationEl = document.querySelector("#ordenes-pagination");
+      const pagePrevBtn = document.querySelector("#ordenes-page-prev");
+      const pageNextBtn = document.querySelector("#ordenes-page-next");
+      const pageLabelEl = document.querySelector("#ordenes-page-label");
       const filterCheckoutBtn = document.querySelector("#btn-filter-checkout");
+      const comprobanteModalEl = document.querySelector("#comprobante-modal");
+      const comprobanteModalImgEl = document.querySelector("#comprobante-modal-img");
 
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const PAGE_SIZE = 10;
       let allOrdenes = [];
       let userMap = {};
       let metodoMap = {};
       let filterCheckoutActive = true;
       let currentUser = null;
       let canManageOrdenes = false;
+      let currentPage = 1;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -170,6 +339,43 @@
         }, {});
       };
 
+      const extractComprobanteUrl = (rawComprobante) => {
+        if (Array.isArray(rawComprobante)) {
+          const first = rawComprobante.find((it) => String(it || "").trim());
+          return first ? String(first).trim() : "";
+        }
+        if (typeof rawComprobante === "string") {
+          const value = rawComprobante.trim();
+          if (!value) return "";
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) {
+              const first = parsed.find((it) => String(it || "").trim());
+              return first ? String(first).trim() : "";
+            }
+          } catch (_err) {
+            // noop
+          }
+          return value;
+        }
+        return "";
+      };
+
+      const openComprobanteModal = (url) => {
+        const imgUrl = String(url || "").trim();
+        if (!comprobanteModalEl || !comprobanteModalImgEl || !imgUrl) return;
+        comprobanteModalImgEl.src = imgUrl;
+        comprobanteModalEl.classList.remove("hidden");
+        comprobanteModalEl.setAttribute("aria-hidden", "false");
+      };
+
+      const closeComprobanteModal = () => {
+        if (!comprobanteModalEl || !comprobanteModalImgEl) return;
+        comprobanteModalEl.classList.add("hidden");
+        comprobanteModalEl.setAttribute("aria-hidden", "true");
+        comprobanteModalImgEl.removeAttribute("src");
+      };
+
       const applyVisibleRowStripes = () => {
         if (!tbodyEl) return;
         const rows = Array.from(tbodyEl.querySelectorAll("tr")).filter(
@@ -186,29 +392,50 @@
         const rows = filterCheckoutActive
           ? allOrdenes.filter((o) => isTrue(o.origen_checkout))
           : allOrdenes;
-        if (!rows.length) {
-          tbodyEl.innerHTML = "";
-          setStatus("No hay ordenes registradas.");
-          return;
-        }
-        tbodyEl.innerHTML = rows
-          .map((orden) => {
-            const cliente = userMap[orden.id_usuario] || "-";
-            const metodo = metodoMap[orden.id_metodo_de_pago] || "-";
-            const montoVal = Number.isFinite(Number(orden.monto_bs))
-              ? formatMonto(orden.monto_bs)
-              : formatMonto(orden.total);
-            const referencia = orden.referencia || "-";
-            const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
-            const hora = orden.hora_orden || "-";
-            const verificado = isTrue(orden.pago_verificado);
-            const cancelada = isTrue(orden.orden_cancelada);
-            const estado = cancelada ? "Rechazada" : verificado ? "Verificado" : "Pendiente";
-            const estadoClass = cancelada ? "estado-bad" : verificado ? "estado-ok" : "estado-warn";
-            const canEntregar = !verificado && !cancelada;
-            const canRechazar = !verificado && !cancelada;
-            const accionesCell = canManageOrdenes
-              ? `
+        const hasMontoTransferido = (orden) => {
+          const raw = orden?.monto_transferido;
+          if (raw === null || raw === undefined) return false;
+          const value = Number(raw);
+          return Number.isFinite(value) && value > 0;
+        };
+        const rowsComprobantes = rows.filter(
+          (orden) =>
+            (hasMontoTransferido(orden) || isTrue(orden?.monto_mayor)) &&
+            !isTrue(orden?.pago_verificado) &&
+            !isTrue(orden?.orden_cancelada)
+        );
+        const buildOrdenRowHtml = (orden) => {
+          const cliente = userMap[orden.id_usuario] || "-";
+          const metodoInfo = metodoMap[orden.id_metodo_de_pago] || {
+            nombre: "-",
+            bolivares: false,
+          };
+          const metodo = metodoInfo.nombre || "-";
+          const totalUsdTxt = formatMonto(orden.total);
+          const montoBsTxt = formatMonto(orden.monto_bs);
+          const montoVal =
+            isTrue(metodoInfo.bolivares)
+              ? montoBsTxt !== "-"
+                ? `Bs. ${montoBsTxt}`
+                : "-"
+              : totalUsdTxt !== "-"
+                ? `$${totalUsdTxt}`
+                : "-";
+          const referencia = orden.referencia || "-";
+          const comprobanteUrl = extractComprobanteUrl(orden.comprobante);
+          const referenciaHtml = comprobanteUrl
+            ? `<span class="referencia-cell">${referencia}<button type="button" class="btn-outline btn-ver-comprobante" data-comprobante="${encodeURIComponent(comprobanteUrl)}">Ver imagen</button></span>`
+            : referencia;
+          const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
+          const hora = orden.hora_orden || "-";
+          const verificado = isTrue(orden.pago_verificado);
+          const cancelada = isTrue(orden.orden_cancelada);
+          const estado = cancelada ? "Rechazada" : verificado ? "Verificado" : "Pendiente";
+          const estadoClass = cancelada ? "estado-bad" : verificado ? "estado-ok" : "estado-warn";
+          const canEntregar = !verificado && !cancelada;
+          const canRechazar = !verificado && !cancelada;
+          const accionesCell = canManageOrdenes
+            ? `
                 <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}" ${canEntregar ? "" : "disabled"}>
                   ${canEntregar ? "Entregar servicio" : cancelada ? "Rechazada" : "Entregado"}
                 </button>
@@ -216,8 +443,8 @@
                   Rechazar servicio
                 </button>
               `
-              : "-";
-            return `
+            : "-";
+          return `
               <tr data-orden="${orden.id_orden}">
                 <td>
                   <button type="button" class="orden-id-link" data-open-orden="${orden.id_orden}">
@@ -227,15 +454,41 @@
                 <td>${cliente || "-"}</td>
                 <td>${metodo}</td>
                 <td>${montoVal}</td>
-                <td>${referencia}</td>
+                <td>${referenciaHtml}</td>
                 <td>${fecha}</td>
                 <td>${hora}</td>
                 <td class="estado-cell ${estadoClass}">${estado}</td>
                 <td class="acciones-cell">${accionesCell}</td>
               </tr>
             `;
-          })
-          .join("");
+        };
+        if (comprobantesVerificarBodyEl) {
+          if (!rowsComprobantes.length) {
+            comprobantesVerificarBodyEl.innerHTML = "";
+            comprobantesVerificarSectionEl?.classList.add("hidden");
+          } else {
+            comprobantesVerificarBodyEl.innerHTML = rowsComprobantes
+              .map((orden) => buildOrdenRowHtml(orden))
+              .join("");
+            comprobantesVerificarSectionEl?.classList.remove("hidden");
+          }
+        }
+        if (!rows.length) {
+          tbodyEl.innerHTML = "";
+          if (paginationEl) paginationEl.classList.add("hidden");
+          setStatus("No hay ordenes registradas.");
+          return;
+        }
+        const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+        const start = (currentPage - 1) * PAGE_SIZE;
+        const pageRows = rows.slice(start, start + PAGE_SIZE);
+        tbodyEl.innerHTML = pageRows.map((orden) => buildOrdenRowHtml(orden)).join("");
+        if (pageLabelEl) pageLabelEl.textContent = `Página ${currentPage} de ${totalPages}`;
+        if (pagePrevBtn) pagePrevBtn.disabled = currentPage <= 1;
+        if (pageNextBtn) pageNextBtn.disabled = currentPage >= totalPages;
+        if (paginationEl) paginationEl.classList.toggle("hidden", rows.length <= 0);
         applyVisibleRowStripes();
         setStatus("");
       };
@@ -362,8 +615,10 @@
         setStatus("Cargando ordenes...");
         let query = supabase
           .from("ordenes")
-          .select("id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, referencia, fecha, hora_orden, pago_verificado, orden_cancelada");
-        if (!isTrue(currentUser?.permiso_superadmin)) {
+          .select(
+            "id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada"
+          );
+        if (!canManageOrdenes) {
           query = query.eq("id_usuario", currentUser?.id_usuario ?? -1);
         }
         const { data: ordenes, error } = await query.order("id_orden", { ascending: false });
@@ -406,12 +661,20 @@
         if (metodoIds.length) {
           const { data: metodos, error: metErr } = await supabase
             .from("metodos_de_pago")
-            .select("id_metodo_de_pago, nombre")
+            .select("id_metodo_de_pago, nombre, verificacion_automatica, bolivares")
             .in("id_metodo_de_pago", metodoIds);
           if (metErr) {
             console.error("metodos load error", metErr);
           } else {
-            metodoMap = buildMap(metodos, "id_metodo_de_pago", (m) => m.nombre || "-");
+            metodoMap = (metodos || []).reduce((acc, m) => {
+              const id = m?.id_metodo_de_pago;
+              if (!id) return acc;
+              acc[id] = {
+                nombre: m?.nombre || "-",
+                bolivares: isTrue(m?.bolivares),
+              };
+              return acc;
+            }, {});
           }
         }
 
@@ -427,8 +690,9 @@
             setStatus("No se pudo identificar al usuario.");
             return;
           }
-          canManageOrdenes = isTrue(currentUser?.permiso_superadmin);
-          if (!isTrue(currentUser?.permiso_superadmin)) {
+          canManageOrdenes =
+            isTrue(currentUser?.permiso_superadmin) || isTrue(currentUser?.permiso_admin);
+          if (!canManageOrdenes) {
             setStatus("Mostrando solo tus ordenes.");
           }
           await loadOrdenes();
@@ -442,13 +706,34 @@
         filterCheckoutActive = !filterCheckoutActive;
         filterCheckoutBtn.classList.toggle("is-active", filterCheckoutActive);
         filterCheckoutBtn.setAttribute("aria-pressed", filterCheckoutActive ? "true" : "false");
+        currentPage = 1;
+        renderOrdenes();
+      });
+
+      pagePrevBtn?.addEventListener("click", () => {
+        if (currentPage <= 1) return;
+        currentPage -= 1;
+        renderOrdenes();
+      });
+
+      pageNextBtn?.addEventListener("click", () => {
+        const rows = filterCheckoutActive
+          ? allOrdenes.filter((o) => isTrue(o.origen_checkout))
+          : allOrdenes;
+        const totalPages = Math.max(1, Math.ceil((rows.length || 0) / PAGE_SIZE));
+        if (currentPage >= totalPages) return;
+        currentPage += 1;
         renderOrdenes();
       });
 
       document.addEventListener("click", async (event) => {
-        const row = event.target.closest("#ordenes-table tbody tr");
+        const row = event.target.closest("#ordenes-table tbody tr, #comprobantes-verificar-table tbody tr");
         if (row) {
-          tbodyEl.querySelectorAll(".orden-row-selected").forEach((tr) => {
+          document
+            .querySelectorAll(
+              "#ordenes-table tbody .orden-row-selected, #comprobantes-verificar-table tbody .orden-row-selected"
+            )
+            .forEach((tr) => {
             tr.classList.remove("orden-row-selected");
           });
           row.classList.add("orden-row-selected");
@@ -489,10 +774,15 @@
             setStatus("No se pudo procesar la orden.");
           } finally {
             const currentBtn = tbodyEl?.querySelector(`.btn-entregar[data-orden="${idOrden}"]`);
-            if (currentBtn && !currentBtn.disabled) {
-              currentBtn.disabled = false;
-              currentBtn.textContent = prevText || "Entregar servicio";
-            }
+            const currentBtnComprobantes = comprobantesVerificarBodyEl?.querySelector(
+              `.btn-entregar[data-orden="${idOrden}"]`
+            );
+            [currentBtn, currentBtnComprobantes].forEach((btn) => {
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = prevText || "Entregar servicio";
+              }
+            });
           }
           return;
         }
@@ -523,6 +813,25 @@
           }
           markOrdenRechazada(idOrden);
           setStatus(`Orden #${idOrden} rechazada.`);
+          return;
+        }
+
+        const verComprobanteBtn = event.target.closest(".btn-ver-comprobante");
+        if (verComprobanteBtn) {
+          const url = decodeURIComponent(String(verComprobanteBtn.dataset.comprobante || ""));
+          openComprobanteModal(url);
+        }
+      });
+
+      document.addEventListener("click", (event) => {
+        if (event.target.closest("[data-close-comprobante]")) {
+          closeComprobanteModal();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeComprobanteModal();
         }
       });
 

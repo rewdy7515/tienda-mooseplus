@@ -98,6 +98,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
       import { copyTextNotify } from "../../scripts/copy-toast.js";
+      import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
       attachLogoHome();
@@ -144,6 +145,7 @@
             const { platform, rows: items } = group;
             const rowsHtml = items
               .map((row) => {
+                const fecha = formatDDMMYYYY(row.fecha) || row.fecha || "-";
                 const correo = row.cuentas?.correo || "-";
                 const correoSafe = correo === "-" ? "" : String(correo).replace(/"/g, "&quot;");
                 const correoLookupBtn =
@@ -154,6 +156,7 @@
                 const tarea = row.tareas?.titulo || "-";
                 return `
                   <tr data-id="${row.id_tarea_asignada}">
+                    <td>${fecha}</td>
                     <td>
                       <span class="correo-cell">
                         <span class="copyable" data-clipboard="${correo === "-" ? "" : correo}">${correo}</span>
@@ -178,6 +181,7 @@
                   <table class="table-base">
                     <thead>
                       <tr>
+                        <th>Fecha</th>
                         <th>Correo</th>
                         <th>Clave</th>
                         <th>Tarea</th>
@@ -202,7 +206,7 @@
         const { data, error } = await supabase
           .from("tareas_asignadas")
           .select(
-            "id_tarea_asignada, id_tarea, cuenta, tareas: tareas!tareas_asignadas_id_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave, id_plataforma, plataformas:plataformas!cuentas_id_plataforma_fkey(id_plataforma, nombre, color_1))"
+            "id_tarea_asignada, id_tarea, cuenta, fecha, tareas: tareas!tareas_asignadas_id_tarea_fkey(titulo), cuentas: cuentas!tareas_asignadas_cuenta_fkey(correo, clave, id_plataforma, plataformas:plataformas!cuentas_id_plataforma_fkey(id_plataforma, nombre, color_1))"
           )
           .order("id_tarea_asignada", { ascending: false });
         if (error) {

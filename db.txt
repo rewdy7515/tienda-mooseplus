@@ -156,6 +156,7 @@ CREATE TABLE public.metodos_de_pago (
   imagen text,
   color_fondo text,
   verificacion_automatica boolean,
+  bolivares boolean,
   CONSTRAINT metodos_de_pago_pkey PRIMARY KEY (id_metodo_de_pago)
 );
 CREATE TABLE public.metricas_clientes_activos_mes (
@@ -219,6 +220,8 @@ CREATE TABLE public.ordenes (
   hora_confirmacion time without time zone,
   checkout_finalizado boolean,
   marcado_pago boolean,
+  monto_transferido real,
+  monto_mayor boolean,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
@@ -389,6 +392,7 @@ CREATE TABLE public.tareas_asignadas (
   id_tarea_asignada bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   id_tarea bigint NOT NULL,
   cuenta bigint,
+  fecha date,
   CONSTRAINT tareas_asignadas_pkey PRIMARY KEY (id_tarea_asignada),
   CONSTRAINT tareas_asignadas_cuenta_fkey FOREIGN KEY (cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT tareas_asignadas_id_tarea_fkey FOREIGN KEY (id_tarea) REFERENCES public.tareas(id_tarea)

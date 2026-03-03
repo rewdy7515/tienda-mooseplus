@@ -1258,6 +1258,14 @@
         }
       };
 
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
       const renderProveedorSugs = (wrap, items, forceHide = false) => {
         const sugs = wrap?.querySelector(".proveedor-sugs");
         if (!sugs) return;
@@ -1269,7 +1277,9 @@
         sugs.innerHTML = items
           .map(
             (p) =>
-              `<button type="button" data-id="${p.id_proveedor}" data-nombre="${p.nombre}">${p.nombre}</button>`,
+              `<button type="button" data-id="${escapeHtml(p.id_proveedor)}" data-nombre="${escapeHtml(
+                p.nombre,
+              )}">${escapeHtml(p.nombre)}</button>`,
           )
           .join("");
         sugs.classList.remove("hidden");
@@ -1323,48 +1333,48 @@
         const estadoInfo = getEstadoVenta({ fecha_corte: fechaCorte });
         const correoCell = isSuperadmin
           ? `<div class="fecha-wrap">
-              <span class="correo-copy correo-text" data-clipboard="${correo || ""}">${correo || "-"}</span>
-              <button type="button" class="btn-edit-correo" data-venta="${idVenta}" data-cuenta="${cuentaId || ""}">✏️</button>
-              <input type="text" class="correo-edit-input hidden" data-venta="${idVenta}" data-cuenta="${cuentaId || ""}" value="${correo || ""}" />
-              <button type="button" class="btn-save-edit hidden" data-venta="${idVenta}" data-cuenta="${cuentaId || ""}" data-type="correo">💾</button>
+              <span class="correo-copy correo-text" data-clipboard="${escapeHtml(correo || "")}">${escapeHtml(correo || "-")}</span>
+              <button type="button" class="btn-edit-correo" data-venta="${escapeHtml(idVenta)}" data-cuenta="${escapeHtml(cuentaId || "")}">✏️</button>
+              <input type="text" class="correo-edit-input hidden" data-venta="${escapeHtml(idVenta)}" data-cuenta="${escapeHtml(cuentaId || "")}" value="${escapeHtml(correo || "")}" />
+              <button type="button" class="btn-save-edit hidden" data-venta="${escapeHtml(idVenta)}" data-cuenta="${escapeHtml(cuentaId || "")}" data-type="correo">💾</button>
               <button type="button" class="btn-cancel-edit hidden" data-type="correo">✖</button>
             </div>`
-          : `<span class="correo-copy" data-clipboard="${correo || ""}">${correo || "-"}</span>`;
+          : `<span class="correo-copy" data-clipboard="${escapeHtml(correo || "")}">${escapeHtml(correo || "-")}</span>`;
         const clienteCell = isSuperadmin
           ? `<div class="fecha-wrap">
-              <span class="cliente-text">${clienteNombre || "-"}</span>
-              <button type="button" class="btn-edit-cliente" data-venta="${idVenta}">✏️</button>
-              <input type="text" class="cliente-edit-input hidden" data-venta="${idVenta}" value="${clienteNombre || ""}" list="sugs-ocupado" />
-              <button type="button" class="btn-save-edit hidden" data-venta="${idVenta}" data-type="cliente">💾</button>
+              <span class="cliente-text">${escapeHtml(clienteNombre || "-")}</span>
+              <button type="button" class="btn-edit-cliente" data-venta="${escapeHtml(idVenta)}">✏️</button>
+              <input type="text" class="cliente-edit-input hidden" data-venta="${escapeHtml(idVenta)}" value="${escapeHtml(clienteNombre || "")}" list="sugs-ocupado" />
+              <button type="button" class="btn-save-edit hidden" data-venta="${escapeHtml(idVenta)}" data-type="cliente">💾</button>
               <button type="button" class="btn-cancel-edit hidden" data-type="cliente">✖</button>
             </div>`
-          : `${clienteNombre || "-"}`;
+          : `${escapeHtml(clienteNombre || "-")}`;
         const fechaCell = isSuperadmin
           ? `<div class="fecha-wrap">
-              <span class="fecha-text">${formatDDMMYYYY(fechaCorte) || ""}</span>
-              <button type="button" class="btn-edit-fecha" data-venta="${idVenta}">✏️</button>
-              <input type="date" class="fecha-input hidden" data-venta="${idVenta}" value="${fechaCorte || ""}" />
-              <button type="button" class="btn-save-edit hidden" data-venta="${idVenta}" data-type="fecha">💾</button>
+              <span class="fecha-text">${escapeHtml(formatDDMMYYYY(fechaCorte) || "")}</span>
+              <button type="button" class="btn-edit-fecha" data-venta="${escapeHtml(idVenta)}">✏️</button>
+              <input type="date" class="fecha-input hidden" data-venta="${escapeHtml(idVenta)}" value="${escapeHtml(fechaCorte || "")}" />
+              <button type="button" class="btn-save-edit hidden" data-venta="${escapeHtml(idVenta)}" data-type="fecha">💾</button>
               <button type="button" class="btn-cancel-edit hidden" data-type="fecha">✖</button>
             </div>`
-          : `${formatDDMMYYYY(fechaCorte) || ""}`;
+          : `${escapeHtml(formatDDMMYYYY(fechaCorte) || "")}`;
         const deleteBtn =
           isSuperadmin && idVenta
-          ? `<button type="button" class="btn-delete-venta" data-id-venta="${idVenta}">Eliminar</button>`
+          ? `<button type="button" class="btn-delete-venta" data-id-venta="${escapeHtml(idVenta)}">Eliminar</button>`
           : "";
-        const perfilIdCell = showPerfilId ? `<td>${idPerfil || ""}</td>` : "";
+        const perfilIdCell = showPerfilId ? `<td>${escapeHtml(idPerfil || "")}</td>` : "";
         const perfilLabel = getPerfilCellLabel(flags, nPerfil, perfilHogar);
-        const perfilCell = showPerfil ? `<td>${perfilLabel}</td>` : "";
+        const perfilCell = showPerfil ? `<td>${escapeHtml(perfilLabel)}</td>` : "";
         return `
-          <tr data-id-venta="${idVenta || ""}">
+          <tr data-id-venta="${escapeHtml(idVenta || "")}">
             ${perfilIdCell}
             ${perfilCell}
             <td>${clienteCell}</td>
             <td>${correoCell}</td>
             <td>${fechaCell}</td>
-            <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
+            <td class="estado-cell ${escapeHtml(estadoInfo.className)}">${escapeHtml(estadoInfo.label)}</td>
             <td>
-              <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${cuentaId || ""}">Ver cuenta</button>
+              <button type="button" class="btn-outline btn-ver-cuenta" data-cuenta="${escapeHtml(cuentaId || "")}">Ver cuenta</button>
               ${deleteBtn}
             </td>
           </tr>

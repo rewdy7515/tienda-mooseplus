@@ -40,6 +40,8 @@ const totalEl = document.querySelector("#checkout-total");
 const checkoutVerificacionNoteEl = document.querySelector("#checkout-verificacion-note");
 const orderTitleEl = document.querySelector("#checkout-order-title");
 const btnSendPayment = document.querySelector("#btn-send-payment");
+const montoTransferidoWrapEl = document.querySelector("#monto-transferido-wrap");
+const montoTransferidoInput = document.querySelector("#input-monto-transferido");
 const refInput = document.querySelector("#input-ref");
 
 let metodos = [];
@@ -69,7 +71,15 @@ const METODO_RECARGO_USD_FIJO = 0.49;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 const isMetodoVerificacionAutomatica = (metodo) => isTrue(metodo?.verificacion_automatica);
+const isMetodoNoBolivares = (metodo) => !isTrue(metodo?.bolivares);
 const CHECKOUT_PANEL_ANIM_MS = 260;
 const CHECKOUT_PANEL_ANIM_CLASSES = [
   "checkout-panel-animating",
@@ -290,6 +300,11 @@ const renderDetalle = () => {
   if (seleccionado === null) {
     metodoDetalle.innerHTML = "";
     checkoutVerificacionNoteEl?.classList.add("hidden");
+    montoTransferidoWrapEl?.classList.add("hidden");
+    if (montoTransferidoInput) {
+      montoTransferidoInput.value = "";
+      montoTransferidoInput.classList.remove("input-error");
+    }
     return;
   }
   const m = metodos[seleccionado];
@@ -316,11 +331,11 @@ const renderDetalle = () => {
   const detalleHtml = campos
     .map((c) => {
       const valueToCopy = c.copy ? c.copyValue ?? c.valor : "";
-      const safeVal = String(valueToCopy).replace(/"/g, "&quot;");
+      const safeVal = escapeHtml(valueToCopy);
       const copyIcon = c.copy
         ? `<img src="https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/iconos/copiar-portapapeles.png" alt="Copiar" class="copy-field-icon" data-copy="${safeVal}" style="width:14px; height:14px; margin-left:6px; cursor:pointer;" />`
         : "";
-      return `<p><strong>${c.label}:</strong> <span>${c.valor}</span>${copyIcon}</p>`;
+      return `<p><strong>${escapeHtml(c.label)}:</strong> <span>${escapeHtml(c.valor)}</span>${copyIcon}</p>`;
     })
     .join("");
 
@@ -401,6 +416,13 @@ const renderDetalle = () => {
       }
     });
   });
+
+  const showMontoTransferido = isMetodoNoBolivares(m);
+  montoTransferidoWrapEl?.classList.toggle("hidden", !showMontoTransferido);
+  if (!showMontoTransferido && montoTransferidoInput) {
+    montoTransferidoInput.value = "";
+    montoTransferidoInput.classList.remove("input-error");
+  }
 };
 
 const populateSelect = (defaultIdx = null) => {
@@ -643,7 +665,11 @@ inputFiles?.addEventListener("change", () => {
   const file = files[0];
   const reader = new FileReader();
   reader.onload = () => {
-    filePreview.innerHTML = `<img src="${reader.result}" alt="${file.name}" />`;
+    filePreview.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = String(reader.result || "");
+    img.alt = String(file.name || "comprobante");
+    filePreview.appendChild(img);
   };
   reader.readAsDataURL(file);
   // keep only one file
@@ -685,7 +711,11 @@ dropzone?.addEventListener("drop", (e) => {
   filePreview.innerHTML = "";
   const reader = new FileReader();
   reader.onload = () => {
-    filePreview.innerHTML = `<img src="${reader.result}" alt="${file.name}" />`;
+    filePreview.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = String(reader.result || "");
+    img.alt = String(file.name || "comprobante");
+    filePreview.appendChild(img);
   };
   reader.readAsDataURL(file);
   dropzone.classList.remove("drag-over");
@@ -938,7 +968,7 @@ async function init() {
       supabase
         .from("metodos_de_pago")
         .select(
-          "id_metodo_de_pago, nombre, imagen, correo, id, cedula, telefono, verificacion_automatica"
+          "id_metodo_de_pago, nombre, imagen, correo, id, cedula, telefono, verificacion_automatica, bolivares"
         ),
       fetchP2PRate(),
       loadCurrentUser(),
@@ -1190,6 +1220,7 @@ btnSendPayment?.addEventListener("click", async () => {
   const metodo = metodos[seleccionado];
   const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
   const isMetodoBs = metodoId === 1;
+  const requiereMontoTransferido = isMetodoNoBolivares(metodo);
   const referenciaRaw = String(refInput?.value || "").trim();
   if (!referenciaRaw) {
     alert("Ingresa la referencia.");
@@ -1204,6 +1235,23 @@ btnSendPayment?.addEventListener("click", async () => {
   }
   const referenciaValue = isMetodoBs ? referenciaDigits : referenciaRaw;
   if (isMetodoBs && refInput) refInput.value = referenciaValue;
+  let montoTransferidoValue = null;
+  if (requiereMontoTransferido) {
+    const rawMontoTransferido = String(montoTransferidoInput?.value || "")
+      .trim()
+      .replace(",", ".");
+    const parsedMontoTransferido = Number(rawMontoTransferido);
+    if (!Number.isFinite(parsedMontoTransferido) || parsedMontoTransferido <= 0) {
+      alert("Ingresa un monto transferido válido.");
+      montoTransferidoInput?.classList.add("input-error");
+      montoTransferidoInput?.focus();
+      return;
+    }
+    montoTransferidoValue = round2(parsedMontoTransferido);
+    if (montoTransferidoInput) {
+      montoTransferidoInput.value = String(montoTransferidoValue.toFixed(2));
+    }
+  }
   if (isMetodoBs) {
     if (!Number.isFinite(tasaBs)) {
       alert("No se pudo obtener la tasa.");
@@ -1233,6 +1281,7 @@ btnSendPayment?.addEventListener("click", async () => {
           total: totalUsd,
           tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
           monto_bs: montoBs,
+          monto_transferido: montoTransferidoValue,
           marcado_pago: true,
           en_espera: true,
           id_carrito: null,
@@ -1259,6 +1308,7 @@ btnSendPayment?.addEventListener("click", async () => {
       comprobantes,
       total: totalUsd,
       tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+      monto_transferido: montoTransferidoValue,
       marcado_pago: true,
     };
     const resp = await submitCheckout(payload);
@@ -1371,8 +1421,19 @@ btnSendPayment?.addEventListener("click", async () => {
       console.error("notificaciones checkout error", nErr);
     }
 
+    const entregaManual = resp?.entrega_manual === true;
+    if (entregaManual) {
+      alert("Pago enviado. Tu orden será revisada y procesada manualmente por un admin.");
+      const manualUrl = resp?.id_orden
+        ? `historial_ordenes.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+        : "historial_ordenes.html";
+      window.location.href = manualUrl;
+      return;
+    }
+
     alert("Pago enviado correctamente.");
-    const pendienteVerificacion = isMetodoVerificacionAutomatica(metodo);
+    const pendienteVerificacion =
+      resp?.pendiente_verificacion === true || isMetodoVerificacionAutomatica(metodo);
     const nextUrl = resp?.id_orden
       ? pendienteVerificacion
         ? `verificando_pago.html?id_orden=${encodeURIComponent(resp.id_orden)}`
@@ -1390,3 +1451,6 @@ btnSendPayment?.addEventListener("click", async () => {
 metodoSelect?.addEventListener("focus", () => metodoSelect.classList.remove("input-error"));
 refInput?.addEventListener("focus", () => refInput.classList.remove("input-error"));
 dropzone?.addEventListener("click", () => dropzone.classList.remove("input-error"));
+montoTransferidoInput?.addEventListener("focus", () =>
+  montoTransferidoInput.classList.remove("input-error")
+);

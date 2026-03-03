@@ -91,6 +91,7 @@ if (!window.__headerActionsInit) {
 
   const headerEl = document.querySelector(".header");
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
+  const ordenesHeaderBtn = document.querySelector("#btn-ordenes-header");
   let headerHeight = 0;
   let hideOffset = 0;
   const applyHeaderOffset = () => {
@@ -292,6 +293,10 @@ if (!window.__headerActionsInit) {
         adminHeaderBtn.classList.toggle("hidden", !isAdmin);
         adminHeaderBtn.style.display = isAdmin ? "inline-flex" : "none";
       }
+      if (ordenesHeaderBtn) {
+        ordenesHeaderBtn.classList.toggle("hidden", !isSuper);
+        ordenesHeaderBtn.style.display = isSuper ? "inline-flex" : "none";
+      }
       if (headerEl) {
         headerEl.classList.toggle("has-admin-btn", !!isAdmin);
       }
@@ -343,6 +348,10 @@ if (!window.__headerActionsInit) {
 
   adminHeaderBtn?.addEventListener("click", () => {
     window.location.href = toAbs("admin/admin_cuentas.html", basePagesUrl);
+  });
+
+  ordenesHeaderBtn?.addEventListener("click", () => {
+    window.location.href = toAbs("admin/ordenes.html", basePagesUrl);
   });
 
   const btnCheckout = document.querySelector("#btn-checkout");

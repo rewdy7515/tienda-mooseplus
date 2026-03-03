@@ -217,11 +217,12 @@ main {
     line-height: 1;
     white-space: nowrap;
   }
-  .header #btn-admin-header {
+  .header #btn-admin-header,
+  .header #btn-ordenes-header {
     order: 4;
     margin: 0;
-    width: 100%;
-    flex: 1 0 100%;
+    flex: 1 1 calc(50% - 5px);
+    min-width: 0;
     justify-content: center;
   }
   .header .search-box {

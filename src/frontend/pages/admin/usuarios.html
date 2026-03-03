@@ -133,6 +133,7 @@
       <h2>Usuarios</h2>
       <div class="usuarios-wrapper">
         <p id="usuarios-status" class="status">Cargando usuarios...</p>
+        <p id="usuarios-registro-stat" class="status"></p>
         <p id="usuarios-phone-stat" class="status"></p>
         <div class="usuarios-tools">
           <input
@@ -213,6 +214,7 @@
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const statusEl = document.querySelector("#usuarios-status");
+      const registroStatEl = document.querySelector("#usuarios-registro-stat");
       const tbodyEl = document.querySelector("#usuarios-body");
       const phoneStatEl = document.querySelector("#usuarios-phone-stat");
       const searchInputEl = document.querySelector("#usuarios-search");
@@ -514,9 +516,15 @@
           if (!usuariosRows.length) {
             setStatus("No hay usuarios registrados.");
             if (tbodyEl) tbodyEl.innerHTML = "";
+            if (registroStatEl) registroStatEl.textContent = "";
             if (phoneStatEl) phoneStatEl.textContent = "";
             if (paginationEl) paginationEl.classList.add("hidden");
             return;
+          }
+          const registradosCount = usuariosRows.filter((u) => !!u?.fecha_registro).length;
+          const registradosPct = Math.round((registradosCount / usuariosRows.length) * 1000) / 10;
+          if (registroStatEl) {
+            registroStatEl.textContent = `Usuarios registrados: ${registradosCount} de ${usuariosRows.length} (${registradosPct}%)`;
           }
           const invalidPhones = usuariosRows.filter((u) => {
             const raw = String(u?.telefono ?? "").trim();

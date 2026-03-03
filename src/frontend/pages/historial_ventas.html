@@ -133,14 +133,14 @@
           }
 
           const ventaIds = Array.from(new Set(rows.map((r) => r.id_venta).filter(Boolean)));
-          const platIds = Array.from(new Set(rows.map((r) => r.id_plataforma).filter(Boolean)));
-          const userIds = Array.from(new Set(rows.map((r) => r.id_usuario_cliente).filter(Boolean)));
+          const platIdsHistorial = Array.from(new Set(rows.map((r) => r.id_plataforma).filter(Boolean)));
+          const userIdsHistorial = Array.from(new Set(rows.map((r) => r.id_usuario_cliente).filter(Boolean)));
 
           let ventasMap = {};
           if (ventaIds.length) {
             const { data: ventas, error: ventErr } = await supabase
               .from("ventas")
-              .select("id_venta, id_precio")
+              .select("id_venta, id_precio, id_usuario")
               .in("id_venta", ventaIds);
             if (ventErr) throw ventErr;
             ventasMap = (ventas || []).reduce((acc, v) => {
@@ -149,6 +149,11 @@
             }, {});
           }
 
+          const userIdsVentas = Array.from(
+            new Set(Object.values(ventasMap).map((v) => v.id_usuario).filter(Boolean))
+          );
+          const userIds = Array.from(new Set([...userIdsHistorial, ...userIdsVentas]));
+
           const precioIds = Array.from(
             new Set(Object.values(ventasMap).map((v) => v.id_precio).filter(Boolean))
           );
@@ -156,7 +161,7 @@
           if (precioIds.length) {
             const { data: precios, error: precErr } = await supabase
               .from("precios")
-              .select("id_precio, plan, cantidad")
+              .select("id_precio, id_plataforma, plan, cantidad")
               .in("id_precio", precioIds);
             if (precErr) throw precErr;
             preciosMap = (precios || []).reduce((acc, p) => {
@@ -164,6 +169,11 @@
               return acc;
             }, {});
           }
+
+          const platIdsPrecio = Array.from(
+            new Set(Object.values(preciosMap).map((p) => p.id_plataforma).filter(Boolean))
+          );
+          const platIds = Array.from(new Set([...platIdsHistorial, ...platIdsPrecio]));
 
           let platMap = {};
           if (platIds.length) {
@@ -207,10 +217,17 @@
 
           const html = rows
             .map((r) => {
-              const cliente = userMap[r.id_usuario_cliente] || "-";
-              const plataforma = platMap[r.id_plataforma] || `Plataforma ${r.id_plataforma || "-"}`;
               const venta = r.id_venta ? ventasMap[r.id_venta] : null;
+              const cliente =
+                userMap[r.id_usuario_cliente] ||
+                userMap[venta?.id_usuario] ||
+                "-";
               const precio = venta?.id_precio ? preciosMap[venta.id_precio] : null;
+              const idPlataformaFinal = r.id_plataforma || precio?.id_plataforma || null;
+              const plataforma =
+                idPlataformaFinal && platMap[idPlataformaFinal]
+                  ? platMap[idPlataformaFinal]
+                  : `Plataforma ${idPlataformaFinal || "-"}`;
               const detalle = precio ? buildDetalle(precio) : "-";
               const metodoRaw = r.id_metodo_de_pago ? metodoMap[r.id_metodo_de_pago] || "-" : "-";
               const metodo = truncateText(metodoRaw, 12);
