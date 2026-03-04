@@ -56,6 +56,11 @@ main {
   background: #1a1a1a;
 }
 
+#btn-ordenes-header.has-pending-verification {
+  border-color: #1f9d55;
+  box-shadow: 0 0 0 2px rgba(31, 157, 85, 0.2);
+}
+
 .logo {
   width: 150px;
   height: 25px;

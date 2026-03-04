@@ -735,6 +735,29 @@
       </div>
     </div>
 
+    <div id="modal-confirm-correo" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card" style="max-width: 420px">
+        <button class="modal-close" id="btn-close-confirm-correo" aria-label="Cerrar">
+          ×
+        </button>
+        <div class="modal-body">
+          <p style="margin-top: 0">
+            ¿Estás seguro que quieres cambiar el correo a
+            <strong id="confirm-correo-nuevo">-</strong>?
+          </p>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end">
+            <button type="button" id="btn-confirm-correo-no" class="btn-outline">
+              No
+            </button>
+            <button type="button" id="btn-confirm-correo-si" class="btn-primary">
+              Sí
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="rec-overlay" class="rec-overlay">
       <div class="rec-modal">
         <h4>Recargar cuenta</h4>
@@ -1331,7 +1354,7 @@
         const showPerfil = flags.showPerfil ?? true;
         const showPerfilId = flags.porPantalla === true;
         const estadoInfo = getEstadoVenta({ fecha_corte: fechaCorte });
-        const correoCell = isSuperadmin
+        const correoCell = isAdminUser
           ? `<div class="fecha-wrap">
               <span class="correo-copy correo-text" data-clipboard="${escapeHtml(correo || "")}">${escapeHtml(correo || "-")}</span>
               <button type="button" class="btn-edit-correo" data-venta="${escapeHtml(idVenta)}" data-cuenta="${escapeHtml(cuentaId || "")}">✏️</button>
@@ -1569,6 +1592,7 @@
         plataforma: "",
       };
       let isSuperadmin = false;
+      let isAdminUser = true;
       const modalReemplazo = document.querySelector("#modal-reemplazo-row");
       const modalMiembroAdd = document.querySelector("#modal-miembro-add");
       const modalReemplazoConfirm = document.querySelector(
@@ -1625,6 +1649,11 @@
       const btnConfirmDelete = document.querySelector("#btn-confirm-delete");
       const btnCancelDelete = document.querySelector("#btn-cancel-delete");
       const btnCloseDelete = document.querySelector(".modal-delete-close");
+      const modalConfirmCorreo = document.querySelector("#modal-confirm-correo");
+      const confirmCorreoNuevoEl = document.querySelector("#confirm-correo-nuevo");
+      const btnConfirmCorreoSi = document.querySelector("#btn-confirm-correo-si");
+      const btnConfirmCorreoNo = document.querySelector("#btn-confirm-correo-no");
+      const btnCloseConfirmCorreo = document.querySelector("#btn-close-confirm-correo");
       let deleteTargetId = null;
       let deleteTargetRow = null;
       const modalReemplazoMsg = document.querySelector("#modal-reemplazo-msg");
@@ -1635,6 +1664,37 @@
       let reemplazarCuentaTargetId = null;
       let reemplazoRelacionadosContext = null;
       let pendingReemplazoBtn = null;
+      const confirmarCambioCorreo = (nuevoCorreo) =>
+        new Promise((resolve) => {
+          if (!modalConfirmCorreo) {
+            resolve(true);
+            return;
+          }
+          if (confirmCorreoNuevoEl) {
+            confirmCorreoNuevoEl.textContent = String(nuevoCorreo || "").trim() || "-";
+          }
+          modalConfirmCorreo.classList.remove("hidden");
+
+          const close = (accepted) => {
+            modalConfirmCorreo.classList.add("hidden");
+            btnConfirmCorreoSi?.removeEventListener("click", onYes);
+            btnConfirmCorreoNo?.removeEventListener("click", onNo);
+            btnCloseConfirmCorreo?.removeEventListener("click", onNo);
+            backdrop?.removeEventListener("click", onBackdrop);
+            resolve(accepted);
+          };
+          const onYes = () => close(true);
+          const onNo = () => close(false);
+          const backdrop = modalConfirmCorreo.querySelector(".modal-backdrop");
+          const onBackdrop = (e) => {
+            if (e.target === backdrop) close(false);
+          };
+
+          btnConfirmCorreoSi?.addEventListener("click", onYes);
+          btnConfirmCorreoNo?.addEventListener("click", onNo);
+          btnCloseConfirmCorreo?.addEventListener("click", onNo);
+          backdrop?.addEventListener("click", onBackdrop);
+        });
 
       (async () => {
         try {
@@ -1650,6 +1710,7 @@
           isSuperadmin = isTrue(user?.permiso_superadmin);
           const isAdmin =
             isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
+          isAdminUser = isAdmin;
           if (adminLink) {
             adminLink.classList.toggle("hidden", !isAdmin);
             adminLink.style.display = isAdmin ? "block" : "none";
@@ -3731,7 +3792,13 @@
           </div>
           <div class="cuenta-platform-cred">
             <span class="cuenta-platform-label">Correo:</span>
-            <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
+            <span class="fecha-wrap cuenta-correo-wrap">
+              <span class="cred-copy correo-cuenta-text" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
+              <button type="button" class="btn-edit-fecha-cuenta btn-edit-correo-cuenta" data-cuenta="${info.id_cuenta}">✏️</button>
+              <input type="text" class="fecha-input-cuenta correo-input-cuenta hidden" data-cuenta="${info.id_cuenta}" value="${info.correo || ""}" />
+              <button type="button" class="btn-save-fecha-cuenta btn-save-correo-cuenta hidden" data-cuenta="${info.id_cuenta}">💾</button>
+              <button type="button" class="btn-cancel-fecha-cuenta btn-cancel-correo-cuenta hidden">✖</button>
+            </span>
             <span class="cuenta-platform-sep">•</span>
             <span class="cuenta-platform-label">Clave:</span>
             <span class="cred-copy" data-clipboard="${info.clave || ""}">${info.clave || "-"}</span>
@@ -3801,7 +3868,16 @@
             <div>
               <p><strong>Proveedor:</strong> ${proveedorHtml}</p>
               <p><strong>Región:</strong> ${info.region || "-"}</p>
-              <p><strong>Correo:</strong> <span class="cred-copy" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span></p>
+              <p>
+                <strong>Correo:</strong>
+                <span class="fecha-wrap cuenta-correo-wrap">
+                  <span class="cred-copy correo-cuenta-text" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
+                  <button type="button" class="btn-edit-fecha-cuenta btn-edit-correo-cuenta" data-cuenta="${info.id_cuenta}">✏️</button>
+                  <input type="text" class="fecha-input-cuenta correo-input-cuenta hidden" data-cuenta="${info.id_cuenta}" value="${info.correo || ""}" />
+                  <button type="button" class="btn-save-fecha-cuenta btn-save-correo-cuenta hidden" data-cuenta="${info.id_cuenta}">💾</button>
+                  <button type="button" class="btn-cancel-fecha-cuenta btn-cancel-correo-cuenta hidden">✖</button>
+                </span>
+              </p>
               <p>
                 <strong>Clave:</strong> <span class="cred-copy" data-clipboard="${info.clave || ""}">${info.clave || "-"}</span>
                 <button type="button" class="btn-pin btn-clave" data-cuenta="${info.id_cuenta}" data-clave="${info.clave || ""}" data-correo="${info.correo || ""}">✏️</button>
@@ -4787,6 +4863,105 @@
 
       // Recargar cuenta modal
       detalleEl?.addEventListener("click", async (e) => {
+        const editCorreoCuentaBtn = e.target.closest(".btn-edit-correo-cuenta");
+        if (editCorreoCuentaBtn) {
+          const wrap = editCorreoCuentaBtn.closest(".cuenta-correo-wrap");
+          const input = wrap?.querySelector(".correo-input-cuenta");
+          const span = wrap?.querySelector(".correo-cuenta-text");
+          const saveBtn = wrap?.querySelector(".btn-save-correo-cuenta");
+          const cancelBtn = wrap?.querySelector(".btn-cancel-correo-cuenta");
+          if (input) {
+            input.classList.remove("hidden");
+            input.classList.add("show");
+            input.focus();
+            input.select();
+          }
+          if (span) span.classList.add("hidden");
+          if (saveBtn) saveBtn.classList.remove("hidden");
+          if (cancelBtn) cancelBtn.classList.remove("hidden");
+          editCorreoCuentaBtn.classList.add("hidden");
+          return;
+        }
+
+        const cancelCorreoCuentaBtn = e.target.closest(".btn-cancel-correo-cuenta");
+        if (cancelCorreoCuentaBtn) {
+          const wrap = cancelCorreoCuentaBtn.closest(".cuenta-correo-wrap");
+          const input = wrap?.querySelector(".correo-input-cuenta");
+          const span = wrap?.querySelector(".correo-cuenta-text");
+          const editBtn = wrap?.querySelector(".btn-edit-correo-cuenta");
+          const saveBtn = wrap?.querySelector(".btn-save-correo-cuenta");
+          if (input) {
+            input.value = String(span?.dataset.clipboard || span?.textContent || "").trim();
+            input.classList.add("hidden");
+            input.classList.remove("show");
+          }
+          if (span) span.classList.remove("hidden");
+          if (editBtn) editBtn.classList.remove("hidden");
+          if (saveBtn) saveBtn.classList.add("hidden");
+          cancelCorreoCuentaBtn.classList.add("hidden");
+          return;
+        }
+
+        const saveCorreoCuentaBtn = e.target.closest(".btn-save-correo-cuenta");
+        if (saveCorreoCuentaBtn) {
+          const wrap = saveCorreoCuentaBtn.closest(".cuenta-correo-wrap");
+          const input = wrap?.querySelector(".correo-input-cuenta");
+          const span = wrap?.querySelector(".correo-cuenta-text");
+          const editBtn = wrap?.querySelector(".btn-edit-correo-cuenta");
+          const cancelBtn = wrap?.querySelector(".btn-cancel-correo-cuenta");
+          const cuentaId = saveCorreoCuentaBtn.dataset.cuenta || currentCuentaDetalle?.id_cuenta;
+          const newCorreo = String(input?.value || "").trim();
+          if (!cuentaId || !newCorreo) {
+            alert("Ingresa un correo.");
+            return;
+          }
+          const confirmado = await confirmarCambioCorreo(newCorreo);
+          if (!confirmado) return;
+          try {
+            const { error } = await supabase
+              .from("cuentas")
+              .update({ correo: newCorreo })
+              .eq("id_cuenta", cuentaId);
+            if (error) throw error;
+
+            if (currentCuentaDetalle && String(currentCuentaDetalle.id_cuenta || "") === String(cuentaId)) {
+              currentCuentaDetalle.correo = newCorreo;
+            }
+            detalleEl?.querySelectorAll(".correo-cuenta-text").forEach((el) => {
+              el.textContent = newCorreo;
+              el.dataset.clipboard = newCorreo;
+              el.classList.remove("hidden");
+            });
+            detalleEl?.querySelectorAll(".correo-input-cuenta").forEach((el) => {
+              el.value = newCorreo;
+              el.classList.add("hidden");
+              el.classList.remove("show");
+            });
+            detalleEl?.querySelectorAll(".btn-edit-correo-cuenta").forEach((el) => {
+              el.classList.remove("hidden");
+            });
+            detalleEl?.querySelectorAll(".btn-save-correo-cuenta").forEach((el) => {
+              el.classList.add("hidden");
+            });
+            detalleEl?.querySelectorAll(".btn-cancel-correo-cuenta").forEach((el) => {
+              el.classList.add("hidden");
+            });
+            detalleEl?.querySelectorAll(".btn-clave").forEach((btn) => {
+              btn.dataset.correo = newCorreo;
+            });
+            detalleEl?.querySelectorAll(".btn-recargar-cuenta").forEach((btn) => {
+              btn.dataset.correo = newCorreo;
+            });
+            detalleEl?.querySelectorAll(".btn-reemplazar-row").forEach((btn) => {
+              btn.dataset.correo = newCorreo;
+            });
+          } catch (err) {
+            console.error("update correo cuenta error", err);
+            alert("No se pudo actualizar el correo.");
+          }
+          return;
+        }
+
         const editCuentaFechaBtn = e.target.closest(".btn-edit-fecha-cuenta");
         if (editCuentaFechaBtn) {
           const wrap = editCuentaFechaBtn.closest(".cuenta-fecha-wrap");
@@ -5036,6 +5211,8 @@
               currentCanvaCuenta?.id_cuenta;
             const newCorreo = (input?.value || "").trim();
             if (!ventaId || !newCorreo) return;
+            const confirmado = await confirmarCambioCorreo(newCorreo);
+            if (!confirmado) return;
             try {
               const { error: vErr } = await supabase
                 .from("ventas")
@@ -5747,6 +5924,8 @@
           if (!ventaId) return;
           const newCorreo = input.value.trim();
           if (!newCorreo) return;
+          const confirmado = await confirmarCambioCorreo(newCorreo);
+          if (!confirmado) return;
           try {
             const { error } = await supabase
               .from("ventas")

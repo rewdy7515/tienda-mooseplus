@@ -63,7 +63,18 @@ const PUBLIC_SITE_URL = (() => {
   const raw = String(process.env.PUBLIC_SITE_URL || process.env.SITE_URL || "https://mooseplus.com")
     .trim()
     .replace(/\/+$/g, "");
-  if (/^https?:\/\/[^/]+$/i.test(raw)) return raw;
+  if (/^https?:\/\/[^/]+$/i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      const host = String(parsed.hostname || "").trim().toLowerCase();
+      if (host === "www.mooseplus.com") {
+        parsed.hostname = "mooseplus.com";
+      }
+      return parsed.toString().replace(/\/+$/g, "");
+    } catch (_err) {
+      return raw;
+    }
+  }
   return "https://mooseplus.com";
 })();
 
@@ -590,6 +601,7 @@ const buildWhatsappRecordatorioItems = async () => {
     const platId = cuenta.id_plataforma || precio.id_plataforma || null;
     const platInfo = platId ? mapPlat[platId] || {} : {};
     const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
+    const platNombreUpper = String(platNombre || "-").toLocaleUpperCase("es-VE");
     const useCorreoCliente =
       platInfo.correo_cliente === true ||
       platInfo.correo_cliente === "true" ||
@@ -612,7 +624,7 @@ const buildWhatsappRecordatorioItems = async () => {
       };
     }
 
-    const platDisplayName = `${platNombre}${hogarTxt}`;
+    const platDisplayName = `${platNombreUpper}${hogarTxt}`;
     const platformKey = `${String(platId || platNombre || "-")}::${hogarTxt ? "hogar" : "normal"}`;
     if (!acc[userId].plataformas[platformKey]) {
       acc[userId].plataformas[platformKey] = {
@@ -643,7 +655,7 @@ const buildWhatsappRecordatorioItems = async () => {
         return `*${plat.nombre || "-"}*\n${detalles}`;
       })
       .join("\n\n");
-    const plain = `¡Hola ${group.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+    const plain = `*¡Hola ${group.cliente}! ❤️🫎*\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     return {
       idUsuario: group.idUsuario,
       cliente: group.cliente,
@@ -1419,24 +1431,74 @@ const signSignupTokenPayload = (payloadPart) => {
   return encodeBase64Url(digest);
 };
 
+const SIGNUP_ULTRA_PREFIX = "x";
+const SIGNUP_ULTRA_MAC_BYTES = 6;
+const SIGNUP_COMPACT_MAC_BYTES = 10;
+const SIGNUP_COMPACT_MAC_BYTES_LEGACY = 16;
+
+const encodeUInt24BE = (num) => {
+  const value = Number(num);
+  if (!Number.isFinite(value) || value < 0 || value > 0xffffff) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  const out = Buffer.allocUnsafe(3);
+  out[0] = (value >>> 16) & 0xff;
+  out[1] = (value >>> 8) & 0xff;
+  out[2] = value & 0xff;
+  return out;
+};
+
+const decodeUInt24BE = (buffer, offset = 0) =>
+  ((buffer[offset] << 16) | (buffer[offset + 1] << 8) | buffer[offset + 2]) >>> 0;
+
 const signSignupTokenCompact = (payloadPart) => {
   const secret = getSignupTokenSecret();
-  // 128-bit MAC truncado: suficientemente fuerte y más corto para URLs.
-  const digest = crypto.createHmac("sha256", secret).update(payloadPart).digest().subarray(0, 16);
+  // 80-bit MAC truncado para URL más corta.
+  const digest = crypto
+    .createHmac("sha256", secret)
+    .update(payloadPart)
+    .digest()
+    .subarray(0, SIGNUP_COMPACT_MAC_BYTES);
+  return encodeBase64Url(digest);
+};
+
+const isValidSignupCompactSignature = (payloadPart, signaturePart) => {
+  const candidates = [SIGNUP_COMPACT_MAC_BYTES, SIGNUP_COMPACT_MAC_BYTES_LEGACY];
+  const receivedSigBuffer = Buffer.from(signaturePart || "", "utf8");
+  return candidates.some((macBytes) => {
+    const secret = getSignupTokenSecret();
+    const expectedSig = encodeBase64Url(
+      crypto.createHmac("sha256", secret).update(payloadPart).digest().subarray(0, macBytes),
+    );
+    const expectedSigBuffer = Buffer.from(expectedSig, "utf8");
+    if (receivedSigBuffer.length !== expectedSigBuffer.length) return false;
+    return crypto.timingSafeEqual(receivedSigBuffer, expectedSigBuffer);
+  });
+};
+
+const signSignupTokenUltra = (payloadPart) => {
+  const secret = getSignupTokenSecret();
+  const digest = crypto
+    .createHmac("sha256", secret)
+    .update(payloadPart)
+    .digest()
+    .subarray(0, SIGNUP_ULTRA_MAC_BYTES);
   return encodeBase64Url(digest);
 };
 
 const buildSignupRegistrationToken = (idUsuario) => {
   const uid = toPositiveInt(idUsuario);
   if (!uid) throw tokenError("INVALID_UID", "id_usuario inválido.");
+  if (uid > 0xffffff) throw tokenError("INVALID_UID", "id_usuario fuera de rango.");
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = nowSec + SIGNUP_TOKEN_TTL_SEC;
-  // Formato compacto: {uid,exp} en base36 + firma corta.
-  const uidPart = uid.toString(36);
-  const expPart = exp.toString(36);
-  const payloadPart = `${uidPart}.${expPart}`;
-  const signaturePart = signSignupTokenCompact(payloadPart);
-  return `${payloadPart}.${signaturePart}`;
+  // Formato ultracorto: "x" + base64url([uid24|expHour24]) + mac48.
+  const expHour = Math.floor(exp / 3600);
+  if (expHour > 0xffffff) throw tokenError("TOKEN_INVALID", "exp fuera de rango.");
+  const payloadBin = Buffer.concat([encodeUInt24BE(uid), encodeUInt24BE(expHour)]);
+  const payloadPart = encodeBase64Url(payloadBin);
+  const signaturePart = signSignupTokenUltra(payloadPart);
+  return `${SIGNUP_ULTRA_PREFIX}${payloadPart}${signaturePart}`;
 };
 
 const verifySignupRegistrationToken = (tokenValue, options = {}) => {
@@ -1449,19 +1511,42 @@ const verifySignupRegistrationToken = (tokenValue, options = {}) => {
   let iat = null;
   const nowSec = Math.floor(Date.now() / 1000);
 
-  if (parts.length === 3) {
-    const [uidPart, expPart, signaturePart] = parts;
-    if (!uidPart || !expPart || !signaturePart) {
+  if (
+    parts.length === 1 &&
+    token.startsWith(SIGNUP_ULTRA_PREFIX) &&
+    token.length > 1
+  ) {
+    const body = token.slice(1);
+    const payloadChars = 8; // 6 bytes -> 8 chars base64url
+    const signaturePart = body.slice(payloadChars);
+    const payloadPart = body.slice(0, payloadChars);
+    if (!payloadPart || !signaturePart) {
       throw tokenError("TOKEN_INVALID", "Token inválido.");
     }
-    const payloadPart = `${uidPart}.${expPart}`;
-    const expectedSig = signSignupTokenCompact(payloadPart);
+    const expectedSig = signSignupTokenUltra(payloadPart);
     const receivedSigBuffer = Buffer.from(signaturePart, "utf8");
     const expectedSigBuffer = Buffer.from(expectedSig, "utf8");
     if (
       receivedSigBuffer.length !== expectedSigBuffer.length ||
       !crypto.timingSafeEqual(receivedSigBuffer, expectedSigBuffer)
     ) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    const payloadBin = decodeBase64Url(payloadPart);
+    if (!payloadBin || payloadBin.length !== 6) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    const uidDecoded = decodeUInt24BE(payloadBin, 0);
+    const expHourDecoded = decodeUInt24BE(payloadBin, 3);
+    uid = toPositiveInt(uidDecoded);
+    exp = Number(expHourDecoded) * 3600;
+  } else if (parts.length === 3) {
+    const [uidPart, expPart, signaturePart] = parts;
+    if (!uidPart || !expPart || !signaturePart) {
+      throw tokenError("TOKEN_INVALID", "Token inválido.");
+    }
+    const payloadPart = `${uidPart}.${expPart}`;
+    if (!isValidSignupCompactSignature(payloadPart, signaturePart)) {
       throw tokenError("TOKEN_INVALID", "Token inválido.");
     }
     const uidDecoded = parseInt(uidPart, 36);
@@ -3943,7 +4028,7 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
     const token = buildSignupRegistrationToken(idUsuarioTarget);
     const nowSec = Math.floor(Date.now() / 1000);
     const expiresAtIso = new Date((nowSec + SIGNUP_TOKEN_TTL_SEC) * 1000).toISOString();
-    const signupUrl = new URL("/signup.html", PUBLIC_SITE_URL);
+    const signupUrl = new URL("/signup", PUBLIC_SITE_URL);
     signupUrl.searchParams.set("t", token);
 
     return res.json({
@@ -3966,6 +4051,21 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
         .json({ error: "Token de registro no configurado en el backend." });
     }
     return res.status(500).json({ error: err?.message || "No se pudo generar el link de registro." });
+  }
+});
+
+// Redirección corta para links de registro: /s/:token -> /signup.html?t=token
+app.get("/s/:token", async (req, res) => {
+  try {
+    const token = String(req.params?.token || "").trim();
+    if (!token) {
+      return res.redirect(302, new URL("/signup.html", PUBLIC_SITE_URL).toString());
+    }
+    const signupUrl = new URL("/signup.html", PUBLIC_SITE_URL);
+    signupUrl.searchParams.set("t", token);
+    return res.redirect(302, signupUrl.toString());
+  } catch (_err) {
+    return res.redirect(302, new URL("/signup.html", PUBLIC_SITE_URL).toString());
   }
 });
 

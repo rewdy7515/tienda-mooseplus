@@ -260,7 +260,7 @@
               return `*${plat.nombre || "-"}*\n${detalles}`;
             })
             .join("\n\n");
-          const plain = `¡Hola ${g.cliente}! ❤️🫎\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+          const plain = `*¡Hola ${g.cliente}! ❤️🫎*\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
           const html = `<h4>${g.cliente || "Cliente"}</h4><p>Teléfono: ${g.telefono || "-"}</p><pre>${plain}</pre>`;
           const ventaIds = Array.from(
             new Set(
@@ -369,6 +369,7 @@
             const platId = cuenta.id_plataforma || precio.id_plataforma || null;
             const platInfo = platId ? mapPlat[platId] || {} : {};
             const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
+            const platNombreUpper = String(platNombre || "-").toLocaleUpperCase("es-VE");
             const userInfo = mapUser[v.id_usuario] || {};
             const cliente = userInfo.cliente || "Cliente";
             const telefono = userInfo.telefono || "";
@@ -388,7 +389,7 @@
             if (!acc[key]) {
               acc[key] = { idUsuario: v.id_usuario || null, cliente, telefono, plataformas: {}, ventaIds: [] };
             }
-            const platDisplayName = `${platNombre}${hogarTxt}`;
+            const platDisplayName = `${platNombreUpper}${hogarTxt}`;
             const platformKey = `${String(platId || platNombre || "-")}::${hogarTxt ? "hogar" : "normal"}`;
             if (!acc[key].plataformas[platformKey]) {
               acc[key].plataformas[platformKey] = {

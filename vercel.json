@@ -13,6 +13,10 @@
     { "src": "/components/(.*)", "dest": "/src/frontend/components/$1" },
     { "src": "/public/(.*)", "dest": "/src/frontend/public/$1" },
     { "src": "/partials/(.*)", "dest": "/src/frontend/partials/$1" },
+    {
+      "src": "^/((?!api/|styles/|scripts/|components/|public/|partials/)[^.?]+)$",
+      "dest": "/src/frontend/pages/$1.html"
+    },
     { "src": "/", "dest": "/src/frontend/pages/index.html" },
     { "src": "/(.*)", "dest": "/src/frontend/pages/$1" }
   ]

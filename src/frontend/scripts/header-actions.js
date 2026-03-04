@@ -92,6 +92,45 @@ if (!window.__headerActionsInit) {
   const headerEl = document.querySelector(".header");
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
   const ordenesHeaderBtn = document.querySelector("#btn-ordenes-header");
+  const setOrdenesPendingBadge = (hasPending) => {
+    if (!ordenesHeaderBtn) return;
+    ordenesHeaderBtn.classList.toggle("has-pending-verification", !!hasPending);
+    ordenesHeaderBtn.setAttribute(
+      "title",
+      hasPending
+        ? "Hay comprobantes pendientes por verificar"
+        : "Ordenes",
+    );
+  };
+  const refreshOrdenesPendingBadge = async () => {
+    if (!ordenesHeaderBtn) return;
+    try {
+      const { data: metodosRows, error: metodosErr } = await supabase
+        .from("metodos_de_pago")
+        .select("id_metodo_de_pago")
+        .eq("verificacion_automatica", false);
+      if (metodosErr) throw metodosErr;
+      const metodosNoAutomaticos = (metodosRows || [])
+        .map((row) => Number(row?.id_metodo_de_pago))
+        .filter((id) => Number.isFinite(id) && id > 0);
+      if (!metodosNoAutomaticos.length) {
+        setOrdenesPendingBadge(false);
+        return;
+      }
+      const { data: ordenesRows, error: ordenesErr } = await supabase
+        .from("ordenes")
+        .select("id_orden")
+        .in("id_metodo_de_pago", metodosNoAutomaticos)
+        .neq("pago_verificado", true)
+        .neq("orden_cancelada", true)
+        .limit(1);
+      if (ordenesErr) throw ordenesErr;
+      setOrdenesPendingBadge((ordenesRows || []).length > 0);
+    } catch (err) {
+      console.error("ordenes pending badge error", err);
+      setOrdenesPendingBadge(false);
+    }
+  };
   let headerHeight = 0;
   let hideOffset = 0;
   const applyHeaderOffset = () => {
@@ -296,6 +335,11 @@ if (!window.__headerActionsInit) {
       if (ordenesHeaderBtn) {
         ordenesHeaderBtn.classList.toggle("hidden", !isSuper);
         ordenesHeaderBtn.style.display = isSuper ? "inline-flex" : "none";
+        if (isSuper) {
+          await refreshOrdenesPendingBadge();
+        } else {
+          setOrdenesPendingBadge(false);
+        }
       }
       if (headerEl) {
         headerEl.classList.toggle("has-admin-btn", !!isAdmin);

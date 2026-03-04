@@ -101,9 +101,14 @@ let homeBannersWheelDidSlideInGesture = false;
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
+const recordatoriosPendientesBtn = document.querySelector("#recordatorios-pendientes-btn");
 const recordatoriosSinTelefonoWrap = document.querySelector("#recordatorios-sin-telefono-wrap");
 const recordatoriosSinTelefonoList = document.querySelector("#recordatorios-sin-telefono-list");
 const recordatoriosSinTelefonoEmpty = document.querySelector("#recordatorios-sin-telefono-empty");
+
+recordatoriosPendientesBtn?.addEventListener("click", () => {
+  window.location.href = "admin/recordatorios.html";
+});
 const loaderAvatarLayerEl = document.querySelector(".page-loader__avatar-layer");
 const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
 const loaderAvatarEl = document.querySelector("#page-loader-avatar");
@@ -1661,6 +1666,7 @@ const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
     recordatoriosPendientesList.innerHTML = "";
     recordatoriosPendientesEmpty.classList.add("hidden");
     recordatoriosPendientesWrap.classList.add("hidden");
+    recordatoriosPendientesBtn?.classList.add("hidden");
     return;
   }
 
@@ -1685,6 +1691,7 @@ const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
     if (!uniqueDates.length) {
       recordatoriosPendientesEmpty.classList.add("hidden");
       recordatoriosPendientesWrap.classList.add("hidden");
+      recordatoriosPendientesBtn?.classList.add("hidden");
       return;
     }
 
@@ -1696,10 +1703,12 @@ const loadPendingReminderDates = async ({ isSuperadmin = false } = {}) => {
 
     recordatoriosPendientesEmpty.classList.add("hidden");
     recordatoriosPendientesWrap.classList.remove("hidden");
+    recordatoriosPendientesBtn?.classList.remove("hidden");
   } catch (err) {
     console.error("recordatorios pendientes error", err);
     recordatoriosPendientesEmpty.classList.add("hidden");
     recordatoriosPendientesWrap.classList.add("hidden");
+    recordatoriosPendientesBtn?.classList.add("hidden");
   }
 };
 

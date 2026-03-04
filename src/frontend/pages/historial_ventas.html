@@ -12,6 +12,14 @@
         flex-direction: column;
         gap: 12px;
       }
+      .historial-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .historial-controls select {
+        min-width: 210px;
+      }
       .historial-table {
         width: 100%;
         border-collapse: collapse;
@@ -43,6 +51,10 @@
     <main class="categorias-dinamicas">
       <h2>Historial de Ventas</h2>
       <div class="historial-wrapper">
+        <div class="historial-controls">
+          <label for="historial-mes-select">Mes:</label>
+          <select id="historial-mes-select" class="input-cuenta"></select>
+        </div>
         <p id="historial-status" class="status">Cargando ventas...</p>
         <div class="historial-table-wrap">
           <table class="historial-table">
@@ -76,6 +88,7 @@
 
       const statusEl = document.querySelector("#historial-status");
       const tbodyEl = document.querySelector("#historial-body");
+      const monthSelectEl = document.querySelector("#historial-mes-select");
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -114,14 +127,43 @@
         return `${hh}:${mm} ${suffix}`;
       };
 
+      const isTrue = (v) =>
+        v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const getMonthKey = (value) => {
+        const raw = String(value || "").trim();
+        const match = raw.match(/^(\d{4})-(\d{2})-\d{2}$/);
+        if (!match) return null;
+        return `${match[1]}-${match[2]}`;
+      };
+
+      const getMonthLabel = (monthKey) => {
+        if (!monthKey) return "Sin fecha";
+        const date = new Date(`${monthKey}-01T00:00:00`);
+        if (Number.isNaN(date.getTime())) return monthKey;
+        const fmt = new Intl.DateTimeFormat("es-VE", {
+          month: "long",
+          year: "numeric",
+        });
+        const text = fmt.format(date);
+        return text.charAt(0).toUpperCase() + text.slice(1);
+      };
+
+      const getCurrentMonthKey = () => {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        return `${y}-${m}`;
+      };
+
       const init = async () => {
         try {
           const { data: historial, error } = await supabase
             .from("historial_ventas")
             .select(
-              "id_historial_ventas, id_venta, id_plataforma, id_usuario_cliente, id_metodo_de_pago, referencia, monto, fecha_pago, hora_pago"
+              "id_historial_ventas, id_venta, id_orden, id_plataforma, id_usuario_cliente, id_metodo_de_pago, referencia, monto, fecha_pago, hora_pago, venta_cliente, renovacion"
             )
-            .order("id_venta", { ascending: false })
+            .order("fecha_pago", { ascending: false, nullsFirst: false })
             .order("id_historial_ventas", { ascending: false });
           if (error) throw error;
 
@@ -135,6 +177,20 @@
           const ventaIds = Array.from(new Set(rows.map((r) => r.id_venta).filter(Boolean)));
           const platIdsHistorial = Array.from(new Set(rows.map((r) => r.id_plataforma).filter(Boolean)));
           const userIdsHistorial = Array.from(new Set(rows.map((r) => r.id_usuario_cliente).filter(Boolean)));
+          const ordenIds = Array.from(new Set(rows.map((r) => r.id_orden).filter(Boolean)));
+
+          let ordenesMap = {};
+          if (ordenIds.length) {
+            const { data: ordenesRows, error: ordenesErr } = await supabase
+              .from("ordenes")
+              .select("id_orden, id_usuario, id_metodo_de_pago, referencia, fecha, hora_orden")
+              .in("id_orden", ordenIds);
+            if (ordenesErr) throw ordenesErr;
+            ordenesMap = (ordenesRows || []).reduce((acc, orden) => {
+              acc[orden.id_orden] = orden;
+              return acc;
+            }, {});
+          }
 
           let ventasMap = {};
           if (ventaIds.length) {
@@ -152,7 +208,12 @@
           const userIdsVentas = Array.from(
             new Set(Object.values(ventasMap).map((v) => v.id_usuario).filter(Boolean))
           );
-          const userIds = Array.from(new Set([...userIdsHistorial, ...userIdsVentas]));
+          const userIdsOrdenes = Array.from(
+            new Set(Object.values(ordenesMap).map((o) => o.id_usuario).filter(Boolean))
+          );
+          const userIds = Array.from(
+            new Set([...userIdsHistorial, ...userIdsVentas, ...userIdsOrdenes])
+          );
 
           const precioIds = Array.from(
             new Set(Object.values(ventasMap).map((v) => v.id_precio).filter(Boolean))
@@ -188,7 +249,11 @@
             }, {});
           }
 
-          const metodoIds = Array.from(new Set(rows.map((r) => r.id_metodo_de_pago).filter(Boolean)));
+          const metodoIdsHistorial = rows.map((r) => r.id_metodo_de_pago);
+          const metodoIdsOrdenes = Object.values(ordenesMap).map((o) => o.id_metodo_de_pago);
+          const metodoIds = Array.from(
+            new Set([...metodoIdsHistorial, ...metodoIdsOrdenes].filter(Boolean))
+          );
           let metodoMap = {};
           if (metodoIds.length) {
             const { data: metodos, error: metErr } = await supabase
@@ -215,11 +280,12 @@
             }, {});
           }
 
-          const html = rows
-            .map((r) => {
+          const normalizedRows = rows.map((r) => {
+              const orden = r.id_orden ? ordenesMap[r.id_orden] : null;
               const venta = r.id_venta ? ventasMap[r.id_venta] : null;
               const cliente =
                 userMap[r.id_usuario_cliente] ||
+                userMap[orden?.id_usuario] ||
                 userMap[venta?.id_usuario] ||
                 "-";
               const precio = venta?.id_precio ? preciosMap[venta.id_precio] : null;
@@ -228,15 +294,31 @@
                 idPlataformaFinal && platMap[idPlataformaFinal]
                   ? platMap[idPlataformaFinal]
                   : `Plataforma ${idPlataformaFinal || "-"}`;
-              const detalle = precio ? buildDetalle(precio) : "-";
-              const metodoRaw = r.id_metodo_de_pago ? metodoMap[r.id_metodo_de_pago] || "-" : "-";
+              const detalle = precio
+                ? buildDetalle(precio)
+                : isTrue(r.renovacion)
+                ? "Renovación"
+                : isTrue(r.venta_cliente)
+                ? "Venta"
+                : "-";
+              const metodoId = r.id_metodo_de_pago || orden?.id_metodo_de_pago || null;
+              const metodoRaw = metodoId ? metodoMap[metodoId] || "-" : "-";
               const metodo = truncateText(metodoRaw, 12);
-              const referencia = r.referencia ?? "-";
-              const fecha = formatDDMMYYYY(r.fecha_pago) || r.fecha_pago || "-";
-              const hora = formatHora(r.hora_pago);
-              return `
+              const referencia = r.referencia ?? orden?.referencia ?? "-";
+              const rawFecha = r.fecha_pago || orden?.fecha || null;
+              const fecha =
+                formatDDMMYYYY(r.fecha_pago) ||
+                formatDDMMYYYY(orden?.fecha) ||
+                r.fecha_pago ||
+                orden?.fecha ||
+                "-";
+              const hora = formatHora(r.hora_pago || orden?.hora_orden);
+              const idVentaVisible = r.id_venta ?? orden?.id_orden ?? "-";
+              return {
+                monthKey: getMonthKey(rawFecha) || "__sin_fecha__",
+                html: `
                 <tr>
-                  <td>${r.id_venta ?? "-"}</td>
+                  <td>${idVentaVisible}</td>
                   <td>${cliente || "-"}</td>
                   <td>${plataforma}</td>
                   <td>${detalle}</td>
@@ -246,12 +328,54 @@
                   <td>${fecha}</td>
                   <td>${hora}</td>
                 </tr>
-              `;
-            })
-            .join("");
+              `,
+              };
+            });
 
-          if (tbodyEl) tbodyEl.innerHTML = html;
-          setStatus("");
+          const monthKeys = Array.from(
+            new Set(normalizedRows.map((row) => row.monthKey))
+          ).sort((a, b) => {
+            if (a === "__sin_fecha__") return 1;
+            if (b === "__sin_fecha__") return -1;
+            return a > b ? -1 : a < b ? 1 : 0;
+          });
+          const currentMonth = getCurrentMonthKey();
+          if (!monthKeys.includes(currentMonth)) {
+            monthKeys.unshift(currentMonth);
+          }
+
+          if (monthSelectEl) {
+            monthSelectEl.innerHTML = monthKeys
+              .map((key) =>
+                `<option value="${key}">${
+                  key === "__sin_fecha__" ? "Sin fecha" : getMonthLabel(key)
+                }</option>`
+              )
+              .join("");
+          }
+
+          const renderMonth = (monthKey) => {
+            const filtered = normalizedRows.filter((row) => row.monthKey === monthKey);
+            if (!filtered.length) {
+              if (tbodyEl) tbodyEl.innerHTML = "";
+              const monthLabel = monthKey === "__sin_fecha__" ? "Sin fecha" : getMonthLabel(monthKey);
+              setStatus(`No hay ventas registradas para ${monthLabel}.`);
+              return;
+            }
+            if (tbodyEl) {
+              tbodyEl.innerHTML = filtered.map((row) => row.html).join("");
+            }
+            setStatus("");
+          };
+
+          const defaultMonth = monthKeys.includes(currentMonth) ? currentMonth : monthKeys[0];
+          if (monthSelectEl) {
+            monthSelectEl.value = defaultMonth;
+            monthSelectEl.addEventListener("change", () => {
+              renderMonth(monthSelectEl.value);
+            });
+          }
+          renderMonth(defaultMonth);
         } catch (err) {
           console.error("historial ventas error", err);
           setStatus("No se pudieron cargar las ventas.");
