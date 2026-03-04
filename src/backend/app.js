@@ -538,7 +538,7 @@ const buildWhatsappRecordatorioItems = async () => {
     userIds.length
       ? supabaseAdmin
           .from("usuarios")
-          .select("id_usuario, nombre, apellido, telefono")
+          .select("id_usuario, nombre, apellido, telefono, fecha_registro")
           .in("id_usuario", userIds)
       : Promise.resolve({ data: [], error: null }),
     perfilIds.length
@@ -580,9 +580,19 @@ const buildWhatsappRecordatorioItems = async () => {
   const mapUser = (users || []).reduce((acc, user) => {
     const userId = Number(user.id_usuario);
     if (!Number.isFinite(userId) || userId <= 0) return acc;
+    const isRegistered = Boolean(user?.fecha_registro);
+    let signupUrl = "";
+    if (!isRegistered) {
+      try {
+        signupUrl = buildSignupRegistrationUrl(userId);
+      } catch (err) {
+        console.error("[recordatorios] signup url build error", { userId, err });
+      }
+    }
     acc[userId] = {
       cliente: [user.nombre, user.apellido].filter(Boolean).join(" ").trim() || `Usuario ${userId}`,
       telefono: String(user.telefono || "").trim(),
+      signupUrl,
     };
     return acc;
   }, {});
@@ -619,6 +629,7 @@ const buildWhatsappRecordatorioItems = async () => {
         idUsuario: userId,
         cliente: userInfo.cliente || `Usuario ${userId}`,
         telefono: userInfo.telefono || "",
+        signupUrl: String(userInfo.signupUrl || "").trim(),
         plataformas: {},
         ventaIds: [],
       };
@@ -655,7 +666,12 @@ const buildWhatsappRecordatorioItems = async () => {
         return `*${plat.nombre || "-"}*\n${detalles}`;
       })
       .join("\n\n");
-    const plain = `*¡Hola ${group.cliente}! ❤️🫎*\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+    const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
+    const signupUrl = String(group.signupUrl || "").trim();
+    const intro = signupUrl
+      ? `Actualiza el pago de tus membresía por nuestra nueva pagina web:\n${signupUrl}`
+      : "Recuerda actualizar el pago de tu membresía:";
+    const plain = `${saludo}\n${intro}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     return {
       idUsuario: group.idUsuario,
       cliente: group.cliente,
@@ -1501,6 +1517,13 @@ const buildSignupRegistrationToken = (idUsuario) => {
   return `${SIGNUP_ULTRA_PREFIX}${payloadPart}${signaturePart}`;
 };
 
+const buildSignupRegistrationUrl = (idUsuario) => {
+  const token = buildSignupRegistrationToken(idUsuario);
+  const signupUrl = new URL("/signup", PUBLIC_SITE_URL);
+  signupUrl.searchParams.set("t", token);
+  return signupUrl.toString();
+};
+
 const verifySignupRegistrationToken = (tokenValue, options = {}) => {
   const token = String(tokenValue || "").trim();
   if (!token) throw tokenError("TOKEN_REQUIRED", "Token requerido.");
@@ -1742,6 +1765,29 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   return { items: items || [], priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs };
 };
 
+const resolveMontoBaseCarrito = async ({ carritoId, fallbackTotal }) => {
+  const fallback = Number.isFinite(Number(fallbackTotal)) ? Number(fallbackTotal) : 0;
+  const carritoNum = Number(carritoId);
+  if (!Number.isFinite(carritoNum) || carritoNum <= 0) return fallback;
+  const { data: carritoRow, error: cartErr } = await supabaseAdmin
+    .from("carritos")
+    .select("monto_usd, monto_final, usa_saldo")
+    .eq("id_carrito", carritoNum)
+    .maybeSingle();
+  if (cartErr) throw cartErr;
+  if (!carritoRow) return fallback;
+  const usaSaldo = isTrue(carritoRow?.usa_saldo);
+  const montoFinal = Number(carritoRow?.monto_final);
+  const montoUsd = Number(carritoRow?.monto_usd);
+  if (usaSaldo && Number.isFinite(montoFinal) && montoFinal >= 0) {
+    return montoFinal;
+  }
+  if (Number.isFinite(montoUsd) && montoUsd >= 0) {
+    return montoUsd;
+  }
+  return fallback;
+};
+
 const processOrderFromItems = async ({
   ordenId,
   idUsuarioSesion,
@@ -1755,6 +1801,7 @@ const processOrderFromItems = async ({
   archivos,
   id_metodo_de_pago,
   carritoId,
+  montoHistorialTotalOverride,
 }) => {
   console.log("[checkout] processOrderFromItems start", {
     ordenId,
@@ -2388,6 +2435,29 @@ const processOrderFromItems = async ({
     });
   });
   if (histRows.length) {
+    const targetHistTotalNum = Number(montoHistorialTotalOverride);
+    if (Number.isFinite(targetHistTotalNum) && targetHistTotalNum >= 0) {
+      const targetHistTotal = Math.round(targetHistTotalNum * 100) / 100;
+      const baseTotal = histRows.reduce((acc, row) => acc + (Number(row?.monto) || 0), 0);
+      if (baseTotal > 0) {
+        const factor = targetHistTotal / baseTotal;
+        let acumulado = 0;
+        histRows.forEach((row, idx) => {
+          const scaledRaw = (Number(row?.monto) || 0) * factor;
+          const scaled = Math.round(scaledRaw * 100) / 100;
+          if (idx === histRows.length - 1) {
+            row.monto = Math.round((targetHistTotal - acumulado) * 100) / 100;
+          } else {
+            row.monto = scaled;
+            acumulado += scaled;
+          }
+        });
+      } else {
+        histRows.forEach((row, idx) => {
+          row.monto = idx === 0 ? targetHistTotal : 0;
+        });
+      }
+    }
     const { error: histErr } = await supabaseAdmin.from("historial_ventas").insert(histRows);
     if (histErr) throw histErr;
   }
@@ -4025,15 +4095,13 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
       return res.status(409).json({ error: "El usuario ya está registrado." });
     }
 
-    const token = buildSignupRegistrationToken(idUsuarioTarget);
     const nowSec = Math.floor(Date.now() / 1000);
     const expiresAtIso = new Date((nowSec + SIGNUP_TOKEN_TTL_SEC) * 1000).toISOString();
-    const signupUrl = new URL("/signup", PUBLIC_SITE_URL);
-    signupUrl.searchParams.set("t", token);
+    const signupUrl = buildSignupRegistrationUrl(idUsuarioTarget);
 
     return res.json({
       ok: true,
-      url: signupUrl.toString(),
+      url: signupUrl,
       expires_at: expiresAtIso,
       expires_in_sec: SIGNUP_TOKEN_TTL_SEC,
     });
@@ -5383,6 +5451,7 @@ app.post("/api/checkout", async (req, res) => {
       tasa_bs,
     });
     const { items, priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs } = context;
+    const montoBaseCobrado = await resolveMontoBaseCarrito({ carritoId, fallbackTotal: total });
     if (!items?.length) {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
@@ -5540,6 +5609,7 @@ app.post("/api/checkout", async (req, res) => {
       archivos,
       id_metodo_de_pago,
       carritoId,
+      montoHistorialTotalOverride: montoBaseCobrado,
     });
     console.log("[checkout] procesado", {
       id_orden: ordenId,
@@ -5573,6 +5643,15 @@ app.post("/api/ordenes/procesar", async (req, res) => {
   const idOrden = Number(req.body?.id_orden);
   if (!Number.isFinite(idOrden)) {
     return res.status(400).json({ error: "id_orden inválido" });
+  }
+  const saldoAFavorRaw = req.body?.saldo_a_favor;
+  const saldoAFavorNum = Number(String(saldoAFavorRaw ?? "").trim().replace(",", "."));
+  const saldoAFavor =
+    saldoAFavorRaw === undefined || saldoAFavorRaw === null || String(saldoAFavorRaw).trim() === ""
+      ? 0
+      : saldoAFavorNum;
+  if (!Number.isFinite(saldoAFavor) || saldoAFavor < 0) {
+    return res.status(400).json({ error: "saldo_a_favor inválido. Debe ser mayor o igual a 0." });
   }
 
   try {
@@ -5611,19 +5690,14 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     }
 
     const idUsuarioVentas = Number(orden?.id_usuario) || idUsuarioSesion;
-    const acreditarExcedenteSaldo = async () => {
-      const montoTransferido = Number(orden?.monto_transferido);
-      const totalOrden = Number(orden?.total);
-      if (!Number.isFinite(montoTransferido) || !Number.isFinite(totalOrden)) {
-        return { acreditado: false, excedente: 0, saldoNuevo: null };
-      }
-      const excedente = Math.round((montoTransferido - totalOrden) * 100) / 100;
-      if (!(excedente > 0)) {
-        return { acreditado: false, excedente: 0, saldoNuevo: null };
+    const acreditarSaldoManual = async (montoInput) => {
+      const amount = Math.round((Number(montoInput) || 0) * 100) / 100;
+      if (!(amount > 0)) {
+        return { acreditado: false, monto: 0, saldoNuevo: null };
       }
       const targetUserId = Number(idUsuarioVentas);
       if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
-        return { acreditado: false, excedente: 0, saldoNuevo: null };
+        return { acreditado: false, monto: 0, saldoNuevo: null };
       }
       const { data: userRow, error: userErr } = await supabaseAdmin
         .from("usuarios")
@@ -5633,13 +5707,13 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       if (userErr) throw userErr;
       const saldoActual = Number(userRow?.saldo);
       const saldoBase = Number.isFinite(saldoActual) ? saldoActual : 0;
-      const saldoNuevo = Math.round((saldoBase + excedente) * 100) / 100;
+      const saldoNuevo = Math.round((saldoBase + amount) * 100) / 100;
       const { error: updSaldoErr } = await supabaseAdmin
         .from("usuarios")
         .update({ saldo: saldoNuevo })
         .eq("id_usuario", targetUserId);
       if (updSaldoErr) throw updSaldoErr;
-      return { acreditado: true, excedente, saldoNuevo };
+      return { acreditado: true, monto: amount, saldoNuevo };
     };
     const isOrderAdmin =
       idUsuarioSesion && orden?.id_admin && Number(orden.id_admin) === Number(idUsuarioSesion);
@@ -5664,7 +5738,6 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     if (ventasErr) throw ventasErr;
     if (ventasExist?.length) {
       const ordenPatch = {};
-      let saldoAcreditadoInfo = { acreditado: false, excedente: 0, saldoNuevo: null };
       if (!orden?.pago_verificado) {
         const { data: pendRows, error: pendErr } = await supabaseAdmin
           .from("ventas")
@@ -5672,7 +5745,6 @@ app.post("/api/ordenes/procesar", async (req, res) => {
           .eq("id_orden", idOrden)
           .eq("pendiente", true);
         if (pendErr) throw pendErr;
-        saldoAcreditadoInfo = await acreditarExcedenteSaldo();
         ordenPatch.pago_verificado = true;
         ordenPatch.en_espera = (pendRows || []).length > 0;
       }
@@ -5692,9 +5764,9 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         already_processed: true,
         ventas: ventasExist.length,
         id_admin: idAdminEntrega,
-        saldo_acreditado: saldoAcreditadoInfo.acreditado,
-        excedente_acreditado: saldoAcreditadoInfo.excedente,
-        saldo_nuevo: saldoAcreditadoInfo.saldoNuevo,
+        saldo_acreditado: false,
+        excedente_acreditado: 0,
+        saldo_nuevo: null,
       });
     }
     if (!orden?.id_carrito) {
@@ -5706,6 +5778,10 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       carritoId: orden.id_carrito,
       totalCliente: orden.total,
       tasa_bs: orden.tasa_bs,
+    });
+    const montoBaseCobrado = await resolveMontoBaseCarrito({
+      carritoId: orden.id_carrito,
+      fallbackTotal: context.total,
     });
     if (!context.items?.length) {
       console.log("[ordenes/procesar] carrito vacío", { id_orden: idOrden, carritoId: orden?.id_carrito });
@@ -5732,6 +5808,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       archivos,
       id_metodo_de_pago: orden?.id_metodo_de_pago,
       carritoId: orden.id_carrito,
+      montoHistorialTotalOverride: montoBaseCobrado,
     });
     console.log("[ordenes/procesar] procesado", {
       id_orden: idOrden,
@@ -5739,10 +5816,8 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       pendientes: result.pendientesCount,
     });
 
-    let saldoAcreditadoInfo = { acreditado: false, excedente: 0, saldoNuevo: null };
-    if (!orden?.pago_verificado) {
-      saldoAcreditadoInfo = await acreditarExcedenteSaldo();
-    }
+    let saldoAcreditadoInfo = { acreditado: false, monto: 0, saldoNuevo: null };
+    saldoAcreditadoInfo = await acreditarSaldoManual(saldoAFavor);
 
     const ordenUpdate = {
       pago_verificado: true,
@@ -5763,7 +5838,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       pendientes: result.pendientesCount,
       id_admin: idAdminEntrega,
       saldo_acreditado: saldoAcreditadoInfo.acreditado,
-      excedente_acreditado: saldoAcreditadoInfo.excedente,
+      excedente_acreditado: saldoAcreditadoInfo.monto,
       saldo_nuevo: saldoAcreditadoInfo.saldoNuevo,
     });
   } catch (err) {

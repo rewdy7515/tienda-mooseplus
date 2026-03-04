@@ -186,6 +186,44 @@
           height: calc(100% - 34px);
         }
       }
+      .saldo-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1300;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .saldo-modal.hidden {
+        display: none;
+      }
+      .saldo-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.56);
+      }
+      .saldo-modal-card {
+        position: relative;
+        z-index: 1;
+        width: min(94vw, 420px);
+        background: #fff;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      .saldo-modal-title {
+        margin: 0 0 8px;
+      }
+      .saldo-modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 12px;
+      }
+      .saldo-modal-hint {
+        font-size: 12px;
+        color: #475569;
+        margin-top: 6px;
+      }
     </style>
   </head>
   <body>
@@ -273,6 +311,20 @@
         </div>
       </div>
     </div>
+    <div id="saldo-modal" class="saldo-modal hidden" aria-hidden="true">
+      <div class="saldo-modal-backdrop" data-close-saldo></div>
+      <div class="saldo-modal-card" role="dialog" aria-modal="true" aria-label="Saldo a favor">
+        <h3 class="saldo-modal-title">¿Agregar saldo a favor?</h3>
+        <p id="saldo-modal-order-txt">Orden #</p>
+        <label for="saldo-modal-input">Monto a acreditar</label>
+        <input id="saldo-modal-input" type="number" min="0" step="0.01" inputmode="decimal" />
+        <p class="saldo-modal-hint" id="saldo-modal-hint"></p>
+        <div class="saldo-modal-actions">
+          <button type="button" class="btn-outline" id="saldo-modal-skip">No acreditar</button>
+          <button type="button" class="btn-primary" id="saldo-modal-credit">Acreditar</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
@@ -309,16 +361,29 @@
       const filterCheckoutBtn = document.querySelector("#btn-filter-checkout");
       const comprobanteModalEl = document.querySelector("#comprobante-modal");
       const comprobanteModalImgEl = document.querySelector("#comprobante-modal-img");
+      const saldoModalEl = document.querySelector("#saldo-modal");
+      const saldoModalOrderTxtEl = document.querySelector("#saldo-modal-order-txt");
+      const saldoModalInputEl = document.querySelector("#saldo-modal-input");
+      const saldoModalHintEl = document.querySelector("#saldo-modal-hint");
+      const saldoModalSkipBtn = document.querySelector("#saldo-modal-skip");
+      const saldoModalCreditBtn = document.querySelector("#saldo-modal-credit");
 
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+      const parseMoney = (v) => {
+        const n = Number(String(v ?? "").trim().replace(",", "."));
+        return Number.isFinite(n) ? round2(n) : 0;
+      };
       const PAGE_SIZE = 10;
       let allOrdenes = [];
       let userMap = {};
       let metodoMap = {};
+      let carritoMap = {};
       let filterCheckoutActive = true;
       let currentUser = null;
       let canManageOrdenes = false;
       let currentPage = 1;
+      let saldoModalResolver = null;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -376,6 +441,62 @@
         comprobanteModalImgEl.removeAttribute("src");
       };
 
+      const closeSaldoModal = (value = null) => {
+        if (!saldoModalEl) return;
+        saldoModalEl.classList.add("hidden");
+        saldoModalEl.setAttribute("aria-hidden", "true");
+        const resolver = saldoModalResolver;
+        saldoModalResolver = null;
+        if (resolver) resolver(value);
+      };
+
+      const askSaldoAFavor = ({ idOrden, suggested }) =>
+        new Promise((resolve) => {
+          if (!saldoModalEl || !saldoModalInputEl || !saldoModalOrderTxtEl || !saldoModalHintEl) {
+            resolve(0);
+            return;
+          }
+          saldoModalResolver = resolve;
+          const safeSuggested = round2(Math.max(0, Number(suggested) || 0));
+          saldoModalOrderTxtEl.textContent = `Orden #${idOrden}`;
+          saldoModalInputEl.value = safeSuggested.toFixed(2);
+          saldoModalHintEl.textContent = `Monto sugerido: $${safeSuggested.toFixed(2)}`;
+          saldoModalEl.classList.remove("hidden");
+          saldoModalEl.setAttribute("aria-hidden", "false");
+          saldoModalInputEl.focus();
+          saldoModalInputEl.select();
+        });
+
+      const calcMetodo4Neto = (montoTransferido) =>
+        round2((Number(montoTransferido) || 0) - ((Number(montoTransferido) || 0) * 0.054 + 0.3));
+
+      const getMontoBaseCobro = (orden) => {
+        const cart = carritoMap[orden?.id_carrito];
+        if (!cart) return round2(orden?.total);
+        if (isTrue(cart.usa_saldo)) {
+          const montoFinal = Number(cart.monto_final);
+          if (Number.isFinite(montoFinal) && montoFinal >= 0) return round2(montoFinal);
+        }
+        const montoUsd = Number(cart.monto_usd);
+        if (Number.isFinite(montoUsd) && montoUsd >= 0) return round2(montoUsd);
+        return round2(orden?.total);
+      };
+
+      const getSaldoSugerido = (orden) => {
+        const montoTransferido = Number(orden?.monto_transferido);
+        if (!Number.isFinite(montoTransferido) || montoTransferido <= 0) return 0;
+        const baseCobro = getMontoBaseCobro(orden);
+        const metodoId = Number(orden?.id_metodo_de_pago);
+        const valorComparable = metodoId === 4 ? calcMetodo4Neto(montoTransferido) : montoTransferido;
+        return round2(Math.max(0, valorComparable - baseCobro));
+      };
+
+      const isMetodoNoAutomatico = (orden) => {
+        const info = metodoMap[orden?.id_metodo_de_pago];
+        if (!info) return false;
+        return info.verificacion_automatica === false;
+      };
+
       const applyVisibleRowStripes = () => {
         if (!tbodyEl) return;
         const rows = Array.from(tbodyEl.querySelectorAll("tr")).filter(
@@ -409,6 +530,7 @@
           const metodoInfo = metodoMap[orden.id_metodo_de_pago] || {
             nombre: "-",
             bolivares: false,
+            verificacion_automatica: true,
           };
           const metodo = metodoInfo.nombre || "-";
           const totalUsdTxt = formatMonto(orden.total);
@@ -616,7 +738,7 @@
         let query = supabase
           .from("ordenes")
           .select(
-            "id_orden, id_usuario, id_metodo_de_pago, id_admin, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada"
+            "id_orden, id_usuario, id_metodo_de_pago, id_admin, id_carrito, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada"
           );
         if (!canManageOrdenes) {
           query = query.eq("id_usuario", currentUser?.id_usuario ?? -1);
@@ -672,7 +794,27 @@
               acc[id] = {
                 nombre: m?.nombre || "-",
                 bolivares: isTrue(m?.bolivares),
+                verificacion_automatica: isTrue(m?.verificacion_automatica),
               };
+              return acc;
+            }, {});
+          }
+        }
+
+        const carritoIds = Array.from(new Set(allOrdenes.map((o) => o.id_carrito).filter(Boolean)));
+        carritoMap = {};
+        if (carritoIds.length) {
+          const { data: carritos, error: cartErr } = await supabase
+            .from("carritos")
+            .select("id_carrito, monto_usd, monto_final, usa_saldo")
+            .in("id_carrito", carritoIds);
+          if (cartErr) {
+            console.error("carritos load error", cartErr);
+          } else {
+            carritoMap = (carritos || []).reduce((acc, c) => {
+              const id = c?.id_carrito;
+              if (!id) return acc;
+              acc[id] = c;
               return acc;
             }, {});
           }
@@ -743,12 +885,20 @@
           if (entregarBtn.disabled) return;
           const idOrden = Number(entregarBtn.dataset.orden);
           if (!Number.isFinite(idOrden)) return;
+          const orden = allOrdenes.find((o) => Number(o.id_orden) === idOrden) || null;
+          let saldoAFavor = 0;
+          if (orden && isMetodoNoAutomatico(orden)) {
+            const suggested = getSaldoSugerido(orden);
+            const modalResult = await askSaldoAFavor({ idOrden, suggested });
+            if (modalResult === null) return;
+            saldoAFavor = Math.max(0, parseMoney(modalResult));
+          }
           const prevText = entregarBtn.textContent;
           entregarBtn.disabled = true;
           entregarBtn.textContent = "Procesando...";
           setStatus(`Procesando orden #${idOrden}...`);
           try {
-            const resp = await procesarOrden(idOrden);
+            const resp = await procesarOrden(idOrden, { saldo_a_favor: saldoAFavor });
             if (resp?.error) {
               console.error("procesar orden error", resp);
               window.alert(resp.error || "No se pudo procesar la orden.");
@@ -832,6 +982,17 @@
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           closeComprobanteModal();
+          closeSaldoModal(null);
+        }
+      });
+
+      saldoModalSkipBtn?.addEventListener("click", () => closeSaldoModal(0));
+      saldoModalCreditBtn?.addEventListener("click", () => {
+        closeSaldoModal(Math.max(0, parseMoney(saldoModalInputEl?.value)));
+      });
+      document.addEventListener("click", (event) => {
+        if (event.target.closest("[data-close-saldo]")) {
+          closeSaldoModal(null);
         }
       });
 

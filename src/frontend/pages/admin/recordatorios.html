@@ -87,7 +87,7 @@
     </main>
     <script type="module">
       import { requireSession, attachLogoHome } from "../../scripts/session.js";
-      import { supabase } from "../../scripts/api.js";
+      import { createUsuarioSignupLink, supabase } from "../../scripts/api.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
@@ -260,7 +260,12 @@
               return `*${plat.nombre || "-"}*\n${detalles}`;
             })
             .join("\n\n");
-          const plain = `*¡Hola ${g.cliente}! ❤️🫎*\nRecuerda actualizar el pago de tu membresía:\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+          const saludo = `*¡Hola ${g.cliente}! ❤️🫎*`;
+          const signupUrl = String(g.signupUrl || "").trim();
+          const intro = signupUrl
+            ? `Actualiza el pago de tus membresía por nuestra nueva pagina web:\n${signupUrl}`
+            : "Recuerda actualizar el pago de tu membresía:";
+          const plain = `${saludo}\n${intro}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
           const html = `<h4>${g.cliente || "Cliente"}</h4><p>Teléfono: ${g.telefono || "-"}</p><pre>${plain}</pre>`;
           const ventaIds = Array.from(
             new Set(
@@ -310,7 +315,7 @@
             userIds.length
               ? supabase
                   .from("usuarios")
-                  .select("id_usuario, nombre, apellido, telefono")
+                  .select("id_usuario, nombre, apellido, telefono, fecha_registro")
                   .in("id_usuario", userIds)
               : Promise.resolve({ data: [], error: null }),
             perfilIds.length
@@ -354,9 +359,26 @@
                 [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
                 `Usuario ${u.id_usuario}`,
               telefono: String(u.telefono || "").trim(),
+              registrado: Boolean(u?.fecha_registro),
             };
             return acc;
           }, {});
+          const unregisteredUserIds = Object.entries(mapUser)
+            .filter(([, info]) => info?.registrado !== true)
+            .map(([id]) => Number(id))
+            .filter((id) => Number.isFinite(id) && id > 0);
+          const signupLinkByUserId = {};
+          await Promise.all(
+            unregisteredUserIds.map(async (idUsuario) => {
+              try {
+                const result = await createUsuarioSignupLink(idUsuario);
+                const url = String(result?.url || "").trim();
+                if (url) signupLinkByUserId[idUsuario] = url;
+              } catch (err) {
+                console.error("recordatorios signup-link error", { idUsuario, err });
+              }
+            })
+          );
           const mapPerf = (perfiles || []).reduce((acc, p) => {
             acc[p.id_perfil] = { n: p.n_perfil, hogar: p.perfil_hogar === true };
             return acc;
@@ -387,7 +409,15 @@
             const hogarTxt = isNetflixPlan2 ? " (HOGAR ACTUALIZADO)" : "";
             const key = v.id_usuario || "sin_usuario";
             if (!acc[key]) {
-              acc[key] = { idUsuario: v.id_usuario || null, cliente, telefono, plataformas: {}, ventaIds: [] };
+              const idUsuario = Number(v.id_usuario) || null;
+              acc[key] = {
+                idUsuario,
+                cliente,
+                telefono,
+                signupUrl: idUsuario ? String(signupLinkByUserId[idUsuario] || "").trim() : "",
+                plataformas: {},
+                ventaIds: [],
+              };
             }
             const platDisplayName = `${platNombreUpper}${hogarTxt}`;
             const platformKey = `${String(platId || platNombre || "-")}::${hogarTxt ? "hogar" : "normal"}`;

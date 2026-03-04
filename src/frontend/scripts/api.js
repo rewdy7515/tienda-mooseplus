@@ -440,14 +440,20 @@ export async function fetchCheckoutDraft() {
   }
 }
 
-export async function procesarOrden(id_orden) {
+export async function procesarOrden(id_orden, options = {}) {
   await ensureServerSession();
   try {
+    const saldoRaw = options?.saldo_a_favor;
+    const saldoNum = Number(String(saldoRaw ?? "").replace(",", "."));
+    const payload = { id_orden };
+    if (Number.isFinite(saldoNum)) {
+      payload.saldo_a_favor = saldoNum;
+    }
     const res = await fetch(`${API_BASE}/api/ordenes/procesar`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ id_orden }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const text = await res.text();
