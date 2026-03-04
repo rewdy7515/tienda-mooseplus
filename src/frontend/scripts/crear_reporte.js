@@ -22,7 +22,8 @@ const selectPlataforma = document.querySelector("#select-plataforma");
 const selectMotivo = document.querySelector("#select-motivo");
 const selectPerfil = document.querySelector("#select-perfil");
 const perfilWrapper = document.querySelector("#perfil-wrapper");
-const selectCorreo = document.querySelector("#select-correo");
+const inputCorreoCuenta = document.querySelector("#input-correo-cuenta");
+const correoSugerenciasEl = document.querySelector("#correo-sugerencias");
 const motivoOtroWrapper = document.querySelector("#motivo-otro-wrapper");
 const motivoExtraWrapper = document.querySelector("#motivo-extra-wrapper");
 const inputMotivoOtro = document.querySelector("#input-motivo-otro");
@@ -39,10 +40,12 @@ let selectedPerfilId = null;
 let selectedPlataformaId = null;
 let cuentasPorPlataforma = new Map();
 let tiposReporteCatalog = [];
+let correosSugerenciasVisibles = [];
 const queryParams = new URLSearchParams(window.location.search);
 const prefillPlataforma = queryParams.get("plataforma");
 const prefillCuenta = queryParams.get("cuenta");
 const prefillPerfil = queryParams.get("perfil");
+const prefillCorreo = queryParams.get("correo");
 const normalizeMotivo = (val) =>
   String(val || "")
     .normalize("NFD")
@@ -66,6 +69,49 @@ const sanitizeFileName = (name) => {
 const asInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+};
+
+const getCuentasDePlataformaSeleccionada = () => {
+  const key = String(selectedPlataformaId || "").trim();
+  if (!key) return [];
+  const cuentasMap = cuentasPorPlataforma.get(key);
+  if (!cuentasMap) return [];
+  return Array.from(cuentasMap.entries()).map(([idCuenta, correo]) => ({
+    idCuenta: Number(idCuenta),
+    correo: String(correo || "").trim(),
+  }));
+};
+
+const hideCorreoSugerencias = () => {
+  correosSugerenciasVisibles = [];
+  if (!correoSugerenciasEl) return;
+  correoSugerenciasEl.innerHTML = "";
+  correoSugerenciasEl.classList.add("hidden");
+};
+
+const renderCorreoSugerencias = (termRaw = "") => {
+  if (!correoSugerenciasEl) return;
+  const term = String(termRaw || "").trim().toLowerCase();
+  const cuentas = getCuentasDePlataformaSeleccionada();
+  const filtered = cuentas
+    .filter((item) => {
+      if (!item.correo) return false;
+      if (!term) return true;
+      return item.correo.toLowerCase().includes(term);
+    })
+    .slice(0, 10);
+  correosSugerenciasVisibles = filtered;
+  if (!filtered.length) {
+    hideCorreoSugerencias();
+    return;
+  }
+  correoSugerenciasEl.innerHTML = filtered
+    .map(
+      (item, idx) =>
+        `<button type="button" class="correo-sugerencia-item" data-sugerencia-idx="${idx}">${item.correo}</button>`
+    )
+    .join("");
+  correoSugerenciasEl.classList.remove("hidden");
 };
 
 const findPerfilLibre = async (plataformaId, perfilHogar, excludeCuenta) => {
@@ -379,22 +425,29 @@ async function cargarPlataformas() {
     .join("");
   selectPlataforma.insertAdjacentHTML("beforeend", opts);
   // Bloquea cuentas hasta que se elija plataforma
-  selectCorreo.disabled = true;
-  selectCorreo.classList.add("input-disabled");
+  if (inputCorreoCuenta) {
+    inputCorreoCuenta.disabled = true;
+    inputCorreoCuenta.classList.add("input-disabled");
+  }
   selectPlataforma.addEventListener("change", () => {
     const platId = selectPlataforma.value;
     selectedPlataformaId = platId || null;
-    selectCorreo.disabled = false;
-    selectCorreo.classList.remove("input-disabled");
+    if (inputCorreoCuenta) {
+      inputCorreoCuenta.disabled = false;
+      inputCorreoCuenta.classList.remove("input-disabled");
+      inputCorreoCuenta.value = "";
+    }
+    hideCorreoSugerencias();
     poblarCorreosPorPlataforma(platId);
     renderMotivosPorPlataforma(platId);
     perfilWrapper?.classList.add("hidden");
-    selectCorreo.value = "";
+    selectedCuentaId = null;
+    selectedPerfilId = null;
   });
 }
 
 async function cargarCorreos() {
-  if (!selectCorreo) return;
+  if (!inputCorreoCuenta) return;
   const userId = requireSession();
   const { data, error } = await supabase
     .from("ventas")
@@ -417,9 +470,9 @@ async function cargarCorreos() {
       if (!map.has(idCuenta)) map.set(idCuenta, correo || "");
     }
   });
-  selectCorreo.innerHTML = '<option value="">Seleccione cuenta</option>';
-  selectCorreo.disabled = true;
-  selectCorreo.classList.add("input-disabled");
+  hideCorreoSugerencias();
+  inputCorreoCuenta.disabled = true;
+  inputCorreoCuenta.classList.add("input-disabled");
 }
 
 async function aplicarPrefillQuery() {
@@ -427,17 +480,44 @@ async function aplicarPrefillQuery() {
   selectPlataforma.value = prefillPlataforma;
   selectedPlataformaId = prefillPlataforma;
   renderMotivosPorPlataforma(prefillPlataforma);
-  selectCorreo.disabled = false;
-  selectCorreo.classList.remove("input-disabled");
+  if (inputCorreoCuenta) {
+    inputCorreoCuenta.disabled = false;
+    inputCorreoCuenta.classList.remove("input-disabled");
+  }
   poblarCorreosPorPlataforma(prefillPlataforma);
-  if (prefillCuenta && selectCorreo.querySelector(`option[value="${prefillCuenta}"]`)) {
-    selectCorreo.value = prefillCuenta;
+  if (prefillCorreo && inputCorreoCuenta) {
+    inputCorreoCuenta.value = prefillCorreo;
+  }
+  if (prefillCuenta) {
+    const key = String(prefillPlataforma);
+    const cuentasMap = cuentasPorPlataforma.get(key);
+    const prefillCuentaNum = Number(prefillCuenta);
+    let correoPrefill = "";
+    if (cuentasMap && Number.isFinite(prefillCuentaNum)) {
+      correoPrefill = cuentasMap.get(prefillCuentaNum) || "";
+    }
+    if (inputCorreoCuenta && correoPrefill) {
+      inputCorreoCuenta.value = correoPrefill;
+    }
     await cargarPerfilesPorCorreo(prefillCuenta);
     if (prefillPerfil && selectPerfil && selectPerfil.querySelector(`option[value="${prefillPerfil}"]`)) {
       selectPerfil.value = prefillPerfil;
       selectedPerfilId = prefillPerfil;
       perfilWrapper?.classList.remove("hidden");
       selectPerfil.required = true;
+    }
+  } else if (prefillCorreo) {
+    const key = String(prefillPlataforma || "").trim();
+    const cuentasMap = cuentasPorPlataforma.get(key);
+    if (cuentasMap) {
+      const correoBusca = String(prefillCorreo).trim().toLowerCase();
+      const exact = Array.from(cuentasMap.entries()).find(
+        ([, correo]) => String(correo || "").trim().toLowerCase() === correoBusca
+      );
+      if (exact?.[0]) {
+        selectedCuentaId = exact[0];
+        await cargarPerfilesPorCorreo(exact[0]);
+      }
     }
   }
 }
@@ -521,27 +601,15 @@ function renderMotivosPorPlataforma(platId) {
 }
 
 function poblarCorreosPorPlataforma(platId) {
-  if (!selectCorreo) return;
+  if (!inputCorreoCuenta) return;
   const key = platId ? String(platId) : "";
-  selectCorreo.innerHTML = '<option value="">Seleccione cuenta</option>';
+  hideCorreoSugerencias();
   // siempre desbloquea al elegir plataforma
-  selectCorreo.disabled = false;
-  selectCorreo.classList.remove("input-disabled");
+  inputCorreoCuenta.disabled = false;
+  inputCorreoCuenta.classList.remove("input-disabled");
   if (!key || !cuentasPorPlataforma.has(key)) {
     return;
   }
-  const cuentasMap = cuentasPorPlataforma.get(key);
-  const cuentas = Array.from(cuentasMap.entries());
-  if (!cuentas.length) {
-    return;
-  }
-  const opts = cuentas
-    .map(
-      ([idCuenta, correo]) =>
-        `<option value="${idCuenta}">${correo || `Cuenta ${idCuenta}`}</option>`
-    )
-    .join("");
-  selectCorreo.insertAdjacentHTML("beforeend", opts);
 }
 
 async function cargarPerfilesPorCorreo(cuentaId) {
@@ -615,12 +683,69 @@ async function cargarPerfilesPorCorreo(cuentaId) {
 }
 
 function initPerfilPorCorreo() {
-  if (!selectCorreo) return;
+  if (!inputCorreoCuenta) return;
   perfilWrapper?.classList.add("hidden");
-  selectCorreo.addEventListener("change", (e) => {
-    const cuentaSel = e.target.value;
+  const resolveCuentaIdByCorreo = (correoRaw) => {
+    const key = String(selectedPlataformaId || "").trim();
+    if (!key) return null;
+    const cuentasMap = cuentasPorPlataforma.get(key);
+    if (!cuentasMap) return null;
+    const value = String(correoRaw || "").trim().toLowerCase();
+    if (!value) return null;
+    const entries = Array.from(cuentasMap.entries());
+    const exact = entries.find(([, correo]) => String(correo || "").trim().toLowerCase() === value);
+    if (exact) return exact[0];
+    const partials = entries.filter(([, correo]) =>
+      String(correo || "").trim().toLowerCase().includes(value)
+    );
+    if (partials.length === 1) return partials[0][0];
+    return null;
+  };
+  const updateCuentaFromCorreoInput = () => {
+    const cuentaSel = resolveCuentaIdByCorreo(inputCorreoCuenta.value);
     selectedCuentaId = cuentaSel || null;
     cargarPerfilesPorCorreo(cuentaSel);
+  };
+  inputCorreoCuenta.addEventListener("focus", () => {
+    if (!selectedPlataformaId) return;
+    renderCorreoSugerencias(inputCorreoCuenta.value);
+  });
+  inputCorreoCuenta.addEventListener("input", () => {
+    if (!selectedPlataformaId) {
+      hideCorreoSugerencias();
+      return;
+    }
+    selectedCuentaId = null;
+    selectedPerfilId = null;
+    perfilWrapper?.classList.add("hidden");
+    if (selectPerfil) {
+      selectPerfil.required = false;
+      selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
+    }
+    renderCorreoSugerencias(inputCorreoCuenta.value);
+  });
+  inputCorreoCuenta.addEventListener("change", updateCuentaFromCorreoInput);
+  inputCorreoCuenta.addEventListener("blur", () => {
+    setTimeout(() => hideCorreoSugerencias(), 120);
+    updateCuentaFromCorreoInput();
+  });
+  correoSugerenciasEl?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-sugerencia-idx]");
+    if (!btn) return;
+    const idx = Number(btn.dataset.sugerenciaIdx);
+    const item = Number.isFinite(idx) ? correosSugerenciasVisibles[idx] : null;
+    if (!item) return;
+    inputCorreoCuenta.value = item.correo;
+    selectedCuentaId = item.idCuenta;
+    hideCorreoSugerencias();
+    cargarPerfilesPorCorreo(item.idCuenta);
+  });
+  document.addEventListener("click", (event) => {
+    const insideInput = event.target.closest("#input-correo-cuenta");
+    const insideList = event.target.closest("#correo-sugerencias");
+    if (!insideInput && !insideList) {
+      hideCorreoSugerencias();
+    }
   });
   selectPerfil?.addEventListener("change", (e) => {
     const val = e.target.value;
@@ -749,6 +874,12 @@ async function handleSubmit(e) {
   try {
     const id_usuario = requireSession();
     const id_plataforma = selectedPlataformaId ? Number(selectedPlataformaId) : null;
+    if (!selectedCuentaId) {
+      alert("Selecciona un correo válido de tu cuenta.");
+      inputCorreoCuenta?.focus();
+      submitBtn && (submitBtn.disabled = false);
+      return;
+    }
     const id_cuenta = selectedCuentaId ? Number(selectedCuentaId) : null;
     const id_perfil = selectedPerfilId ? Number(selectedPerfilId) : null;
     const motivoOption = selectMotivo?.selectedOptions?.[0] || null;

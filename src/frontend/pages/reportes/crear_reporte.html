@@ -27,6 +27,33 @@
       #reporte-form .form-select option[value=""] {
         color: #6b7280;
       }
+      .correo-sugerencias {
+        margin-top: 6px;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        background: #fff;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .correo-sugerencias.hidden {
+        display: none;
+      }
+      .correo-sugerencia-item {
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid #eef2f7;
+        background: #fff;
+        text-align: left;
+        padding: 9px 10px;
+        cursor: pointer;
+      }
+      .correo-sugerencia-item:last-child {
+        border-bottom: 0;
+      }
+      .correo-sugerencia-item:hover,
+      .correo-sugerencia-item:focus-visible {
+        background: #f3f4f6;
+      }
     </style>
   </head>
   <body>
@@ -42,10 +69,16 @@
         </select>
         <p class="status">Se muestran únicamente los servicios que tienes actualmente.</p>
 
-        <label class="form-label" for="select-correo">Correo <span class="required">*</span></label>
-        <select id="select-correo" class="form-select" required>
-          <option value="">Seleccione correo</option>
-        </select>
+        <label class="form-label" for="input-correo-cuenta">Correo <span class="required">*</span></label>
+        <input
+          id="input-correo-cuenta"
+          class="form-input"
+          type="text"
+          placeholder="Buscar correo de la cuenta"
+          autocomplete="off"
+          required
+        />
+        <div id="correo-sugerencias" class="correo-sugerencias hidden"></div>
 
         <div id="perfil-wrapper" class="hidden">
           <label class="form-label" for="select-perfil">Perfil <span class="required">*</span></label>

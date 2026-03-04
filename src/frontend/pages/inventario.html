@@ -1114,10 +1114,12 @@
         const plat = btn.dataset.plataforma || "";
         const cuenta = btn.dataset.cuenta || "";
         const perfil = btn.dataset.perfil || "";
+        const correo = (btn.dataset.correo || "").trim();
         const params = new URLSearchParams();
         if (plat) params.set("plataforma", plat);
         if (cuenta) params.set("cuenta", cuenta);
         if (perfil) params.set("perfil", perfil);
+        if (correo) params.set("correo", correo);
         const url = `reportes/crear_reporte.html${
           params.toString() ? `?${params.toString()}` : ""
         }`;
