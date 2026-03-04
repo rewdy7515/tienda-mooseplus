@@ -692,7 +692,7 @@
             if (cuentasIds.length) {
               const { data: cuentas, error: ctaErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro")
+                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa")
                 .in("id_cuenta", cuentasIds);
               if (ctaErr) {
                 console.error("buscar cuentas error", ctaErr);
@@ -751,7 +751,7 @@
             if (memberCuentaIds.length) {
               const { data: cuentasMiembro, error: cmErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro")
+                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa")
                 .in("id_cuenta", memberCuentaIds);
               if (cmErr) {
                 console.error("buscar cuentas miembro error", cmErr);
@@ -835,7 +835,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, id_plataforma, clave, pin, venta_dominio, id_cuenta_madre, venta_miembro")
+            .select("id_cuenta, correo, id_plataforma, clave, pin, venta_dominio, id_cuenta_madre, venta_miembro, completa")
             .ilike("correo", `%${term}%`)
             .limit(10);
           if (cErr) throw cErr;
@@ -952,7 +952,7 @@
           if (memberCuentaIds.length) {
             const { data: cuentasMiembro, error: cmErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro")
+              .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa")
               .in("id_cuenta", memberCuentaIds);
             if (cmErr) throw cmErr;
             memberCuentaMap = (cuentasMiembro || []).reduce((acc, c) => {
@@ -978,7 +978,7 @@
           if (missingIds.length) {
             const { data: extraCuentas, error: extraErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, id_plataforma, clave, pin, venta_miembro")
+              .select("id_cuenta, correo, id_plataforma, clave, pin, venta_miembro, completa")
               .in("id_cuenta", missingIds);
             if (extraErr) throw extraErr;
             (extraCuentas || []).forEach((c) => {
@@ -1331,8 +1331,27 @@
         return candidatos[0] || preciosPlat[0] || null;
       };
 
+      const isCuentaCompletaFromCuenta = (cuenta) => {
+        if (!cuenta || cuenta.completa == null) return null;
+        return isTrue(cuenta.completa);
+      };
+
       const isCuentaCompletaByContext = async (ctx) => {
         if (!ctx) return false;
+        const idCuenta = ctx.id_cuenta ? Number(ctx.id_cuenta) : null;
+        if (idCuenta) {
+          const { data: cuentaRow, error: cuentaErr } = await supabase
+            .from("cuentas")
+            .select("completa, venta_perfil, venta_miembro")
+            .eq("id_cuenta", idCuenta)
+            .maybeSingle();
+          if (cuentaErr) throw cuentaErr;
+          const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaRow);
+          if (cuentaCompleta !== null) return cuentaCompleta;
+          const ventaPerfil = isTrue(cuentaRow?.venta_perfil);
+          const ventaMiembro = isTrue(cuentaRow?.venta_miembro);
+          return !ventaPerfil && !ventaMiembro;
+        }
         const idPrecio = ctx.id_precio ? Number(ctx.id_precio) : null;
         if (idPrecio) {
           const { data: precioRow, error: precioErr } = await supabase
@@ -1347,17 +1366,7 @@
             return completa && !subCuenta;
           }
         }
-        const idCuenta = ctx.id_cuenta ? Number(ctx.id_cuenta) : null;
-        if (!idCuenta) return false;
-        const { data: cuentaRow, error: cuentaErr } = await supabase
-          .from("cuentas")
-          .select("venta_perfil, venta_miembro")
-          .eq("id_cuenta", idCuenta)
-          .maybeSingle();
-        if (cuentaErr) throw cuentaErr;
-        const ventaPerfil = isTrue(cuentaRow?.venta_perfil);
-        const ventaMiembro = isTrue(cuentaRow?.venta_miembro);
-        return !ventaPerfil && !ventaMiembro;
+        return false;
       };
 
       const fetchMontoBaseForRow = async (ctx) => {
@@ -1538,7 +1547,7 @@
           if (cuentaIds.length) {
             const { data: cuentasData, error: cuentasErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, venta_perfil, venta_miembro, id_plataforma")
+              .select("id_cuenta, completa, venta_perfil, venta_miembro, id_plataforma")
               .in("id_cuenta", cuentaIds);
             if (cuentasErr) throw cuentasErr;
             (cuentasData || []).forEach((c) => {
@@ -1594,6 +1603,8 @@
           const refValue = ref || null;
           const hasCuentasCompletas = seleccionActual.some((it) => {
             const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
+            const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
+            if (cuentaCompleta !== null) return cuentaCompleta;
             const platIdNum = it.id_plataforma ? Number(it.id_plataforma) : cuentaInfo?.id_plataforma || null;
             const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
             const completa = isTrue(priceRow?.completa);
@@ -1621,9 +1632,12 @@
             const accesoCliente = it.id_usuario_cliente ? userMap[it.id_usuario_cliente]?.acceso_cliente : null;
             const platIdNum = it.id_plataforma ? Number(it.id_plataforma) : cuentaInfo?.id_plataforma || null;
             const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
+            const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
             const isCuentaCompletaItem =
-              (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
-              (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
+              cuentaCompleta !== null
+                ? cuentaCompleta
+                : (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
+                  (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
             const updatePayload = {
               fecha_corte: nuevaCorte,
               fecha_pago: fechaPago,
