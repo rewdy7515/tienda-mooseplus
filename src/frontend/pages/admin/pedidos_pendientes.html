@@ -52,7 +52,9 @@
         gap: 6px;
       }
       .correo-edit-wrap .btn-edit-correo,
-      .correo-edit-wrap .btn-save-correo {
+      .correo-edit-wrap .btn-save-correo,
+      .correo-edit-wrap .btn-edit-clave,
+      .correo-edit-wrap .btn-save-clave {
         padding: 4px 6px;
         font-size: 12px;
         line-height: 1;
@@ -507,6 +509,16 @@
                              </div>
                            </td>`
                       : `<td class="copyable" data-clipboard="${correoText}">${correoText}</td>`;
+                    const claveText = r.clave || "-";
+                    const claveCell = isSpotify
+                      ? `
+                           <td>
+                             <div class="correo-edit-wrap" data-venta="${r.id_venta}" data-clave="${claveText}">
+                               <span class="copyable clave-text" data-clipboard="${claveText}">${claveText}</span>
+                               <button type="button" class="btn-outline btn-edit-clave" title="Editar">✏️</button>
+                             </div>
+                           </td>`
+                      : `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>`;
                     return `
                   <tr>
                     <td>#${String(r.id_venta).padStart(4, "0")}</td>
@@ -517,7 +529,7 @@
                         : `<td>${r.servicio || "-"}</td>
                            ${tipoCell}
                            ${correoCell}
-                           ${showClave ? `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>` : ""}`
+                           ${showClave ? claveCell : ""}
                     }
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
@@ -831,20 +843,37 @@
         if (replErr) throw replErr;
 
         if (!idVenta) return;
-        if (!correoCuenta) {
+        const correoCuentaNorm = String(correoCuenta || "").trim().toLowerCase();
+        if (!correoCuentaNorm) {
           alert("Falta el correo del cliente.");
           return;
         }
 
         let nuevaCuentaId = null;
-        const { data: cuentaExist, error: existErr } = await supabase
-          .from("cuentas")
-          .select("id_cuenta, clave")
-          .eq("correo", correoCuenta)
-          .order("id_cuenta", { ascending: true })
-          .limit(1)
-          .maybeSingle();
-        if (existErr) throw existErr;
+        const findCuentaByCorreo = async (correoValue) => {
+          const exactCorreo = String(correoValue || "").trim();
+          if (!exactCorreo) return null;
+          const { data: exactRows, error: exactErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, clave, correo")
+            .eq("correo", exactCorreo)
+            .order("id_cuenta", { ascending: true })
+            .limit(1);
+          if (exactErr) throw exactErr;
+          if (exactRows?.[0]?.id_cuenta) return exactRows[0];
+          const { data: ilikeRows, error: ilikeErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, clave, correo")
+            .ilike("correo", exactCorreo)
+            .order("id_cuenta", { ascending: true })
+            .limit(20);
+          if (ilikeErr) throw ilikeErr;
+          const match = (ilikeRows || []).find(
+            (row) => String(row?.correo || "").trim().toLowerCase() === exactCorreo.toLowerCase()
+          );
+          return match || null;
+        };
+        const cuentaExist = await findCuentaByCorreo(correoCuentaNorm);
         if (cuentaExist?.id_cuenta) {
           const updateCuenta = {
             inactiva: false,
@@ -872,7 +901,7 @@
           nuevaCuentaId = cuentaExist.id_cuenta;
         } else {
           const insertCuenta = {
-            correo: correoCuenta,
+            correo: correoCuentaNorm,
             clave: claveCuenta || null,
             inactiva: false,
             ocupado: false,
@@ -992,7 +1021,7 @@
           cuenta_nueva: false,
         };
         if (forceCuentaCompleta) {
-          updateVenta.correo_miembro = correoCuenta || null;
+          updateVenta.correo_miembro = correoCuentaNorm || null;
           updateVenta.clave_miembro = claveCuenta || null;
         }
         if (ventaSinFechaCorte) {
@@ -1168,6 +1197,66 @@
           } catch (err) {
             console.error("guardar correo_miembro error", err);
             alert("No se pudo guardar el correo.");
+          }
+          return;
+        }
+        const editClaveBtn = e.target.closest(".btn-edit-clave");
+        if (editClaveBtn) {
+          const wrap = editClaveBtn.closest(".correo-edit-wrap");
+          if (!wrap) return;
+          const textEl = wrap.querySelector(".clave-text");
+          if (!textEl) return;
+          const current = textEl.textContent || "";
+          editClaveBtn.classList.add("hidden");
+          textEl.classList.add("hidden");
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = current === "-" ? "" : current;
+          input.className = "input-text clave-edit-input";
+          const saveClaveBtn = document.createElement("button");
+          saveClaveBtn.type = "button";
+          saveClaveBtn.className = "btn-outline btn-save-clave";
+          saveClaveBtn.title = "Guardar";
+          saveClaveBtn.textContent = "💾";
+          wrap.appendChild(input);
+          wrap.appendChild(saveClaveBtn);
+          input.focus();
+          return;
+        }
+        const saveClaveBtn = e.target.closest(".btn-save-clave");
+        if (saveClaveBtn) {
+          const wrap = saveClaveBtn.closest(".correo-edit-wrap");
+          if (!wrap) return;
+          const input = wrap.querySelector(".clave-edit-input");
+          const textEl = wrap.querySelector(".clave-text");
+          const editClaveBtn = wrap.querySelector(".btn-edit-clave");
+          const idVenta = wrap.dataset.venta;
+          const nextVal = (input?.value || "").trim();
+          if (!idVenta || !nextVal) {
+            alert("Ingresa una clave válida.");
+            return;
+          }
+          try {
+            const { error: updErr } = await supabase
+              .from("ventas")
+              .update({ clave_miembro: nextVal })
+              .eq("id_venta", idVenta);
+            if (updErr) throw updErr;
+            if (textEl) {
+              textEl.textContent = nextVal;
+              textEl.dataset.clipboard = nextVal;
+              textEl.classList.remove("hidden");
+            }
+            if (editClaveBtn) editClaveBtn.classList.remove("hidden");
+            wrap.dataset.clave = nextVal;
+            input?.remove();
+            saveClaveBtn.remove();
+            const row = wrap.closest("tr");
+            const entregarBtn = row?.querySelector(".btn-entregar");
+            if (entregarBtn) entregarBtn.dataset.clave = nextVal;
+          } catch (err) {
+            console.error("guardar clave_miembro error", err);
+            alert("No se pudo guardar la clave.");
           }
           return;
         }

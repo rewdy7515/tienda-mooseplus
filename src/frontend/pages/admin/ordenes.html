@@ -469,6 +469,7 @@
 
       const calcMetodo4Neto = (montoTransferido) =>
         round2((Number(montoTransferido) || 0) - ((Number(montoTransferido) || 0) * 0.054 + 0.3));
+      const calcMetodo3Neto = (montoTransferido) => round2((Number(montoTransferido) || 0) * 0.8);
 
       const getMontoBaseCobro = (orden) => {
         const cart = carritoMap[orden?.id_carrito];
@@ -487,7 +488,12 @@
         if (!Number.isFinite(montoTransferido) || montoTransferido <= 0) return 0;
         const baseCobro = getMontoBaseCobro(orden);
         const metodoId = Number(orden?.id_metodo_de_pago);
-        const valorComparable = metodoId === 4 ? calcMetodo4Neto(montoTransferido) : montoTransferido;
+        const valorComparable =
+          metodoId === 4
+            ? calcMetodo4Neto(montoTransferido)
+            : metodoId === 3
+              ? calcMetodo3Neto(montoTransferido)
+              : montoTransferido;
         return round2(Math.max(0, valorComparable - baseCobro));
       };
 
@@ -649,6 +655,7 @@
       const notifyVentasEntregadas = async (idOrden) => {
         const id = Number(idOrden);
         if (!Number.isFinite(id)) return;
+        const PLATFORMS_EN_PROCESO = new Set([9, 12]);
 
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
@@ -659,12 +666,14 @@
         if (ventasOrdErr) throw ventasOrdErr;
 
         const nuevosServiciosPorUsuario = new Map();
+        const serviciosEnProcesoPorUsuario = new Map();
         const renovacionesPorUsuario = new Map();
 
         (ventasOrden || []).forEach((v) => {
           const uid = Number(v?.id_usuario);
           if (!Number.isFinite(uid)) return;
           const cuentaRow = v.cuentas_miembro || v.cuentas || null;
+          const idPlataforma = Number(cuentaRow?.id_plataforma) || null;
           const platName = cuentaRow?.plataformas?.nombre || "Plataforma";
           const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
           const correoTxt = v.correo_miembro || cuentaRow?.correo || "";
@@ -683,6 +692,17 @@
             const itemsRenov = renovacionesPorUsuario.get(uid) || [];
             itemsRenov.push(item);
             renovacionesPorUsuario.set(uid, itemsRenov);
+            return;
+          }
+
+          if (idPlataforma && PLATFORMS_EN_PROCESO.has(idPlataforma)) {
+            const itemsProc = serviciosEnProcesoPorUsuario.get(uid) || [];
+            itemsProc.push({
+              plataforma: platName,
+              fechaCorte: v.fecha_corte || "",
+              idVenta: v.id_venta || null,
+            });
+            serviciosEnProcesoPorUsuario.set(uid, itemsProc);
             return;
           }
 
@@ -710,6 +730,17 @@
           const userIds = pickNotificationUserIds("servicio_renovado", { ventaUserId: uid });
           if (!userIds.length) return;
           const payload = buildNotificationPayload("servicio_renovado", { items });
+          userIds.forEach((idUsuario) => {
+            rowsNotif.push({ ...payload, id_usuario: idUsuario });
+            userIdsToFlag.add(idUsuario);
+          });
+        });
+
+        serviciosEnProcesoPorUsuario.forEach((items, uid) => {
+          if (!items.length) return;
+          const userIds = pickNotificationUserIds("servicio_en_proceso", { ventaUserId: uid });
+          if (!userIds.length) return;
+          const payload = buildNotificationPayload("servicio_en_proceso", { items });
           userIds.forEach((idUsuario) => {
             rowsNotif.push({ ...payload, id_usuario: idUsuario });
             userIdsToFlag.add(idUsuario);

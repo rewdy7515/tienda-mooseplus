@@ -409,13 +409,15 @@ const processNuevoServicioNotificationQueue = async () => {
       }
 
       try {
+        const plataformaEventoId = Number(eventRow?.id_plataforma);
+        const esServicioEnProceso = plataformaEventoId === 9 || plataformaEventoId === 12;
         if (Number.isFinite(idVenta) && idVenta > 0) {
           const duplicatePattern = `%ID Venta: #${idVenta}%`;
           const { data: existingRows, error: existingErr } = await supabaseAdmin
             .from("notificaciones")
             .select("id_notificacion")
             .eq("id_usuario", idUsuario)
-            .eq("titulo", "Nuevo servicio")
+            .eq("titulo", esServicioEnProceso ? "Servicio en proceso" : "Nuevo servicio")
             .ilike("mensaje", duplicatePattern)
             .limit(1);
           if (existingErr) throw existingErr;
@@ -430,17 +432,27 @@ const processNuevoServicioNotificationQueue = async () => {
         const plataformaTxt =
           String(eventRow?.plataforma || "").trim() ||
           (eventRow?.id_plataforma ? `Plataforma ${eventRow.id_plataforma}` : "Plataforma");
-        const payload = buildNotificationPayload(
-          "nuevo_servicio",
-          {
-            plataforma: plataformaTxt,
-            correoCuenta: String(eventRow?.correo_cuenta || "").trim(),
-            perfil: perfilTxt,
-            fechaCorte: eventRow?.fecha_corte || "",
-            idVenta: Number.isFinite(idVenta) && idVenta > 0 ? idVenta : null,
-          },
-          { idCuenta: toPositiveInt(eventRow?.id_cuenta) || null },
-        );
+        const payload = esServicioEnProceso
+          ? buildNotificationPayload(
+              "servicio_en_proceso",
+              {
+                plataforma: plataformaTxt,
+                fechaCorte: eventRow?.fecha_corte || "",
+                idVenta: Number.isFinite(idVenta) && idVenta > 0 ? idVenta : null,
+              },
+              { idCuenta: toPositiveInt(eventRow?.id_cuenta) || null },
+            )
+          : buildNotificationPayload(
+              "nuevo_servicio",
+              {
+                plataforma: plataformaTxt,
+                correoCuenta: String(eventRow?.correo_cuenta || "").trim(),
+                perfil: perfilTxt,
+                fechaCorte: eventRow?.fecha_corte || "",
+                idVenta: Number.isFinite(idVenta) && idVenta > 0 ? idVenta : null,
+              },
+              { idCuenta: toPositiveInt(eventRow?.id_cuenta) || null },
+            );
 
         const { error: insErr } = await supabaseAdmin.from("notificaciones").insert({
           ...payload,
@@ -1826,7 +1838,7 @@ const processOrderFromItems = async ({
     const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, cuenta_principal:cuentas!ventas_id_cuenta_fkey(venta_perfil, venta_miembro), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(venta_perfil, venta_miembro)"
+        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, suspendido, cuenta_principal:cuentas!ventas_id_cuenta_fkey(venta_perfil, venta_miembro), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(venta_perfil, venta_miembro)"
       )
       .in("id_venta", idsVentasRenovar);
     if (ventErr) throw ventErr;
@@ -1835,6 +1847,7 @@ const processOrderFromItems = async ({
     });
   }
 
+  let renovacionesPendientesCount = 0;
   const renovPromises = renovaciones.map((it) => {
     const price = priceMap[it.id_precio] || {};
     const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
@@ -1842,6 +1855,11 @@ const processOrderFromItems = async ({
     const base = pickPrecio(price) * cantidadVal * mesesVal;
     const monto = Number(base.toFixed(2));
     const ventaAnt = ventaMap[it.id_venta] || {};
+    const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
+    const platId = Number(price?.id_plataforma) || null;
+    const entregaInmediata = isTrue(platInfoById?.[platId]?.entrega_inmediata);
+    const renovarPendiente = !entregaInmediata || isSuspendidaAnt;
+    if (renovarPendiente) renovacionesPendientesCount += 1;
     const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
     const isCuentaCompletaRenov =
       isCuentaCompletaByFlags(cuentaVenta) ||
@@ -1854,6 +1872,8 @@ const processOrderFromItems = async ({
       monto,
       id_orden: ordenId,
       renovacion: true,
+      pendiente: renovarPendiente,
+      suspendido: false,
     };
     if (isCuentaCompletaRenov) {
       updatePayload.cuenta_pagada_admin = false;
@@ -2526,9 +2546,12 @@ const processOrderFromItems = async ({
   console.log("[checkout] processOrderFromItems end", {
     ordenId,
     ventasCount: ventasToInsert.length,
-    pendientesCount: pendientes.length,
+    pendientesCount: pendientes.length + renovacionesPendientesCount,
   });
-  return { ventasCount: ventasToInsert.length, pendientesCount: pendientes.length };
+  return {
+    ventasCount: ventasToInsert.length,
+    pendientesCount: pendientes.length + renovacionesPendientesCount,
+  };
 };
 
 // Usa solo el id de usuario autenticado en cookie httpOnly.
@@ -5475,6 +5498,20 @@ app.post("/api/checkout", async (req, res) => {
     }
     const metodoVerificacionAutomatica = isTrue(metodoPagoRow?.verificacion_automatica);
     const metodoEsBolivares = isTrue(metodoPagoRow?.bolivares);
+    const metodoPagoIdNum = Number(id_metodo_de_pago);
+    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const calcularMontoRecibidoReal = (montoTransferidoRaw, metodoId) => {
+      const monto = Number(montoTransferidoRaw);
+      if (!Number.isFinite(monto) || monto <= 0) return 0;
+      const idMetodo = Number(metodoId);
+      if (idMetodo === 4) {
+        return round2(monto - (monto * 0.054 + 0.3));
+      }
+      if (idMetodo === 3) {
+        return round2(monto * 0.8);
+      }
+      return round2(monto);
+    };
     const montoTransferidoNum = Number(
       String(monto_transferido ?? "")
         .trim()
@@ -5494,9 +5531,10 @@ app.post("/api/checkout", async (req, res) => {
       Number.isFinite(total) && Number.isFinite(tasaBs)
         ? Math.round(total * tasaBs * 100) / 100
         : null;
+    const montoRecibidoReal = calcularMontoRecibidoReal(montoTransferido, metodoPagoIdNum);
     const excedenteTransferido =
-      Number.isFinite(montoTransferido) && Number.isFinite(total)
-        ? Math.round((montoTransferido - total) * 100) / 100
+      Number.isFinite(montoRecibidoReal) && Number.isFinite(total)
+        ? Math.round((montoRecibidoReal - total) * 100) / 100
         : 0;
     const montoMayor = excedenteTransferido > 0;
     const requierePendiente = requiereVerificacionPago || requiereEntregaManual || montoMayor;
@@ -5507,6 +5545,7 @@ app.post("/api/checkout", async (req, res) => {
       tasaBs,
       monto_bs,
       monto_transferido: montoTransferido,
+      monto_recibido_real: montoRecibidoReal,
       excedente_transferido: excedenteTransferido,
       monto_mayor: montoMayor,
       metodoVerificacionAutomatica,

@@ -1647,9 +1647,7 @@
             if (isCuentaCompletaItem) {
               updatePayload.cuenta_pagada_admin = false;
             }
-            if (!entregaInmediata && isSuspendido) {
-              updatePayload.pendiente = true;
-            }
+            updatePayload.pendiente = !entregaInmediata || isSuspendido;
             const { error } = await supabase
               .from("ventas")
               .update(updatePayload)
@@ -1912,9 +1910,7 @@
           if (esCuentaCompleta) {
             updatePayload.cuenta_pagada_admin = false;
           }
-          if (!entregaInmediata && isSuspendido) {
-            updatePayload.pendiente = true;
-          }
+          updatePayload.pendiente = !entregaInmediata || isSuspendido;
           const { error: updErr } = await supabase
             .from("ventas")
             .update(updatePayload)

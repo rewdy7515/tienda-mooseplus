@@ -1454,6 +1454,7 @@ const loadStockSummary = async (canLogStock = false) => {
   const [
     { data: perfiles, error: perfErr },
     { data: cuentasMiembro, error: ctaErr },
+    { data: cuentasVentaMiembro, error: ctaMiembroErr },
     { data: cuentasCompletas, error: compErr },
     { data: giftPins, error: giftPinsErr },
     { data: giftPlatforms, error: giftPlatErr },
@@ -1477,6 +1478,12 @@ const loadStockSummary = async (canLogStock = false) => {
       .eq("inactiva", false),
     supabase
       .from("cuentas")
+      .select("id_cuenta, id_plataforma, venta_miembro, venta_perfil, ocupado, inactiva, correo, plataformas(nombre)")
+      .eq("venta_miembro", true)
+      .eq("ocupado", false)
+      .eq("inactiva", false),
+    supabase
+      .from("cuentas")
       .select("id_cuenta, id_plataforma, venta_miembro, venta_perfil, ocupado, inactiva")
       .eq("venta_perfil", false)
       .eq("venta_miembro", false)
@@ -1493,8 +1500,11 @@ const loadStockSummary = async (canLogStock = false) => {
       .select("id_plataforma")
       .eq("tarjeta_de_regalo", true),
   ]);
-  if (perfErr || ctaErr || compErr || giftPinsErr || giftPlatErr) {
-    logStockError("stock summary error", perfErr || ctaErr || compErr || giftPinsErr || giftPlatErr);
+  if (perfErr || ctaErr || ctaMiembroErr || compErr || giftPinsErr || giftPlatErr) {
+    logStockError(
+      "stock summary error",
+      perfErr || ctaErr || ctaMiembroErr || compErr || giftPinsErr || giftPlatErr
+    );
     return {};
   }
   let stockObj = {};
@@ -1563,6 +1573,21 @@ const loadStockSummary = async (canLogStock = false) => {
     stockObj[`${platId}_completas`] = completasCount[platId];
   });
 
+  const ventaMiembroSummary = {};
+  (cuentasVentaMiembro || []).forEach((c) => {
+    const platId = Number(c?.id_plataforma);
+    if (!Number.isFinite(platId) || platId <= 0) return;
+    if (!ventaMiembroSummary[platId]) {
+      ventaMiembroSummary[platId] = {
+        nombre: c?.plataformas?.nombre || `Plataforma ${platId}`,
+        total: 0,
+        correos: [],
+      };
+    }
+    ventaMiembroSummary[platId].total += 1;
+    if (c?.correo) ventaMiembroSummary[platId].correos.push(c.correo);
+  });
+
   const giftStockByPlat = (giftPins || []).reduce((acc, row) => {
     const platId = Number(row?.id_plataforma);
     if (!Number.isFinite(platId) || platId <= 0) return acc;
@@ -1620,6 +1645,14 @@ const loadStockSummary = async (canLogStock = false) => {
       return;
     }
     logStock(`[stock] Plataforma ${platId} libres (detalle):`, nombre, items);
+  });
+  Object.entries(ventaMiembroSummary).forEach(([platId, info]) => {
+    logStock(
+      `[stock] Plataforma ${platId} cuentas venta_miembro libres:`,
+      info?.nombre || `Plataforma ${platId}`,
+      info?.total || 0,
+      info?.correos || []
+    );
   });
   return stockObj;
 };

@@ -831,7 +831,8 @@
         const forceCuentaCompleta = platIdNum === 11;
         const platInfo = platById[platId] || {};
         const needsClave = isTrue(platInfo?.clave_cliente);
-        if (!correoVal) {
+        const correoValNorm = String(correoVal || "").trim().toLowerCase();
+        if (!correoValNorm) {
           alert("Ingresa el correo.");
           return;
         }
@@ -854,14 +855,31 @@
           let clientCuentaId = null;
           let cuentaExist = null;
 
-          const { data: cuentasFound, error: cErr } = await supabase
-            .from("cuentas")
-            .select("id_cuenta, id_cuenta_madre, id_plataforma, clave")
-            .eq("correo", correoVal)
-            .order("id_cuenta", { ascending: true })
-            .limit(1);
-          if (cErr) throw cErr;
-          cuentaExist = cuentasFound?.[0] || null;
+          const findCuentaByCorreo = async (correoInput) => {
+            const target = String(correoInput || "").trim();
+            if (!target) return null;
+            const { data: exactRows, error: exactErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, id_cuenta_madre, id_plataforma, clave, correo")
+              .eq("correo", target)
+              .order("id_cuenta", { ascending: true })
+              .limit(1);
+            if (exactErr) throw exactErr;
+            if (exactRows?.[0]?.id_cuenta) return exactRows[0];
+            const { data: ilikeRows, error: ilikeErr } = await supabase
+              .from("cuentas")
+              .select("id_cuenta, id_cuenta_madre, id_plataforma, clave, correo")
+              .ilike("correo", target)
+              .order("id_cuenta", { ascending: true })
+              .limit(20);
+            if (ilikeErr) throw ilikeErr;
+            return (
+              (ilikeRows || []).find(
+                (row) => String(row?.correo || "").trim().toLowerCase() === target.toLowerCase()
+              ) || null
+            );
+          };
+          cuentaExist = await findCuentaByCorreo(correoValNorm);
 
           if (forceCuentaCompleta) {
             if (cuentaExist?.id_cuenta) {
@@ -884,7 +902,7 @@
               clientCuentaId = cuentaExist.id_cuenta;
             } else {
               const insertCuenta = {
-                correo: correoVal,
+                correo: correoValNorm,
                 clave: claveVal || null,
                 id_plataforma: hasPlatId ? platIdNum : null,
                 inactiva: false,
@@ -992,7 +1010,7 @@
             if (claveErr) throw claveErr;
           }
 
-          const payload = { correo_miembro: correoVal };
+          const payload = { correo_miembro: correoValNorm };
           if ((needsClave || forceCuentaCompleta) && claveVal) payload.clave_miembro = claveVal;
           if (forceCuentaCompleta) {
             payload.id_cuenta = clientCuentaId || null;

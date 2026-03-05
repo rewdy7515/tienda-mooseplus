@@ -82,6 +82,23 @@ const getCuentasDePlataformaSeleccionada = () => {
   }));
 };
 
+const resolveCuentaIdByCorreo = (correoRaw) => {
+  const key = String(selectedPlataformaId || "").trim();
+  if (!key) return null;
+  const cuentasMap = cuentasPorPlataforma.get(key);
+  if (!cuentasMap) return null;
+  const value = String(correoRaw || "").trim().toLowerCase();
+  if (!value) return null;
+  const entries = Array.from(cuentasMap.entries());
+  const exact = entries.find(([, correo]) => String(correo || "").trim().toLowerCase() === value);
+  if (exact) return exact[0];
+  const partials = entries.filter(([, correo]) =>
+    String(correo || "").trim().toLowerCase().includes(value)
+  );
+  if (partials.length === 1) return partials[0][0];
+  return null;
+};
+
 const hideCorreoSugerencias = () => {
   correosSugerenciasVisibles = [];
   if (!correoSugerenciasEl) return;
@@ -623,7 +640,8 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   perfilWrapper.classList.remove("hidden");
   selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
   selectPerfil.required = false;
-  selectedCuentaId = cuentaId;
+  const cuentaNum = Number(cuentaId);
+  selectedCuentaId = Number.isFinite(cuentaNum) ? cuentaNum : cuentaId;
   selectedPerfilId = null;
 
   const userId = requireSession();
@@ -640,10 +658,9 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   const ventasFiltradas = (data || []).filter(
     (row) => row.id_perfil !== null && row.id_perfil !== undefined
   );
-  const cuentasUnicas = [...new Set(ventasFiltradas.map((r) => r.id_cuenta).filter(Boolean))];
-  selectedCuentaId = cuentasUnicas[0] || null;
-
-  const perfilesRaw = ventasFiltradas.filter((row) => row.id_cuenta === selectedCuentaId);
+  const perfilesRaw = ventasFiltradas.filter(
+    (row) => Number(row.id_cuenta) === Number(selectedCuentaId)
+  );
   if (!perfilesRaw.length) {
     selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
     selectedPerfilId = null;
@@ -685,22 +702,6 @@ async function cargarPerfilesPorCorreo(cuentaId) {
 function initPerfilPorCorreo() {
   if (!inputCorreoCuenta) return;
   perfilWrapper?.classList.add("hidden");
-  const resolveCuentaIdByCorreo = (correoRaw) => {
-    const key = String(selectedPlataformaId || "").trim();
-    if (!key) return null;
-    const cuentasMap = cuentasPorPlataforma.get(key);
-    if (!cuentasMap) return null;
-    const value = String(correoRaw || "").trim().toLowerCase();
-    if (!value) return null;
-    const entries = Array.from(cuentasMap.entries());
-    const exact = entries.find(([, correo]) => String(correo || "").trim().toLowerCase() === value);
-    if (exact) return exact[0];
-    const partials = entries.filter(([, correo]) =>
-      String(correo || "").trim().toLowerCase().includes(value)
-    );
-    if (partials.length === 1) return partials[0][0];
-    return null;
-  };
   const updateCuentaFromCorreoInput = () => {
     const cuentaSel = resolveCuentaIdByCorreo(inputCorreoCuenta.value);
     selectedCuentaId = cuentaSel || null;
@@ -874,6 +875,12 @@ async function handleSubmit(e) {
   try {
     const id_usuario = requireSession();
     const id_plataforma = selectedPlataformaId ? Number(selectedPlataformaId) : null;
+    if (!selectedCuentaId) {
+      const cuentaFromInput = resolveCuentaIdByCorreo(inputCorreoCuenta?.value);
+      if (cuentaFromInput) {
+        selectedCuentaId = cuentaFromInput;
+      }
+    }
     if (!selectedCuentaId) {
       alert("Selecciona un correo válido de tu cuenta.");
       inputCorreoCuenta?.focus();

@@ -68,6 +68,8 @@ const RATE_SLOT_SECONDS = 2 * 60 * 60;
 const METODO_RECARGO_USD_ID = 4;
 const METODO_RECARGO_USD_PERCENT = 0.0349;
 const METODO_RECARGO_USD_FIJO = 0.49;
+const METODO_COMISION_20_ID = 3;
+const METODO_COMISION_20_PERCENT = 0.2;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
@@ -91,8 +93,14 @@ const CHECKOUT_PANEL_ANIM_CLASSES = [
 const getTotalUsdMostrado = (baseUsd, metodoId) => {
   const montoBase = Number(baseUsd);
   if (!Number.isFinite(montoBase)) return 0;
-  if (Number(metodoId) !== METODO_RECARGO_USD_ID) return round2(montoBase);
-  return round2(montoBase * (1 + METODO_RECARGO_USD_PERCENT) + METODO_RECARGO_USD_FIJO);
+  const id = Number(metodoId);
+  if (id === METODO_RECARGO_USD_ID) {
+    return round2(montoBase * (1 + METODO_RECARGO_USD_PERCENT) + METODO_RECARGO_USD_FIJO);
+  }
+  if (id === METODO_COMISION_20_ID) {
+    return round2(montoBase * (1 + METODO_COMISION_20_PERCENT));
+  }
+  return round2(montoBase);
 };
 let isMetodoMenuAnimating = false;
 
@@ -745,7 +753,10 @@ const renderTotal = () => {
   const totalUsdText = isMetodoUsdt
     ? `${totalUsdMostrado.toFixed(2)} USDT`
     : `$${totalUsdMostrado.toFixed(2)}`;
-  const usdLabel = Number(metodoId) === METODO_RECARGO_USD_ID ? "Monto Paypal" : "Total";
+  const usdLabel =
+    Number(metodoId) === METODO_RECARGO_USD_ID || Number(metodoId) === METODO_COMISION_20_ID
+      ? "Monto a transferir"
+      : "Total";
   const lineUsd = `${usdLabel}: ${totalUsdText} ${
     precioTierLabel ? `(${precioTierLabel})` : ""
   }`;
@@ -1346,6 +1357,7 @@ btnSendPayment?.addEventListener("click", async () => {
     // Notificaciones de nuevo servicio y renovaciones para el usuario en sesión por cada venta de la orden
     try {
       if (resp?.id_orden) {
+        const PLATFORMS_EN_PROCESO = new Set([9, 12]);
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
@@ -1354,9 +1366,11 @@ btnSendPayment?.addEventListener("click", async () => {
           .eq("id_orden", resp.id_orden);
         if (ventasOrdErr) throw ventasOrdErr;
         const nuevosServiciosPorUsuario = new Map();
+        const serviciosEnProcesoPorUsuario = new Map();
         const renovacionesPorUsuario = new Map();
         (ventasOrden || []).forEach((v) => {
           const cuentaRow = v.cuentas_miembro || v.cuentas || null;
+          const idPlataforma = Number(cuentaRow?.id_plataforma) || null;
           const platName = cuentaRow?.plataformas?.nombre || "Plataforma";
           const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
           const correoTxt = v.correo_miembro || cuentaRow?.correo || "";
@@ -1378,9 +1392,21 @@ btnSendPayment?.addEventListener("click", async () => {
             return;
           }
 
-          if (!ventaUserId || !correoTxt) return;
-          const items = nuevosServiciosPorUsuario.get(ventaUserId) || [];
-          items.push({
+          if (!ventaUserId) return;
+          if (idPlataforma && PLATFORMS_EN_PROCESO.has(idPlataforma)) {
+            const itemsProc = serviciosEnProcesoPorUsuario.get(ventaUserId) || [];
+            itemsProc.push({
+              plataforma: platName,
+              fechaCorte: v.fecha_corte || "",
+              idVenta: v.id_venta || null,
+            });
+            serviciosEnProcesoPorUsuario.set(ventaUserId, itemsProc);
+            return;
+          }
+
+          if (!correoTxt) return;
+          const itemsNew = nuevosServiciosPorUsuario.get(ventaUserId) || [];
+          itemsNew.push({
             plataforma: platName,
             correoCuenta: correoTxt,
             clave: claveTxt,
@@ -1388,7 +1414,7 @@ btnSendPayment?.addEventListener("click", async () => {
             fechaCorte: v.fecha_corte || "",
             idVenta: v.id_venta || null,
           });
-          nuevosServiciosPorUsuario.set(ventaUserId, items);
+          nuevosServiciosPorUsuario.set(ventaUserId, itemsNew);
         });
 
         const rowsNotif = [];
@@ -1402,6 +1428,19 @@ btnSendPayment?.addEventListener("click", async () => {
         if (rowsNotif.length) {
           const { error: notifErr } = await supabase.from("notificaciones").insert(rowsNotif);
           if (notifErr) throw notifErr;
+        }
+
+        const rowsProcNotif = [];
+        serviciosEnProcesoPorUsuario.forEach((items, uid) => {
+          if (!items.length) return;
+          const userIds = pickNotificationUserIds("servicio_en_proceso", { ventaUserId: uid });
+          if (!userIds.length) return;
+          const payload = buildNotificationPayload("servicio_en_proceso", { items });
+          userIds.forEach((id) => rowsProcNotif.push({ ...payload, id_usuario: id }));
+        });
+        if (rowsProcNotif.length) {
+          const { error: procErr } = await supabase.from("notificaciones").insert(rowsProcNotif);
+          if (procErr) throw procErr;
         }
 
         const renovacionRows = [];

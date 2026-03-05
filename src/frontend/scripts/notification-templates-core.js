@@ -144,6 +144,42 @@
       };
     },
 
+    servicio_en_proceso: (data = {}) => {
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const items =
+        rawItems.length > 0
+          ? rawItems
+          : [
+              {
+                plataforma: data.plataforma,
+                fechaCorte: data.fechaCorte,
+                idVenta: data.idVenta,
+              },
+            ].filter((it) => it.plataforma || it.fechaCorte || it.idVenta);
+
+      const blocks = items.map((item) => {
+        const parts = [];
+        if (item.plataforma || item.idVenta) {
+          const idTxt = item.idVenta ? `ID Venta: #${item.idVenta}` : "";
+          parts.push(
+            `<div class="notif-line"><strong>${item.plataforma || ""}</strong>${
+              idTxt ? ` <span class="notif-id-venta">${idTxt}</span>` : ""
+            }</div>`,
+          );
+        }
+        if (item.fechaCorte) {
+          parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
+        }
+        return parts.join("<br>");
+      });
+
+      const cuerpo = blocks.length > 0 ? `<br><br>${blocks.join("<br><br>")}` : "";
+      return {
+        titulo: "Servicio en proceso",
+        mensaje: `Tu servicio se está procesando.${cuerpo}`,
+      };
+    },
+
     recordatorio_corte: ({ plataforma, correoCuenta, perfil, fechaCorte }) => {
       const partesCuenta = [correoCuenta, perfil].filter(Boolean).join(" - ");
       const cuentaTxt = partesCuenta ? ` (${partesCuenta})` : "";
@@ -224,6 +260,7 @@
       case "pin_actualizado":
       case "servicio_renovado":
       case "nuevo_servicio":
+      case "servicio_en_proceso":
       case "servicio_reemplazado":
       case "recordatorio_corte":
       case "servicios_vencen_pronto":
