@@ -446,7 +446,7 @@ export async function procesarOrden(id_orden, options = {}) {
     const saldoRaw = options?.saldo_a_favor;
     const saldoNum = Number(String(saldoRaw ?? "").replace(",", "."));
     const payload = { id_orden };
-    if (Number.isFinite(saldoNum)) {
+    if (Number.isFinite(saldoNum) && saldoNum > 0) {
       payload.saldo_a_favor = saldoNum;
     }
     const res = await fetch(`${API_BASE}/api/ordenes/procesar`, {

@@ -529,7 +529,7 @@
                         : `<td>${r.servicio || "-"}</td>
                            ${tipoCell}
                            ${correoCell}
-                           ${showClave ? claveCell : ""}
+                           ${showClave ? claveCell : ""}`
                     }
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>

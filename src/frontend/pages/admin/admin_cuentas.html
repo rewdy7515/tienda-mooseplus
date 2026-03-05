@@ -3365,6 +3365,42 @@
             id_precio: v.id_precio ?? null,
           }));
         }
+        if (colMode === "miembro" && !isCuentaMadre) {
+          const ventasMiembro = Array.isArray(info.ventasCuenta) ? info.ventasCuenta : [];
+          if (ventasMiembro.length) {
+            const existingVentaIds = new Set(
+              rows
+                .map((r) => Number(r?.id_venta))
+                .filter((id) => Number.isFinite(id) && id > 0),
+            );
+            const ventasSinPerfil = ventasMiembro.filter((v) => {
+              const idVenta = Number(v?.id_venta);
+              if (!Number.isFinite(idVenta) || idVenta <= 0) return false;
+              return !existingVentaIds.has(idVenta);
+            });
+            const rowsFromVentas = ventasSinPerfil.map((v) => ({
+              perfil: "",
+              pin: "",
+              hogar: false,
+              id_perfil: null,
+              n_raw: null,
+              reemplazado: false,
+              ocupadoPor:
+                info.usuariosCuenta?.[v.id_usuario] ||
+                (v.id_usuario ? `Usuario ${v.id_usuario}` : "-"),
+              id_venta: v.id_venta || null,
+              fecha_corte: v.fecha_corte || "",
+              fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
+              suspendido: v.suspendido === true,
+              id_precio: v.id_precio ?? null,
+            }));
+            if (!rows.length) {
+              rows = rowsFromVentas;
+            } else if (rowsFromVentas.length) {
+              rows = [...rows, ...rowsFromVentas];
+            }
+          }
+        }
         if (colMode === "miembro" && rows.length === 0) {
           rows.push({
             perfil: "",
@@ -4226,7 +4262,7 @@
           const { data: ventasCuentaCheck, error: ventasCuentaErr } = await supabase
             .from("ventas")
             .select("id_venta")
-            .eq("id_cuenta", idCuenta)
+            .or(`id_cuenta.eq.${idCuenta},id_cuenta_miembro.eq.${idCuenta}`)
             .limit(1);
           if (ventasCuentaErr) throw ventasCuentaErr;
           const hasVentasCuenta = !!ventasCuentaCheck?.length;
@@ -4266,12 +4302,28 @@
               });
               ventasCta = Array.from(mapVentas.values());
             } else {
-              const { data, error: ventasCtaErr } = await supabase
-                .from("ventas")
-                .select(ventasSelect)
-                .eq("id_cuenta", idCuenta);
-              if (ventasCtaErr) throw ventasCtaErr;
-              ventasCta = data || [];
+              const queryResults = await Promise.all([
+                supabase
+                  .from("ventas")
+                  .select(ventasSelect)
+                  .eq("id_cuenta", idCuenta),
+                supabase
+                  .from("ventas")
+                  .select(ventasSelect)
+                  .eq("id_cuenta_miembro", idCuenta),
+              ]);
+              queryResults.forEach((r) => {
+                if (r?.error) throw r.error;
+              });
+              const mapVentas = new Map();
+              queryResults.forEach((r) => {
+                (r?.data || []).forEach((v) => {
+                  const key = Number(v?.id_venta) || null;
+                  if (!key || mapVentas.has(key)) return;
+                  mapVentas.set(key, v);
+                });
+              });
+              ventasCta = Array.from(mapVentas.values());
             }
             ventasCuenta = ventasCta || [];
             const userIdsCta = Array.from(

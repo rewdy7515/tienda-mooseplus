@@ -57,8 +57,8 @@ main {
 }
 
 #btn-ordenes-header.has-pending-verification {
-  border-color: #1f9d55;
-  box-shadow: 0 0 0 2px rgba(31, 157, 85, 0.2);
+  outline: 2px solid #39ff14;
+  outline-offset: 2px;
 }
 
 .logo {

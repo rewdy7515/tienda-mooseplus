@@ -769,7 +769,7 @@
         let query = supabase
           .from("ordenes")
           .select(
-            "id_orden, id_usuario, id_metodo_de_pago, id_admin, id_carrito, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada"
+            "id_orden, id_usuario, id_metodo_de_pago, id_admin, id_carrito, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada, checkout_finalizado"
           );
         if (!canManageOrdenes) {
           query = query.eq("id_usuario", currentUser?.id_usuario ?? -1);
@@ -782,7 +782,7 @@
         }
         allOrdenes = (ordenes || []).map((orden) => ({
           ...orden,
-          origen_checkout: orden.id_admin == null,
+          origen_checkout: isTrue(orden?.checkout_finalizado) || orden.id_admin == null,
         }));
         if (!allOrdenes.length) {
           tbodyEl.innerHTML = "";
@@ -929,7 +929,10 @@
           entregarBtn.textContent = "Procesando...";
           setStatus(`Procesando orden #${idOrden}...`);
           try {
-            const resp = await procesarOrden(idOrden, { saldo_a_favor: saldoAFavor });
+            const resp =
+              saldoAFavor > 0
+                ? await procesarOrden(idOrden, { saldo_a_favor: saldoAFavor })
+                : await procesarOrden(idOrden);
             if (resp?.error) {
               console.error("procesar orden error", resp);
               window.alert(resp.error || "No se pudo procesar la orden.");
