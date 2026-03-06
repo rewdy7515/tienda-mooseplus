@@ -24,7 +24,7 @@ export function buildServiceCopyText({
   const platLabel = showHogar ? `${platLabelRaw} (HOGAR ACTUALIZADO)` : platLabelRaw;
   const fechaFmt = formatDDMMYYYY(fechaCorte);
   lines.push(`*${platLabel}* 🫎 \`ID Venta: #${idVenta || ""}\``);
-  lines.push("_Instagram: @moose.plus_");
+  lines.push("_Pagina Web: www.mooseplus.com_");
   lines.push("");
   lines.push(`*Correo:* ${correo || ""}`);
   lines.push(`*Clave:* ${clave || ""}`);

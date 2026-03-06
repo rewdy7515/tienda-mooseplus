@@ -228,6 +228,24 @@ const randomWhatsappDelayMs = () => {
   );
 };
 
+const buildWhatsappErrorLog = (err) => {
+  const cause =
+    err?.cause instanceof Error
+      ? {
+          name: err.cause.name || null,
+          message: err.cause.message || null,
+          stack: err.cause.stack || null,
+        }
+      : err?.cause ?? null;
+  return {
+    name: err?.name || null,
+    message: err?.message || null,
+    code: err?.code || null,
+    stack: err?.stack || null,
+    cause,
+  };
+};
+
 const didSendAllRecordatorios = (result = {}) => {
   const total = Number(result.total || 0);
   if (total <= 0) return false;
@@ -802,8 +820,9 @@ const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
 
       const progressIndex = sendableProcessed + 1;
       const progressTag = `${progressIndex}/${sendableItemsCount}`;
+      const chatId = `${item.phone}@c.us`;
       try {
-        await client.sendMessage(`${item.phone}@c.us`, item.plain, { linkPreview: false });
+        await client.sendMessage(chatId, item.plain, { linkPreview: false });
         const ventaIdsItem = uniqPositiveIds(item.ventaIds || []);
         if (ventaIdsItem.length) {
           const { error: updateErr } = await supabaseAdmin
@@ -820,13 +839,15 @@ const sendWhatsappRecordatorios = async ({ source = "manual" } = {}) => {
         );
       } catch (err) {
         failed += 1;
+        const errLog = buildWhatsappErrorLog(err);
         processedItems.push({
           ...item,
           status: "failed",
           error: err?.message || "No se pudo enviar",
         });
-        console.warn(
-          `[WhatsApp] Recordatorios ${source}: ${progressTag} fallido cliente="${item.cliente || "Cliente"}" phone="${item.phone}" error="${err?.message || "No se pudo enviar"}"`,
+        console.error(
+          `[WhatsApp] Recordatorios ${source}: ${progressTag} fallido cliente="${item.cliente || "Cliente"}" phone="${item.phone}" raw_phone="${item.telefonoRaw || ""}" chat_id="${chatId}"`,
+          errLog,
         );
       }
 
@@ -5415,7 +5436,7 @@ app.post("/api/checkout", async (req, res) => {
   if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
     return res
       .status(400)
-      .json({ error: "id_metodo_de_pago, referencia y comprobante(s) son requeridos" });
+      .json({ error: "id_metodo_de_pago, referencia y comprobante(s) son requeridos en formato válido" });
   }
 
   try {
@@ -5498,6 +5519,9 @@ app.post("/api/checkout", async (req, res) => {
     }
     const metodoVerificacionAutomatica = isTrue(metodoPagoRow?.verificacion_automatica);
     const metodoEsBolivares = isTrue(metodoPagoRow?.bolivares);
+    if (metodoVerificacionAutomatica === false && archivos.length === 0) {
+      return res.status(400).json({ error: "comprobante es requerido para este método." });
+    }
     const metodoPagoIdNum = Number(id_metodo_de_pago);
     const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
     const calcularMontoRecibidoReal = (montoTransferidoRaw, metodoId) => {

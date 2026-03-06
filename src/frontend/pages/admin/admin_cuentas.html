@@ -3465,14 +3465,15 @@
               const clave = p.clave || "";
               const fecha = p.fecha_corte || "";
               const canInlineAssign = !p.id_venta;
-              const clienteCell = canInlineAssign
+              const canInlineAssignForUser = canInlineAssign && isSuperadmin;
+              const clienteCell = canInlineAssignForUser
                 ? '<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />'
                 : cliente || "-";
-              const correoCell = canInlineAssign
+              const correoCell = canInlineAssignForUser
                 ? '<input type="text" class="correo-input" placeholder="Correo" />'
                 : correo || "-";
               const claveCell = showClaveCliente
-                ? canInlineAssign
+                ? canInlineAssignForUser
                   ? '<input type="text" class="clave-input" placeholder="Clave" />'
                   : clave || "-"
                 : "";
@@ -3480,7 +3481,9 @@
                 ? `<td>${getPerfilCellLabel(flags, p.n_raw, p.hogar)}</td>`
                 : "";
               const fechaCell = canInlineAssign
-                ? renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                ? isSuperadmin
+                  ? renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                  : "-"
                 : renderFechaEditCell(fecha, p.id_venta);
               const estadoRow = getEstado({
                 suspendido: p.suspendido === true,
@@ -3502,7 +3505,7 @@
                 perfilHogar: p.hogar,
                 isSubCuenta: false,
               });
-              const accionButtons = canInlineAssign
+              const accionButtons = canInlineAssignForUser
                 ? `
                   <button type="button" class="btn-primary btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
@@ -3544,6 +3547,7 @@
               </tr>`;
             }
             if (colMode === "perfil") {
+              const isEmptySlot = !p.id_venta;
               const toggleHtml = showHogar
                 ? `<label class="toggle-label toggle-small">
                     <input type="checkbox" class="toggle-hogar" data-perfil="${p.id_perfil}" ${p.hogar ? "checked" : ""} />
@@ -3587,7 +3591,9 @@
                   ${
                     p.id_venta
                       ? renderFechaEditCell(p.fecha_corte, p.id_venta)
-                      : renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                      : isSuperadmin
+                        ? renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                        : "-"
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
@@ -3610,9 +3616,13 @@
                       ? `<button type="button" class="btn-outline btn-reactivar-venta" data-idventa="${p.id_venta || ""}">Reactivar</button>`
                       : ""
                   }
-                  <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
+                  ${
+                    isEmptySlot && !isSuperadmin
+                      ? ""
+                      : `<button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
-                  >Registrar servicio</button>
+                  >Registrar servicio</button>`
+                  }
                   ${
                     isSuperadmin && p.id_venta
                       ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
@@ -3622,6 +3632,7 @@
               </tr>`;
             }
             if (colMode === "miembro") {
+              const isEmptySlot = !p.id_venta;
               const copyText = buildServiceCopyText({
                 plataforma: info.plataformaNombre,
                 idVenta: p.id_venta,
@@ -3652,7 +3663,9 @@
                   ${
                     p.id_venta
                       ? renderFechaEditCell(p.fecha_corte, p.id_venta)
-                      : renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                      : isSuperadmin
+                        ? renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                        : "-"
                   }
                 </td>
                 <td class="estado-cell ${estado.className}">${estado.label}</td>
@@ -3670,9 +3683,13 @@
                   data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
-                  <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
+                  ${
+                    isEmptySlot && !isSuperadmin
+                      ? ""
+                      : `<button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled
                     data-perfil="${p.id_perfil || ""}"
-                  >Registrar servicio</button>
+                  >Registrar servicio</button>`
+                  }
                   ${
                     isSuperadmin && p.id_venta
                       ? `<button type="button" class="btn-delete-venta" data-id-venta="${p.id_venta}">Eliminar</button>`
@@ -3706,7 +3723,9 @@
                 ${
                   p.id_venta
                     ? renderFechaEditCell(p.fecha_corte, p.id_venta)
-                    : renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                    : isSuperadmin
+                      ? renderFechaInlineCell("", `data-perfil="${p.id_perfil || ""}"`)
+                      : "-"
                 }
               </td>
               <td class="estado-cell ${estado.className}">${estado.label}</td>
@@ -4033,14 +4052,16 @@
                           <td><span class="correo-copy" data-clipboard="${m.correo || ""}">${m.correo || "-"}</span></td>
                           ${showClaveCliente ? `<td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>` : ""}
                           ${showPin ? `<td><span class="pin-copy" data-clipboard="${m.pin || ""}">${m.pin || "-"}</span></td>` : ""}
-                          <td>${hasVenta ? m.ocupado || "-" : `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />`}</td>
+                          <td>${hasVenta ? m.ocupado || "-" : isSuperadmin ? `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />` : "-"}</td>
                           <td>${hasVenta ? `#${m.id_venta}` : "-"}</td>
                           <td>${renderPrecioVentaCell(m.id_venta, m.id_precio)}</td>
                           <td>
                             ${
                               hasVenta
                                 ? renderFechaEditCell(m.fecha_corte, m.id_venta)
-                                : renderFechaInlineCell("", `data-cuenta="${m.id_cuenta || ""}"`)
+                                : isSuperadmin
+                                  ? renderFechaInlineCell("", `data-cuenta="${m.id_cuenta || ""}"`)
+                                  : "-"
                             }
                           </td>
                           <td class="action-cell">
@@ -4062,7 +4083,11 @@
                                 ? `<button type="button" class="btn-outline btn-reactivar-venta" data-idventa="${m.id_venta || ""}">Reactivar</button>`
                                 : ""
                             }
-                            <button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>
+                            ${
+                              !hasVenta && !isSuperadmin
+                                ? ""
+                                : `<button type="button" class="btn-outline btn-registrar-servicio btn-disabled" disabled data-cuenta="${m.id_cuenta || ""}">Registrar servicio</button>`
+                            }
                             ${
                               isSuperadmin && hasVenta
                                 ? `<button type="button" class="btn-delete-venta" data-id-venta="${m.id_venta || ""}">Eliminar</button>`

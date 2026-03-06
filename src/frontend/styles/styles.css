@@ -2966,6 +2966,18 @@ input[type="number"].input-inline {
   max-width: 100%;
 }
 
+@media (max-width: 1024px) {
+  :where(div, section, article):has(> table.table-base) {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table.table-base {
+    min-width: max-content;
+  }
+}
+
 .copyable,
 [data-clipboard] {
   cursor: pointer;

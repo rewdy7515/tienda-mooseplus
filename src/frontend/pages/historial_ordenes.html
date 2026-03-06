@@ -333,7 +333,7 @@
         selectedUser = sessionUser;
         if (searchInput) searchInput.value = "";
         hideSuggestions();
-        setContext("Mostrando solo ordenes de tu sesion.");
+        setContext("");
         await loadOrdenesByUserId(sessionUser.id_usuario);
       };
 

@@ -290,6 +290,11 @@
       const netflixStatus = document.querySelector("#netflix-cuentas-status");
       const btnUsuarios = document.querySelector("#btn-usuarios");
       const btnOrdenes = document.querySelector("#btn-ordenes");
+      const btnRenovarServicio = document.querySelector("#btn-renovar-servicio");
+      const btnEditarPrecios = document.querySelector("#btn-editar-precios");
+      const btnImportarDatos = document.querySelector("#btn-importar-datos");
+      const btnEditarLogos = document.querySelector("#btn-editar-logos");
+      const btnRecordatorios = document.querySelector("#btn-recordatorios");
       const dashDashboardAction = document.querySelector("#dash-dashboard-action");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
       const modalRenovarList = document.querySelector("#spotify-renovar-list");
@@ -342,6 +347,18 @@
         adminGroups.forEach((group) => {
           if (!group) return;
           group.dataset.loading = isLoading ? "true" : "false";
+        });
+      };
+
+      const syncAdminGroupsVisibility = () => {
+        adminGroups.forEach((group) => {
+          if (!group) return;
+          const visibleActions = Array.from(group.querySelectorAll(".admin-action")).filter(
+            (el) => !el.classList.contains("hidden") && el.style.display !== "none",
+          );
+          const hasVisibleActions = visibleActions.length > 0;
+          group.classList.toggle("hidden", !hasVisibleActions);
+          group.style.display = hasVisibleActions ? "" : "none";
         });
       };
 
@@ -793,6 +810,18 @@
             btnUsuarios.classList.toggle("hidden", !isSuperAdmin);
             btnUsuarios.style.display = isSuperAdmin ? "inline-flex" : "none";
           }
+          [
+            btnRenovarServicio,
+            btnEditarPrecios,
+            btnImportarDatos,
+            btnEditarLogos,
+            btnRecordatorios,
+          ].forEach((btn) => {
+            if (!btn) return;
+            btn.classList.toggle("hidden", !isSuperAdmin);
+            btn.style.display = isSuperAdmin ? "inline-flex" : "none";
+          });
+          syncAdminGroupsVisibility();
           if (!isAdmin) {
             document.querySelector("main .status").textContent =
               "No tienes permisos para administrar servicios.";

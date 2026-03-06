@@ -72,6 +72,13 @@ const METODO_COMISION_20_ID = 3;
 const METODO_COMISION_20_PERCENT = 0.2;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const isImageFile = (file) => {
+  if (!file) return false;
+  const mime = String(file.type || "").toLowerCase();
+  if (mime.startsWith("image/")) return true;
+  const name = String(file.name || "").toLowerCase().trim();
+  return /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(name);
+};
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -662,9 +669,7 @@ btnAddImage?.addEventListener("click", () => {
 
 inputFiles?.addEventListener("change", () => {
   if (!filePreview) return;
-  const files = Array.from(inputFiles.files || []).filter((f) =>
-    f.type?.startsWith("image/")
-  );
+  const files = Array.from(inputFiles.files || []).filter((f) => isImageFile(f));
   if (!files.length) {
     filePreview.innerHTML = "";
     inputFiles.value = "";
@@ -705,9 +710,7 @@ inputFiles?.addEventListener("change", () => {
 
 dropzone?.addEventListener("drop", (e) => {
   e.preventDefault();
-  const files = Array.from(e.dataTransfer?.files || []).filter((f) =>
-    f.type?.startsWith("image/")
-  );
+  const files = Array.from(e.dataTransfer?.files || []).filter((f) => isImageFile(f));
   if (!files.length) {
     dropzone.classList.remove("drag-over");
     return;
@@ -1231,6 +1234,7 @@ btnSendPayment?.addEventListener("click", async () => {
   const metodo = metodos[seleccionado];
   const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
   const isMetodoBs = metodoId === 1;
+  const requiereComprobante = !isMetodoVerificacionAutomatica(metodo);
   const requiereMontoTransferido = isMetodoNoBolivares(metodo);
   const referenciaRaw = String(refInput?.value || "").trim();
   if (!referenciaRaw) {
@@ -1268,7 +1272,8 @@ btnSendPayment?.addEventListener("click", async () => {
       alert("No se pudo obtener la tasa.");
       return;
     }
-  } else if (!inputFiles?.files?.length) {
+  }
+  if (requiereComprobante && !inputFiles?.files?.length) {
     alert("Adjunta comprobantes de pago.");
     dropzone?.classList.add("input-error");
     return;
@@ -1278,7 +1283,7 @@ btnSendPayment?.addEventListener("click", async () => {
     return;
   }
   try {
-    const comprobantes = isMetodoBs ? [] : await uploadFiles();
+    const comprobantes = inputFiles?.files?.length ? await uploadFiles() : [];
     const { fecha, hora } = getCaracasNow();
     if (isSaldoCheckout) {
       const pendienteVerificacion = isMetodoVerificacionAutomatica(metodo);
