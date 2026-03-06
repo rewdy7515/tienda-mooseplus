@@ -249,9 +249,22 @@
       }
       .tarea-otro-input {
         margin-left: 26px;
+        width: calc(100% - 26px);
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 14px;
+        color: #111;
+        background: #fff;
       }
       .tarea-otro-input.hidden {
         display: none;
+      }
+      .tarea-otro-input:focus {
+        border-color: #111;
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(17, 17, 17, 0.12);
       }
       .cuenta-platform-cred {
         font-size: 18px;
@@ -7605,34 +7618,30 @@
           return;
         }
         try {
-          if (otherTaskTitle) {
-            let otherTaskId = null;
-            const { data: existingTask, error: existingTaskErr } = await supabase
-              .from("tareas")
-              .select("id_tarea")
-              .eq("titulo", otherTaskTitle)
-              .maybeSingle();
-            if (existingTaskErr) throw existingTaskErr;
-            if (existingTask?.id_tarea) {
-              otherTaskId = Number(existingTask.id_tarea);
-            } else {
-              const { data: insertedTask, error: insertTaskErr } = await supabase
-                .from("tareas")
-                .insert({ titulo: otherTaskTitle })
-                .select("id_tarea")
-                .maybeSingle();
-              if (insertTaskErr) throw insertTaskErr;
-              otherTaskId = Number(insertedTask?.id_tarea || 0);
-            }
-            if (Number.isFinite(otherTaskId) && otherTaskId > 0) {
-              if (!selected.includes(otherTaskId)) selected.push(otherTaskId);
-              tareasCache = null;
-            }
-          }
           const rows = selected.map((id) => ({
             id_tarea: id,
             cuenta: Number(tareasCuentaId),
           }));
+          if (otherTaskTitle) {
+            const fallbackTaskIdRaw =
+              selected[0] ||
+              Number(tareasCache?.[0]?.id_tarea || 0);
+            const fallbackTaskId =
+              Number.isFinite(fallbackTaskIdRaw) && fallbackTaskIdRaw > 0
+                ? Math.trunc(fallbackTaskIdRaw)
+                : null;
+            if (!fallbackTaskId) {
+              alert(
+                "No hay tareas base disponibles para guardar la tarea personalizada. Crea una tarea primero.",
+              );
+              return;
+            }
+            rows.push({
+              id_tarea: fallbackTaskId,
+              cuenta: Number(tareasCuentaId),
+              tarea_personalizada: otherTaskTitle,
+            });
+          }
           const { error } = await supabase
             .from("tareas_asignadas")
             .insert(rows);

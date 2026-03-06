@@ -393,6 +393,7 @@ CREATE TABLE public.tareas_asignadas (
   id_tarea bigint NOT NULL,
   cuenta bigint,
   fecha date,
+  tarea_personalizada text,
   CONSTRAINT tareas_asignadas_pkey PRIMARY KEY (id_tarea_asignada),
   CONSTRAINT tareas_asignadas_cuenta_fkey FOREIGN KEY (cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT tareas_asignadas_id_tarea_fkey FOREIGN KEY (id_tarea) REFERENCES public.tareas(id_tarea)
@@ -410,9 +411,11 @@ CREATE TABLE public.tarjetas_de_regalo (
   fecha_compra date,
   fecha_uso date,
   id_cuenta bigint,
+  admin_involucrado bigint,
   CONSTRAINT tarjetas_de_regalo_pkey PRIMARY KEY (id_tarjeta_de_regalo),
   CONSTRAINT tarjetas_de_regalo_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
   CONSTRAINT tarjetas_de_regalo_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
+  CONSTRAINT tarjetas_de_regalo_admin_involucrado_fkey FOREIGN KEY (admin_involucrado) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT tarjetas_de_regalo_vendido_a_fkey FOREIGN KEY (vendido_a) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT tarjetas_de_regalo_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta)
 );
