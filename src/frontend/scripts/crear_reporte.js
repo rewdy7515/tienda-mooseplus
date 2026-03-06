@@ -418,7 +418,9 @@ async function cargarPlataformas() {
   const userId = requireSession();
   const { data, error } = await supabase
     .from("ventas")
-    .select("id_cuenta, cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, plataformas(nombre))")
+    .select(
+      "id_cuenta, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, id_plataforma, plataformas(nombre)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, plataformas(nombre))"
+    )
     .eq("id_usuario", userId);
   if (error) {
     console.error("plataformas ventas error", error);
@@ -426,11 +428,16 @@ async function cargarPlataformas() {
   }
   const unique = new Map();
   (data || []).forEach((row) => {
-    const platId = row.cuentas?.id_plataforma;
-    const nombre = row.cuentas?.plataformas?.nombre;
-    if (platId && nombre && !unique.has(platId)) {
-      unique.set(platId, nombre);
-    }
+    const ctaMain = row.cuentas || null;
+    const ctaMiembro = row.cuentas_miembro || null;
+    const opciones = [ctaMain, ctaMiembro];
+    opciones.forEach((cta) => {
+      const platId = cta?.id_plataforma;
+      const nombre = cta?.plataformas?.nombre;
+      if (platId && nombre && !unique.has(platId)) {
+        unique.set(platId, nombre);
+      }
+    });
   });
   if (!unique.size) {
     selectPlataforma.innerHTML = '<option value="">No tienes plataformas</option>';
@@ -468,7 +475,9 @@ async function cargarCorreos() {
   const userId = requireSession();
   const { data, error } = await supabase
     .from("ventas")
-    .select("id_usuario, id_cuenta, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, id_plataforma)")
+    .select(
+      "id_usuario, id_cuenta, id_cuenta_miembro, correo_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, id_plataforma), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, id_plataforma)"
+    )
     .eq("id_usuario", userId);
   if (error) {
     console.error("correos ventas error", error);
@@ -476,15 +485,40 @@ async function cargarCorreos() {
   }
   // mapa de platId -> map de cuentas (id_cuenta -> correo)
   cuentasPorPlataforma = new Map();
+  const upsertCuentaCorreo = (platKey, idCuentaRaw, correoRaw) => {
+    const idCuenta = Number(idCuentaRaw);
+    const correo = String(correoRaw || "").trim();
+    if (!platKey || !Number.isFinite(idCuenta) || idCuenta <= 0 || !correo) return;
+    if (!cuentasPorPlataforma.has(platKey)) cuentasPorPlataforma.set(platKey, new Map());
+    const map = cuentasPorPlataforma.get(platKey);
+    if (!map.has(idCuenta)) {
+      map.set(idCuenta, correo);
+    } else if (!String(map.get(idCuenta) || "").trim() && correo) {
+      map.set(idCuenta, correo);
+    }
+  };
   (data || []).forEach((row) => {
-    const platId = row.cuentas?.id_plataforma;
-    const platKey = platId === null || platId === undefined ? null : String(platId);
-    const correo = row.cuentas?.correo;
-    const idCuenta = row.cuentas?.id_cuenta || row.id_cuenta;
-    if (platKey && idCuenta) {
-      if (!cuentasPorPlataforma.has(platKey)) cuentasPorPlataforma.set(platKey, new Map());
-      const map = cuentasPorPlataforma.get(platKey);
-      if (!map.has(idCuenta)) map.set(idCuenta, correo || "");
+    const ctaMain = row.cuentas || null;
+    const ctaMiembro = row.cuentas_miembro || null;
+    const platMain = ctaMain?.id_plataforma;
+    const platMiembro = ctaMiembro?.id_plataforma;
+    const platKeyMain =
+      platMain === null || platMain === undefined ? null : String(platMain);
+    const platKeyMiembro =
+      platMiembro === null || platMiembro === undefined ? null : String(platMiembro);
+
+    upsertCuentaCorreo(platKeyMain, ctaMain?.id_cuenta || row.id_cuenta, ctaMain?.correo);
+    upsertCuentaCorreo(
+      platKeyMiembro,
+      ctaMiembro?.id_cuenta || row.id_cuenta_miembro,
+      ctaMiembro?.correo
+    );
+
+    const correoMiembro = String(row?.correo_miembro || "").trim();
+    if (correoMiembro) {
+      const targetId = ctaMiembro?.id_cuenta || row.id_cuenta_miembro || ctaMain?.id_cuenta || row.id_cuenta;
+      const targetPlatKey = platKeyMiembro || platKeyMain;
+      upsertCuentaCorreo(targetPlatKey, targetId, correoMiembro);
     }
   });
   hideCorreoSugerencias();
@@ -648,9 +682,9 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   // Busca ventas del usuario con ese id_cuenta e id_perfil asignado
   const { data, error } = await supabase
     .from("ventas")
-    .select("id_cuenta, id_perfil, perfiles(id_perfil, n_perfil)")
+    .select("id_cuenta, id_cuenta_miembro, id_perfil, perfiles(id_perfil, n_perfil)")
     .eq("id_usuario", userId)
-    .eq("id_cuenta", cuentaId);
+    .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`);
   if (error) {
     console.error("perfiles por correo error", error);
     return;
@@ -659,7 +693,9 @@ async function cargarPerfilesPorCorreo(cuentaId) {
     (row) => row.id_perfil !== null && row.id_perfil !== undefined
   );
   const perfilesRaw = ventasFiltradas.filter(
-    (row) => Number(row.id_cuenta) === Number(selectedCuentaId)
+    (row) =>
+      Number(row.id_cuenta) === Number(selectedCuentaId) ||
+      Number(row.id_cuenta_miembro) === Number(selectedCuentaId)
   );
   if (!perfilesRaw.length) {
     selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
