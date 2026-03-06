@@ -242,6 +242,17 @@
         justify-content: flex-end;
         margin-top: 8px;
       }
+      .tarea-otro-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .tarea-otro-input {
+        margin-left: 26px;
+      }
+      .tarea-otro-input.hidden {
+        display: none;
+      }
       .cuenta-platform-cred {
         font-size: 18px;
         font-weight: 700;
@@ -773,6 +784,16 @@
           <span class="rec-label">PIN</span>
           <span class="rec-copy" id="rec-pin">Buscando...</span>
         </div>
+        <div class="rec-row" id="rec-pin-link-row">
+          <span class="rec-label"></span>
+          <a
+            href="https://www.netflix.com/ve/redeem"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rec-copy"
+            style="text-decoration: underline"
+          >https://www.netflix.com/ve/redeem</a>
+        </div>
         <div class="rec-row">
           <span class="rec-label">Próx. corte</span>
           <input type="date" class="rec-date" id="rec-corte" />
@@ -1077,6 +1098,7 @@
       const recClave = document.querySelector("#rec-pass");
       const recPin = document.querySelector("#rec-pin");
       const recPinRow = document.querySelector("#rec-pin-row");
+      const recPinLinkRow = document.querySelector("#rec-pin-link-row");
       const recCorte = document.querySelector("#rec-corte");
       const btnCerrarRecargar = document.querySelector("#rec-close");
       const btnDoRecarga = document.querySelector("#rec-do");
@@ -1630,6 +1652,12 @@
       );
       const inputReemplazarCuentaCorreo = document.querySelector(
         "#input-reemplazar-cuenta-correo",
+      );
+      const reemplazarCuentaLinkWrap = document.querySelector(
+        "#reemplazar-cuenta-link-wrap",
+      );
+      const reemplazarCuentaLinkEl = document.querySelector(
+        "#reemplazar-cuenta-link",
       );
       const inputReemplazarCuentaClave = document.querySelector(
         "#input-reemplazar-cuenta-clave",
@@ -5721,6 +5749,7 @@
         const usaPins = isTrue(btnRec.dataset.usaPins);
         const parsedBaseDate = parseDateValue(btnRec.dataset.corte);
         if (recPinRow) recPinRow.style.display = usaPins ? "" : "none";
+        if (recPinLinkRow) recPinLinkRow.style.display = usaPins ? "" : "none";
         renewPlatId = platId || null;
         if (platId === 1) {
           recCorreo.textContent = btnRec.dataset.correo || "-";
@@ -6136,6 +6165,11 @@
             alert("No se pudo identificar la cuenta.");
             return;
           }
+          const adminInvolucradoIdRaw = Number(currentUserId || requireSession() || 0);
+          const adminInvolucradoId =
+            Number.isFinite(adminInvolucradoIdRaw) && adminInvolucradoIdRaw > 0
+              ? Math.trunc(adminInvolucradoIdRaw)
+              : null;
           const today = new Date().toISOString().slice(0, 10);
           // Actualizar fecha_corte de cuenta
           const { error: updErr } = await supabase
@@ -6153,6 +6187,7 @@
                 usado: true,
                 fecha_uso: today,
                 id_cuenta: currentCuentaId,
+                admin_involucrado: adminInvolucradoId,
               })
               .eq("id_tarjeta_de_regalo", pinId);
             if (cardErr) throw cardErr;
@@ -6772,14 +6807,34 @@
         tareasCuentaId = null;
       };
 
+      const getTareaOtroElements = () => {
+        const otherCheckbox = tareasListEl?.querySelector(
+          'input[type="checkbox"][data-role="tarea-otro"]',
+        );
+        const otherInput = tareasListEl?.querySelector(
+          'input[type="text"][data-role="tarea-otro-input"]',
+        );
+        return { otherCheckbox, otherInput };
+      };
+
+      const syncTareaOtroInput = () => {
+        const { otherCheckbox, otherInput } = getTareaOtroElements();
+        if (!otherInput) return;
+        const isChecked = !!otherCheckbox?.checked;
+        otherInput.classList.toggle("hidden", !isChecked);
+        if (isChecked) {
+          otherInput.focus();
+          otherInput.select();
+        } else {
+          otherInput.value = "";
+        }
+      };
+
       const renderTareasList = (tareas) => {
         if (!tareasListEl) return;
-        if (!Array.isArray(tareas) || !tareas.length) {
-          tareasListEl.innerHTML =
-            '<p class="status" style="margin:0;">No hay tareas.</p>';
-          return;
-        }
-        tareasListEl.innerHTML = tareas
+        const hasPresetTasks = Array.isArray(tareas) && tareas.length > 0;
+        const rowsHtml = hasPresetTasks
+          ? tareas
           .map(
             (t) => `
               <label class="tarea-item">
@@ -6788,7 +6843,25 @@
               </label>
             `,
           )
-          .join("");
+          .join("")
+          : '<p class="status" style="margin:0;">No hay tareas predefinidas.</p>';
+        tareasListEl.innerHTML = `
+          ${rowsHtml}
+          <div class="tarea-otro-wrap">
+            <label class="tarea-item">
+              <input type="checkbox" value="__otro__" data-role="tarea-otro">
+              <span>Otro</span>
+            </label>
+            <input
+              type="text"
+              class="form-input tarea-otro-input hidden"
+              data-role="tarea-otro-input"
+              placeholder="Escribe la tarea"
+              maxlength="180"
+            />
+          </div>
+        `;
+        syncTareaOtroInput();
       };
 
       const loadTareas = async () => {
@@ -7012,6 +7085,14 @@
         if (inputReemplazarCuentaCorreo) inputReemplazarCuentaCorreo.value = "";
         if (inputReemplazarCuentaClave) inputReemplazarCuentaClave.value = "";
         if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = "";
+        if (reemplazarCuentaLinkEl) {
+          reemplazarCuentaLinkEl.textContent = "";
+          reemplazarCuentaLinkEl.href = "#";
+        }
+        if (reemplazarCuentaLinkWrap) {
+          reemplazarCuentaLinkWrap.style.display = "none";
+          reemplazarCuentaLinkWrap.classList.add("hidden");
+        }
       };
 
       const openReemplazarCuentaModal = ({ cuentaId, fechaCorte = "" }) => {
@@ -7026,6 +7107,17 @@
               currentCuentaDetalle?.fecha_corte ||
               "",
           ).trim();
+        const plataformaLinkRaw = String(currentCuentaDetalle?.plataformaLink || "").trim();
+        const plataformaLinkHref = normalizeExternalLink(plataformaLinkRaw);
+        if (reemplazarCuentaLinkEl) {
+          reemplazarCuentaLinkEl.textContent = plataformaLinkRaw || "";
+          reemplazarCuentaLinkEl.href = plataformaLinkHref || "#";
+        }
+        if (reemplazarCuentaLinkWrap) {
+          const showLink = Boolean(plataformaLinkRaw);
+          reemplazarCuentaLinkWrap.style.display = showLink ? "" : "none";
+          reemplazarCuentaLinkWrap.classList.toggle("hidden", !showLink);
+        }
         if (inputReemplazarCuentaFecha) inputReemplazarCuentaFecha.value = fechaDefault;
         modalReemplazarCuenta.classList.remove("hidden");
         modalReemplazarCuenta.setAttribute("aria-hidden", "false");
@@ -7475,19 +7567,68 @@
         if (e.target.classList.contains("modal-backdrop")) closeTareasModal();
         if (e.target.classList.contains("modal-close")) closeTareasModal();
       });
+      tareasListEl?.addEventListener("change", (e) => {
+        if (e.target?.matches?.('input[type="checkbox"][data-role="tarea-otro"]')) {
+          syncTareaOtroInput();
+        }
+      });
+      tareasListEl?.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        if (!e.target?.matches?.('input[type="text"][data-role="tarea-otro-input"]')) return;
+        e.preventDefault();
+        btnTareasSend?.click();
+      });
       btnTareasSend?.addEventListener("click", async () => {
         if (!tareasCuentaId) {
           closeTareasModal();
           return;
         }
-        const selected = Array.from(
+        const checked = Array.from(
           tareasListEl?.querySelectorAll('input[type="checkbox"]:checked') || [],
-        ).map((el) => Number(el.value)).filter(Boolean);
-        if (!selected.length) {
+        );
+        const otherChecked = checked.some((el) => String(el.value) === "__otro__");
+        const selected = checked
+          .map((el) => Number(el.value))
+          .filter((id) => Number.isFinite(id) && id > 0);
+        let otherTaskTitle = "";
+        if (otherChecked) {
+          const { otherInput } = getTareaOtroElements();
+          otherTaskTitle = String(otherInput?.value || "").trim();
+          if (!otherTaskTitle) {
+            alert("Escribe la tarea en 'Otro'.");
+            otherInput?.focus();
+            return;
+          }
+        }
+        if (!selected.length && !otherTaskTitle) {
           alert("Selecciona al menos una tarea.");
           return;
         }
         try {
+          if (otherTaskTitle) {
+            let otherTaskId = null;
+            const { data: existingTask, error: existingTaskErr } = await supabase
+              .from("tareas")
+              .select("id_tarea")
+              .eq("titulo", otherTaskTitle)
+              .maybeSingle();
+            if (existingTaskErr) throw existingTaskErr;
+            if (existingTask?.id_tarea) {
+              otherTaskId = Number(existingTask.id_tarea);
+            } else {
+              const { data: insertedTask, error: insertTaskErr } = await supabase
+                .from("tareas")
+                .insert({ titulo: otherTaskTitle })
+                .select("id_tarea")
+                .maybeSingle();
+              if (insertTaskErr) throw insertTaskErr;
+              otherTaskId = Number(insertedTask?.id_tarea || 0);
+            }
+            if (Number.isFinite(otherTaskId) && otherTaskId > 0) {
+              if (!selected.includes(otherTaskId)) selected.push(otherTaskId);
+              tareasCache = null;
+            }
+          }
           const rows = selected.map((id) => ({
             id_tarea: id,
             cuenta: Number(tareasCuentaId),
@@ -7964,6 +8105,21 @@
         </button>
         <div class="replace-account-modal-body">
           <h3 class="replace-account-modal-title">Reemplazar cuenta</h3>
+          <div
+            id="reemplazar-cuenta-link-wrap"
+            class="replace-account-field hidden"
+            style="display: none"
+          >
+            <span class="replace-account-label">Página de la plataforma</span>
+            <a
+              id="reemplazar-cuenta-link"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="replace-account-input"
+              style="display: inline-block; text-decoration: underline; word-break: break-all"
+            ></a>
+          </div>
           <label class="replace-account-field">
             <span class="replace-account-label">Correo</span>
             <input

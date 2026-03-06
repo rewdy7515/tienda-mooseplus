@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0?no-check&sourcemap=0";
-import { requireSession } from "./session.js";
+import { clearSession, requireSession } from "./session.js";
 
 const supabase = createClient(
   "https://ojigtjcwhcrnawdbtqkl.supabase.co",
@@ -51,6 +51,45 @@ const API_BASE = (() => {
   if (isLocalHost && port !== "3000") return `http://${hostname}:3000`;
   return `${protocol}//${host}`;
 })();
+
+let authRecoveryInProgress = false;
+
+const isAuthFatalErrorMessage = (msg = "") => {
+  const text = String(msg || "").toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes("sesión de auth no disponible") ||
+    text.includes("no se pudo leer la sesión de auth") ||
+    text.includes("usuario no autenticado") ||
+    text.includes("access denied") ||
+    text.includes("auth required") ||
+    text.includes("invalid jwt") ||
+    text.includes("jwt")
+  );
+};
+
+const clearSupabaseLocalArtifacts = () => {
+  try {
+    const keysToDelete = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = String(window.localStorage.key(i) || "");
+      if (!key) continue;
+      if (key.startsWith("sb-") || key.includes("supabase")) keysToDelete.push(key);
+    }
+    keysToDelete.forEach((key) => window.localStorage.removeItem(key));
+  } catch (_err) {
+    // noop
+  }
+};
+
+const getLoginHref = () => {
+  const idx = window.location.pathname.indexOf("/pages/");
+  if (idx >= 0) {
+    const base = window.location.pathname.slice(0, idx + "/pages/".length);
+    return `${window.location.origin}${base}login.html`;
+  }
+  return `${window.location.origin}/src/frontend/pages/login.html`;
+};
 
 const bufferToBase64 = (buffer) => {
   let binary = "";
@@ -843,10 +882,41 @@ export async function clearServerSession() {
   }
 }
 
+async function handleFatalAuthSessionError(reason = "") {
+  if (authRecoveryInProgress) return;
+  authRecoveryInProgress = true;
+  try {
+    console.warn("[auth] sesión inválida, cerrando sesión automáticamente", {
+      reason: String(reason || "").trim(),
+    });
+    try {
+      await supabase.auth.signOut();
+    } catch (_err) {
+      // noop
+    }
+    clearSession();
+    clearSupabaseLocalArtifacts();
+    await clearServerSession();
+  } finally {
+    const loginHref = getLoginHref();
+    const current = `${window.location.origin}${window.location.pathname}`;
+    if (current !== loginHref) {
+      window.location.replace(loginHref);
+    }
+  }
+}
+
 export async function ensureServerSession() {
   const id = requireSession();
+  if (!id) {
+    await handleFatalAuthSessionError("session_user_id ausente");
+    throw new Error("Sesión no disponible");
+  }
   const result = await startSession(id);
   if (result?.error) {
+    if (isAuthFatalErrorMessage(result.error)) {
+      await handleFatalAuthSessionError(result.error);
+    }
     throw new Error(result.error);
   }
   return result;

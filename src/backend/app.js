@@ -622,6 +622,7 @@ const buildWhatsappRecordatorioItems = async () => {
     acc[userId] = {
       cliente: [user.nombre, user.apellido].filter(Boolean).join(" ").trim() || `Usuario ${userId}`,
       telefono: String(user.telefono || "").trim(),
+      registrado: isRegistered,
       signupUrl,
     };
     return acc;
@@ -655,11 +656,23 @@ const buildWhatsappRecordatorioItems = async () => {
     const hogarTxt = isNetflixPlan2 ? " (HOGAR ACTUALIZADO)" : "";
 
     if (!acc[userId]) {
+      const isRegistered = userInfo?.registrado === true;
+      let signupUrl = "";
+      if (!isRegistered) {
+        signupUrl = String(userInfo.signupUrl || "").trim();
+        if (!signupUrl) {
+          try {
+            signupUrl = buildSignupRegistrationUrl(userId);
+          } catch (err) {
+            console.error("[recordatorios] signup url fallback build error", { userId, err });
+          }
+        }
+      }
       acc[userId] = {
         idUsuario: userId,
         cliente: userInfo.cliente || `Usuario ${userId}`,
         telefono: userInfo.telefono || "",
-        signupUrl: String(userInfo.signupUrl || "").trim(),
+        signupUrl,
         plataformas: {},
         ventaIds: [],
       };
