@@ -66,6 +66,28 @@ const sanitizeFileName = (name) => {
   return base.replace(/[^a-zA-Z0-9._-]/g, "_");
 };
 
+const extractPrivateAssetPath = (rawValue) => {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return "";
+  if (!/^https?:\/\//i.test(raw)) return raw.replace(/^\/+/, "");
+  try {
+    const parsed = new URL(raw);
+    const match = parsed.pathname.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
+    );
+    if (match && match[1] === "private_assets" && match[2]) {
+      return decodeURIComponent(match[2]);
+    }
+    const idx = parsed.pathname.indexOf("/private_assets/");
+    if (idx >= 0) {
+      return decodeURIComponent(parsed.pathname.slice(idx + "/private_assets/".length));
+    }
+  } catch (_err) {
+    // noop
+  }
+  return raw;
+};
+
 const asInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -431,7 +453,12 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     console.error("auto reemplazo notificacion error", notifCatchErr);
   }
 
-  return { reemplazado: true, aplica: true, sinStock: false };
+  return {
+    reemplazado: true,
+    aplica: true,
+    sinStock: false,
+    correoNuevo: dataDestino.correo || "",
+  };
 }
 
 async function init() {
@@ -958,7 +985,9 @@ async function uploadEvidence(file, userId) {
     console.error("upload evidence error", error);
     throw error || new Error("No se pudo subir la evidencia");
   }
-  return urls[0] || null;
+  const first = urls[0] || null;
+  if (!first) return null;
+  return extractPrivateAssetPath(first);
 }
 
 async function handleSubmit(e) {
@@ -1035,6 +1064,10 @@ async function handleSubmit(e) {
     });
     if (autoReplaceResult?.reemplazado) {
       const imagenAuto = await resolveImagenPath();
+      const correoNuevoAuto = String(autoReplaceResult?.correoNuevo || "").trim();
+      const descripcionSolucionAuto = correoNuevoAuto
+        ? `Reemplazo automático por cuenta inactiva: ${correoNuevoAuto}`
+        : "Reemplazo automático por cuenta inactiva";
       const payloadAuto = {
         id_usuario,
         id_plataforma,
@@ -1045,7 +1078,7 @@ async function handleSubmit(e) {
         imagen: imagenAuto,
         en_revision: false,
         solucionado: true,
-        descripcion_solucion: "Reemplazo automático por cuenta inactiva",
+        descripcion_solucion: descripcionSolucionAuto,
       };
       const { error: insertAutoErr } = await supabase.from("reportes").insert([payloadAuto]);
       if (insertAutoErr) {

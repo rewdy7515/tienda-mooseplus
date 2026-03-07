@@ -4263,6 +4263,14 @@
                 ?.querySelector(".toggle-text");
               if (labelText)
                 labelText.textContent = checked ? "Inactivada" : "Activa";
+              if (checked) {
+                const autoRes = await autoReplaceFromPendingReportsByCuenta(id);
+                if (autoRes.replaced > 0) {
+                  alert(
+                    `Se aplicó reemplazo automático a ${autoRes.replaced} reporte(s) pendiente(s).`,
+                  );
+                }
+              }
             } catch (err) {
               console.error("toggle inactiva error", err);
               e.target.checked = !checked;
@@ -7781,6 +7789,271 @@
         copyTextNotify(text);
       };
 
+      const autoReplaceFromPendingReportsByCuenta = async (rawCuentaId) => {
+        const cuentaId = toPositiveId(rawCuentaId);
+        const actorUserId = toPositiveId(currentUserId || requireSession());
+        const summary = { processed: 0, replaced: 0, skipped: 0, errors: 0 };
+        if (!cuentaId) return summary;
+
+        const { data: cuentaActual, error: cuentaErr } = await supabase
+          .from("cuentas")
+          .select(
+            "id_cuenta, id_plataforma, correo, clave, inactiva, venta_perfil, venta_miembro",
+          )
+          .eq("id_cuenta", cuentaId)
+          .maybeSingle();
+        if (cuentaErr) throw cuentaErr;
+        if (!cuentaActual || cuentaActual.inactiva !== true) return summary;
+
+        const plataformaId = toPositiveId(cuentaActual.id_plataforma);
+        if (!plataformaId) return summary;
+
+        const { data: plataformaInfo } = await supabase
+          .from("plataformas")
+          .select("nombre")
+          .eq("id_plataforma", plataformaId)
+          .maybeSingle();
+        const plataformaNombre = String(plataformaInfo?.nombre || "").trim();
+
+        const { data: reportesRows, error: reportesErr } = await supabase
+          .from("reportes")
+          .select(
+            "id_reporte, id_usuario, id_cuenta, id_perfil, descripcion, en_revision, solucionado",
+          )
+          .eq("id_cuenta", cuentaId)
+          .eq("solucionado", false)
+          .order("id_reporte", { ascending: true });
+        if (reportesErr) throw reportesErr;
+
+        const reportesPendientes = Array.isArray(reportesRows) ? reportesRows : [];
+        for (const reporte of reportesPendientes) {
+          summary.processed += 1;
+          try {
+            const reporteId = toPositiveId(reporte?.id_reporte);
+            const ventaUserId = toPositiveId(reporte?.id_usuario);
+            const perfilId = toPositiveId(reporte?.id_perfil);
+            if (!reporteId || !ventaUserId) {
+              summary.skipped += 1;
+              continue;
+            }
+
+            let ventaQuery = supabase
+              .from("ventas")
+              .select("id_venta, id_usuario, id_cuenta, id_perfil")
+              .eq("id_usuario", ventaUserId)
+              .eq("id_cuenta", cuentaId)
+              .order("id_venta", { ascending: false })
+              .limit(1);
+            if (perfilId) {
+              ventaQuery = ventaQuery.eq("id_perfil", perfilId);
+            } else {
+              ventaQuery = ventaQuery.is("id_perfil", null);
+            }
+            const { data: ventaRows, error: ventaErr } = await ventaQuery;
+            if (ventaErr) throw ventaErr;
+            let ventaInfo = ventaRows?.[0] || null;
+            if (!ventaInfo) {
+              const { data: fallbackRows, error: fallbackErr } = await supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_cuenta, id_perfil")
+                .eq("id_usuario", ventaUserId)
+                .eq("id_cuenta", cuentaId)
+                .order("id_venta", { ascending: false })
+                .limit(1);
+              if (fallbackErr) throw fallbackErr;
+              ventaInfo = fallbackRows?.[0] || null;
+            }
+            if (!ventaInfo?.id_venta) {
+              summary.skipped += 1;
+              continue;
+            }
+
+            let perfilActual = null;
+            if (perfilId) {
+              const { data: perfilData, error: perfilErr } = await supabase
+                .from("perfiles")
+                .select("id_perfil, n_perfil, perfil_hogar")
+                .eq("id_perfil", perfilId)
+                .maybeSingle();
+              if (perfilErr) throw perfilErr;
+              perfilActual = perfilData || null;
+            }
+
+            let nuevoCuenta = null;
+            let nuevoPerfil = null;
+            let dataDestino = {};
+            if (perfilId) {
+              const { data: perfilDestino, error: perfilDestinoErr } =
+                await findPerfilLibre(
+                  plataformaId,
+                  perfilActual?.perfil_hogar === true,
+                  cuentaId,
+                );
+              if (perfilDestinoErr) throw perfilDestinoErr;
+              if (!perfilDestino) {
+                summary.skipped += 1;
+                continue;
+              }
+              nuevoCuenta = toPositiveId(perfilDestino.id_cuenta);
+              nuevoPerfil = toPositiveId(perfilDestino.id_perfil);
+              dataDestino = {
+                correo: perfilDestino.cuentas?.correo || "",
+                clave: perfilDestino.cuentas?.clave || "",
+                n_perfil: perfilDestino.n_perfil || null,
+              };
+            } else if (
+              isTrue(cuentaActual.venta_miembro) &&
+              !isTrue(cuentaActual.venta_perfil)
+            ) {
+              const { data: cuentaDestino, error: cuentaDestinoErr } =
+                await findCuentaMiembroLibre(plataformaId, cuentaId);
+              if (cuentaDestinoErr) throw cuentaDestinoErr;
+              if (!cuentaDestino) {
+                summary.skipped += 1;
+                continue;
+              }
+              nuevoCuenta = toPositiveId(cuentaDestino.id_cuenta);
+              nuevoPerfil = null;
+              dataDestino = {
+                correo: cuentaDestino.correo || "",
+                clave: cuentaDestino.clave || "",
+                n_perfil: null,
+              };
+            } else {
+              const { data: cuentaDestino, error: cuentaDestinoErr } =
+                await findCuentaCompleta(plataformaId, cuentaId);
+              if (cuentaDestinoErr) throw cuentaDestinoErr;
+              if (!cuentaDestino) {
+                summary.skipped += 1;
+                continue;
+              }
+              nuevoCuenta = toPositiveId(cuentaDestino.id_cuenta);
+              nuevoPerfil = null;
+              dataDestino = {
+                correo: cuentaDestino.correo || "",
+                clave: cuentaDestino.clave || "",
+                n_perfil: null,
+              };
+            }
+
+            if (!nuevoCuenta) {
+              summary.skipped += 1;
+              continue;
+            }
+
+            const { error: updVentaErr } = await supabase
+              .from("ventas")
+              .update({
+                id_cuenta: nuevoCuenta,
+                id_perfil: nuevoPerfil,
+                id_sub_cuenta: null,
+              })
+              .eq("id_venta", ventaInfo.id_venta);
+            if (updVentaErr) throw updVentaErr;
+
+            let perfilTieneOtraVenta = false;
+            if (perfilId) {
+              const { data: perfilVentasRestantes, error: perfilVentasErr } =
+                await supabase
+                  .from("ventas")
+                  .select("id_venta")
+                  .eq("id_perfil", perfilId)
+                  .neq("id_venta", ventaInfo.id_venta)
+                  .limit(1);
+              if (perfilVentasErr) throw perfilVentasErr;
+              perfilTieneOtraVenta = (perfilVentasRestantes || []).length > 0;
+            }
+
+            if (perfilId && !perfilTieneOtraVenta) {
+              const { error: freePerfilErr } = await supabase
+                .from("perfiles")
+                .update({ ocupado: false })
+                .eq("id_perfil", perfilId);
+              if (freePerfilErr) {
+                console.error("auto reemplazo liberar perfil error", freePerfilErr);
+              }
+            }
+            if (nuevoPerfil) {
+              const { error: occPerfilErr } = await supabase
+                .from("perfiles")
+                .update({ ocupado: true })
+                .eq("id_perfil", nuevoPerfil);
+              if (occPerfilErr) {
+                console.error("auto reemplazo ocupar perfil error", occPerfilErr);
+              }
+            }
+            {
+              const { error: occCuentaErr } = await supabase
+                .from("cuentas")
+                .update({ ocupado: true })
+                .eq("id_cuenta", nuevoCuenta);
+              if (occCuentaErr) {
+                console.error("auto reemplazo ocupar cuenta error", occCuentaErr);
+              }
+            }
+
+            const debeRegistrarReemplazo = !(perfilId && perfilTieneOtraVenta);
+            if (debeRegistrarReemplazo) {
+              const { error: replErr } = await supabase
+                .from("reemplazos")
+                .insert({
+                  id_cuenta: cuentaId,
+                  id_perfil: perfilId || null,
+                  id_sub_cuenta: null,
+                });
+              if (replErr) throw replErr;
+              addToReemplazosCache({ idCuenta: cuentaId, idPerfil: perfilId || null });
+            }
+
+            const { error: updReporteErr } = await supabase
+              .from("reportes")
+              .update({
+                en_revision: false,
+                solucionado: true,
+                solucionado_por: actorUserId || null,
+                descripcion_solucion: "Reemplazo automático por cuenta inactiva",
+              })
+              .eq("id_reporte", reporteId);
+            if (updReporteErr) throw updReporteErr;
+
+            try {
+              const userIds = pickNotificationUserIds("servicio_reemplazado", {
+                ventaUserId: ventaInfo.id_usuario || ventaUserId,
+              });
+              if (userIds.length) {
+                const notif = buildNotificationPayload(
+                  "servicio_reemplazado",
+                  {
+                    plataforma: plataformaNombre || "",
+                    correoViejo: cuentaActual.correo || "",
+                    perfilViejo: perfilActual?.n_perfil
+                      ? `M${perfilActual.n_perfil}`
+                      : "",
+                    correoNuevo: dataDestino.correo || "",
+                    perfilNuevo: dataDestino.n_perfil ? `M${dataDestino.n_perfil}` : "",
+                    claveNuevo: dataDestino.clave || "",
+                  },
+                  { idCuenta: nuevoCuenta },
+                );
+                const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
+                const { error: notifErr } = await supabase
+                  .from("notificaciones")
+                  .insert(rows);
+                if (notifErr) throw notifErr;
+              }
+            } catch (notifErr) {
+              console.error("auto reemplazo notificacion error", notifErr);
+            }
+
+            summary.replaced += 1;
+          } catch (itemErr) {
+            summary.errors += 1;
+            console.error("auto reemplazo por reporte pendiente error", itemErr);
+          }
+        }
+        return summary;
+      };
+
       // Helpers de reemplazo (versión simplificada, sin reporte)
       const findPerfilLibre = async (plataformaId, perfilHogar, excludeCuenta) => {
         const { data: bloqueados, error: replErr } = await loadReemplazosCache(true);
@@ -7897,7 +8170,7 @@
             btn.dataset.cuenta || currentCuentaDetalle?.id_cuenta || null;
           const { data: ventaInfo, error: ventaErr } = await supabase
             .from("ventas")
-            .select("id_venta, id_cuenta, id_perfil, id_cuenta_miembro")
+            .select("id_venta, id_usuario, id_cuenta, id_perfil, id_cuenta_miembro")
             .eq("id_venta", ventaId)
             .maybeSingle();
           if (ventaErr) throw ventaErr;
@@ -7941,6 +8214,67 @@
             .from("perfiles")
             .update({ ocupado: true })
             .eq("id_perfil", nuevoPerfil);
+
+          try {
+            const [oldCuentaRes, oldPerfilRes, newCuentaRes, newPerfilRes] = await Promise.all([
+              supabase
+                .from("cuentas")
+                .select("correo")
+                .eq("id_cuenta", ventaInfo?.id_cuenta || oldCuentaId)
+                .maybeSingle(),
+              ventaInfo?.id_perfil
+                ? supabase
+                    .from("perfiles")
+                    .select("n_perfil")
+                    .eq("id_perfil", ventaInfo.id_perfil)
+                    .maybeSingle()
+                : Promise.resolve({ data: null, error: null }),
+              supabase
+                .from("cuentas")
+                .select("correo, clave")
+                .eq("id_cuenta", nuevoCuenta)
+                .maybeSingle(),
+              supabase
+                .from("perfiles")
+                .select("n_perfil")
+                .eq("id_perfil", nuevoPerfil)
+                .maybeSingle(),
+            ]);
+            if (oldCuentaRes.error) throw oldCuentaRes.error;
+            if (oldPerfilRes.error) throw oldPerfilRes.error;
+            if (newCuentaRes.error) throw newCuentaRes.error;
+            if (newPerfilRes.error) throw newPerfilRes.error;
+
+            const userIds = pickNotificationUserIds("servicio_reemplazado", {
+              ventaUserId: ventaInfo?.id_usuario,
+            });
+            if (userIds.length) {
+              const notif = buildNotificationPayload(
+                "servicio_reemplazado",
+                {
+                  plataforma: currentCuentaDetalle?.plataformaNombre || "",
+                  correoViejo: String(oldCuentaRes.data?.correo || "").trim(),
+                  perfilViejo: oldPerfilRes.data?.n_perfil
+                    ? `M${oldPerfilRes.data.n_perfil}`
+                    : "",
+                  correoNuevo: String(newCuentaRes.data?.correo || "").trim(),
+                  perfilNuevo: newPerfilRes.data?.n_perfil
+                    ? `M${newPerfilRes.data.n_perfil}`
+                    : "",
+                  claveNuevo: String(newCuentaRes.data?.clave || "").trim(),
+                },
+                { idCuenta: nuevoCuenta },
+              );
+              const rows = userIds.map((uid) => ({ ...notif, id_usuario: uid }));
+              const { error: notifErr } = await supabase
+                .from("notificaciones")
+                .insert(rows);
+              if (notifErr) throw notifErr;
+            }
+          } catch (notifErr) {
+            console.error("notificacion servicio_reemplazado cuenta madre error", notifErr);
+          }
+
           alert("Cuenta madre cambiada.");
           if (currentCuentaDetalle?.id_cuenta) {
             loadCuentaDetalle(currentCuentaDetalle.id_cuenta);

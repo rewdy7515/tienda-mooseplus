@@ -145,34 +145,51 @@ const notifyReporteCerrado = async (row) => {
   if (error) throw error;
 };
 
-async function getImageUrl(path) {
-  if (!path) return null;
-  // Si viene como URL de Supabase, intenta firmarla; si falla, usa la original
-  if (/^https?:\/\//i.test(path)) {
-    try {
-      const url = new URL(path);
-      const match = url.pathname.match(/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/(.+)/);
-      if (match && match[1] && match[2]) {
-        const bucket = match[1];
-        const objectPath = match[2];
-        const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600);
-        if (!error && data?.signedUrl) return data.signedUrl;
-      }
-      return path;
-    } catch (_err) {
-      return path;
-    }
+const extractStorageRef = (rawPath) => {
+  const raw = String(rawPath || "").trim();
+  if (!raw) return null;
+  if (!/^https?:\/\//i.test(raw)) {
+    return { bucket: "private_assets", path: raw.replace(/^\/+/, "") };
   }
   try {
-    const { data, error } = await supabase.storage.from("private_assets").createSignedUrl(path, 3600);
+    const parsed = new URL(raw);
+    const match = parsed.pathname.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
+    );
+    if (match && match[1] && match[2]) {
+      return { bucket: match[1], path: decodeURIComponent(match[2]) };
+    }
+    const idx = parsed.pathname.indexOf("/private_assets/");
+    if (idx >= 0) {
+      return {
+        bucket: "private_assets",
+        path: decodeURIComponent(parsed.pathname.slice(idx + "/private_assets/".length)),
+      };
+    }
+  } catch (_err) {
+    return null;
+  }
+  return null;
+};
+
+async function getImageUrl(path) {
+  if (!path) return null;
+  const storageRef = extractStorageRef(path);
+  if (!storageRef) {
+    return /^https?:\/\//i.test(path) ? path : null;
+  }
+  try {
+    const { data, error } = await supabase.storage
+      .from(storageRef.bucket)
+      .createSignedUrl(storageRef.path, 3600);
     if (error) {
       console.error("signed url error", error);
-      return null;
+      return /^https?:\/\//i.test(path) ? path : null;
     }
     return data?.signedUrl || null;
   } catch (err) {
     console.error("signed url error", err);
-    return null;
+    return /^https?:\/\//i.test(path) ? path : null;
   }
 }
 

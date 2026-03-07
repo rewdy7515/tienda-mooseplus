@@ -74,6 +74,21 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const REEMPLAZO_NOTA_PREFIX = "Reemplazo automático por cuenta inactiva:";
+
+const renderSolucionNota = (notaRaw = "") => {
+  const nota = String(notaRaw || "").trim();
+  if (!nota) return "";
+  if (nota.startsWith(REEMPLAZO_NOTA_PREFIX)) {
+    const correo = nota.slice(REEMPLAZO_NOTA_PREFIX.length).trim();
+    if (correo) {
+      const href = `../inventario.html?correo=${encodeURIComponent(correo)}`;
+      return `${escapeHtml(REEMPLAZO_NOTA_PREFIX)} <a href="${href}">${escapeHtml(correo)}</a>`;
+    }
+  }
+  return escapeHtml(nota);
+};
+
 async function init() {
   try {
     const userId = requireSession();
@@ -338,7 +353,9 @@ function openModalSol(row) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (parts.length) {
-      modalSolNotas.innerHTML = `<ul>${parts.map((p) => `<li>${p}</li>`).join("")}</ul>`;
+      modalSolNotas.innerHTML = `<ul>${parts
+        .map((p) => `<li>${renderSolucionNota(p)}</li>`)
+        .join("")}</ul>`;
     } else {
       modalSolNotas.textContent = "-";
     }

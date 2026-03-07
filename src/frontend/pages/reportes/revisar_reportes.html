@@ -93,6 +93,17 @@
       .reportes-list .inventario-plan .reportes-table {
         margin-top: 0;
       }
+      /* Limita la columna "Motivo" para que no ensanche toda la tabla en desktop */
+      .reportes-list .reportes-table th:nth-child(4),
+      .reportes-list .reportes-table td:nth-child(4) {
+        width: 280px;
+        max-width: 280px;
+      }
+      .reportes-list .reportes-table td:nth-child(4) {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       #modal-imagen-wrapper {
         width: min(100%, 520px);
         max-width: 100%;
