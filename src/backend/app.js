@@ -4757,6 +4757,7 @@ app.get("/api/inventario", async (req, res) => {
           null,
         perfil_hogar: row.perfiles?.perfil_hogar ?? null,
         fecha_corte: row.fecha_corte,
+        fecha_corte_venta: row.fecha_corte,
         venta_perfil: row.cuentas?.venta_perfil ?? row.cuentas_miembro?.venta_perfil,
         venta_miembro: row.cuentas?.venta_miembro ?? row.cuentas_miembro?.venta_miembro,
         completa: isCompleta,

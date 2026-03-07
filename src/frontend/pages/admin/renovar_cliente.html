@@ -407,6 +407,11 @@
         }
       };
 
+      const normalizeVentaFechaCorte = (value) => {
+        const raw = String(value || "").trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+      };
+
       const renderResultado = (items) => {
         if (!resultadoEl) return;
         console.log("[renovar_cliente] renderResultado items:", items);
@@ -455,7 +460,7 @@
                     ? "Desactivado"
                     : "-"
                   : "";
-                const estadoLabel = resolveEstadoLabel(it.fecha_corte_raw, it.suspendido);
+                const estadoLabel = resolveEstadoLabel(it.fecha_corte_venta_raw, it.suspendido);
                 return `
                   <tr>
                     <td>#${String(it.id_venta ?? "").padStart(4, "0")}</td>
@@ -463,7 +468,7 @@
                     ${showPerfilCol ? `<td>${perfilLabel}</td>` : ""}
                     ${showHogarCol ? `<td>${hogarLabel}</td>` : ""}
                     <td>${estadoLabel}</td>
-                    <td>${it.fecha_corte || "-"}</td>
+                    <td>${it.fecha_corte_venta || "-"}</td>
                     <td>
                       <label class="proximas-check">
 	                        <input
@@ -478,7 +483,7 @@
                           data-id-plataforma="${it.id_plataforma || ""}"
                           data-id-cuenta="${it.id_cuenta || ""}"
                           data-id-usuario="${it.id_usuario_cliente || ""}"
-                          data-fechacorte="${it.fecha_corte_raw || ""}"
+                          data-fechacorte="${it.fecha_corte_venta_raw || ""}"
                           data-entrega="${it.entrega_inmediata ? "true" : "false"}"
                           data-suspendido="${it.suspendido ? "true" : "false"}"
                           data-hogar="${it.hogar_actualizado ? "true" : "false"}"
@@ -557,15 +562,15 @@
                   <td>${r.cliente || "-"}</td>
                   ${showPerfil ? `<td>${r.perfil || "-"}</td>` : ""}
                   ${showHogar ? `<td>${r.hogarText || "-"}</td>` : ""}
-                  <td>${resolveEstadoLabel(r.fecha_corte_raw, r.suspendido)}</td>
-                  <td>${r.fecha_corte || "-"}</td>
+                  <td>${resolveEstadoLabel(r.fecha_corte_venta_raw, r.suspendido)}</td>
+                  <td>${r.fecha_corte_venta || "-"}</td>
                   <td>
                     <button
                       type="button"
                       class="btn-primary btn-renovar-row"
                       data-cliente="${r.cliente || "-"}"
                       data-perfil="${r.perfil || "-"}"
-                      data-fecha="${r.fecha_corte_raw || ""}"
+                      data-fecha="${r.fecha_corte_venta_raw || ""}"
                       data-venta="${r.id_venta || ""}"
                       data-id-plataforma="${r.id_plataforma || ""}"
                       data-id-cuenta="${r.id_cuenta || ""}"
@@ -781,7 +786,7 @@
                 cuentaMiembro: memberCuenta,
                 perfil: perfInfo,
               });
-              const fechaRaw = v.fecha_corte || "";
+              const fechaRaw = normalizeVentaFechaCorte(v.fecha_corte);
               const showPerfil = !!(platInfo?.por_pantalla || perfInfo?.n_perfil);
               const isPlatPerfilHogar = platId === 1;
               const hogarActualizado =
@@ -813,6 +818,8 @@
                 entrega_inmediata: platInfo?.entrega_inmediata === true,
                 fecha_corte: formatFechaCorte(fechaRaw) || "-",
                 fecha_corte_raw: fechaRaw,
+                fecha_corte_venta: formatFechaCorte(fechaRaw) || "-",
+                fecha_corte_venta_raw: fechaRaw,
               };
             });
             console.log("[renovar_cliente] rows clientes:", rows);
@@ -1024,7 +1031,7 @@
               (perf?.perfil_hogar === true ||
                 cuentaRef?.venta_miembro === true ||
                 !!memberId);
-            const fechaRaw = v.fecha_corte || "";
+            const fechaRaw = normalizeVentaFechaCorte(v.fecha_corte);
               return {
                 plataforma: plat?.nombre || "",
                 plataforma_nombre: plat?.nombre || "",
@@ -1047,6 +1054,8 @@
               entrega_inmediata: plat?.entrega_inmediata === true,
               fecha_corte: formatFechaCorte(fechaRaw) || "-",
               fecha_corte_raw: fechaRaw,
+              fecha_corte_venta: formatFechaCorte(fechaRaw) || "-",
+              fecha_corte_venta_raw: fechaRaw,
             };
           });
 

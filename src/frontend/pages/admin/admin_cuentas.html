@@ -3505,17 +3505,6 @@
             id_precio: null,
           });
         }
-        if (colMode === "miembro" && !isCuentaMadre) {
-          const fechaReferencia = info.fecha_corte_display || info.fecha_corte || "";
-          if (fechaReferencia) {
-            rows = rows.map((row) => ({
-              ...row,
-              fecha_corte: fechaReferencia,
-              fecha_corte_fmt: formatDDMMYYYY(fechaReferencia) || "",
-            }));
-          }
-        }
-
         const getEstado = (row) => getEstadoVenta(row);
 
         const tbodyRows = rows
@@ -3678,7 +3667,7 @@
                   data-nperfil="${p.n_raw ?? ""}"
                   data-pin="${p.pin ?? ""}"
                   data-plat="${info.plataformaNombre || ""}"
-                  data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
+                  data-fecha="${p.fecha_corte || ""}"
                   data-idventa="${p.id_venta || ""}"
                   data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>
@@ -3750,7 +3739,7 @@
                   data-nperfil="${p.n_raw ?? ""}"
                   data-pin="${p.pin ?? ""}"
                   data-plat="${info.plataformaNombre || ""}"
-                  data-fecha="${p.fecha_corte || info.fecha_corte || ""}"
+                  data-fecha="${p.fecha_corte || ""}"
                   data-idventa="${p.id_venta || ""}"
                   data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>

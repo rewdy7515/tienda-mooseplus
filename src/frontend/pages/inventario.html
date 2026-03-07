@@ -334,7 +334,7 @@
           clave: claveVal,
           nPerfil: venta?.n_perfil ?? "",
           pin: venta?.pin ?? "",
-          fechaCorte: venta?.fecha_corte || "",
+          fechaCorte: getVentaFechaCorte(venta),
           porAcceso: plat?.por_acceso ?? venta?.por_acceso,
           usaPines: plat?.usa_pines ?? venta?.usa_pines,
           ventaPerfil: venta?.venta_perfil,
@@ -376,6 +376,12 @@
         });
       };
       const formatPerfilLabel = (val) => (val ? `M${val}` : "");
+      const normalizeVentaFechaCorte = (value) => {
+        const raw = String(value || "").trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+      };
+      const getVentaFechaCorte = (venta = {}) =>
+        normalizeVentaFechaCorte(venta?.fecha_corte_venta || venta?.fecha_corte);
       const buildVentasIndex = () => {
         const rows = [];
         (ultimasPlataformas || []).forEach((p) => {
@@ -398,6 +404,7 @@
               const rowCorreo = isTrue(p?.plat_correo_cliente)
                 ? v.correo_cliente || ""
                 : v.correo || "";
+              const fechaCorteVenta = normalizeVentaFechaCorte(v.fecha_corte);
               rows.push({
                 id_venta: v.id_venta ?? "",
                 nombre_cliente: v.nombre_cliente || "",
@@ -405,7 +412,8 @@
                 clave: v.clave || "",
                 n_perfil: v.n_perfil ?? "",
                 pin: v.pin ?? "",
-                fecha_corte: v.fecha_corte || "",
+                fecha_corte: fechaCorteVenta,
+                fecha_corte_venta: fechaCorteVenta,
                 plataforma: platNombre,
                 plan: planNombre,
                 id_plataforma: platId,
@@ -534,7 +542,7 @@
               ${showClave ? `<td class="copyable" data-label="Clave">${it.clave || ""}</td>` : ""}
               ${showPerfil ? `<td>${perfilVal}</td>` : ""}
               ${showPin ? `<td class="copyable" data-label="PIN">${it.pin || ""}</td>` : ""}
-              <td>${formatDate(it.fecha_corte)}</td>
+              <td>${formatDate(it.fecha_corte_venta || it.fecha_corte)}</td>
               <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
               <td>
                 <div class="actions-inline">
@@ -703,7 +711,7 @@
       const diffDias = (iso) => {
         if (!iso) return null;
         const hoy = new Date();
-        const fecha = new Date(iso);
+        const fecha = new Date(normalizeVentaFechaCorte(iso));
         if (Number.isNaN(fecha.valueOf())) return null;
         const diff = fecha - hoy;
         return Math.ceil(diff / (1000 * 60 * 60 * 24));
@@ -724,7 +732,7 @@
           const items = [];
           (p.planes || []).forEach((planObj) => {
             (planObj.ventas || []).forEach((v) => {
-              const dias = diffDias(v.fecha_corte);
+              const dias = diffDias(normalizeVentaFechaCorte(v.fecha_corte));
               if (dias === null) return;
               const correoVal = isTrue(p?.plat_correo_cliente)
                 ? v.correo_cliente || ""
@@ -915,7 +923,7 @@
                       ${showClave ? `<td class="copyable" data-label="Clave">${v.clave || ""}</td>` : ""}
                       ${showPerfil ? `<td>${perfilVal}</td>` : ""}
                       ${showPin ? `<td class="copyable" data-label="PIN">${v.pin ?? ""}</td>` : ""}
-                      <td>${formatDate(v.fecha_corte)}</td>
+                      <td>${formatDate(normalizeVentaFechaCorte(v.fecha_corte))}</td>
                       <td>
                         <div class="actions-inline">
                           <button class="btn-small btn-renovar" data-venta="${

@@ -216,6 +216,8 @@
       const modalCorreo = document.querySelector("#cn-correo");
       const modalTelefono = document.querySelector("#cn-telefono");
       const modalGuardarDefaultText = modalGuardar?.textContent || "Guardar";
+      const procesarBtn = document.querySelector("#cn-procesar");
+      const procesarBtnDefaultText = procesarBtn?.textContent || "Procesar";
       let sugsCounter = 0;
       let suppressBlur = false;
       let usuariosCache = null;
@@ -578,6 +580,12 @@
 
       // Procesar pedido: intenta checkout para el cliente indicado
       document.querySelector("#cn-procesar")?.addEventListener("click", async () => {
+        if (procesarBtn?.disabled) return;
+        if (procesarBtn) {
+          procesarBtn.disabled = true;
+          procesarBtn.textContent = "Procesando...";
+          procesarBtn.classList.add("btn-disabled");
+        }
         const idCliente = clienteSeleccionadoId || null;
         if (!idCliente) {
           alert("Selecciona un cliente válido (ID no encontrado).");
@@ -689,6 +697,12 @@
       } catch (err) {
         console.error("procesar cuenta nueva error", err);
           alert("No se pudo procesar el pedido.");
+        } finally {
+          if (procesarBtn) {
+            procesarBtn.disabled = false;
+            procesarBtn.textContent = procesarBtnDefaultText;
+            procesarBtn.classList.remove("btn-disabled");
+          }
         }
       });
     </script>
