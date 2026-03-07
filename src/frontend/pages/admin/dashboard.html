@@ -389,6 +389,8 @@
       const GIFT_PLATFORM_REMAP_SOURCE_ID = 21;
       const GIFT_PLATFORM_REMAP_TARGET_ID = 1;
       const GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME = "Plataforma 1";
+      const NOMINA_START_MONTH_KEY = "2026-03";
+      const NOMINA_QUINCENA_AMOUNT = 80;
 
       const moneyFmt = new Intl.NumberFormat("es-VE", {
         style: "currency",
@@ -680,6 +682,109 @@
           stats.movimientos += extraMovements;
           stats.extraMovimientosGoogleSheets = (stats.extraMovimientosGoogleSheets || 0) + extraMovements;
         }
+      };
+      const getNominaQuincenalAdjustment = (range) => {
+        const monthKey = monthKeyFromDate(range?.start);
+        const monthIdx = monthToIndex(monthKey);
+        const startIdx = monthToIndex(NOMINA_START_MONTH_KEY);
+        if (
+          !monthKey ||
+          monthIdx === null ||
+          startIdx === null ||
+          monthIdx < startIdx
+        ) {
+          return { amount: 0, paymentsCount: 0, dates: [], monthKey: monthKey || "" };
+        }
+        const m = String(monthKey).match(/^(\d{4})-(\d{2})$/);
+        if (!m) return { amount: 0, paymentsCount: 0, dates: [], monthKey: monthKey || "" };
+        const year = Number(m[1]);
+        const month = Number(m[2]);
+        const mm = String(month).padStart(2, "0");
+        const lastDay = new Date(year, month, 0).getDate();
+        const startDay = Math.max(1, isoDay(range?.start) || 1);
+        const endDay = Math.max(startDay, isoDay(range?.end) || lastDay);
+        const quincenaDays = [15, lastDay]
+          .filter((day, idx, arr) => arr.indexOf(day) === idx)
+          .filter((day) => day >= startDay && day <= endDay);
+        const dates = quincenaDays.map(
+          (day) => `${year}-${mm}-${String(day).padStart(2, "0")}`,
+        );
+        return {
+          amount: quincenaDays.length * NOMINA_QUINCENA_AMOUNT,
+          paymentsCount: quincenaDays.length,
+          dates,
+          monthKey,
+        };
+      };
+      const applyNominaAdjustment = (stats, adjustment) => {
+        if (!stats || !adjustment) return;
+        const amount = toNumber(adjustment.amount);
+        const paymentsCount = Math.max(0, Number(adjustment.paymentsCount) || 0);
+        const dates = Array.isArray(adjustment.dates) ? adjustment.dates : [];
+        if (!amount || !paymentsCount || !dates.length) return;
+
+        stats.gastosTotal += amount;
+        stats.netoTotal -= amount;
+        stats.margenPct =
+          stats.ingresosTotal > 0 ? (stats.netoTotal / stats.ingresosTotal) * 100 : 0;
+        stats.movimientos += paymentsCount;
+        stats.countGastos += paymentsCount;
+        stats.nominaQuincenalTotal = (stats.nominaQuincenalTotal || 0) + amount;
+
+        const nominaPlatformIdx = stats.platformRows.findIndex(
+          (row) => String(row?.nombre || "").trim().toLowerCase() === "nómina",
+        );
+        if (nominaPlatformIdx >= 0) {
+          const row = stats.platformRows[nominaPlatformIdx];
+          row.gastos = toNumber(row.gastos) + amount;
+          row.movimientos = toNumber(row.movimientos) + paymentsCount;
+          row.neto = toNumber(row.ingresos) - toNumber(row.gastos);
+        } else {
+          stats.platformRows.push({
+            id: "nomina",
+            nombre: "Nómina",
+            ingresos: 0,
+            gastos: amount,
+            neto: -amount,
+            movimientos: paymentsCount,
+          });
+        }
+        stats.platformRows.sort((a, b) => toNumber(b.neto) - toNumber(a.neto));
+
+        const nominaProviderIdx = stats.providerRows.findIndex(
+          (row) => String(row?.nombre || "").trim().toLowerCase() === "nómina",
+        );
+        if (nominaProviderIdx >= 0) {
+          const row = stats.providerRows[nominaProviderIdx];
+          row.gastoTotal = toNumber(row.gastoTotal) + amount;
+          row.movimientos = toNumber(row.movimientos) + paymentsCount;
+        } else {
+          stats.providerRows.push({
+            id: "nomina",
+            nombre: "Nómina",
+            gastoTotal: amount,
+            renovTotal: 0,
+            movimientos: paymentsCount,
+          });
+        }
+        stats.providerRows.sort((a, b) => toNumber(b.gastoTotal) - toNumber(a.gastoTotal));
+
+        dates.forEach((date) => {
+          const dailyIdx = stats.dailyRows.findIndex((row) => row?.fecha === date);
+          if (dailyIdx >= 0) {
+            const row = stats.dailyRows[dailyIdx];
+            row.gastos = toNumber(row.gastos) + NOMINA_QUINCENA_AMOUNT;
+            row.neto = toNumber(row.ingresos) - toNumber(row.gastos);
+          } else {
+            stats.dailyRows.push({
+              fecha: date,
+              ingresos: 0,
+              gastos: NOMINA_QUINCENA_AMOUNT,
+              neto: -NOMINA_QUINCENA_AMOUNT,
+            });
+          }
+        });
+        stats.dailyRows.sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
       };
 
       const setStatus = (text) => {
@@ -1119,10 +1224,30 @@
               `Dato extra agregado de plantilla de google sheets (mes anterior): +$${formatMoneyPlain(adjustments.previous.amount)}, +${intFmt.format(adjustments.previous.newSalesCount || 0)} ventas nuevas y +${intFmt.format(adjustments.previous.renewalsCount || 0)} renovaciones aplicado a ${monthLbl}.`,
             );
           }
-          if (notes.length) {
+          if (adjustments.nominaCurrent?.amount) {
+            const monthLbl = formatMonthLabel(adjustments.nominaCurrent.monthKey);
             notes.push(
-              "Este monto corresponde a los primeros 15 días de enero y no está registrado en la base de datos de la página web.",
+              `Nómina aplicada en ${monthLbl}: -$${formatMoneyPlain(
+                adjustments.nominaCurrent.amount,
+              )} (${intFmt.format(adjustments.nominaCurrent.paymentsCount || 0)} pago(s) quincenal(es) de $${formatMoneyPlain(
+                NOMINA_QUINCENA_AMOUNT,
+              )}).`,
             );
+          }
+          if (adjustments.nominaPrevious?.amount) {
+            const monthLbl = formatMonthLabel(adjustments.nominaPrevious.monthKey);
+            notes.push(
+              `Nómina aplicada en mes anterior (${monthLbl}): -$${formatMoneyPlain(
+                adjustments.nominaPrevious.amount,
+              )}.`,
+            );
+          }
+          if (notes.length) {
+            if (adjustments.current?.amount || adjustments.previous?.amount) {
+              notes.push(
+                "Este monto corresponde a los primeros 15 días de enero y no está registrado en la base de datos de la página web.",
+              );
+            }
             extraNoteEl.textContent = notes.join(" ");
             extraNoteEl.classList.remove("hidden");
           } else {
@@ -1146,6 +1271,8 @@
         try {
           const currentAdjustment = getSheetsJanuaryAdjustment(range);
           const previousAdjustment = getSheetsJanuaryAdjustment(prevRange);
+          const currentNominaAdjustment = getNominaQuincenalAdjustment(range);
+          const previousNominaAdjustment = getNominaQuincenalAdjustment(prevRange);
           const [{ historial, gifts }, prevData, currentActive, previousActive] = await Promise.all([
             fetchMonthData(range),
             prevRange ? fetchMonthData(prevRange) : Promise.resolve({ historial: [], gifts: [] }),
@@ -1160,6 +1287,8 @@
           prevStats.ventasActivasCount = previousActive?.ventasActivasCount || 0;
           applyIncomeAdjustment(stats, currentAdjustment);
           applyIncomeAdjustment(prevStats, previousAdjustment);
+          applyNominaAdjustment(stats, currentNominaAdjustment);
+          applyNominaAdjustment(prevStats, previousNominaAdjustment);
           renderAll(
             stats,
             prevStats,
@@ -1167,7 +1296,12 @@
             prevRange || range,
             compareCtx.compareSuffix,
             compareCtx.isProgressCut,
-            { current: currentAdjustment, previous: previousAdjustment },
+            {
+              current: currentAdjustment,
+              previous: previousAdjustment,
+              nominaCurrent: currentNominaAdjustment,
+              nominaPrevious: previousNominaAdjustment,
+            },
           );
           const loadedLabel = formatMonthLabel(monthVal);
           const loadedNote = compareCtx.isProgressCut ? " (comparación al corte actual)" : "";
