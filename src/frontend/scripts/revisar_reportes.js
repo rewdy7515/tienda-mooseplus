@@ -17,6 +17,8 @@ const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const statusEl = document.querySelector("#revisar-status");
 const listEl = document.querySelector("#reportes-list");
+const toggleAutoReemplazoWrapEl = document.querySelector("#auto-reemplazo-toggle-wrap");
+const toggleAutoReemplazoEl = document.querySelector("#toggle-auto-reemplazo");
 const modal = document.querySelector("#modal-detalle");
 const modalPlatTitle = document.querySelector("#modal-plat-title");
 const modalCorreo = document.querySelector("#modal-correo");
@@ -56,6 +58,7 @@ let cambioPin = false;
 let currentImageDownloadUrl = "";
 let currentImageDownloadName = "";
 const reportesById = new Map();
+const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
 
 const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
 
@@ -144,6 +147,62 @@ const notifyReporteCerrado = async (row) => {
   const { error } = await supabase.from("notificaciones").insert(payload);
   if (error) throw error;
 };
+
+async function loadAutoReemplazoConfig() {
+  const { data, error } = await supabase
+    .from("configuracion_sistema")
+    .select("valor_bool")
+    .eq("clave", AUTO_REEMPLAZO_CFG_KEY)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.valor_bool === true;
+}
+
+async function saveAutoReemplazoConfig(value) {
+  const next = value === true;
+  const { error } = await supabase
+    .from("configuracion_sistema")
+    .update({
+      valor_bool: next,
+      actualizado_en: new Date().toISOString(),
+    })
+    .eq("clave", AUTO_REEMPLAZO_CFG_KEY);
+  if (error) throw error;
+}
+
+async function initAutoReemplazoToggle({ isSuperadmin = false } = {}) {
+  if (!toggleAutoReemplazoEl) return;
+  if (!isSuperadmin) {
+    toggleAutoReemplazoWrapEl?.classList.add("hidden");
+    toggleAutoReemplazoEl.disabled = true;
+    return;
+  }
+  toggleAutoReemplazoWrapEl?.classList.remove("hidden");
+  toggleAutoReemplazoEl.disabled = true;
+  try {
+    const currentValue = await loadAutoReemplazoConfig();
+    toggleAutoReemplazoEl.checked = currentValue;
+  } catch (err) {
+    console.error("load auto reemplazo config error", err);
+    toggleAutoReemplazoEl.checked = false;
+  }
+
+  toggleAutoReemplazoEl.disabled = false;
+  toggleAutoReemplazoEl.addEventListener("change", async () => {
+    const prev = !toggleAutoReemplazoEl.checked;
+    const next = toggleAutoReemplazoEl.checked;
+    toggleAutoReemplazoEl.disabled = true;
+    try {
+      await saveAutoReemplazoConfig(next);
+    } catch (err) {
+      console.error("save auto reemplazo config error", err);
+      toggleAutoReemplazoEl.checked = prev;
+      alert("No se pudo actualizar el estado del auto reemplazo.");
+    } finally {
+      toggleAutoReemplazoEl.disabled = false;
+    }
+  });
+}
 
 const extractStorageRef = (rawPath) => {
   const raw = String(rawPath || "").trim();
@@ -457,10 +516,13 @@ async function init() {
       isTrue(sessionRoles?.permiso_superadmin) ||
       isTrue(user?.permiso_admin) ||
       isTrue(user?.permiso_superadmin);
+    const isSuperadmin =
+      isTrue(sessionRoles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);
       adminLink.style.display = isAdmin ? "block" : "none";
     }
+    await initAutoReemplazoToggle({ isSuperadmin });
     attachLogoHome();
 
     const all = await loadReportes();

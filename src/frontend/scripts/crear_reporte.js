@@ -41,6 +41,7 @@ let selectedPlataformaId = null;
 let cuentasPorPlataforma = new Map();
 let tiposReporteCatalog = [];
 let correosSugerenciasVisibles = [];
+const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
 const queryParams = new URLSearchParams(window.location.search);
 const prefillPlataforma = queryParams.get("plataforma");
 const prefillCuenta = queryParams.get("cuenta");
@@ -92,6 +93,66 @@ const asInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+async function isAutoReemplazoCuentaInactivaEnabled() {
+  try {
+    const { data, error } = await supabase
+      .from("configuracion_sistema")
+      .select("valor_bool")
+      .eq("clave", AUTO_REEMPLAZO_CFG_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.valor_bool === true;
+  } catch (err) {
+    console.error("load auto reemplazo config error", err);
+    return true;
+  }
+}
+
+async function markVentaPendienteByReporteRule({
+  idUsuario,
+  idCuenta,
+  idPerfil,
+  idPlataforma,
+  motivoTipoId,
+}) {
+  const motivoIdNum = Number(motivoTipoId);
+  if (motivoIdNum !== 3) return;
+  const plataformaIdNum = Number(idPlataforma);
+  const cuentaIdNum = Number(idCuenta);
+  if (!Number.isFinite(plataformaIdNum) || plataformaIdNum <= 0) return;
+  if (!Number.isFinite(cuentaIdNum) || cuentaIdNum <= 0) return;
+
+  const { data: plataformaData, error: plataformaErr } = await supabase
+    .from("plataformas")
+    .select("entrega_inmediata")
+    .eq("id_plataforma", plataformaIdNum)
+    .maybeSingle();
+  if (plataformaErr) throw plataformaErr;
+  if (isTrue(plataformaData?.entrega_inmediata)) return;
+
+  let ventaQuery = supabase
+    .from("ventas")
+    .select("id_venta")
+    .eq("id_usuario", idUsuario)
+    .or(`id_cuenta.eq.${cuentaIdNum},id_cuenta_miembro.eq.${cuentaIdNum}`)
+    .order("id_venta", { ascending: false })
+    .limit(1);
+  const idPerfilNum = Number(idPerfil);
+  if (Number.isFinite(idPerfilNum) && idPerfilNum > 0) {
+    ventaQuery = ventaQuery.eq("id_perfil", idPerfilNum);
+  }
+  const { data: ventaRows, error: ventaErr } = await ventaQuery;
+  if (ventaErr) throw ventaErr;
+  const ventaId = Number(ventaRows?.[0]?.id_venta);
+  if (!Number.isFinite(ventaId) || ventaId <= 0) return;
+
+  const { error: updErr } = await supabase
+    .from("ventas")
+    .update({ pendiente: true })
+    .eq("id_venta", ventaId);
+  if (updErr) throw updErr;
+}
 
 const getCuentasDePlataformaSeleccionada = () => {
   const key = String(selectedPlataformaId || "").trim();
@@ -548,9 +609,8 @@ async function cargarPlataformas() {
     hideCorreoSugerencias();
     poblarCorreosPorPlataforma(platId);
     renderMotivosPorPlataforma(platId);
-    perfilWrapper?.classList.add("hidden");
     selectedCuentaId = null;
-    selectedPerfilId = null;
+    resetPerfilSelectionUI();
   });
 }
 
@@ -747,20 +807,25 @@ function poblarCorreosPorPlataforma(platId) {
   }
 }
 
+function resetPerfilSelectionUI() {
+  perfilWrapper?.classList.add("hidden");
+  if (selectPerfil) {
+    selectPerfil.required = false;
+    selectPerfil.value = "";
+    selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
+  }
+  selectedPerfilId = null;
+}
+
 async function cargarPerfilesPorCorreo(cuentaId) {
   if (!cuentaId || !selectPerfil || !perfilWrapper) {
-    perfilWrapper?.classList.add("hidden");
-    if (selectPerfil) selectPerfil.required = false;
+    resetPerfilSelectionUI();
     selectedCuentaId = null;
-    selectedPerfilId = null;
     return;
   }
-  perfilWrapper.classList.remove("hidden");
-  selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
-  selectPerfil.required = false;
+  resetPerfilSelectionUI();
   const cuentaNum = Number(cuentaId);
   selectedCuentaId = Number.isFinite(cuentaNum) ? cuentaNum : cuentaId;
-  selectedPerfilId = null;
 
   const userId = requireSession();
   // Busca ventas del usuario con ese id_cuenta e id_perfil asignado
@@ -771,6 +836,7 @@ async function cargarPerfilesPorCorreo(cuentaId) {
     .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`);
   if (error) {
     console.error("perfiles por correo error", error);
+    resetPerfilSelectionUI();
     return;
   }
   const ventasFiltradas = (data || []).filter(
@@ -782,8 +848,7 @@ async function cargarPerfilesPorCorreo(cuentaId) {
       Number(row.id_cuenta_miembro) === Number(selectedCuentaId)
   );
   if (!perfilesRaw.length) {
-    selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
-    selectedPerfilId = null;
+    resetPerfilSelectionUI();
     return;
   }
   const perfilesMap = new Map();
@@ -797,7 +862,7 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   });
 
   if (!perfilesMap.size) {
-    if (selectPerfil) selectPerfil.required = false;
+    resetPerfilSelectionUI();
     return;
   }
 
@@ -821,7 +886,7 @@ async function cargarPerfilesPorCorreo(cuentaId) {
 
 function initPerfilPorCorreo() {
   if (!inputCorreoCuenta) return;
-  perfilWrapper?.classList.add("hidden");
+  resetPerfilSelectionUI();
   const updateCuentaFromCorreoInput = () => {
     const cuentaSel = resolveCuentaIdByCorreo(inputCorreoCuenta.value);
     selectedCuentaId = cuentaSel || null;
@@ -837,12 +902,7 @@ function initPerfilPorCorreo() {
       return;
     }
     selectedCuentaId = null;
-    selectedPerfilId = null;
-    perfilWrapper?.classList.add("hidden");
-    if (selectPerfil) {
-      selectPerfil.required = false;
-      selectPerfil.innerHTML = '<option value="">Seleccione perfil</option>';
-    }
+    resetPerfilSelectionUI();
     renderCorreoSugerencias(inputCorreoCuenta.value);
   });
   inputCorreoCuenta.addEventListener("change", updateCuentaFromCorreoInput);
@@ -1056,12 +1116,15 @@ async function handleSubmit(e) {
       return imagenPath;
     };
 
-    const autoReplaceResult = await intentarReemplazoAutomaticoCuentaInactiva({
-      idUsuario: id_usuario,
-      idCuenta: id_cuenta,
-      idPerfil: id_perfil,
-      idPlataforma: id_plataforma,
-    });
+    const autoReemplazoEnabled = await isAutoReemplazoCuentaInactivaEnabled();
+    const autoReplaceResult = autoReemplazoEnabled
+      ? await intentarReemplazoAutomaticoCuentaInactiva({
+          idUsuario: id_usuario,
+          idCuenta: id_cuenta,
+          idPerfil: id_perfil,
+          idPlataforma: id_plataforma,
+        })
+      : { reemplazado: false, aplica: false, sinStock: false };
     if (autoReplaceResult?.reemplazado) {
       const imagenAuto = await resolveImagenPath();
       const correoNuevoAuto = String(autoReplaceResult?.correoNuevo || "").trim();
@@ -1087,6 +1150,17 @@ async function handleSubmit(e) {
         window.location.href = "./report.html";
         return;
       }
+      try {
+        await markVentaPendienteByReporteRule({
+          idUsuario: id_usuario,
+          idCuenta: id_cuenta,
+          idPerfil: id_perfil,
+          idPlataforma: id_plataforma,
+          motivoTipoId: motivoTipoId,
+        });
+      } catch (pendErr) {
+        console.error("mark venta pendiente by reporte rule error", pendErr);
+      }
       alert("Servicio reemplazado automáticamente.");
       window.location.href = "./report.html";
       return;
@@ -1111,6 +1185,17 @@ async function handleSubmit(e) {
       console.error("insert reporte error", error);
       alert("No se pudo enviar el reporte. Intenta nuevamente.");
       return;
+    }
+    try {
+      await markVentaPendienteByReporteRule({
+        idUsuario: id_usuario,
+        idCuenta: id_cuenta,
+        idPerfil: id_perfil,
+        idPlataforma: id_plataforma,
+        motivoTipoId: motivoTipoId,
+      });
+    } catch (pendErr) {
+      console.error("mark venta pendiente by reporte rule error", pendErr);
     }
     alert("Reporte enviado correctamente.");
     window.location.href = "./report.html";

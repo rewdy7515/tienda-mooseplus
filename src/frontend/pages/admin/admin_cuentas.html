@@ -1110,6 +1110,22 @@
         });
       };
       let currentUserId = null;
+      const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
+
+      const isAutoReemplazoCuentaInactivaEnabled = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("configuracion_sistema")
+            .select("valor_bool")
+            .eq("clave", AUTO_REEMPLAZO_CFG_KEY)
+            .maybeSingle();
+          if (error) throw error;
+          return data?.valor_bool === true;
+        } catch (err) {
+          console.error("load auto reemplazo config error", err);
+          return true;
+        }
+      };
 
       const inputCuenta = document.querySelector("#input-cuenta");
       const inputCliente = document.querySelector("#input-cliente");
@@ -4264,11 +4280,14 @@
               if (labelText)
                 labelText.textContent = checked ? "Inactivada" : "Activa";
               if (checked) {
-                const autoRes = await autoReplaceFromPendingReportsByCuenta(id);
-                if (autoRes.replaced > 0) {
-                  alert(
-                    `Se aplicó reemplazo automático a ${autoRes.replaced} reporte(s) pendiente(s).`,
-                  );
+                const autoEnabled = await isAutoReemplazoCuentaInactivaEnabled();
+                if (autoEnabled) {
+                  const autoRes = await autoReplaceFromPendingReportsByCuenta(id);
+                  if (autoRes.replaced > 0) {
+                    alert(
+                      `Se aplicó reemplazo automático a ${autoRes.replaced} reporte(s) pendiente(s).`,
+                    );
+                  }
                 }
               }
             } catch (err) {
@@ -7794,6 +7813,8 @@
         const actorUserId = toPositiveId(currentUserId || requireSession());
         const summary = { processed: 0, replaced: 0, skipped: 0, errors: 0 };
         if (!cuentaId) return summary;
+        const autoEnabled = await isAutoReemplazoCuentaInactivaEnabled();
+        if (!autoEnabled) return summary;
 
         const { data: cuentaActual, error: cuentaErr } = await supabase
           .from("cuentas")

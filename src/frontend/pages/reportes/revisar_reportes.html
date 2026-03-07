@@ -104,6 +104,63 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      .auto-reemplazo-toggle {
+        margin: 8px 0 14px;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .auto-reemplazo-toggle .toggle-label {
+        font-size: 14px;
+        font-weight: 600;
+        color: #111827;
+      }
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 46px;
+        height: 26px;
+        flex: 0 0 auto;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .switch-slider {
+        position: absolute;
+        inset: 0;
+        cursor: pointer;
+        background-color: #d1d5db;
+        transition: 0.2s;
+        border-radius: 999px;
+      }
+      .switch-slider:before {
+        position: absolute;
+        content: "";
+        height: 20px;
+        width: 20px;
+        left: 3px;
+        top: 3px;
+        background-color: #fff;
+        transition: 0.2s;
+        border-radius: 50%;
+      }
+      .switch input:checked + .switch-slider {
+        background-color: #16a34a;
+      }
+      .switch input:checked + .switch-slider:before {
+        transform: translateX(20px);
+      }
+      .switch input:disabled + .switch-slider {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
       #modal-imagen-wrapper {
         width: min(100%, 520px);
         max-width: 100%;
@@ -230,6 +287,13 @@
 
     <main class="categorias-dinamicas">
       <h2>Reportes pendientes</h2>
+      <div id="auto-reemplazo-toggle-wrap" class="auto-reemplazo-toggle hidden">
+        <span class="toggle-label">Auto reemplazo por cuenta inactiva</span>
+        <label class="switch" title="Activar/desactivar reemplazo automático">
+          <input type="checkbox" id="toggle-auto-reemplazo" />
+          <span class="switch-slider"></span>
+        </label>
+      </div>
       <p id="revisar-status" class="status">Cargando reportes...</p>
       <div id="reportes-list" class="inventario-list reportes-list"></div>
 
