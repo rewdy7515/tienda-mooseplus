@@ -237,18 +237,26 @@ async function getImageUrl(path) {
   if (!storageRef) {
     return /^https?:\/\//i.test(path) ? path : null;
   }
+  const fallbackPublicUrl = () => {
+    try {
+      const { data } = supabase.storage.from(storageRef.bucket).getPublicUrl(storageRef.path);
+      return String(data?.publicUrl || "").trim() || null;
+    } catch (_err) {
+      return /^https?:\/\//i.test(path) ? path : null;
+    }
+  };
   try {
     const { data, error } = await supabase.storage
       .from(storageRef.bucket)
       .createSignedUrl(storageRef.path, 3600);
     if (error) {
       console.error("signed url error", error);
-      return /^https?:\/\//i.test(path) ? path : null;
+      return fallbackPublicUrl();
     }
     return data?.signedUrl || null;
   } catch (err) {
     console.error("signed url error", err);
-    return /^https?:\/\//i.test(path) ? path : null;
+    return fallbackPublicUrl();
   }
 }
 

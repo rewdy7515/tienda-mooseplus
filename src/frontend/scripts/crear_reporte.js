@@ -67,28 +67,6 @@ const sanitizeFileName = (name) => {
   return base.replace(/[^a-zA-Z0-9._-]/g, "_");
 };
 
-const extractPrivateAssetPath = (rawValue) => {
-  const raw = String(rawValue || "").trim();
-  if (!raw) return "";
-  if (!/^https?:\/\//i.test(raw)) return raw.replace(/^\/+/, "");
-  try {
-    const parsed = new URL(raw);
-    const match = parsed.pathname.match(
-      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
-    );
-    if (match && match[1] === "private_assets" && match[2]) {
-      return decodeURIComponent(match[2]);
-    }
-    const idx = parsed.pathname.indexOf("/private_assets/");
-    if (idx >= 0) {
-      return decodeURIComponent(parsed.pathname.slice(idx + "/private_assets/".length));
-    }
-  } catch (_err) {
-    // noop
-  }
-  return raw;
-};
-
 const asInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -1039,15 +1017,19 @@ async function uploadEvidence(file, userId) {
   if (!file) return null;
   const safeName = sanitizeFileName(file.name);
   const uniqueName = `reporte-${userId}-${Date.now()}-${safeName}`;
-  const renamedFile = new File([file], uniqueName, { type: file.type });
-  const { urls, error } = await uploadComprobantes([renamedFile]);
+  const payloadFile = {
+    name: uniqueName,
+    type: file.type,
+    arrayBuffer: () => file.arrayBuffer(),
+  };
+  const { urls, error } = await uploadComprobantes([payloadFile]);
   if (error || !urls?.length) {
     console.error("upload evidence error", error);
     throw error || new Error("No se pudo subir la evidencia");
   }
   const first = urls[0] || null;
   if (!first) return null;
-  return extractPrivateAssetPath(first);
+  return String(first).trim();
 }
 
 async function handleSubmit(e) {
@@ -1109,7 +1091,13 @@ async function handleSubmit(e) {
       if (imagenResuelta) return imagenPath;
       imagenResuelta = true;
       if (file && file.type?.startsWith("image/")) {
-        imagenPath = await uploadEvidence(file, id_usuario);
+        try {
+          imagenPath = await uploadEvidence(file, id_usuario);
+        } catch (uploadErr) {
+          console.error("upload reporte imagen error", uploadErr);
+          imagenPath = null;
+          alert("No se pudo subir la imagen. Se enviará el reporte sin imagen.");
+        }
       } else {
         imagenPath = null;
       }
