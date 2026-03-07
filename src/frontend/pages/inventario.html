@@ -364,8 +364,8 @@
       const sortVentasByFechaCorte = (ventas = []) => {
         const now = Date.now();
         return [...ventas].sort((a, b) => {
-          const da = parseFechaMs(a?.fecha_corte);
-          const db = parseFechaMs(b?.fecha_corte);
+          const da = parseFechaMs(getVentaFechaCorte(a));
+          const db = parseFechaMs(getVentaFechaCorte(b));
           if (da == null && db == null) return 0;
           if (da == null) return 1;
           if (db == null) return -1;
@@ -404,7 +404,7 @@
               const rowCorreo = isTrue(p?.plat_correo_cliente)
                 ? v.correo_cliente || ""
                 : v.correo || "";
-              const fechaCorteVenta = normalizeVentaFechaCorte(v.fecha_corte);
+              const fechaCorteVenta = getVentaFechaCorte(v);
               rows.push({
                 id_venta: v.id_venta ?? "",
                 nombre_cliente: v.nombre_cliente || "",
@@ -542,7 +542,7 @@
               ${showClave ? `<td class="copyable" data-label="Clave">${it.clave || ""}</td>` : ""}
               ${showPerfil ? `<td>${perfilVal}</td>` : ""}
               ${showPin ? `<td class="copyable" data-label="PIN">${it.pin || ""}</td>` : ""}
-              <td>${formatDate(it.fecha_corte_venta || it.fecha_corte)}</td>
+              <td>${formatDate(it.fecha_corte_venta)}</td>
               <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
               <td>
                 <div class="actions-inline">
@@ -732,7 +732,7 @@
           const items = [];
           (p.planes || []).forEach((planObj) => {
             (planObj.ventas || []).forEach((v) => {
-              const dias = diffDias(normalizeVentaFechaCorte(v.fecha_corte));
+              const dias = diffDias(getVentaFechaCorte(v));
               if (dias === null) return;
               const correoVal = isTrue(p?.plat_correo_cliente)
                 ? v.correo_cliente || ""
@@ -923,7 +923,7 @@
                       ${showClave ? `<td class="copyable" data-label="Clave">${v.clave || ""}</td>` : ""}
                       ${showPerfil ? `<td>${perfilVal}</td>` : ""}
                       ${showPin ? `<td class="copyable" data-label="PIN">${v.pin ?? ""}</td>` : ""}
-                      <td>${formatDate(normalizeVentaFechaCorte(v.fecha_corte))}</td>
+                      <td>${formatDate(getVentaFechaCorte(v))}</td>
                       <td>
                         <div class="actions-inline">
                           <button class="btn-small btn-renovar" data-venta="${
