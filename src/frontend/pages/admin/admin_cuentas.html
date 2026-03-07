@@ -1011,6 +1011,36 @@
         }
         return { label: "Activo", className: "activo" };
       };
+      const isEligibleForCredChangeNotification = (venta = {}) => {
+        if (!venta || venta.suspendido === true) return false;
+        const fechaCorte = String(venta.fecha_corte || "").trim();
+        if (!fechaCorte) return false;
+        return !isOnOrBeforeToday(fechaCorte);
+      };
+      const getEligibleUserIdsFromVentas = (ventas = []) =>
+        Array.from(
+          new Set(
+            (ventas || [])
+              .filter((v) => isEligibleForCredChangeNotification(v))
+              .map((v) => Number(v?.id_usuario))
+              .filter((id) => Number.isFinite(id) && id > 0),
+          ),
+        );
+      const mergeVentasRows = (...groups) => {
+        const byVenta = new Map();
+        (groups || []).forEach((rows) => {
+          (rows || []).forEach((row) => {
+            const key = Number(row?.id_venta);
+            if (Number.isFinite(key) && key > 0) {
+              if (!byVenta.has(key)) byVenta.set(key, row);
+              return;
+            }
+            const altKey = `${row?.id_usuario || "u"}|${row?.id_cuenta || "c"}|${row?.id_cuenta_miembro || "cm"}|${row?.fecha_corte || "f"}`;
+            if (!byVenta.has(altKey)) byVenta.set(altKey, row);
+          });
+        });
+        return Array.from(byVenta.values());
+      };
       const renderFechaEditCell = (fechaCorte, ventaId) => {
         const fechaValue = fechaCorte || "";
         const fechaFmt = formatDDMMYYYY(fechaValue) || "";
@@ -7954,9 +7984,35 @@
               }
             }
 
-            const userIds = pickNotificationUserIds("pin_actualizado", {
-              ventaUserId: ventaPerfil?.id_usuario,
-            });
+            let ventasRelacionadasPin = [];
+            if (perfilId) {
+              const { data: ventasPerfilRows, error: ventasPerfilErr } = await supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido")
+                .eq("id_perfil", perfilId);
+              if (ventasPerfilErr) throw ventasPerfilErr;
+              ventasRelacionadasPin = mergeVentasRows(
+                ventasRelacionadasPin,
+                ventasPerfilRows || [],
+              );
+            }
+            if (cuentaIdsCandidatas.size) {
+              const ids = Array.from(cuentaIdsCandidatas);
+              const idsCsv = ids.join(",");
+              const { data: ventasCuentaRows, error: ventasCuentaErr } = await supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido")
+                .or(`id_cuenta.in.(${idsCsv}),id_cuenta_miembro.in.(${idsCsv})`);
+              if (ventasCuentaErr) throw ventasCuentaErr;
+              ventasRelacionadasPin = mergeVentasRows(
+                ventasRelacionadasPin,
+                ventasCuentaRows || [],
+              );
+            }
+            const eligibleUserIdsPin = getEligibleUserIdsFromVentas(
+              ventasRelacionadasPin,
+            );
+            const userIds = eligibleUserIdsPin;
             if (userIds.length) {
               const notif = buildNotificationPayload(
                 "pin_actualizado",
@@ -8039,28 +8095,28 @@
               if (ventasDomErr) throw ventasDomErr;
             }
 
-            // Notificar cambio de clave a usuarios con fecha_corte >= mañana y no suspendidos
-            const { data: ventasUsuarios, error: ventErr } = await supabase
-              .from("ventas")
-              .select("id_usuario, fecha_corte, suspendido")
-              .eq("id_cuenta", modalState.targetId);
-            if (ventErr) throw ventErr;
-
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-            const userIds = Array.from(
-              new Set(
-                (ventasUsuarios || [])
-                  .filter((v) => {
-                    if (v?.suspendido === true) return false;
-                    if (!v?.fecha_corte) return false;
-                    return v.fecha_corte >= tomorrowStr;
-                  })
-                  .map((v) => v.id_usuario)
-                  .filter(Boolean),
-              ),
+            let ventasClaveRows = [];
+            const targetCuentaId = Number(modalState.targetId);
+            if (Number.isFinite(targetCuentaId) && targetCuentaId > 0) {
+              const { data: ventasCuentaRows, error: ventErr } = await supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido")
+                .or(`id_cuenta.eq.${targetCuentaId},id_cuenta_miembro.eq.${targetCuentaId}`);
+              if (ventErr) throw ventErr;
+              ventasClaveRows = mergeVentasRows(ventasClaveRows, ventasCuentaRows || []);
+            }
+            if (isCuentaDominio && correoCuentaDominio) {
+              const { data: ventasDomRows, error: ventasDomErrQ } = await supabase
+                .from("ventas")
+                .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido")
+                .eq("correo_miembro", correoCuentaDominio);
+              if (ventasDomErrQ) throw ventasDomErrQ;
+              ventasClaveRows = mergeVentasRows(ventasClaveRows, ventasDomRows || []);
+            }
+            const eligibleUserIdsClave = getEligibleUserIdsFromVentas(
+              ventasClaveRows,
             );
+            const userIds = eligibleUserIdsClave;
             if (userIds.length) {
               const notif = buildNotificationPayload(
                 "clave_actualizada",

@@ -770,7 +770,8 @@
           .from("ordenes")
           .select(
             "id_orden, id_usuario, id_metodo_de_pago, id_admin, id_carrito, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada, checkout_finalizado"
-          );
+          )
+          .eq("marcado_pago", true);
         if (!canManageOrdenes) {
           query = query.eq("id_usuario", currentUser?.id_usuario ?? -1);
         }

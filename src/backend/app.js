@@ -1015,6 +1015,101 @@ if (NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED) {
   });
 }
 
+const normalizeMontoBs = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  let clean = raw;
+  if (raw.includes(".") && raw.includes(",")) {
+    clean = raw.replace(/\./g, "").replace(",", ".");
+  } else if (raw.includes(",")) {
+    clean = raw.replace(",", ".");
+  }
+  const num = Number(clean);
+  return Number.isFinite(num) ? Math.round(num * 100) / 100 : null;
+};
+
+const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+
+const extractRefCandidates = (text) => {
+  const raw = String(text || "");
+  const matches = raw.match(/\d{4,}/g) || [];
+  return matches.map((m) => String(m).trim()).filter(Boolean);
+};
+
+const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
+  const pagoId = Number(pagoMovilRow?.id || 0);
+  if (!pagoId) return { matched: false, reason: "invalid_pago_id" };
+
+  const pagoMonto = normalizeMontoBs(pagoMovilRow?.monto_bs);
+  const refCandidates = [
+    ...extractRefCandidates(pagoMovilRow?.texto || ""),
+    ...extractRefCandidates(pagoMovilRow?.referencia || ""),
+  ];
+  const refLast4Set = new Set(
+    refCandidates
+      .map((r) => normalizeReferenceDigits(r))
+      .filter((r) => r.length >= 4)
+      .map((r) => r.slice(-4)),
+  );
+  if (!refLast4Set.size || !Number.isFinite(pagoMonto)) {
+    return { matched: false, reason: "missing_ref_or_amount" };
+  }
+
+  const { data: pendingOrders, error: ordErr } = await supabaseAdmin
+    .from("ordenes")
+    .select(
+      "id_orden, id_usuario, referencia, monto_bs, total, tasa_bs, id_metodo_de_pago, marcado_pago, pago_verificado, en_espera, orden_cancelada, fecha, hora_orden",
+    )
+    .eq("id_metodo_de_pago", 1)
+    .eq("marcado_pago", true)
+    .eq("pago_verificado", false)
+    .eq("orden_cancelada", false)
+    .order("id_orden", { ascending: false })
+    .limit(400);
+  if (ordErr) throw ordErr;
+
+  const computeOrderMontoBs = (orden) => {
+    const direct = normalizeMontoBs(orden?.monto_bs);
+    if (Number.isFinite(direct)) return direct;
+    const total = Number(orden?.total);
+    const tasa = Number(orden?.tasa_bs);
+    if (Number.isFinite(total) && Number.isFinite(tasa)) {
+      return Math.round(total * tasa * 100) / 100;
+    }
+    return null;
+  };
+
+  const matchedOrder = (pendingOrders || []).find((orden) => {
+    const refDigits = normalizeReferenceDigits(orden?.referencia);
+    if (refDigits.length < 4) return false;
+    const refLast4 = refDigits.slice(-4);
+    if (!refLast4Set.has(refLast4)) return false;
+    const montoOrdenBs = computeOrderMontoBs(orden);
+    if (!Number.isFinite(montoOrdenBs)) return false;
+    return Math.abs(montoOrdenBs - pagoMonto) <= 0.01;
+  });
+
+  if (!matchedOrder?.id_orden) {
+    return { matched: false, reason: "no_order_match" };
+  }
+
+  const refMatch =
+    refCandidates
+      .map((r) => normalizeReferenceDigits(r))
+      .find((r) => r.length >= 4 && r.slice(-4) === normalizeReferenceDigits(matchedOrder.referencia).slice(-4)) ||
+    null;
+
+  return {
+    matched: true,
+    id_orden: matchedOrder.id_orden,
+    id_usuario: matchedOrder.id_usuario || null,
+    pago_id: pagoId,
+    referencia_match: refMatch,
+    monto_bs_pago: pagoMonto,
+  };
+};
+
 app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async (req, res) => {
   clearCorsHeaders(res);
   try {
@@ -1066,7 +1161,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
     };
     const monto = normalizeMonto(montoMatch);
 
-    const { error: insErr } = await supabaseAdmin.from("pagomoviles").insert({
+    const payloadPagoMovil = {
       app: appName,
       titulo,
       texto,
@@ -1074,10 +1169,35 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       dispositivo,
       hash,
       monto_bs: monto,
-    });
+    };
+    const { data: insertedPagoMovil, error: insErr } = await supabaseAdmin
+      .from("pagomoviles")
+      .insert(payloadPagoMovil)
+      .select("id, referencia, texto, monto_bs")
+      .single();
     if (insErr) throw insErr;
 
-    return res.json({ ok: true, duplicado: false });
+    let matchResult = { matched: false, reason: "not_checked" };
+    try {
+      matchResult = await autoMatchPagoMovilAgainstOrders(insertedPagoMovil || {});
+      if (matchResult?.matched) {
+        console.log("[bdv/notify] pago conciliado con orden", matchResult);
+      } else {
+        console.log("[bdv/notify] pago recibido sin orden coincidente", {
+          pago_id: insertedPagoMovil?.id || null,
+          reason: matchResult?.reason || "unknown",
+        });
+      }
+    } catch (matchErr) {
+      console.error("[bdv/notify] conciliacion automatica error", matchErr);
+    }
+
+    return res.json({
+      ok: true,
+      duplicado: false,
+      coincidencia_orden: matchResult?.matched === true,
+      id_orden: matchResult?.id_orden || null,
+    });
   } catch (err) {
     console.error("bdv notify error", err);
     return res.status(500).json({ error: "Internal error" });
@@ -1890,9 +2010,7 @@ const processOrderFromItems = async ({
     const monto = Number(base.toFixed(2));
     const ventaAnt = ventaMap[it.id_venta] || {};
     const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
-    const platId = Number(price?.id_plataforma) || null;
-    const entregaInmediata = isTrue(platInfoById?.[platId]?.entrega_inmediata);
-    const renovarPendiente = !entregaInmediata || isSuspendidaAnt;
+    const renovarPendiente = isSuspendidaAnt;
     if (renovarPendiente) renovacionesPendientesCount += 1;
     const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
     const isCuentaCompletaRenov =
@@ -4410,6 +4528,55 @@ app.delete("/api/session", (_req, res) => {
   res.json({ ok: true });
 });
 
+const truncateText = (value, max = 2000) => {
+  const txt = String(value ?? "");
+  return txt.length > max ? `${txt.slice(0, max)}…` : txt;
+};
+
+app.post("/api/client-errors", jsonParser, async (req, res) => {
+  try {
+    const sessionUserId = parseSessionUserId(req);
+    const body = req?.body && typeof req.body === "object" ? req.body : {};
+    const asInt = (value) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? Math.trunc(num) : null;
+    };
+    const safeMetadata =
+      body?.metadata && typeof body.metadata === "object" ? body.metadata : null;
+
+    const payload = {
+      id_usuario: Number.isFinite(Number(sessionUserId)) ? Number(sessionUserId) : null,
+      level: truncateText(body?.level || "error", 20),
+      kind: truncateText(body?.kind || "runtime", 50),
+      message: truncateText(body?.message || "Frontend error", 4000),
+      stack: truncateText(body?.stack || "", 12000),
+      source: truncateText(body?.source || "", 1200),
+      line: asInt(body?.line),
+      column: asInt(body?.column),
+      page_url: truncateText(body?.page_url || "", 2000),
+      page_path: truncateText(body?.page_path || "", 600),
+      user_agent: truncateText(body?.user_agent || req.get("user-agent") || "", 1200),
+      metadata: safeMetadata,
+      occurred_at: body?.occurred_at || new Date().toISOString(),
+    };
+
+    const { error } = await supabaseAdmin.from("frontend_error_logs").insert(payload);
+    if (error) {
+      if (String(error.code || "") === "42P01") {
+        return res
+          .status(503)
+          .json({ ok: false, tableMissing: true, error: "Tabla frontend_error_logs no existe." });
+      }
+      throw error;
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[client-errors] save error", err);
+    return res.status(500).json({ ok: false, error: "No se pudo guardar el error de cliente." });
+  }
+});
+
 // Inventario: ventas por usuario autenticado agrupadas por plataforma
 app.get("/api/inventario", async (req, res) => {
   try {
@@ -4434,6 +4601,7 @@ app.get("/api/inventario", async (req, res) => {
           id_cuenta,
           id_plataforma,
           correo,
+          pin,
           clave,
           venta_perfil,
           venta_miembro,
@@ -4453,6 +4621,7 @@ app.get("/api/inventario", async (req, res) => {
           id_cuenta,
           id_plataforma,
           correo,
+          pin,
           clave,
           venta_perfil,
           venta_miembro,
@@ -4524,7 +4693,7 @@ app.get("/api/inventario", async (req, res) => {
     if (memberIds.length) {
       const { data: memberCuentas, error: memberErr } = await supabaseAdmin
         .from("cuentas")
-        .select("id_cuenta, correo, clave")
+        .select("id_cuenta, correo, clave, pin")
         .in("id_cuenta", memberIds);
       if (memberErr) throw memberErr;
       memberCuentaMap = (memberCuentas || []).reduce((acc, c) => {
@@ -4580,7 +4749,12 @@ app.get("/api/inventario", async (req, res) => {
         correo_cliente: row.correo_miembro || "",
         clave: memberCuenta?.clave || cuentaData?.clave || "",
         n_perfil: row.perfiles?.n_perfil ?? null,
-        pin: row.perfiles?.pin ?? row.tarjetas_de_regalo?.pin ?? null,
+        pin:
+          row.perfiles?.pin ??
+          row.tarjetas_de_regalo?.pin ??
+          memberCuenta?.pin ??
+          cuentaData?.pin ??
+          null,
         perfil_hogar: row.perfiles?.perfil_hogar ?? null,
         fecha_corte: row.fecha_corte,
         venta_perfil: row.cuentas?.venta_perfil ?? row.cuentas_miembro?.venta_perfil,

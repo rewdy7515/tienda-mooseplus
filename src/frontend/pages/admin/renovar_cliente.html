@@ -1622,7 +1622,6 @@
             }
           }
           const updates = seleccionActual.map(async (it) => {
-            const entregaInmediata = resolveEntregaInmediata(it.entrega_inmediata);
             const isSuspendido = isTrue(it.suspendido);
             let baseDate = it.fecha_corte ? new Date(it.fecha_corte) : new Date();
             if (Number.isNaN(baseDate.valueOf())) baseDate = new Date();
@@ -1647,7 +1646,7 @@
             if (isCuentaCompletaItem) {
               updatePayload.cuenta_pagada_admin = false;
             }
-            updatePayload.pendiente = !entregaInmediata || isSuspendido;
+            updatePayload.pendiente = isSuspendido;
             const { error } = await supabase
               .from("ventas")
               .update(updatePayload)
@@ -1877,7 +1876,6 @@
           return;
         }
         const monto = montoBase * meses;
-        const entregaInmediata = resolveEntregaInmediata(modalRowContext.entrega_inmediata);
         const isSuspendido = isTrue(modalRowContext.suspendido);
         const baseFecha = modalRowContext.fecha_corte || "";
         const baseForCalc = baseFecha || new Date().toISOString().slice(0, 10);
@@ -1910,7 +1908,7 @@
           if (esCuentaCompleta) {
             updatePayload.cuenta_pagada_admin = false;
           }
-          updatePayload.pendiente = !entregaInmediata || isSuspendido;
+          updatePayload.pendiente = isSuspendido;
           const { error: updErr } = await supabase
             .from("ventas")
             .update(updatePayload)

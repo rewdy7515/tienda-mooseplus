@@ -99,6 +99,63 @@ const resolveCuentaIdByCorreo = (correoRaw) => {
   return null;
 };
 
+const resolveCuentaIdByCorreoRobusto = async (correoRaw) => {
+  const fromMap = resolveCuentaIdByCorreo(correoRaw);
+  if (fromMap) return Number(fromMap);
+
+  const correo = String(correoRaw || "").trim();
+  const plataformaId = Number(selectedPlataformaId);
+  const userId = requireSession();
+  if (!correo || !Number.isFinite(plataformaId) || plataformaId <= 0 || !userId) {
+    return null;
+  }
+
+  const { data: cuentasRows, error: cuentasErr } = await supabase
+    .from("cuentas")
+    .select("id_cuenta")
+    .eq("id_plataforma", plataformaId)
+    .ilike("correo", correo)
+    .limit(20);
+  if (cuentasErr) {
+    console.error("resolve cuenta por correo error", cuentasErr);
+    return null;
+  }
+
+  const candidateIds = Array.from(
+    new Set(
+      (cuentasRows || [])
+        .map((r) => Number(r?.id_cuenta))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  );
+  if (!candidateIds.length) return null;
+
+  const idsCsv = candidateIds.join(",");
+  const { data: ventasRows, error: ventasErr } = await supabase
+    .from("ventas")
+    .select("id_cuenta, id_cuenta_miembro")
+    .eq("id_usuario", userId)
+    .or(`id_cuenta.in.(${idsCsv}),id_cuenta_miembro.in.(${idsCsv})`)
+    .limit(50);
+  if (ventasErr) {
+    console.error("resolve cuenta desde ventas error", ventasErr);
+    return null;
+  }
+
+  const vinculadas = new Set();
+  (ventasRows || []).forEach((row) => {
+    const main = Number(row?.id_cuenta);
+    const member = Number(row?.id_cuenta_miembro);
+    if (Number.isFinite(main) && main > 0) vinculadas.add(main);
+    if (Number.isFinite(member) && member > 0) vinculadas.add(member);
+  });
+
+  for (const id of candidateIds) {
+    if (vinculadas.has(id)) return id;
+  }
+  return null;
+};
+
 const hideCorreoSugerencias = () => {
   correosSugerenciasVisibles = [];
   if (!correoSugerenciasEl) return;
@@ -912,7 +969,9 @@ async function handleSubmit(e) {
     const id_usuario = requireSession();
     const id_plataforma = selectedPlataformaId ? Number(selectedPlataformaId) : null;
     if (!selectedCuentaId) {
-      const cuentaFromInput = resolveCuentaIdByCorreo(inputCorreoCuenta?.value);
+      const cuentaFromInput = await resolveCuentaIdByCorreoRobusto(
+        inputCorreoCuenta?.value,
+      );
       if (cuentaFromInput) {
         selectedCuentaId = cuentaFromInput;
       }

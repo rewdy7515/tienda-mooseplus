@@ -53,6 +53,157 @@ const API_BASE = (() => {
 })();
 
 let authRecoveryInProgress = false;
+let clientErrorReporterInit = false;
+
+const CLIENT_ERROR_MAX_REPORTS_PER_PAGE = 40;
+const CLIENT_ERROR_DEDUP_WINDOW_MS = 15000;
+let clientErrorReportsSent = 0;
+const clientErrorLastSentByKey = new Map();
+
+const trimText = (value, max = 2000) => {
+  const txt = String(value ?? "");
+  return txt.length > max ? `${txt.slice(0, max)}…` : txt;
+};
+
+const safeSerialize = (value, maxLen = 4000) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return trimText(value, maxLen);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Error) {
+    const stack = trimText(value.stack || "", maxLen);
+    if (stack) return stack;
+    return trimText(value.message || value.name || "Error", maxLen);
+  }
+  try {
+    return trimText(JSON.stringify(value), maxLen);
+  } catch (_err) {
+    try {
+      return trimText(String(value), maxLen);
+    } catch (_err2) {
+      return "";
+    }
+  }
+};
+
+const shouldSendClientError = (dedupKey = "") => {
+  if (clientErrorReportsSent >= CLIENT_ERROR_MAX_REPORTS_PER_PAGE) return false;
+  const key = String(dedupKey || "").trim();
+  if (!key) return true;
+  const now = Date.now();
+  const last = Number(clientErrorLastSentByKey.get(key) || 0);
+  if (last && now - last < CLIENT_ERROR_DEDUP_WINDOW_MS) return false;
+  clientErrorLastSentByKey.set(key, now);
+  return true;
+};
+
+const postClientError = async (payload = {}) => {
+  try {
+    await fetch(`${API_BASE}/api/client-errors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      keepalive: true,
+      body: JSON.stringify(payload),
+    });
+  } catch (_err) {
+    // noop: nunca bloquear UX por fallas de logging
+  }
+};
+
+const reportClientError = (input = {}) => {
+  try {
+    if (typeof window === "undefined") return;
+    const payload = {
+      level: trimText(input.level || "error", 20),
+      kind: trimText(input.kind || "runtime", 40),
+      message: trimText(input.message || "Frontend error", 4000),
+      stack: trimText(input.stack || "", 12000),
+      source: trimText(input.source || "", 1000),
+      line: Number.isFinite(Number(input.line)) ? Number(input.line) : null,
+      column: Number.isFinite(Number(input.column)) ? Number(input.column) : null,
+      page_url: trimText(window.location.href || "", 2000),
+      page_path: trimText(window.location.pathname || "", 500),
+      user_agent: trimText(navigator.userAgent || "", 1000),
+      metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : null,
+      occurred_at: new Date().toISOString(),
+    };
+    const dedupKey = [
+      payload.kind,
+      payload.message,
+      payload.source,
+      payload.line ?? "",
+      payload.column ?? "",
+    ].join("|");
+    if (!shouldSendClientError(dedupKey)) return;
+    clientErrorReportsSent += 1;
+    postClientError(payload);
+  } catch (_err) {
+    // noop
+  }
+};
+
+const initClientErrorReporter = () => {
+  if (clientErrorReporterInit || typeof window === "undefined") return;
+  clientErrorReporterInit = true;
+
+  window.addEventListener("error", (event) => {
+    const err = event?.error;
+    reportClientError({
+      level: "error",
+      kind: "window_error",
+      message:
+        trimText(event?.message || err?.message || "window error", 4000) || "window error",
+      stack: safeSerialize(err?.stack || err || "", 12000),
+      source: trimText(event?.filename || "", 1000),
+      line: event?.lineno,
+      column: event?.colno,
+    });
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event?.reason;
+    const message =
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === "string"
+          ? reason
+          : "Unhandled promise rejection";
+    reportClientError({
+      level: "error",
+      kind: "unhandled_rejection",
+      message: trimText(message || "Unhandled promise rejection", 4000),
+      stack: safeSerialize(reason instanceof Error ? reason.stack || reason : reason, 12000),
+    });
+  });
+
+  const originalConsoleError = console.error?.bind(console);
+  if (typeof originalConsoleError === "function") {
+    console.error = (...args) => {
+      try {
+        const first = args[0];
+        const maybeError = first instanceof Error ? first : null;
+        const message =
+          maybeError?.message ||
+          args.map((part) => safeSerialize(part, 600)).filter(Boolean).join(" | ") ||
+          "console.error";
+        const stack = maybeError?.stack
+          ? safeSerialize(maybeError.stack, 12000)
+          : safeSerialize(args, 12000);
+        reportClientError({
+          level: "error",
+          kind: "console_error",
+          message: trimText(message, 4000),
+          stack,
+        });
+      } catch (_err) {
+        // noop
+      }
+      originalConsoleError(...args);
+    };
+  }
+};
+
+initClientErrorReporter();
 
 const isAuthFatalErrorMessage = (msg = "") => {
   const text = String(msg || "").toLowerCase();

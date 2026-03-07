@@ -121,6 +121,7 @@ if (!window.__headerActionsInit) {
         .from("ordenes")
         .select("id_orden")
         .in("id_metodo_de_pago", metodosNoAutomaticos)
+        .eq("marcado_pago", true)
         .neq("pago_verificado", true)
         .neq("orden_cancelada", true)
         .limit(1);
