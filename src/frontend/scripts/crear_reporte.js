@@ -87,7 +87,47 @@ async function isAutoReemplazoCuentaInactivaEnabled() {
   }
 }
 
+async function findVentaAsociadaParaReporte({ idUsuario, idCuenta, idPerfil }) {
+  const userIdNum = Number(idUsuario);
+  const cuentaIdNum = Number(idCuenta);
+  if (!Number.isFinite(userIdNum) || userIdNum <= 0) return null;
+  if (!Number.isFinite(cuentaIdNum) || cuentaIdNum <= 0) return null;
+
+  let query = supabase
+    .from("ventas")
+    .select("id_venta, reportado, id_perfil")
+    .eq("id_usuario", userIdNum)
+    .or(`id_cuenta.eq.${cuentaIdNum},id_cuenta_miembro.eq.${cuentaIdNum}`)
+    .order("id_venta", { ascending: false })
+    .limit(1);
+
+  const idPerfilNum = Number(idPerfil);
+  if (Number.isFinite(idPerfilNum) && idPerfilNum > 0) {
+    query = query.eq("id_perfil", idPerfilNum);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const found = data?.[0] || null;
+  if (found) return found;
+
+  if (Number.isFinite(idPerfilNum) && idPerfilNum > 0) {
+    const { data: fallbackData, error: fallbackErr } = await supabase
+      .from("ventas")
+      .select("id_venta, reportado, id_perfil")
+      .eq("id_usuario", userIdNum)
+      .or(`id_cuenta.eq.${cuentaIdNum},id_cuenta_miembro.eq.${cuentaIdNum}`)
+      .order("id_venta", { ascending: false })
+      .limit(1);
+    if (fallbackErr) throw fallbackErr;
+    return fallbackData?.[0] || null;
+  }
+
+  return null;
+}
+
 async function markVentaPendienteByReporteRule({
+  ventaId,
   idUsuario,
   idCuenta,
   idPerfil,
@@ -109,26 +149,23 @@ async function markVentaPendienteByReporteRule({
   if (plataformaErr) throw plataformaErr;
   if (isTrue(plataformaData?.entrega_inmediata)) return;
 
-  let ventaQuery = supabase
-    .from("ventas")
-    .select("id_venta")
-    .eq("id_usuario", idUsuario)
-    .or(`id_cuenta.eq.${cuentaIdNum},id_cuenta_miembro.eq.${cuentaIdNum}`)
-    .order("id_venta", { ascending: false })
-    .limit(1);
-  const idPerfilNum = Number(idPerfil);
-  if (Number.isFinite(idPerfilNum) && idPerfilNum > 0) {
-    ventaQuery = ventaQuery.eq("id_perfil", idPerfilNum);
+  const ventaIdNum = Number(ventaId);
+  let ventaFinalId = Number.isFinite(ventaIdNum) && ventaIdNum > 0 ? ventaIdNum : null;
+  if (!ventaFinalId) {
+    const ventaInfo = await findVentaAsociadaParaReporte({
+      idUsuario,
+      idCuenta: cuentaIdNum,
+      idPerfil,
+    });
+    const foundVentaId = Number(ventaInfo?.id_venta);
+    if (!Number.isFinite(foundVentaId) || foundVentaId <= 0) return;
+    ventaFinalId = foundVentaId;
   }
-  const { data: ventaRows, error: ventaErr } = await ventaQuery;
-  if (ventaErr) throw ventaErr;
-  const ventaId = Number(ventaRows?.[0]?.id_venta);
-  if (!Number.isFinite(ventaId) || ventaId <= 0) return;
 
   const { error: updErr } = await supabase
     .from("ventas")
     .update({ pendiente: true })
-    .eq("id_venta", ventaId);
+    .eq("id_venta", ventaFinalId);
   if (updErr) throw updErr;
 }
 
@@ -1055,6 +1092,17 @@ async function handleSubmit(e) {
     }
     const id_cuenta = selectedCuentaId ? Number(selectedCuentaId) : null;
     const id_perfil = selectedPerfilId ? Number(selectedPerfilId) : null;
+    const ventaAsociada = await findVentaAsociadaParaReporte({
+      idUsuario: id_usuario,
+      idCuenta: id_cuenta,
+      idPerfil: id_perfil,
+    });
+    if (isTrue(ventaAsociada?.reportado)) {
+      alert("Ya hay un reporte activo de esta venta");
+      submitBtn && (submitBtn.disabled = false);
+      return;
+    }
+    const ventaAsociadaId = Number(ventaAsociada?.id_venta) || null;
     const motivoOption = selectMotivo?.selectedOptions?.[0] || null;
     const motivoTipoRaw = String(motivoOption?.value || "").trim();
     const motivoLabel = (motivoOption?.dataset?.titulo || motivoOption?.textContent || "").trim();
@@ -1138,8 +1186,12 @@ async function handleSubmit(e) {
         window.location.href = "./report.html";
         return;
       }
+      if (ventaAsociadaId) {
+        await supabase.from("ventas").update({ reportado: true }).eq("id_venta", ventaAsociadaId);
+      }
       try {
         await markVentaPendienteByReporteRule({
+          ventaId: ventaAsociadaId,
           idUsuario: id_usuario,
           idCuenta: id_cuenta,
           idPerfil: id_perfil,
@@ -1174,8 +1226,12 @@ async function handleSubmit(e) {
       alert("No se pudo enviar el reporte. Intenta nuevamente.");
       return;
     }
+    if (ventaAsociadaId) {
+      await supabase.from("ventas").update({ reportado: true }).eq("id_venta", ventaAsociadaId);
+    }
     try {
       await markVentaPendienteByReporteRule({
+        ventaId: ventaAsociadaId,
         idUsuario: id_usuario,
         idCuenta: id_cuenta,
         idPerfil: id_perfil,

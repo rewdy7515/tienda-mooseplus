@@ -132,6 +132,17 @@ const getDescripcion = (row) => {
   return row.descripcion || "Otro...";
 };
 
+const getPlanLabelFromReporte = (row) => {
+  const cta = row?.cuentas || {};
+  const ventaPerfil = isTrue(cta?.venta_perfil);
+  const ventaMiembro = isTrue(cta?.venta_miembro);
+  if (ventaPerfil) return "Perfil";
+  if (!ventaPerfil && ventaMiembro) return "Miembro";
+  if (!ventaPerfil && !ventaMiembro) return "Cuenta completa";
+  if (Number(row?.id_perfil) > 0) return "Perfil";
+  return "Sin plan";
+};
+
 const notifyReporteCerrado = async (row) => {
   const reportId = Number(row?.id_reporte);
   const targetUserId = Number(row?.id_usuario);
@@ -268,35 +279,51 @@ const renderReportesList = (plataformas = []) => {
   }
   listEl.innerHTML = plataformas
     .map((p, idx) => {
-      const rowsHtml = (p.items || [])
-        .map((r) => {
-          const idFmt = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
-          const cliente =
-            [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
-          const correo = r.cuentas?.correo || "-";
-          const correoText = escapeHtml(correo);
-          const correoCopyAttr = escapeHtml(correo);
-          const correoCell = normalizeCopyValue(correo)
-            ? `<span class="correo-actions-inline">
-                <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
-                <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
-              </span>`
-            : correoText;
-          const motivo = getDescripcion(r);
-          const fecha = formatDate(r.fecha_creacion || null);
+      const planGroups = new Map();
+      (p.items || []).forEach((r) => {
+        const plan = getPlanLabelFromReporte(r);
+        if (!planGroups.has(plan)) planGroups.set(plan, []);
+        planGroups.get(plan).push(r);
+      });
+      const rowsHtml = Array.from(planGroups.entries())
+        .map(([plan, rows]) => {
+          const groupedRows = (rows || [])
+            .map((r) => {
+              const idFmt = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
+              const cliente =
+                [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
+              const correo = r.cuentas?.correo || "-";
+              const correoText = escapeHtml(correo);
+              const correoCopyAttr = escapeHtml(correo);
+              const correoCell = normalizeCopyValue(correo)
+                ? `<span class="correo-actions-inline">
+                    <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
+                    <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
+                  </span>`
+                : correoText;
+              const motivo = getDescripcion(r);
+              const fecha = formatDate(r.fecha_creacion || null);
+              return `
+                <tr>
+                  <td>${escapeHtml(idFmt)}</td>
+                  <td>${escapeHtml(cliente)}</td>
+                  <td>${correoCell}</td>
+                  <td>${escapeHtml(motivo)}</td>
+                  <td>${escapeHtml(fecha)}</td>
+                  <td>
+                    <div class="actions-inline">
+                      <button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle">Más detalles</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("");
           return `
-            <tr>
-              <td>${escapeHtml(idFmt)}</td>
-              <td>${escapeHtml(cliente)}</td>
-              <td>${correoCell}</td>
-              <td>${escapeHtml(motivo)}</td>
-              <td>${escapeHtml(fecha)}</td>
-              <td>
-                <div class="actions-inline">
-                  <button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle">Más detalles</button>
-                </div>
-              </td>
+            <tr class="plan-divider-row">
+              <td colspan="6">Plan: ${escapeHtml(plan)}</td>
             </tr>
+            ${groupedRows}
           `;
         })
         .join("");
