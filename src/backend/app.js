@@ -1880,6 +1880,27 @@ const getPrecioPicker = async (idUsuarioVentas) => {
   return { esMayorista, pickPrecio };
 };
 
+const isValidPrecioId = (value) => {
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0;
+};
+
+const assertItemsValidPrecioId = (items = []) => {
+  const invalidItem = (items || []).find((it) => !isValidPrecioId(it?.id_precio));
+  if (!invalidItem) return;
+  const err = new Error(
+    `No se puede procesar la venta: id_precio inválido (${invalidItem?.id_precio ?? "null"}).`,
+  );
+  err.code = "INVALID_PRECIO_ID";
+  err.httpStatus = 400;
+  err.details = {
+    id_item: invalidItem?.id_item ?? null,
+    id_venta: invalidItem?.id_venta ?? null,
+    id_precio: invalidItem?.id_precio ?? null,
+  };
+  throw err;
+};
+
 const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, tasa_bs }) => {
   const { pickPrecio } = await getPrecioPicker(idUsuarioVentas);
   const { data: items, error: itemErr } = await supabaseAdmin
@@ -1893,6 +1914,8 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
     const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
     return { items: [], priceMap: {}, platInfoById: {}, platNameById: {}, pickPrecio, total, tasaBs };
   }
+
+  assertItemsValidPrecioId(items);
 
   const preciosIds = (items || []).map((i) => i.id_precio).filter(Boolean);
   const { data: precios, error: precioErr } = await supabaseAdmin
@@ -5885,6 +5908,12 @@ app.post("/api/checkout", async (req, res) => {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
+    if (err?.code === "INVALID_PRECIO_ID") {
+      return res.status(Number(err?.httpStatus) || 400).json({
+        error: err?.message || "id_precio inválido en la venta",
+        details: err?.details || null,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -6096,6 +6125,12 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     console.error("[ordenes/procesar] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "INVALID_PRECIO_ID") {
+      return res.status(Number(err?.httpStatus) || 400).json({
+        error: err?.message || "id_precio inválido en la venta",
+        details: err?.details || null,
+      });
     }
     res.status(500).json({ error: err.message });
   }

@@ -3029,6 +3029,65 @@
         }
       };
 
+      const resolveRegistroServicioIdPrecio = async ({
+        perfilId = null,
+        cuentaId = null,
+        cuentaMiembroId = null,
+        plataformaId = null,
+        ventaPerfil = false,
+        ventaMiembro = false,
+      } = {}) => {
+        const perfilIdNum = toPositiveId(perfilId);
+        const cuentaIdNum = toPositiveId(cuentaId);
+        const cuentaMiembroIdNum = toPositiveId(cuentaMiembroId);
+        const plataformaIdNum = toPositiveId(plataformaId);
+
+        const fetchVentaPrecioBy = async (field, value) => {
+          const id = toPositiveId(value);
+          if (!id) return null;
+          const { data, error } = await supabase
+            .from("ventas")
+            .select("id_venta, id_precio")
+            .eq(field, id)
+            .not("id_precio", "is", null)
+            .gt("id_precio", 0)
+            .order("id_venta", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (error) throw error;
+          return toPositiveId(data?.id_precio);
+        };
+
+        // Prioriza coincidencias exactas del contexto de asignación.
+        const directChecks = [
+          ["id_perfil", perfilIdNum],
+          ["id_cuenta_miembro", cuentaMiembroIdNum],
+          ["id_cuenta", cuentaIdNum],
+          ...(ventaMiembro && cuentaIdNum ? [["id_cuenta_miembro", cuentaIdNum]] : []),
+        ];
+        for (const [field, value] of directChecks) {
+          const match = await fetchVentaPrecioBy(field, value);
+          if (match) return match;
+        }
+
+        if (!plataformaIdNum) return null;
+        const { data: precios, error: preciosErr } = await supabase
+          .from("precios")
+          .select("id_precio, completa, sub_cuenta")
+          .eq("id_plataforma", plataformaIdNum)
+          .order("id_precio", { ascending: true });
+        if (preciosErr) throw preciosErr;
+        const rows = Array.isArray(precios) ? precios : [];
+        if (!rows.length) return null;
+
+        const preferSubCuenta = ventaPerfil || ventaMiembro;
+        const preferred = preferSubCuenta
+          ? rows.find((p) => isTrue(p?.sub_cuenta) || !isTrue(p?.completa))
+          : rows.find((p) => isTrue(p?.completa) && !isTrue(p?.sub_cuenta));
+        const fallback = preferred || rows[0];
+        return toPositiveId(fallback?.id_precio);
+      };
+
       const bindPrecioInputEvents = (rootEl) => {
         if (!rootEl) return;
         rootEl.addEventListener("change", (e) => {
@@ -5483,6 +5542,7 @@
           const perfilId = btnRegistrar.dataset.perfil || null;
           const cuentaId = btnRegistrar.dataset.cuenta || currentCuentaId;
           let newVentaId = null;
+          let resolvedIdPrecio = null;
           if (!cuentaId) {
             alert("No se pudo identificar la cuenta.");
             return;
@@ -5605,6 +5665,17 @@
                   if (perfErr) throw perfErr;
                 }
               }
+              resolvedIdPrecio = await resolveRegistroServicioIdPrecio({
+                perfilId,
+                cuentaId,
+                cuentaMiembroId: isSpotify ? memberCuentaId : null,
+                plataformaId: currentCuentaDetalle?.plataformaId || null,
+                ventaPerfil: currentCuentaDetalle?.venta_perfil === true,
+                ventaMiembro: currentCuentaDetalle?.venta_miembro === true,
+              });
+              if (!resolvedIdPrecio) {
+                alert("Se pondrá id_precio = null");
+              }
               const { data: ventaRow, error } = await supabase
                 .from("ventas")
                 .insert({
@@ -5612,6 +5683,7 @@
                   id_cuenta: Number(cuentaId),
                   id_cuenta_miembro: isSpotify ? memberCuentaId : null,
                   id_perfil: perfilId ? Number(perfilId) : null,
+                  id_precio: resolvedIdPrecio,
                   fecha_corte: fechaVal,
                   fecha_pago: new Date().toISOString().slice(0, 10),
                   pendiente: false,
@@ -5658,12 +5730,24 @@
                 alert("Ingresa una fecha de corte.");
                 return;
               }
+              resolvedIdPrecio = await resolveRegistroServicioIdPrecio({
+                perfilId,
+                cuentaId,
+                cuentaMiembroId: null,
+                plataformaId: currentCuentaDetalle?.plataformaId || null,
+                ventaPerfil: currentCuentaDetalle?.venta_perfil === true,
+                ventaMiembro: currentCuentaDetalle?.venta_miembro === true,
+              });
+              if (!resolvedIdPrecio) {
+                alert("Se pondrá id_precio = null");
+              }
               const { data: ventaRow, error } = await supabase
                 .from("ventas")
                 .insert({
                   id_usuario: Number(finalUserId),
                   id_cuenta: Number(cuentaId),
                   id_perfil: perfilId ? Number(perfilId) : null,
+                  id_precio: resolvedIdPrecio,
                   fecha_corte: fechaVal,
                   fecha_pago: new Date().toISOString().slice(0, 10),
                   pendiente: false,
@@ -5728,7 +5812,7 @@
                   estadoCell.classList.add(estadoInfo.className);
               }
               if (precioCell) {
-                precioCell.innerHTML = renderPrecioVentaCell(newVentaId, null);
+                precioCell.innerHTML = renderPrecioVentaCell(newVentaId, resolvedIdPrecio);
               }
 
               let nPerfil = "";

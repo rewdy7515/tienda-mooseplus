@@ -131,59 +131,70 @@
         z-index: 1;
         background: #fff;
         border-radius: 14px;
-        width: min(96vw, 1200px);
-        height: min(92dvh, 900px);
-        max-width: 96vw;
-        max-height: 92dvh;
-        padding: 12px;
+        width: min(88vw, 860px);
+        height: min(80dvh, 640px);
+        max-width: 88vw;
+        max-height: 80dvh;
+        padding: 14px 14px 12px;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
         overflow: hidden;
       }
       .comprobante-modal-close {
         position: absolute;
-        top: 8px;
-        right: 8px;
-        border: 0;
-        width: 28px;
-        height: 28px;
+        top: 10px;
+        right: 10px;
+        border: 1px solid #d1d5db;
+        width: 32px;
+        height: 32px;
         border-radius: 999px;
-        background: rgba(0, 0, 0, 0.08);
+        background: #ffffff;
+        color: #111827;
         cursor: pointer;
-        font-size: 18px;
+        font-size: 20px;
+        font-weight: 700;
         line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
       .comprobante-modal-media {
         display: flex;
         align-items: center;
         justify-content: center;
         width: 100%;
-        height: calc(100% - 28px);
+        height: 100%;
+        padding-top: 18px;
       }
       .comprobante-modal-media img {
         display: block;
         width: auto;
         height: auto;
-        max-width: 100%;
-        max-height: 100%;
+        max-width: 78vw;
+        max-height: 70dvh;
         object-fit: contain;
         border-radius: 10px;
       }
       @media (max-width: 768px) {
         .comprobante-modal-card {
-          width: 98vw;
-          height: 88dvh;
-          padding: 10px;
-          border-radius: 12px;
+          width: 92vw;
+          height: 72dvh;
+          padding: 12px 12px 10px;
+          border-radius: 10px;
         }
         .comprobante-modal-close {
-          top: 6px;
-          right: 6px;
-          width: 30px;
-          height: 30px;
-          font-size: 20px;
+          top: 8px;
+          right: 8px;
+          width: 34px;
+          height: 34px;
+          font-size: 22px;
         }
         .comprobante-modal-media {
-          height: calc(100% - 34px);
+          height: 100%;
+          padding-top: 16px;
+        }
+        .comprobante-modal-media img {
+          max-width: 86vw;
+          max-height: 60dvh;
         }
       }
       .saldo-modal {
@@ -305,7 +316,9 @@
     <div id="comprobante-modal" class="comprobante-modal hidden" aria-hidden="true">
       <div class="comprobante-modal-backdrop" data-close-comprobante></div>
       <div class="comprobante-modal-card" role="dialog" aria-modal="true" aria-label="Comprobante">
-        <button type="button" class="comprobante-modal-close" data-close-comprobante>×</button>
+        <button type="button" class="comprobante-modal-close" data-close-comprobante aria-label="Cerrar modal">
+          X
+        </button>
         <div class="comprobante-modal-media">
           <img id="comprobante-modal-img" alt="Comprobante de pago" />
         </div>
