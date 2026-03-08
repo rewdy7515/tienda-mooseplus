@@ -1055,6 +1055,9 @@
       const renderFechaEditCell = (fechaCorte, ventaId) => {
         const fechaValue = fechaCorte || "";
         const fechaFmt = formatDDMMYYYY(fechaValue) || "";
+        if (!isSuperadmin) {
+          return `<div class="fecha-wrap"><span class="fecha-text">${fechaFmt}</span></div>`;
+        }
         const ventaAttr = ventaId ? `data-venta="${ventaId}"` : "";
         return `<div class="fecha-wrap">
             <span class="fecha-text">${fechaFmt}</span>
@@ -1067,6 +1070,9 @@
       const renderFechaInlineCell = (fechaCorte, dataAttrs = "") => {
         const fechaValue = fechaCorte || "";
         const fechaFmt = formatDDMMYYYY(fechaValue) || "-";
+        if (!isSuperadmin) {
+          return `<div class="fecha-wrap"><span class="fecha-text">${fechaFmt}</span></div>`;
+        }
         return `<div class="fecha-wrap">
             <span class="fecha-text">${fechaFmt}</span>
             <button type="button" class="btn-edit-fecha">✏️</button>

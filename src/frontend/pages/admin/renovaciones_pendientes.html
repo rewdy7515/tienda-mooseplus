@@ -22,10 +22,19 @@
       }
       .rp-check-cell {
         text-align: center;
+        white-space: nowrap;
       }
       .rp-check-cell input[type="checkbox"] {
         width: 18px;
         height: 18px;
+      }
+      .rp-check-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .rp-copyable {
+        cursor: pointer;
       }
       .rp-modal-card {
         width: min(96vw, 1080px);
@@ -93,6 +102,7 @@
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
 
       requireSession();
       attachLogoHome();
@@ -189,12 +199,20 @@
                   <tr>
                     <td>#${String(row.id_venta).padStart(4, "0")}</td>
                     <td>${escapeHtml(row.cliente || "-")}</td>
-                    <td>${escapeHtml(row.correo || "-")}</td>
-                    <td>${escapeHtml(row.clave || "-")}</td>
+                    <td><span class="rp-copyable" data-copy="${escapeHtml(row.correo || "")}" title="Copiar correo">${escapeHtml(row.correo || "-")}</span></td>
+                    <td><span class="rp-copyable" data-copy="${escapeHtml(row.clave || "")}" title="Copiar clave">${escapeHtml(row.clave || "-")}</span></td>
                     <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
                     <td data-provider-venta="${row.id_venta}">${escapeHtml(row.proveedor || "-")}</td>
                     <td class="rp-check-cell">
-                      <input type="checkbox" class="rp-row-check" data-venta="${row.id_venta}" ${checked} />
+                      <span class="rp-check-actions">
+                        <input type="checkbox" class="rp-row-check" data-venta="${row.id_venta}" ${checked} />
+                        <button
+                          type="button"
+                          class="btn-outline btn-small rp-copy-row"
+                          data-correo="${escapeHtml(row.correo || "")}"
+                          data-clave="${escapeHtml(row.clave || "")}"
+                        >Copiar</button>
+                      </span>
                     </td>
                   </tr>
                 `;
@@ -333,7 +351,7 @@
           const { data: ventas, error: ventasErr } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, pendiente, suspendido, usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa)",
+              "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, pendiente, suspendido, completa, usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa)",
             )
             .eq("cuenta_pagada_admin", false)
             .order("id_venta", { ascending: false });
@@ -349,7 +367,9 @@
               venta?.cuentas_miembro?.id_cuenta ? venta.cuentas_miembro : venta.cuentas;
             if (!sourceAccount) return;
             if (isTrue(sourceAccount.inactiva)) return;
-            if (!isTrue(sourceAccount.completa)) return;
+            const completaVenta = isTrue(venta?.completa);
+            const completaCuenta = isTrue(sourceAccount.completa);
+            if (!completaVenta && !completaCuenta) return;
             const idPlataforma = Number(sourceAccount.id_plataforma || 0);
             if (!idPlataforma) return;
             const idProveedor = Number(sourceAccount.id_proveedor || 0) || null;
@@ -442,6 +462,23 @@
           selectedVentas.delete(idVenta);
         }
         updateRenovarButton();
+      });
+
+      tablasEl?.addEventListener("click", async (event) => {
+        const copyField = event.target.closest(".rp-copyable");
+        if (copyField) {
+          const value = String(copyField.dataset.copy || "").trim();
+          if (!value) return;
+          await copyTextNotify(value);
+          return;
+        }
+        const copyBtn = event.target.closest(".rp-copy-row");
+        if (!copyBtn) return;
+        const correo = String(copyBtn.dataset.correo || "").trim();
+        const clave = String(copyBtn.dataset.clave || "").trim();
+        if (!correo && !clave) return;
+        const text = `Correo: ${correo || "-"}\nClave: ${clave || "-"}`;
+        await copyTextNotify(text);
       });
 
       btnRenovarEl?.addEventListener("click", () => {

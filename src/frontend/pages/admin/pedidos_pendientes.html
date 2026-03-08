@@ -1085,6 +1085,7 @@
         const nextIso = toYMD(next);
         const updateVenta = {
           pendiente: false,
+          cuenta_pagada_admin: true,
           id_cuenta: forceCuentaCompleta ? nuevaCuentaId : cuentaMadreId || null,
           id_cuenta_miembro: forceCuentaCompleta ? null : nuevaCuentaId,
           id_perfil: forceCuentaCompleta ? null : perfilId || null,
