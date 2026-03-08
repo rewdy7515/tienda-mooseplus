@@ -339,6 +339,17 @@
       .miembros-table .clave-copy {
         cursor: pointer;
       }
+      .miembro-input-row td {
+        vertical-align: middle;
+      }
+      .miembro-input-row .miembro-input-wrap {
+        position: relative;
+        width: 100%;
+      }
+      .miembro-input-row .miembro-input-text {
+        width: 100%;
+        box-sizing: border-box;
+      }
       .perfil-dot {
         display: inline-block;
         width: 8px;
@@ -6389,27 +6400,32 @@
         if (!tbody) return;
         if (tbody.querySelector(".miembro-input-row")) return;
         const currentFlags = getPlatFlags(currentCuentaDetalle || {});
-        const colSpanMiembroInput =
-          6 + (currentFlags.showClave ? 1 : 0) + (currentFlags.showPin ? 1 : 0);
         const inputRow = document.createElement("tr");
         inputRow.className = "miembro-input-row";
+        const claveCell = currentFlags.showClave
+          ? `<td><input type="text" class="miembro-clave miembro-input-text" placeholder="Clave" /></td>`
+          : "";
+        const pinCell = currentFlags.showPin ? "<td>-</td>" : "";
         inputRow.innerHTML = `
-          <td colspan="${colSpanMiembroInput}">
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <div class="input-wrap" style="min-width:220px; flex:1 1 260px;">
-                <input type="text" id="miembro-input" placeholder="Buscar correo (plataforma 1)" autocomplete="off" />
-                <div id="miembro-sugs" class="sugerencias-cuentas hidden"></div>
-              </div>
-              <input type="text" id="miembro-clave" placeholder="Clave" style="min-width:150px;" />
-              <button type="button" class="btn-save-miembro">💾</button>
+          <td>
+            <div class="miembro-input-wrap">
+              <input type="text" class="miembro-correo miembro-input-text" placeholder="Buscar correo (plataforma 1)" autocomplete="off" />
+              <div class="miembro-sugs sugerencias-cuentas hidden"></div>
             </div>
           </td>
+          ${claveCell}
+          ${pinCell}
+          <td>-</td>
+          <td>-</td>
+          <td>-</td>
+          <td>-</td>
+          <td class="action-cell"><button type="button" class="btn-save-miembro">💾</button></td>
         `;
         tbody.insertBefore(inputRow, addRow);
 
-        const inp = inputRow.querySelector("#miembro-input");
-        const claveInput = inputRow.querySelector("#miembro-clave");
-        const sugsBox = inputRow.querySelector("#miembro-sugs");
+        const inp = inputRow.querySelector(".miembro-correo");
+        const claveInput = inputRow.querySelector(".miembro-clave");
+        const sugsBox = inputRow.querySelector(".miembro-sugs");
         let sugsCounter = 0;
         const renderSugs = (items) => {
           if (!sugsBox) return;
@@ -6508,8 +6524,8 @@
         const btnSave = e.target.closest(".btn-save-miembro");
         if (!btnSave) return;
         const row = btnSave.closest(".miembro-input-row");
-        const correoInp = row?.querySelector("#miembro-input");
-        const claveInp = row?.querySelector("#miembro-clave");
+        const correoInp = row?.querySelector(".miembro-correo");
+        const claveInp = row?.querySelector(".miembro-clave");
         const correoVal = (correoInp?.value || "").trim();
         const claveVal = (claveInp?.value || "").trim();
         if (!correoVal) {
