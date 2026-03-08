@@ -109,6 +109,48 @@
         grid-template-columns: 1fr;
         gap: 12px;
       }
+      .dashboard-trend {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .dashboard-trend h3 {
+        margin: 0 0 6px;
+      }
+      .dashboard-trend-legend {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 0 0 8px;
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .dashboard-trend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+      }
+      .dashboard-trend-dot.current {
+        background: #111827;
+      }
+      .dashboard-trend-dot.previous {
+        background: #9ca3af;
+      }
+      .dashboard-trend-chart {
+        width: 100%;
+        height: 240px;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #f9fafb 0%, #ffffff 100%);
+        border: 1px solid #f1f5f9;
+      }
+      .dashboard-trend-empty {
+        color: #6b7280;
+        margin: 8px 0 0;
+      }
       .dashboard-block {
         background: #fff;
         border: 1px solid #e5e7eb;
@@ -142,6 +184,50 @@
         margin-top: 6px;
         color: #6b7280;
       }
+      .dashboard-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 0 0 10px;
+      }
+      .dashboard-bar-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 170px) 1fr auto;
+        align-items: center;
+        gap: 10px;
+      }
+      .dashboard-bar-label {
+        color: #111827;
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dashboard-bar-track {
+        position: relative;
+        width: 100%;
+        height: 16px;
+        border-radius: 999px;
+        background: #e5e7eb;
+        overflow: hidden;
+      }
+      .dashboard-bar-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0;
+        border-radius: 999px;
+      }
+      .dashboard-bar-value {
+        min-width: 24px;
+        text-align: right;
+        font-size: 13px;
+        font-weight: 600;
+        color: #111827;
+      }
+      .dashboard-bars-empty {
+        color: #6b7280;
+        margin: 0 0 10px;
+      }
       @media (max-width: 1024px) {
         .dashboard-kpi {
           grid-column: span 6;
@@ -167,6 +253,13 @@
         }
         .dashboard-kpi.neto .dashboard-kpi-value {
           font-size: 30px;
+        }
+        .dashboard-bar-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+        .dashboard-bar-value {
+          text-align: left;
         }
       }
     </style>
@@ -253,6 +346,16 @@
         </article>
       </section>
 
+      <section class="dashboard-trend">
+        <h3>Ventas del mes vs mes anterior</h3>
+        <p class="dashboard-trend-legend">
+          <span><span class="dashboard-trend-dot current"></span>Mes actual</span>
+          <span><span class="dashboard-trend-dot previous"></span>Mes anterior</span>
+        </p>
+        <svg id="ventas-trend-chart" class="dashboard-trend-chart" viewBox="0 0 1000 240" preserveAspectRatio="none"></svg>
+        <p id="ventas-trend-empty" class="dashboard-trend-empty hidden">Sin ventas para graficar.</p>
+      </section>
+
       <div class="dashboard-grid">
         <section class="dashboard-block">
           <h3>Resumen del mes</h3>
@@ -295,6 +398,26 @@
             </table>
           </div>
           <p class="dashboard-empty hidden" id="empty-proveedores">Sin gastos de proveedores en este mes.</p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Ventas activas por plataforma</h3>
+          <div id="chart-activas-plataforma" class="dashboard-bars"></div>
+          <p class="dashboard-bars-empty hidden" id="empty-chart-activas-plataforma">
+            Sin ventas activas para este periodo.
+          </p>
+          <div class="cuenta-table-wrap">
+            <table class="table-base" id="table-activas-plataforma">
+              <thead>
+                <tr>
+                  <th>Plataforma</th>
+                  <th>Ventas activas</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="dashboard-empty hidden" id="empty-activas-plataforma">Sin ventas activas para este periodo.</p>
         </section>
 
         <section class="dashboard-block">
@@ -363,11 +486,24 @@
 
       const platformTbody = document.querySelector("#table-plataformas tbody");
       const providerTbody = document.querySelector("#table-proveedores tbody");
+      const activeByPlatformTbody = document.querySelector("#table-activas-plataforma tbody");
       const dailyTbody = document.querySelector("#table-diario tbody");
+      const activeByPlatformChart = document.querySelector("#chart-activas-plataforma");
 
       const emptyPlataformas = document.querySelector("#empty-plataformas");
       const emptyProveedores = document.querySelector("#empty-proveedores");
+      const emptyActivasPlataforma = document.querySelector("#empty-activas-plataforma");
       const emptyDiario = document.querySelector("#empty-diario");
+      const emptyChartActivasPlataforma = document.querySelector("#empty-chart-activas-plataforma");
+      const ventasTrendChart = document.querySelector("#ventas-trend-chart");
+      const ventasTrendEmpty = document.querySelector("#ventas-trend-empty");
+      let trendSelectedDay = null;
+      let trendSelectedSeries = "current";
+      let trendHoverDay = null;
+      let trendHoverSeries = null;
+      let trendLastStats = null;
+      let trendLastPrevStats = null;
+      let trendLastRange = null;
       const MONTH_NAMES_ES = [
         "Enero",
         "Febrero",
@@ -964,12 +1100,215 @@
         });
       };
 
+      const renderActiveByPlatform = (rows) => {
+        clearTableBody(activeByPlatformTbody);
+        if (!rows.length) {
+          emptyActivasPlataforma?.classList.remove("hidden");
+          return;
+        }
+        emptyActivasPlataforma?.classList.add("hidden");
+
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${escapeHtml(row.nombre)}</td>
+            <td>${intFmt.format(row.ventasActivas)}</td>
+          `;
+          activeByPlatformTbody.appendChild(tr);
+        });
+      };
+      const renderActiveByPlatformChart = (rows) => {
+        if (!activeByPlatformChart) return;
+        activeByPlatformChart.innerHTML = "";
+        if (!rows.length) {
+          emptyChartActivasPlataforma?.classList.remove("hidden");
+          return;
+        }
+        emptyChartActivasPlataforma?.classList.add("hidden");
+        const maxValue = Math.max(...rows.map((row) => Number(row.ventasActivas) || 0), 1);
+        rows.forEach((row) => {
+          const value = Number(row.ventasActivas) || 0;
+          const widthPct = Math.max(4, (value / maxValue) * 100);
+          const barColor = String(row.color_1 || "").trim() || "#2563eb";
+          const barRow = document.createElement("div");
+          barRow.className = "dashboard-bar-row";
+          barRow.innerHTML = `
+            <div class="dashboard-bar-label" title="${escapeHtml(row.nombre)}">${escapeHtml(row.nombre)}</div>
+            <div class="dashboard-bar-track">
+              <div class="dashboard-bar-fill" style="width:${widthPct}%; background:${escapeHtml(barColor)};"></div>
+            </div>
+            <div class="dashboard-bar-value">${intFmt.format(value)}</div>
+          `;
+          activeByPlatformChart.appendChild(barRow);
+        });
+      };
+      const renderVentasTrendChart = (stats, prevStats, range) => {
+        if (!ventasTrendChart) return;
+        ventasTrendChart.innerHTML = "";
+
+        const monthStart = String(range?.start || "");
+        const monthMatch = monthStart.match(/^(\d{4})-(\d{2})-\d{2}$/);
+        const year = monthMatch ? Number(monthMatch[1]) : NaN;
+        const month = monthMatch ? Number(monthMatch[2]) : NaN;
+        const endDay =
+          Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12
+            ? new Date(year, month, 0).getDate()
+            : 31;
+        const days = [];
+        for (let day = 1; day <= endDay; day += 1) {
+          days.push(day);
+        }
+        if (!days.length) {
+          ventasTrendEmpty?.classList.remove("hidden");
+          return;
+        }
+
+        const currMap = stats?.ventasDiariasPorDia || {};
+        const prevMap = prevStats?.ventasDiariasPorDia || {};
+        const currentCutDay = Math.max(1, Math.min(isoDay(range?.end) || endDay, endDay));
+        const currVals = days.map((day) => (day <= currentCutDay ? Number(currMap[day]) || 0 : null));
+        const prevVals = days.map((day) => Number(prevMap[day]) || 0);
+        const currNumericVals = currVals.map((v) => (v == null ? 0 : Number(v) || 0));
+        const maxY = Math.max(1, ...currNumericVals, ...prevVals);
+        const w = 1000;
+        const h = 260;
+        const px = 46;
+        const pyTop = 20;
+        const pyBottom = 40;
+        const innerW = w - px * 2;
+        const innerH = h - pyTop - pyBottom;
+        const toX = (idx) =>
+          px + (days.length <= 1 ? innerW / 2 : (idx / (days.length - 1)) * innerW);
+        const toY = (value) => pyTop + innerH - (value / maxY) * innerH;
+        const buildPath = (vals) => {
+          const points = vals
+            .map((val, idx) => (val == null ? null : { x: toX(idx), y: toY(Number(val) || 0) }))
+            .filter(Boolean);
+          return points
+            .map((pt, idx) => `${idx === 0 ? "M" : "L"}${pt.x.toFixed(2)},${pt.y.toFixed(2)}`)
+            .join(" ");
+        };
+
+        const gridLines = [0, 0.25, 0.5, 0.75, 1]
+          .map((p) => {
+            const y = pyTop + innerH - innerH * p;
+            return `<line x1="${px}" y1="${y}" x2="${w - px}" y2="${y}" stroke="#e5e7eb" stroke-width="1" />`;
+          })
+          .join("");
+        const yTicks = [0, 0.25, 0.5, 0.75, 1]
+          .map((p) => {
+            const y = pyTop + innerH - innerH * p;
+            const val = Math.round(maxY * p);
+            return `<text x="${(px - 8).toFixed(2)}" y="${(y + 3).toFixed(2)}" text-anchor="end" fill="#6b7280" font-size="10">${val}</text>`;
+          })
+          .join("");
+        const axisY = pyTop + innerH;
+        const xLabels = days
+          .map((day, idx) => {
+            const x = toX(idx);
+            return `<text x="${x.toFixed(2)}" y="${(axisY + 16).toFixed(2)}" text-anchor="middle" fill="#6b7280" font-size="9">${day}</text>`;
+          })
+          .join("");
+        const currPath = buildPath(currVals);
+        const prevPath = buildPath(prevVals);
+        const endCurr = Number(currMap[currentCutDay]) || 0;
+        const endPrev = prevVals[prevVals.length - 1] || 0;
+        const activeDayRaw =
+          Number.isInteger(trendHoverDay) && trendHoverDay >= 1 && trendHoverDay <= endDay
+            ? trendHoverDay
+            : Number.isInteger(trendSelectedDay) && trendSelectedDay >= 1 && trendSelectedDay <= endDay
+              ? trendSelectedDay
+              : null;
+        const activeSeriesRaw =
+          trendHoverSeries === "current" || trendHoverSeries === "previous"
+            ? trendHoverSeries
+            : trendSelectedSeries;
+        const selectedDay = activeDayRaw;
+        const selectedIdx = selectedDay ? selectedDay - 1 : null;
+        const selectedCurrentVal = selectedDay && selectedDay <= currentCutDay ? Number(currMap[selectedDay]) || 0 : null;
+        const selectedPrevVal = selectedDay ? Number(prevMap[selectedDay]) || 0 : null;
+        const selectedValue = activeSeriesRaw === "previous" ? selectedPrevVal : selectedCurrentVal;
+        const selectedX = selectedIdx == null ? null : toX(selectedIdx);
+        const selectedY = selectedValue == null ? null : toY(selectedValue);
+        const selectedColor = activeSeriesRaw === "previous" ? "#9ca3af" : "#111827";
+        const selectionLabel =
+          selectedX != null && selectedY != null
+            ? `<text x="${selectedX.toFixed(2)}" y="${Math.max(14, selectedY - 10).toFixed(2)}" text-anchor="middle" fill="${selectedColor}" font-size="11" font-weight="700">${selectedValue}</text>
+               <circle cx="${selectedX.toFixed(2)}" cy="${selectedY.toFixed(2)}" r="5.5" fill="${selectedColor}" />`
+            : "";
+        const clickTargets = days
+          .map((day, idx) => {
+            const x = toX(idx).toFixed(2);
+            const prevY = toY(prevVals[idx]).toFixed(2);
+            const prevTarget = `<circle cx="${x}" cy="${prevY}" r="10" fill="transparent" data-day="${day}" data-series="previous" style="cursor:pointer;" />`;
+            const currVal = currVals[idx];
+            if (currVal == null) return prevTarget;
+            const currY = toY(currVal).toFixed(2);
+            const currTarget = `<circle cx="${x}" cy="${currY}" r="10" fill="transparent" data-day="${day}" data-series="current" style="cursor:pointer;" />`;
+            return `${prevTarget}${currTarget}`;
+          })
+          .join("");
+
+        ventasTrendChart.innerHTML = `
+          ${gridLines}
+          ${yTicks}
+          <line x1="${px}" y1="${axisY}" x2="${w - px}" y2="${axisY}" stroke="#d1d5db" stroke-width="1.2" />
+          <path d="${prevPath}" fill="none" stroke="#9ca3af" stroke-width="2.5" />
+          <path d="${currPath}" fill="none" stroke="#111827" stroke-width="3.25" />
+          <circle cx="${toX(Math.max(0, currentCutDay - 1)).toFixed(2)}" cy="${toY(endCurr).toFixed(2)}" r="4.5" fill="#111827" />
+          <circle cx="${toX(prevVals.length - 1).toFixed(2)}" cy="${toY(endPrev).toFixed(2)}" r="3.8" fill="#9ca3af" />
+          ${selectionLabel}
+          ${clickTargets}
+          ${xLabels}
+        `;
+        const hasSales = currNumericVals.some((v) => v > 0) || prevVals.some((v) => v > 0);
+        ventasTrendEmpty?.classList.toggle("hidden", hasSales);
+      };
+
+      ventasTrendChart?.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof SVGElement)) return;
+        const day = Number(target.dataset?.day || 0);
+        const series = String(target.dataset?.series || "");
+        if (!Number.isInteger(day) || day <= 0) return;
+        if (series !== "current" && series !== "previous") return;
+        trendSelectedDay = day;
+        trendSelectedSeries = series;
+        renderVentasTrendChart(trendLastStats, trendLastPrevStats, trendLastRange);
+      });
+      ventasTrendChart?.addEventListener("mousemove", (e) => {
+        const target = e.target;
+        if (!(target instanceof SVGElement)) return;
+        const day = Number(target.dataset?.day || 0);
+        const series = String(target.dataset?.series || "");
+        if (!Number.isInteger(day) || day <= 0) {
+          if (trendHoverDay !== null || trendHoverSeries !== null) {
+            trendHoverDay = null;
+            trendHoverSeries = null;
+            renderVentasTrendChart(trendLastStats, trendLastPrevStats, trendLastRange);
+          }
+          return;
+        }
+        if (series !== "current" && series !== "previous") return;
+        if (trendHoverDay === day && trendHoverSeries === series) return;
+        trendHoverDay = day;
+        trendHoverSeries = series;
+        renderVentasTrendChart(trendLastStats, trendLastPrevStats, trendLastRange);
+      });
+      ventasTrendChart?.addEventListener("mouseleave", () => {
+        if (trendHoverDay === null && trendHoverSeries === null) return;
+        trendHoverDay = null;
+        trendHoverSeries = null;
+        renderVentasTrendChart(trendLastStats, trendLastPrevStats, trendLastRange);
+      });
+
       const computeStats = (historial, giftRows) => {
         const rowsIngreso = [];
         const rowsNuevasIngreso = [];
         const rowsGasto = [];
         const rowsRenovIngreso = [];
         const rowsRenovGasto = [];
+        const ventasDiariasPorDia = {};
 
         historial.forEach((row) => {
           const isIngreso = isTrue(row?.venta_cliente);
@@ -978,6 +1317,8 @@
             rowsIngreso.push(row);
             if (isRenov) rowsRenovIngreso.push(row);
             else rowsNuevasIngreso.push(row);
+            const day = isoDay(row?.fecha_pago);
+            if (day) ventasDiariasPorDia[day] = (ventasDiariasPorDia[day] || 0) + 1;
           } else {
             rowsGasto.push(row);
             if (isRenov) rowsRenovGasto.push(row);
@@ -1129,6 +1470,7 @@
           ventasActivasCount: 0,
           renovacionesClienteCount: rowsRenovIngreso.length,
           ventasNuevasClienteCount: rowsNuevasIngreso.length,
+          ventasDiariasPorDia,
         };
       };
 
@@ -1191,19 +1533,67 @@
           ventasActivasCount: rows.length,
         };
       };
+      const fetchActiveByPlatform = async (endDate) => {
+        if (!endDate) return [];
+        const { data, error } = await supabase
+          .from("ventas")
+          .select(
+            "id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado, cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, plataformas(nombre, color_1))",
+          )
+          .not("id_usuario", "is", null)
+          .not("fecha_pago", "is", null)
+          .lte("fecha_pago", endDate);
+        if (error) throw error;
+        const rows = (data || []).filter((row) => {
+          const notSuspended = !isTrue(row?.suspendido);
+          const notPending = !isTrue(row?.pendiente);
+          const notRejected = !isTrue(row?.pago_rechazado);
+          const activeByDate =
+            isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= endDate);
+          return notSuspended && notPending && notRejected && activeByDate;
+        });
+        const platformMap = new Map();
+        rows.forEach((row) => {
+          const platId = row?.cuentas?.id_plataforma ?? null;
+          const platNameRaw = row?.cuentas?.plataformas?.nombre;
+          const key = String(platId ?? "sin-plataforma");
+          if (!platformMap.has(key)) {
+            platformMap.set(key, {
+              id: platId,
+              nombre: platNameRaw || "Sin plataforma",
+              color_1: row?.cuentas?.plataformas?.color_1 || null,
+              ventasActivas: 0,
+            });
+          }
+          platformMap.get(key).ventasActivas += 1;
+        });
+        return Array.from(platformMap.values()).sort((a, b) => {
+          const diff = Number(b.ventasActivas || 0) - Number(a.ventasActivas || 0);
+          if (diff !== 0) return diff;
+          return String(a.nombre || "").localeCompare(String(b.nombre || ""));
+        });
+      };
 
       const renderAll = (
         stats,
         prevStats,
+        prevTrendStats,
+        activeByPlatformRows,
         range,
         prevRange,
         compareSuffix,
         isProgressCut,
         adjustments = {},
       ) => {
+        trendLastStats = stats || null;
+        trendLastPrevStats = prevTrendStats || prevStats || null;
+        trendLastRange = range || null;
         fillKpis(stats, prevStats, compareSuffix);
         renderPlatforms(stats.platformRows);
         renderProviders(stats.providerRows);
+        renderActiveByPlatform(activeByPlatformRows || []);
+        renderActiveByPlatformChart(activeByPlatformRows || []);
+        renderVentasTrendChart(stats, prevTrendStats || prevStats, range);
         renderDaily(stats.dailyRows);
 
         if (summaryNoteEl) {
@@ -1273,14 +1663,26 @@
           const previousAdjustment = getSheetsJanuaryAdjustment(prevRange);
           const currentNominaAdjustment = getNominaQuincenalAdjustment(range);
           const previousNominaAdjustment = getNominaQuincenalAdjustment(prevRange);
-          const [{ historial, gifts }, prevData, currentActive, previousActive] = await Promise.all([
+          const prevMonthFullRange = monthRange(previousMonthKey(monthVal));
+          const shouldLoadPrevTrendFull = compareCtx.isProgressCut && !!prevMonthFullRange;
+          const [{ historial, gifts }, prevData, prevTrendData, currentActive, previousActive] = await Promise.all([
             fetchMonthData(range),
             prevRange ? fetchMonthData(prevRange) : Promise.resolve({ historial: [], gifts: [] }),
+            shouldLoadPrevTrendFull
+              ? fetchMonthData(prevMonthFullRange)
+              : Promise.resolve(null),
             fetchActiveCounts(range.end),
             fetchActiveCounts(prevRange?.end || range.end),
           ]);
+          const [activeByPlatformRows] = await Promise.all([
+            fetchActiveByPlatform(range.end),
+          ]);
           const stats = computeStats(historial, gifts);
           const prevStats = computeStats(prevData.historial || [], prevData.gifts || []);
+          const prevTrendStats =
+            shouldLoadPrevTrendFull && prevTrendData
+              ? computeStats(prevTrendData.historial || [], prevTrendData.gifts || [])
+              : prevStats;
           stats.clientesActivosCount = currentActive?.clientesActivosCount || 0;
           stats.ventasActivasCount = currentActive?.ventasActivasCount || 0;
           prevStats.clientesActivosCount = previousActive?.clientesActivosCount || 0;
@@ -1292,6 +1694,8 @@
           renderAll(
             stats,
             prevStats,
+            prevTrendStats,
+            activeByPlatformRows,
             range,
             prevRange || range,
             compareCtx.compareSuffix,

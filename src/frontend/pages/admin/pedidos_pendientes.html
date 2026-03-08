@@ -285,6 +285,7 @@
       const modalActivarCancelarBtn = document.querySelector("#btn-activar-cancelar");
       const modalActivarEntregarBtn = document.querySelector("#btn-activar-entregar");
       const modalActivarCostoInput = document.querySelector("#input-activar-costo");
+      const modalActivarCostoLabel = document.querySelector('label[for="input-activar-costo"]');
       const modalActivarProveedorInput = document.querySelector("#input-activar-proveedor");
       const modalActivarProvSugs = document.querySelector("#activar-prov-sugerencias");
       const modalActivarAddProveedorBtn = document.querySelector("#btn-activar-add-proveedor");
@@ -468,6 +469,11 @@
         }
       };
 
+      const requiereCostoPorPrecioCompleta = (btn) => {
+        if (!btn) return false;
+        return isTrue(btn.dataset.precioCompleta);
+      };
+
       const openModalActivacion = (btn) => {
         pendingEntregaBtn = btn || null;
         proveedorSeleccionadoId = null;
@@ -478,7 +484,14 @@
         renderProvSuggestions([], true);
         if (modalActivarTitleEl) {
           const plat = btn?.dataset?.plataforma || "servicio";
-          modalActivarTitleEl.textContent = `Activar servicio (${plat})`;
+          modalActivarTitleEl.textContent = requiereCostoPorPrecioCompleta(btn)
+            ? `Costo (${plat})`
+            : `Activar servicio (${plat})`;
+        }
+        if (modalActivarCostoLabel) {
+          modalActivarCostoLabel.textContent = requiereCostoPorPrecioCompleta(btn)
+            ? "Costo"
+            : "¿Costo para activar el servicio?";
         }
         modalActivarEl?.classList.remove("hidden");
         document.body.classList.add("modal-open");
@@ -498,7 +511,7 @@
         if (!btn) return false;
         const correoCliente = isTrue(btn.dataset.correoCliente);
         const ligadoPerfil = hasPerfilId(btn.dataset.idPerfil);
-        return correoCliente && !ligadoPerfil;
+        return (correoCliente && !ligadoPerfil) || requiereCostoPorPrecioCompleta(btn);
       };
 
       const renderSection = (title, grouped) => {
@@ -585,7 +598,7 @@
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -732,7 +745,7 @@
           if (precioIds.length) {
             const { data: precios, error: pErr } = await supabase
               .from("precios")
-              .select("id_precio, id_plataforma, plan")
+              .select("id_precio, id_plataforma, plan, completa")
               .in("id_precio", precioIds);
             if (pErr) throw pErr;
             precioMap = (precios || []).reduce((acc, p) => {
@@ -840,6 +853,8 @@
               id_venta: v.id_venta,
               cliente,
               id_usuario: v.id_usuario,
+              id_precio: v.id_precio || null,
+              precio_completa: isTrue(precio?.completa),
               fecha_pago: v.fecha_pago || "-",
               servicio,
               cuenta_nueva: v.cuenta_nueva,

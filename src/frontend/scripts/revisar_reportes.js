@@ -136,6 +136,8 @@ const getPlanLabelFromReporte = (row) => {
   const cta = row?.cuentas || {};
   const ventaPerfil = isTrue(cta?.venta_perfil);
   const ventaMiembro = isTrue(cta?.venta_miembro);
+  const perfilHogar = isTrue(row?.perfiles?.perfil_hogar);
+  if (ventaMiembro && perfilHogar) return "Miembro";
   if (ventaPerfil) return "Perfil";
   if (!ventaPerfil && ventaMiembro) return "Miembro";
   if (!ventaPerfil && !ventaMiembro) return "Cuenta completa";
@@ -158,6 +160,134 @@ const notifyReporteCerrado = async (row) => {
   const { error } = await supabase.from("notificaciones").insert(payload);
   if (error) throw error;
 };
+
+const parseDateParts = (isoDate = "") => {
+  const m = String(isoDate || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+};
+
+const parseTimeParts = (timeRaw = "") => {
+  const m = String(timeRaw || "")
+    .trim()
+    .match(/^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
+  if (!m) return { hour: 0, minute: 0, second: 0 };
+  return {
+    hour: Number(m[1]) || 0,
+    minute: Number(m[2]) || 0,
+    second: Number(m[3]) || 0,
+  };
+};
+
+const toUtcFromCaracasLocal = (dateIso, timeRaw) => {
+  const d = parseDateParts(dateIso);
+  if (!d) return null;
+  const t = parseTimeParts(timeRaw);
+  // Venezuela UTC-4 (sin DST). Convertimos "local Caracas" -> UTC.
+  return Date.UTC(d.year, d.month - 1, d.day, t.hour + 4, t.minute, t.second, 0);
+};
+
+const calcDiasDiferenciaReporte = (row) => {
+  const createdUtcMs = toUtcFromCaracasLocal(row?.fecha_creacion, row?.hora_creacion);
+  if (!Number.isFinite(createdUtcMs)) return 0;
+  const nowUtcMs = Date.now();
+  if (nowUtcMs <= createdUtcMs) return 0;
+  return Math.floor((nowUtcMs - createdUtcMs) / 86400000);
+};
+
+const addDaysToIsoDate = (dateIso, days) => {
+  const d = parseDateParts(dateIso);
+  const nDays = Number(days);
+  if (!d || !Number.isFinite(nDays) || nDays <= 0) return dateIso;
+  const dt = new Date(Date.UTC(d.year, d.month - 1, d.day, 0, 0, 0));
+  dt.setUTCDate(dt.getUTCDate() + Math.trunc(nDays));
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+async function findVentaAsociadaFromReporte(row) {
+  const cuentaId = Number(row?.id_cuenta);
+  if (!Number.isFinite(cuentaId) || cuentaId <= 0) return null;
+  const perfilId = Number(row?.id_perfil);
+  const withPerfil = Number.isFinite(perfilId) && perfilId > 0;
+
+  const findWithFilter = async (withUserFilter = true, strictPerfil = true) => {
+    let query = supabase
+      .from("ventas")
+      .select("id_venta, id_usuario, fecha_corte")
+      .eq("id_cuenta", cuentaId)
+      .order("id_venta", { ascending: false })
+      .limit(1);
+    if (withUserFilter && row?.id_usuario) query = query.eq("id_usuario", row.id_usuario);
+    if (withPerfil) {
+      if (strictPerfil) query = query.eq("id_perfil", perfilId);
+    } else {
+      query = query.is("id_perfil", null);
+    }
+    const { data, error } = await query;
+    if (error) return { data: null, error };
+    return { data: data?.[0] || null, error: null };
+  };
+
+  let res = await findWithFilter(true, true);
+  if (res.error) throw res.error;
+  if (res.data) return res.data;
+
+  res = await findWithFilter(false, true);
+  if (res.error) throw res.error;
+  if (res.data) return res.data;
+
+  if (!withPerfil) {
+    return null;
+  }
+  res = await findWithFilter(true, false);
+  if (res.error) throw res.error;
+  if (res.data) return res.data;
+
+  res = await findWithFilter(false, false);
+  if (res.error) throw res.error;
+  return res.data || null;
+}
+
+async function applyDiasExtraToVentaFechaCorte(row, ventaInfoFromFlow = null) {
+  const dias = calcDiasDiferenciaReporte(row);
+  if (dias < 1) return { dias: 0, applied: false, venta: null };
+
+  const ventaInfo = ventaInfoFromFlow || (await findVentaAsociadaFromReporte(row));
+  if (!ventaInfo?.id_venta) return { dias, applied: false, venta: null };
+  if (!ventaInfo?.fecha_corte) return { dias, applied: false, venta: ventaInfo };
+
+  const nuevaFechaCorte = addDaysToIsoDate(ventaInfo.fecha_corte, dias);
+  const { error } = await supabase
+    .from("ventas")
+    .update({ fecha_corte: nuevaFechaCorte })
+    .eq("id_venta", ventaInfo.id_venta);
+  if (error) throw error;
+
+  return {
+    dias,
+    applied: true,
+    venta: { ...ventaInfo, fecha_corte: nuevaFechaCorte },
+  };
+}
+
+async function notifyDiasSumados({ row, ventaInfo, dias }) {
+  const targetUserId = Number(ventaInfo?.id_usuario || row?.id_usuario);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
+  const fecha = new Date().toISOString().slice(0, 10);
+  const payload = {
+    titulo: "Reporte solucionado",
+    mensaje: `Se sumó ${dias} dias a tu fecha de pago.`,
+    fecha,
+    leido: false,
+    id_usuario: targetUserId,
+    id_cuenta: Number.isFinite(Number(row?.id_cuenta)) ? Number(row.id_cuenta) : null,
+  };
+  const { error } = await supabase.from("notificaciones").insert(payload);
+  if (error) throw error;
+}
 
 async function loadAutoReemplazoConfig() {
   const { data, error } = await supabase
@@ -363,11 +493,58 @@ const renderReportesList = (plataformas = []) => {
     .join("");
 };
 
+const removeReporteRowFromUI = (reportIdRaw) => {
+  const reportId = Number(reportIdRaw);
+  if (!Number.isFinite(reportId) || reportId <= 0 || !listEl) return;
+
+  reportesById.delete(String(reportId));
+
+  const actionBtn = listEl.querySelector(
+    `button[data-action="detalle"][data-id="${String(reportId)}"]`,
+  );
+  const row = actionBtn?.closest("tr");
+  if (!row) return;
+  const tbody = row.closest("tbody");
+  const section = row.closest(".inventario-item");
+  const prev = row.previousElementSibling;
+  const next = row.nextElementSibling;
+  row.remove();
+
+  // Si el plan quedó vacío, elimina el divisor "Plan: ..."
+  if (
+    prev?.classList?.contains("plan-divider-row") &&
+    (!next || next.classList?.contains("plan-divider-row"))
+  ) {
+    prev.remove();
+  }
+
+  if (section) {
+    const leftInSection = section.querySelectorAll('button[data-action="detalle"]').length;
+    const badge = section.querySelector(".plat-count-badge span");
+    const badgeWrap = section.querySelector(".plat-count-badge");
+    if (badge) badge.textContent = String(leftInSection);
+    if (badgeWrap) badgeWrap.setAttribute("aria-label", `${leftInSection} reportes`);
+    if (leftInSection === 0) {
+      section.remove();
+    }
+  }
+
+  if (tbody && !tbody.querySelector("tr")) {
+    tbody.innerHTML =
+      '<tr><td colspan="6" class="status">No hay reportes pendientes para esta plataforma.</td></tr>';
+  }
+
+  const remaining = listEl.querySelectorAll('button[data-action="detalle"]').length;
+  if (!remaining && statusEl) {
+    statusEl.textContent = "No hay reportes pendientes.";
+  }
+};
+
 async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion"
+      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
@@ -733,6 +910,7 @@ attachLogout(clearServerSession);
 
 async function guardarCambios() {
   if (!currentRow) return;
+  const closedReportId = Number(currentRow?.id_reporte);
   const btn = btnGuardarCampos;
   if (btn) btn.disabled = true;
   try {
@@ -789,12 +967,26 @@ async function guardarCambios() {
     if (error) throw error;
 
     try {
+      const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow);
+      if (fechaRes.applied && fechaRes.dias >= 1) {
+        await notifyDiasSumados({
+          row: currentRow,
+          ventaInfo: fechaRes.venta,
+          dias: fechaRes.dias,
+        });
+      }
+    } catch (diasErr) {
+      console.error("sumar dias fecha_corte reporte cerrado error", diasErr);
+    }
+
+    try {
       await notifyReporteCerrado(currentRow);
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }
 
     alert("Campos guardados y reporte cerrado.");
+    removeReporteRowFromUI(closedReportId);
     modalResumen?.classList.add("hidden");
     closeModal();
   } catch (err) {
@@ -810,6 +1002,7 @@ async function reemplazarServicio() {
     alert("Selecciona un reporte.");
     return;
   }
+  const closedReportId = Number(currentRow?.id_reporte);
 
   try {
     const idUsuarioSesion = requireSession();
@@ -1053,12 +1246,26 @@ async function reemplazarServicio() {
     if (repErr) throw repErr;
 
     try {
+      const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow, ventaInfo);
+      if (fechaRes.applied && fechaRes.dias >= 1) {
+        await notifyDiasSumados({
+          row: currentRow,
+          ventaInfo: fechaRes.venta || ventaInfo,
+          dias: fechaRes.dias,
+        });
+      }
+    } catch (diasErr) {
+      console.error("sumar dias fecha_corte en reemplazo error", diasErr);
+    }
+
+    try {
       await notifyReporteCerrado(currentRow);
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }
 
     alert("Reemplazo realizado.");
+    removeReporteRowFromUI(closedReportId);
     closeModal();
   } catch (err) {
     console.error("reemplazo reporte error", err);

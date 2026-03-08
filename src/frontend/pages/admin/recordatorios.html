@@ -262,9 +262,8 @@
             .join("\n\n");
           const saludo = `*¡Hola ${g.cliente}! ❤️🫎*`;
           const signupUrl = String(g.signupUrl || "").trim();
-          const intro = signupUrl
-            ? `Actualiza el pago de tus membresía por nuestra nueva pagina web:\n${signupUrl}`
-            : "Recuerda actualizar el pago de tu membresía:";
+          const renewUrl = signupUrl || "https://mooseplus.com";
+          const intro = `Renueva tus membresías por nuestra nueva pagina web:\n${renewUrl}`;
           const plain = `${saludo}\n${intro}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
           const html = `<h4>${g.cliente || "Cliente"}</h4><p>Teléfono: ${g.telefono || "-"}</p><pre>${plain}</pre>`;
           const ventaIds = Array.from(

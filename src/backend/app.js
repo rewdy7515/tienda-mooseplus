@@ -711,9 +711,8 @@ const buildWhatsappRecordatorioItems = async () => {
       .join("\n\n");
     const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
     const signupUrl = String(group.signupUrl || "").trim();
-    const intro = signupUrl
-      ? `Actualiza el pago de tus membresía por nuestra nueva pagina web:\n${signupUrl}`
-      : "Recuerda actualizar el pago de tu membresía:";
+    const renewUrl = signupUrl || buildPublicSiteUrl();
+    const intro = `Renueva tus membresías por nuestra nueva pagina web:\n${renewUrl}`;
     const plain = `${saludo}\n${intro}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     return {
       idUsuario: group.idUsuario,
