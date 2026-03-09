@@ -46,6 +46,50 @@
       .reportes-solucionados-list .inventario-plan .reportes-table {
         margin-top: 0;
       }
+      .reportes-admin-search {
+        margin: 0 0 14px;
+        position: relative;
+      }
+      .reportes-admin-search.hidden {
+        display: none;
+      }
+      .reportes-admin-search input {
+        width: 100%;
+      }
+      .reportes-admin-results {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        z-index: 30;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+        max-height: 260px;
+        overflow-y: auto;
+      }
+      .reportes-admin-results.hidden {
+        display: none;
+      }
+      .reportes-admin-result {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        cursor: pointer;
+        font: inherit;
+      }
+      .reportes-admin-result:hover {
+        background: #f3f4f6;
+      }
+      .reportes-admin-target {
+        margin-top: 8px;
+        color: #6b7280;
+        font-size: 13px;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
@@ -54,6 +98,17 @@
 
     <main class="categorias-dinamicas">
       <h2>Reportes</h2>
+      <div id="reportes-admin-search" class="reportes-admin-search hidden">
+        <input
+          type="text"
+          id="reportes-admin-input"
+          class="input-cuenta"
+          placeholder="Buscar cliente por nombre o apellido..."
+          autocomplete="off"
+        />
+        <div id="reportes-admin-results" class="reportes-admin-results hidden"></div>
+        <div id="reportes-admin-target" class="reportes-admin-target hidden"></div>
+      </div>
       <div class="actions" style="margin-bottom: 16px;">
         <button id="btn-crear-reporte" class="btn-primary">Hacer un reporte</button>
       </div>

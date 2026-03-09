@@ -15,6 +15,18 @@ requireSession();
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const getCaracasDateISO = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value || "0000";
+  const month = parts.find((part) => part.type === "month")?.value || "00";
+  const day = parts.find((part) => part.type === "day")?.value || "00";
+  return `${year}-${month}-${day}`;
+};
 const statusEl = document.querySelector("#revisar-status");
 const listEl = document.querySelector("#reportes-list");
 const toggleAutoReemplazoWrapEl = document.querySelector("#auto-reemplazo-toggle-wrap");
@@ -149,7 +161,7 @@ const notifyReporteCerrado = async (row) => {
   const reportId = Number(row?.id_reporte);
   const targetUserId = Number(row?.id_usuario);
   if (!Number.isFinite(reportId) || !Number.isFinite(targetUserId)) return;
-  const fecha = new Date().toISOString().slice(0, 10);
+  const fecha = getCaracasDateISO();
   const payload = {
     titulo: `Reporte ${reportId} cerrado.`,
     mensaje: '<a href="reportes/report.html" class="link-inline">Más detalles</a>',
@@ -276,7 +288,7 @@ async function applyDiasExtraToVentaFechaCorte(row, ventaInfoFromFlow = null) {
 async function notifyDiasSumados({ row, ventaInfo, dias }) {
   const targetUserId = Number(ventaInfo?.id_usuario || row?.id_usuario);
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
-  const fecha = new Date().toISOString().slice(0, 10);
+  const fecha = getCaracasDateISO();
   const payload = {
     titulo: "Reporte solucionado",
     mensaje: `Se sumó ${dias} dias a tu fecha de pago.`,
@@ -292,7 +304,7 @@ async function notifyDiasSumados({ row, ventaInfo, dias }) {
 async function notifyReemplazoReporte({ row, plataforma, correoViejo, correoNuevo, dias }) {
   const targetUserId = Number(row?.id_usuario);
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
-  const fecha = new Date().toISOString().slice(0, 10);
+  const fecha = getCaracasDateISO();
   const correoNuevoTxt = String(correoNuevo || "").trim();
   const correoViejoTxt = String(correoViejo || "").trim();
   const plataformaTxt = escapeHtml(plataforma || "la plataforma");

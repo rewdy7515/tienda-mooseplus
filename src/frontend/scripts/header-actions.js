@@ -693,6 +693,67 @@ if (!window.__headerActionsInit) {
       bindCartFallback();
       await ensureServerSession();
       const user = await loadCurrentUser();
+      const markTutorialCompleted = async () => {
+        const uid = Number(user?.id_usuario || userId);
+        if (!Number.isFinite(uid) || uid <= 0) return;
+        const { error } = await supabase
+          .from("usuarios")
+          .update({ tutorial_completado: true })
+          .eq("id_usuario", uid);
+        if (error) throw error;
+      };
+      const tutorialValue = user?.tutorial_completado;
+      const tutorialCompletado =
+        tutorialValue === true ||
+        tutorialValue === "true" ||
+        tutorialValue === 1 ||
+        tutorialValue === "1" ||
+        tutorialValue === "t";
+      const tutorialPendiente =
+        tutorialValue == null ||
+        tutorialValue === false ||
+        tutorialValue === "false" ||
+        tutorialValue === 0 ||
+        tutorialValue === "0" ||
+        tutorialValue === "f";
+      const pathName = String(window.location.pathname || "");
+      const isIndexPage =
+        /\/index\.html$/i.test(pathName) ||
+        pathName === "/" ||
+        /\/pages\/$/i.test(pathName);
+      const waitForIndexLoaderHidden = async () => {
+        if (!isIndexPage) return;
+        const loader = document.querySelector("#page-loader");
+        if (!loader) return;
+        const isHidden = () =>
+          loader.classList.contains("hidden") ||
+          loader.hidden === true ||
+          window.getComputedStyle(loader).display === "none" ||
+          window.getComputedStyle(loader).visibility === "hidden" ||
+          Number(window.getComputedStyle(loader).opacity || "1") === 0;
+        if (isHidden()) return;
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            window.removeEventListener("moose:page-loader-hidden", onLoaderHidden);
+            observer.disconnect();
+            clearTimeout(safetyTimer);
+            resolve();
+          };
+          const onLoaderHidden = () => finish();
+          const observer = new MutationObserver(() => {
+            if (isHidden()) finish();
+          });
+          observer.observe(loader, {
+            attributes: true,
+            attributeFilter: ["class", "style", "hidden", "aria-hidden"],
+          });
+          window.addEventListener("moose:page-loader-hidden", onLoaderHidden, { once: true });
+          const safetyTimer = window.setTimeout(finish, 6000);
+        });
+      };
       setSessionRoles(user || {});
       await applyHeaderAvatar(user || null, userId);
       const roles = getSessionRoles();
@@ -797,7 +858,8 @@ if (!window.__headerActionsInit) {
         }
       });
 
-      if (!tutorialCompletado && tutorialPendiente) {
+      if (isIndexPage && !tutorialCompletado && tutorialPendiente) {
+        await waitForIndexLoaderHidden();
         startHeaderTutorial({
           onFinish: async () => {
             await markTutorialCompleted();
@@ -914,24 +976,3 @@ if (!window.__headerActionsInit) {
       .catch((err) => console.error("header search init error", err));
   }
 }
-      const markTutorialCompleted = async () => {
-        const uid = Number(user?.id_usuario || userId);
-        if (!Number.isFinite(uid) || uid <= 0) return;
-        const { error } = await supabase
-          .from("usuarios")
-          .update({ tutorial_completado: true })
-          .eq("id_usuario", uid);
-        if (error) throw error;
-      };
-      const tutorialCompletado =
-        user?.tutorial_completado === true ||
-        user?.tutorial_completado === "true" ||
-        user?.tutorial_completado === 1 ||
-        user?.tutorial_completado === "1" ||
-        user?.tutorial_completado === "t";
-      const tutorialPendiente =
-        user?.tutorial_completado === false ||
-        user?.tutorial_completado === "false" ||
-        user?.tutorial_completado === 0 ||
-        user?.tutorial_completado === "0" ||
-        user?.tutorial_completado === "f";

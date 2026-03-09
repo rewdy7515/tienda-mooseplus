@@ -10,6 +10,19 @@
     root.NotificationTemplatesCore = api;
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function buildCore() {
+  const getCaracasDateISO = () => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Caracas",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const year = parts.find((part) => part.type === "year")?.value || "0000";
+    const month = parts.find((part) => part.type === "month")?.value || "00";
+    const day = parts.find((part) => part.type === "day")?.value || "00";
+    return `${year}-${month}-${day}`;
+  };
+
   const formatDDMMYYYY = (dateStr) => {
     if (!dateStr) return "";
     const parts = String(dateStr).split("-");
@@ -239,7 +252,7 @@
 
   const buildNotificationPayload = (tipo, data = {}, { idCuenta = null, fecha = null } = {}) => {
     const { titulo, mensaje } = buildNotification(tipo, data);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getCaracasDateISO();
     return {
       titulo,
       mensaje,
@@ -250,7 +263,7 @@
   };
 
   const pickNotificationUserIds = (tipo, { ventaUserId = null, cuentaVentas = [] } = {}) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getCaracasDateISO();
     const toDate = (d) => {
       const parsed = new Date(d);
       return Number.isNaN(parsed.getTime()) ? null : parsed;

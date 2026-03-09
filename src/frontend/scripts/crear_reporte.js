@@ -18,6 +18,28 @@ requireSession();
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const getCaracasDateTime = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value || "0000";
+  const month = parts.find((part) => part.type === "month")?.value || "00";
+  const day = parts.find((part) => part.type === "day")?.value || "00";
+  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
+  const second = parts.find((part) => part.type === "second")?.value || "00";
+  return {
+    fecha: `${year}-${month}-${day}`,
+    hora: `${hour}:${minute}:${second}`,
+  };
+};
 const selectPlataforma = document.querySelector("#select-plataforma");
 const selectMotivo = document.querySelector("#select-motivo");
 const selectPerfil = document.querySelector("#select-perfil");
@@ -1163,6 +1185,7 @@ async function handleSubmit(e) {
         })
       : { reemplazado: false, aplica: false, sinStock: false };
     if (autoReplaceResult?.reemplazado) {
+      const caracasNow = getCaracasDateTime();
       const imagenAuto = await resolveImagenPath();
       const correoNuevoAuto = String(autoReplaceResult?.correoNuevo || "").trim();
       const descripcionSolucionAuto = correoNuevoAuto
@@ -1179,6 +1202,8 @@ async function handleSubmit(e) {
         en_revision: false,
         solucionado: true,
         descripcion_solucion: descripcionSolucionAuto,
+        fecha_creacion: caracasNow.fecha,
+        hora_creacion: caracasNow.hora,
       };
       const { error: insertAutoErr } = await supabase.from("reportes").insert([payloadAuto]);
       if (insertAutoErr) {
@@ -1208,6 +1233,7 @@ async function handleSubmit(e) {
     }
 
     const imagenNormal = await resolveImagenPath();
+    const caracasNow = getCaracasDateTime();
 
     const payload = {
       id_usuario,
@@ -1219,6 +1245,8 @@ async function handleSubmit(e) {
       imagen: imagenNormal,
       en_revision: true,
       solucionado: false,
+      fecha_creacion: caracasNow.fecha,
+      hora_creacion: caracasNow.hora,
     };
 
     const { error } = await supabase.from("reportes").insert([payload]);

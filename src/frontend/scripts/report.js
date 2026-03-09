@@ -31,6 +31,12 @@ let reportesSolById = new Map();
 const btnSolucionados = document.querySelector("#btn-solucionados");
 const solSection = document.querySelector("#solucionados-section");
 const solListEl = document.querySelector("#reportes-solucionados-list");
+const adminSearchWrap = document.querySelector("#reportes-admin-search");
+const adminSearchInput = document.querySelector("#reportes-admin-input");
+const adminSearchResults = document.querySelector("#reportes-admin-results");
+const adminSearchTarget = document.querySelector("#reportes-admin-target");
+let selectedUserId = null;
+let selectedUserLabel = "";
 
 const normalizeHexColor = (value) => {
   const raw = String(value || "").trim();
@@ -91,7 +97,8 @@ const renderSolucionNota = (notaRaw = "") => {
 
 async function init() {
   try {
-    const userId = requireSession();
+    const userId = Number(requireSession() || 0);
+    selectedUserId = Number.isFinite(userId) && userId > 0 ? userId : null;
     await ensureServerSession();
     const user = await loadCurrentUser();
     if (user && usernameEl) {
@@ -105,11 +112,18 @@ async function init() {
       isTrue(sessionRoles?.permiso_superadmin) ||
       isTrue(user?.permiso_admin) ||
       isTrue(user?.permiso_superadmin);
+    const isSuperadmin =
+      isTrue(sessionRoles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);
       adminLink.style.display = isAdmin ? "block" : "none";
     }
-
+    const selfName =
+      [user?.nombre, user?.apellido].filter(Boolean).join(" ").trim() || "Mi cuenta";
+    selectedUserLabel = selfName;
+    if (isSuperadmin) {
+      bindSuperadminSearch({ selfName });
+    }
     await loadReportes();
     await loadReportesSolucionados();
   } catch (err) {
@@ -184,7 +198,12 @@ function renderReportes(items = []) {
 async function loadReportes() {
   if (statusEl) statusEl.textContent = "Cargando reportes...";
   try {
-    const id = requireSession();
+    const id = Number(selectedUserId || requireSession() || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      renderReportes([]);
+      if (statusEl) statusEl.textContent = "";
+      return;
+    }
     await ensureServerSession();
     const { data, error } = await supabase
       .from("reportes")
@@ -226,7 +245,12 @@ pendientesListEl?.addEventListener("click", (e) => {
 
 async function loadReportesSolucionados() {
   try {
-    const id = requireSession();
+    const id = Number(selectedUserId || requireSession() || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      porPlataformaSol = new Map();
+      renderSolucionadosList();
+      return;
+    }
     await ensureServerSession();
     const { data, error } = await supabase
       .from("reportes")
@@ -250,6 +274,93 @@ async function loadReportesSolucionados() {
   } catch (err) {
     console.error("load solucionados error", err);
   }
+}
+
+async function searchUsuarios(termRaw = "") {
+  const term = String(termRaw || "").trim().replaceAll(",", " ");
+  if (term.length < 2) return [];
+  const q = `%${term}%`;
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("id_usuario, nombre, apellido")
+    .or(`nombre.ilike.${q},apellido.ilike.${q}`)
+    .order("nombre", { ascending: true })
+    .limit(20);
+  if (error) throw error;
+  return data || [];
+}
+
+function setAdminTarget(text = "") {
+  if (!adminSearchTarget) return;
+  const safe = String(text || "").trim();
+  adminSearchTarget.textContent = safe;
+  adminSearchTarget.classList.toggle("hidden", !safe);
+}
+
+function bindSuperadminSearch({ selfName = "Mi cuenta" } = {}) {
+  if (!adminSearchWrap || !adminSearchInput || !adminSearchResults) return;
+  adminSearchWrap.classList.remove("hidden");
+  setAdminTarget(`Mostrando reportes de: ${selfName}`);
+  let debounceTimer = null;
+  let latestQuery = "";
+  const hideResults = () => {
+    adminSearchResults.innerHTML = "";
+    adminSearchResults.classList.add("hidden");
+  };
+  const selectUser = async (row) => {
+    const id = Number(row?.id_usuario);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const fullName =
+      [row?.nombre, row?.apellido].filter(Boolean).join(" ").trim() || `Usuario ${id}`;
+    adminSearchInput.value = fullName;
+    selectedUserId = id;
+    selectedUserLabel = fullName;
+    hideResults();
+    setAdminTarget(`Mostrando reportes de: ${fullName}`);
+    await Promise.all([loadReportes(), loadReportesSolucionados()]);
+  };
+  adminSearchInput.addEventListener("input", () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    latestQuery = adminSearchInput.value || "";
+    debounceTimer = setTimeout(async () => {
+      try {
+        if ((latestQuery || "").trim().length < 2) {
+          hideResults();
+          return;
+        }
+        const rows = await searchUsuarios(latestQuery);
+        if (!rows.length) {
+          adminSearchResults.innerHTML =
+            '<div class="status" style="padding:10px 12px;">Sin resultados.</div>';
+          adminSearchResults.classList.remove("hidden");
+          return;
+        }
+        adminSearchResults.innerHTML = rows
+          .map((r) => {
+            const fullName =
+              [r.nombre, r.apellido].filter(Boolean).join(" ").trim() ||
+              `Usuario ${r.id_usuario}`;
+            return `<button type="button" class="reportes-admin-result" data-id="${r.id_usuario}" data-name="${escapeHtml(
+              fullName
+            )}">${escapeHtml(fullName)}</button>`;
+          })
+          .join("");
+        adminSearchResults.classList.remove("hidden");
+      } catch (err) {
+        console.error("buscar usuarios reportes error", err);
+      }
+    }, 220);
+  });
+  adminSearchResults.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".reportes-admin-result");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    const name = String(btn.dataset.name || "").trim();
+    await selectUser({ id_usuario: id, nombre: name, apellido: "" });
+  });
+  document.addEventListener("click", (e) => {
+    if (!adminSearchWrap.contains(e.target)) hideResults();
+  });
 }
 
 function renderSolucionadosList() {

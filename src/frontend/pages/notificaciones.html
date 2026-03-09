@@ -99,6 +99,50 @@
         color: #6b7280;
         font-weight: 600;
       }
+      .notif-admin-search {
+        margin: 0 0 12px;
+        position: relative;
+      }
+      .notif-admin-search.hidden {
+        display: none;
+      }
+      .notif-admin-search input {
+        width: 100%;
+      }
+      .notif-admin-results {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+        max-height: 260px;
+        overflow-y: auto;
+        z-index: 20;
+      }
+      .notif-admin-results.hidden {
+        display: none;
+      }
+      .notif-admin-result {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 10px 12px;
+        cursor: pointer;
+        font: inherit;
+      }
+      .notif-admin-result:hover {
+        background: #f3f4f6;
+      }
+      .notif-admin-target {
+        margin-top: 8px;
+        color: #6b7280;
+        font-size: 13px;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
@@ -107,6 +151,17 @@
 
     <main class="categorias-dinamicas">
       <h2>Notificaciones</h2>
+      <div id="notif-admin-search" class="notif-admin-search hidden">
+        <input
+          type="text"
+          id="notif-admin-input"
+          class="input-cuenta"
+          placeholder="Buscar cliente por nombre o apellido..."
+          autocomplete="off"
+        />
+        <div id="notif-admin-results" class="notif-admin-results hidden"></div>
+        <div id="notif-admin-target" class="notif-admin-target hidden"></div>
+      </div>
       <div id="notif-container">
         <p class="status" id="notif-status">Cargando...</p>
         <div class="notif-list" id="notif-body"></div>
@@ -123,7 +178,13 @@
 
       const statusEl = document.querySelector("#notif-status");
       const tbody = document.querySelector("#notif-body");
+      const adminSearchWrap = document.querySelector("#notif-admin-search");
+      const adminSearchInput = document.querySelector("#notif-admin-input");
+      const adminSearchResults = document.querySelector("#notif-admin-results");
+      const adminSearchTarget = document.querySelector("#notif-admin-target");
       const TEST_USER_ID = 23;
+      const isTrue = (v) =>
+        v === true || v === 1 || v === "1" || v === "true" || v === "t";
       const normalizePlatformName = (value = "") =>
         String(value || "").trim().toLowerCase();
       const normalizeHexColor = (value = "") => {
@@ -146,6 +207,12 @@
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
+      };
+      const setAdminTarget = (text = "") => {
+        if (!adminSearchTarget) return;
+        const safe = String(text || "").trim();
+        adminSearchTarget.textContent = safe;
+        adminSearchTarget.classList.toggle("hidden", !safe);
       };
 
       const renderTable = (items = [], platformColors = new Map()) => {
@@ -201,8 +268,6 @@
           });
           return wrap.innerHTML;
         };
-        const shouldShowDate = (title = "") =>
-          title.toLowerCase().includes("pronto vence tu servicio");
         const colorizePlatformNames = (html = "") => {
           const wrap = document.createElement("div");
           wrap.innerHTML = html;
@@ -218,13 +283,12 @@
         tbody.innerHTML = items
           .map((n) => {
             const title = n.titulo || "-";
-            const showDate = shouldShowDate(title);
             const mensaje = colorizePlatformNames(linkifyEmails(n.mensaje || "-"));
             return `
           <div class="notif-item">
             <h4>${title}</h4>
             <p>${mensaje}</p>
-            ${showDate ? `<small>${n.fecha || ""}</small>` : ""}
+            <small>${n.fecha || ""}</small>
           </div>
         `;
           })
@@ -240,6 +304,120 @@
       const getPin = (v) => v?.perfiles?.pin || "";
       const getPlataforma = (v) => v?.cuentas?.plataformas?.nombre || "Plataforma";
       const getIdCuenta = (v) => v?.id_cuenta || v?.cuentas?.id_cuenta || null;
+
+      const loadPlatformColors = async () => {
+        let platformColors = new Map();
+        try {
+          const { data: plats, error: platsErr } = await supabase
+            .from("plataformas")
+            .select("nombre, color_1");
+          if (platsErr) {
+            console.error("cargar colores de plataformas error", platsErr);
+          } else {
+            platformColors = buildPlatformColorMap(plats || []);
+          }
+        } catch (platErr) {
+          console.error("cargar colores de plataformas error", platErr);
+        }
+        return platformColors;
+      };
+
+      const loadNotificationsByUserId = async (targetUserId, platformColors) => {
+        const id = Number(targetUserId);
+        if (!Number.isFinite(id) || id <= 0) {
+          renderTable([], platformColors);
+          return;
+        }
+        setStatus("Cargando...");
+        const { data, error } = await supabase
+          .from("notificaciones")
+          .select("id_notificacion, titulo, mensaje, fecha")
+          .eq("id_usuario", id)
+          .order("id_notificacion", { ascending: false });
+        if (error) throw error;
+        renderTable(data || [], platformColors);
+      };
+
+      const searchUsuarios = async (termRaw = "") => {
+        const term = String(termRaw || "").trim().replaceAll(",", " ");
+        if (term.length < 2) return [];
+        const q = `%${term}%`;
+        const { data, error } = await supabase
+          .from("usuarios")
+          .select("id_usuario, nombre, apellido")
+          .or(`nombre.ilike.${q},apellido.ilike.${q}`)
+          .order("nombre", { ascending: true })
+          .limit(20);
+        if (error) throw error;
+        return data || [];
+      };
+
+      const bindSuperadminSearch = ({ selfUser, platformColors }) => {
+        if (!adminSearchWrap || !adminSearchInput || !adminSearchResults) return;
+        adminSearchWrap.classList.remove("hidden");
+        let debounceTimer = null;
+        let latestQuery = "";
+        const hideResults = () => {
+          adminSearchResults.innerHTML = "";
+          adminSearchResults.classList.add("hidden");
+        };
+        const selectUser = async (row) => {
+          const fullName =
+            [row?.nombre, row?.apellido].filter(Boolean).join(" ").trim() ||
+            `Usuario ${row?.id_usuario || ""}`;
+          adminSearchInput.value = fullName;
+          hideResults();
+          setAdminTarget(`Mostrando notificaciones de: ${fullName}`);
+          await loadNotificationsByUserId(row.id_usuario, platformColors);
+        };
+        adminSearchInput.addEventListener("input", () => {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          const q = adminSearchInput.value || "";
+          latestQuery = q;
+          debounceTimer = setTimeout(async () => {
+            try {
+              if ((latestQuery || "").trim().length < 2) {
+                hideResults();
+                return;
+              }
+              const rows = await searchUsuarios(latestQuery);
+              if (!rows.length) {
+                adminSearchResults.innerHTML =
+                  '<div class="status" style="padding:10px 12px;">Sin resultados.</div>';
+                adminSearchResults.classList.remove("hidden");
+                return;
+              }
+              adminSearchResults.innerHTML = rows
+                .map((r) => {
+                  const name =
+                    [r.nombre, r.apellido].filter(Boolean).join(" ").trim() ||
+                    `Usuario ${r.id_usuario}`;
+                  return `<button type="button" class="notif-admin-result" data-id="${r.id_usuario}" data-name="${name}">${name}</button>`;
+                })
+                .join("");
+              adminSearchResults.classList.remove("hidden");
+            } catch (err) {
+              console.error("buscar usuarios notificaciones error", err);
+            }
+          }, 220);
+        });
+        adminSearchResults.addEventListener("click", async (e) => {
+          const btn = e.target.closest(".notif-admin-result");
+          if (!btn) return;
+          const id = Number(btn.dataset.id);
+          const name = String(btn.dataset.name || "").trim();
+          await selectUser({ id_usuario: id, nombre: name, apellido: "" });
+        });
+        document.addEventListener("click", (e) => {
+          if (!adminSearchWrap.contains(e.target)) hideResults();
+        });
+        setAdminTarget(
+          `Mostrando notificaciones de: ${[selfUser?.nombre, selfUser?.apellido]
+            .filter(Boolean)
+            .join(" ")
+            .trim() || "Mi cuenta"}`
+        );
+      };
 
       const seedTestNotifications = async () => {
         const today = new Date().toISOString().slice(0, 10);
@@ -416,26 +594,11 @@
           if (Number(user.id_usuario) === TEST_USER_ID) {
             await seedTestNotifications();
           }
-          let platformColors = new Map();
-          try {
-            const { data: plats, error: platsErr } = await supabase
-              .from("plataformas")
-              .select("nombre, color_1");
-            if (platsErr) {
-              console.error("cargar colores de plataformas error", platsErr);
-            } else {
-              platformColors = buildPlatformColorMap(plats || []);
-            }
-          } catch (platErr) {
-            console.error("cargar colores de plataformas error", platErr);
+          const platformColors = await loadPlatformColors();
+          await loadNotificationsByUserId(user.id_usuario, platformColors);
+          if (isTrue(user?.permiso_superadmin)) {
+            bindSuperadminSearch({ selfUser: user, platformColors });
           }
-          const { data, error } = await supabase
-            .from("notificaciones")
-            .select("titulo, mensaje, fecha")
-            .eq("id_usuario", user.id_usuario)
-            .order("fecha", { ascending: false });
-          if (error) throw error;
-          renderTable(data || [], platformColors);
         } catch (err) {
           console.error("cargar notificaciones error", err);
           setStatus("No se pudieron cargar las notificaciones.");

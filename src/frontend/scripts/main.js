@@ -1995,6 +1995,7 @@ async function init() {
     const shell = document.getElementById("app-shell");
     if (shell) shell.classList.remove("hidden");
     if (loader) loader.classList.add("hidden");
+    window.dispatchEvent(new CustomEvent("moose:page-loader-hidden"));
   }
 }
 
