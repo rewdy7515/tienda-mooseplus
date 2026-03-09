@@ -90,8 +90,401 @@ if (!window.__headerActionsInit) {
   };
 
   const headerEl = document.querySelector(".header");
+  const tutorialHeaderBtn = document.querySelector("#btn-tutorial-header");
   const adminHeaderBtn = document.querySelector("#btn-admin-header");
   const ordenesHeaderBtn = document.querySelector("#btn-ordenes-header");
+  const ensureHeaderTutorialStyles = () => {
+    if (document.querySelector("#header-tutorial-style")) return;
+    const style = document.createElement("style");
+    style.id = "header-tutorial-style";
+    style.textContent = `
+      .header-tutorial-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 9998;
+        background: transparent;
+      }
+      .header-tutorial-overlay.hidden {
+        display: none;
+      }
+      .header-tutorial-spotlight {
+        position: fixed;
+        z-index: 10003;
+        border-radius: 12px;
+        border: 3px solid #22c55e;
+        pointer-events: none;
+        box-shadow: 0 0 0 9999px rgba(10, 10, 10, 0.58);
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .header-tutorial-card {
+        position: fixed;
+        width: min(92vw, 420px);
+        z-index: 10004;
+        border-radius: 14px;
+        background: #fff;
+        color: #111827;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+        padding: 16px;
+      }
+      .header-tutorial-card h4 {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+        font-weight: 800;
+      }
+      .header-tutorial-card p {
+        margin: 0;
+        line-height: 1.45;
+      }
+      .header-tutorial-actions {
+        margin-top: 14px;
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .header-tutorial-target {
+        z-index: 10000 !important;
+      }
+      @media (max-width: 640px) {
+        .header-tutorial-card {
+          bottom: 10px;
+          padding: 14px;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  };
+  const ensureHeaderTutorialUi = () => {
+    ensureHeaderTutorialStyles();
+    let overlay = document.querySelector("#header-tutorial-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "header-tutorial-overlay";
+      overlay.className = "header-tutorial-overlay hidden";
+      overlay.innerHTML = `
+        <div id="header-tutorial-spotlight" class="header-tutorial-spotlight"></div>
+        <div class="header-tutorial-card" role="dialog" aria-modal="true" aria-labelledby="header-tutorial-title">
+          <h4 id="header-tutorial-title">Tutorial</h4>
+          <p id="header-tutorial-text"></p>
+          <div class="header-tutorial-actions">
+            <button type="button" class="btn-outline" id="header-tutorial-prev">Anterior</button>
+            <button type="button" class="btn-outline" id="header-tutorial-next">Siguiente</button>
+            <button type="button" class="btn-primary" id="header-tutorial-close">Finalizar</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  };
+  const startHeaderTutorial = () => {
+    const overlay = ensureHeaderTutorialUi();
+    const titleEl = overlay.querySelector("#header-tutorial-title");
+    const textEl = overlay.querySelector("#header-tutorial-text");
+    const cardEl = overlay.querySelector(".header-tutorial-card");
+    const spotlightEl = overlay.querySelector("#header-tutorial-spotlight");
+    const prevBtn = overlay.querySelector("#header-tutorial-prev");
+    const nextBtn = overlay.querySelector("#header-tutorial-next");
+    const closeBtn = overlay.querySelector("#header-tutorial-close");
+    const userMenuEl = document.querySelector(".user-menu");
+    const userDropdownEl = document.querySelector(".user-dropdown");
+    const platformModalEl = document.querySelector("#platform-modal");
+    const platformModalCloseBtn = document.querySelector("#platform-modal .modal-close");
+    const steps = [
+      {
+        selector: ".user-menu",
+        title: "Menú de usuario",
+        text: "Desde aquí accedes a tus opciones de cuenta.",
+      },
+      {
+        selector: ".user-dropdown",
+        title: "Botones del menú",
+        text: "Aquí verás las opciones disponibles de tu cuenta.",
+        openUserMenu: true,
+      },
+      {
+        selector: '.user-dropdown a[href*="mi_perfil.html"]',
+        title: "Mi perfil",
+        text: "Aquí puedes actualizar tus datos personales.",
+        openUserMenu: true,
+      },
+      {
+        selector: ".saldo-item",
+        title: "Saldo",
+        text: "Aquí verás el saldo disponible de tu cuenta.",
+        openUserMenu: true,
+      },
+      {
+        selector: '.user-dropdown a[href*="inventario.html"]',
+        title: "Mis cuentas",
+        text: "Aquí encontrarás todos tus servicios activos. También podrás renovar y reportar problemas.",
+        openUserMenu: true,
+      },
+      {
+        selector: '.user-dropdown a[href*="notificaciones.html"]',
+        title: "Notificaciones",
+        text: "Aquí verás avisos importantes de tus servicios.",
+        openUserMenu: true,
+      },
+      {
+        selector: ".reportes-link",
+        title: "Reportes",
+        text: "Aquí puedes crear y revisar reportes de tus servicios.",
+        openUserMenu: true,
+      },
+      {
+        selector: '.user-dropdown a[href*="historial_ordenes.html"]',
+        title: "Ordenes",
+        text: "Aquí puedes consultar tus órdenes.",
+        openUserMenu: true,
+      },
+      {
+        selector: "#search-input",
+        title: "Barra de buscar plataforma",
+        text: "Usa esta barra para buscar plataformas rápidamente.",
+      },
+      {
+        selector: ".plataformas-grid .plataforma-card:first-child",
+        title: "Presionar el producto",
+        text: "Primero presiona un producto para abrir sus planes disponibles.",
+        openProductModal: false,
+      },
+      {
+        selector: "#modal-precios",
+        title: "Presionar plan",
+        text: "Luego presiona el plan que quieres comprar.",
+        openProductModal: true,
+      },
+      {
+        selector: ".modal-qty-group",
+        title: "Meses y cantidad",
+        text: "Aquí eliges meses y cantidad. Mientras más meses o cantidades elijas, más descuentos puedes obtener.",
+        openProductModal: true,
+      },
+      {
+        selector: "#add-cart",
+        title: "Añadir al carrito",
+        text: "Cuando termines de configurar, presiona Añadir al carrito.",
+        openProductModal: true,
+      },
+      {
+        selector: ".carrito",
+        title: "Icono de carrito",
+        text: "Aquí ves tu carrito y puedes continuar con la compra.",
+        closeProductModal: true,
+      },
+    ];
+    const hasProductCatalog = !!document.querySelector(".plataforma-card");
+    const visibleSteps = steps.filter((step) => {
+      if (step.openProductModal) return hasProductCatalog;
+      const el = document.querySelector(step.selector);
+      return el && getComputedStyle(el).display !== "none";
+    });
+    if (!visibleSteps.length) return;
+
+    let index = 0;
+    let highlighted = null;
+    let openedUserMenuByTutorial = false;
+    let forcedDropdownVisibleByTutorial = false;
+    let currentTargetRect = null;
+    let openedPlatformModalByTutorial = false;
+    const blockedScrollKeys = new Set([
+      "ArrowUp",
+      "ArrowDown",
+      "PageUp",
+      "PageDown",
+      "Home",
+      "End",
+      " ",
+      "Spacebar",
+    ]);
+    const isPlatformModalOpen = () =>
+      !!platformModalEl && !platformModalEl.classList.contains("hidden");
+    const openFirstProductModalForTutorial = () => {
+      if (isPlatformModalOpen()) return true;
+      const firstProductCard = document.querySelector(".plataforma-card");
+      if (!firstProductCard) return false;
+      firstProductCard.scrollIntoView({ block: "center", behavior: "smooth" });
+      firstProductCard.click();
+      openedPlatformModalByTutorial = true;
+      return isPlatformModalOpen();
+    };
+    const closeProductModalForTutorial = () => {
+      if (!isPlatformModalOpen()) return;
+      if (platformModalCloseBtn) {
+        platformModalCloseBtn.click();
+      } else {
+        platformModalEl?.classList.add("hidden");
+      }
+    };
+    const resetSpotlight = () => {
+      if (!spotlightEl) return;
+      spotlightEl.style.opacity = "0";
+      spotlightEl.style.left = "0px";
+      spotlightEl.style.top = "0px";
+      spotlightEl.style.width = "0px";
+      spotlightEl.style.height = "0px";
+    };
+    const paintSpotlight = (rect) => {
+      if (!spotlightEl || !rect) return;
+      spotlightEl.style.left = `${Math.max(0, rect.left - 6)}px`;
+      spotlightEl.style.top = `${Math.max(0, rect.top - 6)}px`;
+      spotlightEl.style.width = `${Math.max(0, rect.width + 12)}px`;
+      spotlightEl.style.height = `${Math.max(0, rect.height + 12)}px`;
+      spotlightEl.style.opacity = "1";
+    };
+    const blockScrollInput = (event) => {
+      event.preventDefault();
+    };
+    const blockScrollKeyInput = (event) => {
+      if (!blockedScrollKeys.has(event.key)) return;
+      event.preventDefault();
+    };
+    const enableTutorialScrollLock = () => {
+      window.addEventListener("wheel", blockScrollInput, { passive: false, capture: true });
+      window.addEventListener("touchmove", blockScrollInput, { passive: false, capture: true });
+      window.addEventListener("keydown", blockScrollKeyInput, { capture: true });
+    };
+    const disableTutorialScrollLock = () => {
+      window.removeEventListener("wheel", blockScrollInput, { capture: true });
+      window.removeEventListener("touchmove", blockScrollInput, { capture: true });
+      window.removeEventListener("keydown", blockScrollKeyInput, { capture: true });
+    };
+    const positionTutorialCard = (targetRect) => {
+      if (!cardEl || !targetRect) return;
+      const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+      const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+      const cardRect = cardEl.getBoundingClientRect();
+      const margin = 12;
+
+      let left = targetRect.left;
+      if (left + cardRect.width > viewportW - margin) {
+        left = viewportW - cardRect.width - margin;
+      }
+      left = Math.max(margin, left);
+
+      let top = targetRect.bottom + 10;
+      if (top + cardRect.height > viewportH - margin) {
+        top = targetRect.top - cardRect.height - 10;
+      }
+      if (top < margin) {
+        top = Math.max(margin, Math.min(viewportH - cardRect.height - margin, margin));
+      }
+
+      cardEl.style.left = `${left}px`;
+      cardEl.style.top = `${top}px`;
+      cardEl.style.bottom = "auto";
+      cardEl.style.transform = "none";
+    };
+    const clearHighlight = () => {
+      if (highlighted) highlighted.classList.remove("header-tutorial-target");
+      highlighted = null;
+      currentTargetRect = null;
+      resetSpotlight();
+      if (forcedDropdownVisibleByTutorial && userDropdownEl) {
+        userDropdownEl.style.opacity = "";
+        userDropdownEl.style.pointerEvents = "";
+        userDropdownEl.style.transform = "";
+        forcedDropdownVisibleByTutorial = false;
+      }
+      if (openedUserMenuByTutorial && userMenuEl) {
+        userMenuEl.classList.remove("open");
+        openedUserMenuByTutorial = false;
+      }
+    };
+    const close = () => {
+      clearHighlight();
+      if (openedPlatformModalByTutorial) {
+        closeProductModalForTutorial();
+      }
+      overlay.classList.add("hidden");
+      document.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("resize", onResizeReposition);
+      window.removeEventListener("scroll", onResizeReposition, true);
+      disableTutorialScrollLock();
+    };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") close();
+    };
+    const onResizeReposition = () => {
+      if (!currentTargetRect) return;
+      const rect = highlighted?.getBoundingClientRect();
+      if (!rect) return;
+      currentTargetRect = rect;
+      positionTutorialCard(rect);
+      paintSpotlight(rect);
+    };
+    const render = () => {
+      const step = visibleSteps[index];
+      if (!step) return;
+      clearHighlight();
+      if (step.openUserMenu && userMenuEl) {
+        userMenuEl.classList.remove("suppress-dropdown");
+        userMenuEl.classList.add("open");
+        openedUserMenuByTutorial = true;
+        if (userDropdownEl) {
+          userDropdownEl.style.opacity = "1";
+          userDropdownEl.style.pointerEvents = "auto";
+          userDropdownEl.style.transform = "translateY(0)";
+          forcedDropdownVisibleByTutorial = true;
+        }
+      }
+      if (step.closeProductModal) {
+        closeProductModalForTutorial();
+      }
+      if (step.openProductModal) {
+        openFirstProductModalForTutorial();
+      }
+      const el = document.querySelector(step.selector);
+      if (el) {
+        el.classList.add("header-tutorial-target");
+        highlighted = el;
+        // Siempre desplaza al objetivo al cambiar de paso (Siguiente/Anterior).
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        const syncHighlightPosition = () => {
+          if (!highlighted) return;
+          const liveRect = highlighted.getBoundingClientRect();
+          currentTargetRect = liveRect;
+          paintSpotlight(liveRect);
+          positionTutorialCard(liveRect);
+        };
+        syncHighlightPosition();
+        // Recalculo continuo corto para asegurar alineación durante/tras el scroll suave.
+        window.requestAnimationFrame(syncHighlightPosition);
+        window.setTimeout(syncHighlightPosition, 80);
+        window.setTimeout(syncHighlightPosition, 180);
+        window.setTimeout(syncHighlightPosition, 320);
+      }
+      titleEl.textContent = `${step.title} (${index + 1}/${visibleSteps.length})`;
+      textEl.textContent = step.text;
+      prevBtn.disabled = index === 0;
+      const isLastStep = index >= visibleSteps.length - 1;
+      nextBtn.disabled = isLastStep;
+      nextBtn.style.display = isLastStep ? "none" : "";
+    };
+
+    prevBtn.onclick = () => {
+      if (index > 0) {
+        index -= 1;
+        render();
+      }
+    };
+    nextBtn.onclick = () => {
+      if (index < visibleSteps.length - 1) {
+        index += 1;
+        render();
+      }
+    };
+    closeBtn.onclick = close;
+
+    overlay.classList.remove("hidden");
+    document.addEventListener("keydown", onKeydown);
+    window.addEventListener("resize", onResizeReposition);
+    window.addEventListener("scroll", onResizeReposition, true);
+    enableTutorialScrollLock();
+    render();
+  };
   const setOrdenesPendingBadge = (hasPending) => {
     if (!ordenesHeaderBtn) return;
     ordenesHeaderBtn.classList.toggle("has-pending-verification", !!hasPending);
@@ -260,6 +653,10 @@ if (!window.__headerActionsInit) {
         }
       };
       if (!userId) {
+        if (tutorialHeaderBtn) {
+          tutorialHeaderBtn.classList.add("hidden");
+          tutorialHeaderBtn.style.display = "none";
+        }
         await applyHeaderAvatar(null, null);
         showLogin();
         bindCartFallback();
@@ -333,6 +730,10 @@ if (!window.__headerActionsInit) {
         adminHeaderBtn.classList.toggle("hidden", !isAdmin);
         adminHeaderBtn.style.display = isAdmin ? "inline-flex" : "none";
       }
+      if (tutorialHeaderBtn) {
+        tutorialHeaderBtn.classList.remove("hidden");
+        tutorialHeaderBtn.style.display = "block";
+      }
       if (ordenesHeaderBtn) {
         ordenesHeaderBtn.classList.toggle("hidden", !isSuper);
         ordenesHeaderBtn.style.display = isSuper ? "inline-flex" : "none";
@@ -397,6 +798,10 @@ if (!window.__headerActionsInit) {
 
   ordenesHeaderBtn?.addEventListener("click", () => {
     window.location.href = toAbs("admin/ordenes.html", basePagesUrl);
+  });
+
+  tutorialHeaderBtn?.addEventListener("click", () => {
+    startHeaderTutorial();
   });
 
   const btnCheckout = document.querySelector("#btn-checkout");

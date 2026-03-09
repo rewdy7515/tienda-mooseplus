@@ -106,7 +106,75 @@ export function requireSession() {
 export async function attachLogout(clearServerSession, clearCartCache) {
   const btn = document.querySelector(".logout-btn");
   if (!btn) return;
-  btn.addEventListener("click", async () => {
+  const ensureLogoutModal = () => {
+    let modal = document.querySelector("#logout-confirm-modal");
+    if (modal) return modal;
+
+    const style = document.createElement("style");
+    style.id = "logout-confirm-style";
+    style.textContent = `
+      .logout-confirm-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .logout-confirm-modal.hidden {
+        display: none;
+      }
+      .logout-confirm-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+      }
+      .logout-confirm-card {
+        position: relative;
+        width: min(92vw, 420px);
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+        padding: 18px;
+      }
+      .logout-confirm-title {
+        margin: 0 0 14px 0;
+        font-size: 18px;
+        font-weight: 800;
+        color: #111827;
+      }
+      .logout-confirm-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+      .logout-confirm-actions button {
+        min-width: 112px;
+      }
+    `;
+    if (!document.querySelector("#logout-confirm-style")) {
+      document.head.appendChild(style);
+    }
+
+    modal = document.createElement("div");
+    modal.id = "logout-confirm-modal";
+    modal.className = "logout-confirm-modal hidden";
+    modal.setAttribute("aria-hidden", "true");
+    modal.innerHTML = `
+      <div class="logout-confirm-backdrop" data-close="1"></div>
+      <div class="logout-confirm-card" role="dialog" aria-modal="true" aria-labelledby="logout-confirm-title">
+        <h3 id="logout-confirm-title" class="logout-confirm-title">¿Quieres cerrar sesión?</h3>
+        <div class="logout-confirm-actions">
+          <button type="button" class="btn-outline" id="logout-cancel-btn">Cancelar</button>
+          <button type="button" class="btn-primary" id="logout-confirm-btn">Cerrar sesión</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+  };
+
+  const runLogout = async () => {
     clearSession();
     if (typeof clearServerSession === "function") {
       await clearServerSession();
@@ -116,6 +184,41 @@ export async function attachLogout(clearServerSession, clearCartCache) {
     }
     const prefix = getPathPrefix();
     window.location.href = `${prefix}login.html`;
+  };
+
+  btn.addEventListener("click", async () => {
+    const modal = ensureLogoutModal();
+    const cancelBtn = modal.querySelector("#logout-cancel-btn");
+    const confirmBtn = modal.querySelector("#logout-confirm-btn");
+    const backdrop = modal.querySelector(".logout-confirm-backdrop");
+
+    const close = () => {
+      modal.classList.add("hidden");
+      modal.setAttribute("aria-hidden", "true");
+      document.removeEventListener("keydown", onKeydown);
+    };
+    const onKeydown = (e) => {
+      if (e.key === "Escape") close();
+    };
+    const onCancel = () => close();
+    const onBackdrop = (e) => {
+      if (e.target?.dataset?.close === "1") close();
+    };
+    const onConfirm = async () => {
+      confirmBtn.disabled = true;
+      try {
+        await runLogout();
+      } finally {
+        confirmBtn.disabled = false;
+      }
+    };
+
+    cancelBtn.onclick = onCancel;
+    backdrop.onclick = onBackdrop;
+    confirmBtn.onclick = onConfirm;
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.addEventListener("keydown", onKeydown);
   });
 }
 

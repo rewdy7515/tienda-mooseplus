@@ -6859,6 +6859,7 @@
                 id_cuenta: cuentaId,
                 id_perfil: perfilAnteriorId,
                 id_sub_cuenta: null,
+                id_venta: ventaId,
               });
             if (insReemplazoErr) throw insReemplazoErr;
             addToReemplazosCache({
@@ -8043,6 +8044,7 @@
                   id_cuenta: cuentaId,
                   id_perfil: perfilId || null,
                   id_sub_cuenta: null,
+                  id_venta: ventaInfo.id_venta,
                 });
               if (replErr) throw replErr;
               addToReemplazosCache({ idCuenta: cuentaId, idPerfil: perfilId || null });

@@ -7,7 +7,7 @@ import {
 } from "./session.js";
 import { clearServerSession, loadCurrentUser, supabase, ensureServerSession } from "./api.js";
 import { formatDDMMYYYY } from "./date-format.js";
-import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
+import { pickNotificationUserIds } from "./notification-templates.js";
 import { copyTextNotify } from "./copy-toast.js";
 
 requireSession();
@@ -280,6 +280,31 @@ async function notifyDiasSumados({ row, ventaInfo, dias }) {
   const payload = {
     titulo: "Reporte solucionado",
     mensaje: `Se sumó ${dias} dias a tu fecha de pago.`,
+    fecha,
+    leido: false,
+    id_usuario: targetUserId,
+    id_cuenta: Number.isFinite(Number(row?.id_cuenta)) ? Number(row.id_cuenta) : null,
+  };
+  const { error } = await supabase.from("notificaciones").insert(payload);
+  if (error) throw error;
+}
+
+async function notifyReemplazoReporte({ row, plataforma, correoViejo, correoNuevo, dias }) {
+  const targetUserId = Number(row?.id_usuario);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
+  const fecha = new Date().toISOString().slice(0, 10);
+  const correoNuevoTxt = String(correoNuevo || "").trim();
+  const correoViejoTxt = String(correoViejo || "").trim();
+  const plataformaTxt = escapeHtml(plataforma || "la plataforma");
+  const correoViejoSafe = escapeHtml(correoViejoTxt || "-");
+  const correoNuevoSafe = escapeHtml(correoNuevoTxt);
+  const correoLink = correoNuevoTxt
+    ? `<a href="inventario.html?correo=${encodeURIComponent(correoNuevoTxt)}" class="link-inline">${correoNuevoSafe}</a>`
+    : "-";
+  const diasInt = Number.isFinite(Number(dias)) ? Math.max(0, Number(dias)) : 0;
+  const payload = {
+    titulo: "Servicio reemplazado",
+    mensaje: `Tu servicio de <strong>${plataformaTxt}</strong> pasó de ${correoViejoSafe} a:<br>Correo: ${correoLink}<br><br>Se sumó ${diasInt} dias a tu fecha de pago.<br>Presiona el correo para ver los datos de la cuenta.`,
     fecha,
     leido: false,
     id_usuario: targetUserId,
@@ -1207,34 +1232,8 @@ async function reemplazarServicio() {
       id_cuenta: cuentaId,
       id_perfil: rowPerfil?.id_perfil || null,
       id_sub_cuenta: null,
+      id_venta: ventaId,
     });
-
-    try {
-      const userIds = pickNotificationUserIds("servicio_reemplazado", {
-        ventaUserId: ventaInfo?.id_usuario,
-      });
-      if (userIds.length) {
-        const notif = buildNotificationPayload(
-          "servicio_reemplazado",
-          {
-            plataforma: currentRow.plataformas?.nombre || "",
-            correoViejo: currentRow.cuentas?.correo || "",
-            perfilViejo: rowPerfil?.perfil || (rowPerfil?.n_raw ? `M${rowPerfil.n_raw}` : ""),
-            correoNuevo: dataDestino.correo || "",
-            perfilNuevo: dataDestino.n_perfil ? `M${dataDestino.n_perfil}` : "",
-            claveNuevo: dataDestino.clave || "",
-          },
-          { idCuenta: nuevoCuenta || null },
-        );
-        const rows = userIds.map((uid) => ({
-          ...notif,
-          id_usuario: uid,
-        }));
-        await supabase.from("notificaciones").insert(rows);
-      }
-    } catch (nErr) {
-      console.error("notificacion servicio_reemplazado error", nErr);
-    }
 
     const descripcionSolucion = "Servicio reemplazado";
     const { error: repErr } = await supabase
@@ -1249,17 +1248,29 @@ async function reemplazarServicio() {
       .eq("id_reporte", currentRow.id_reporte);
     if (repErr) throw repErr;
 
+    let diasSumados = 0;
     try {
       const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow, ventaInfo);
-      if (fechaRes.applied && fechaRes.dias >= 1) {
-        await notifyDiasSumados({
-          row: currentRow,
-          ventaInfo: fechaRes.venta || ventaInfo,
-          dias: fechaRes.dias,
-        });
-      }
+      diasSumados = Number(fechaRes?.dias || 0);
     } catch (diasErr) {
       console.error("sumar dias fecha_corte en reemplazo error", diasErr);
+    }
+
+    try {
+      const userIds = pickNotificationUserIds("servicio_reemplazado", {
+        ventaUserId: ventaInfo?.id_usuario,
+      });
+      if (userIds.length) {
+        await notifyReemplazoReporte({
+          row: { ...currentRow, id_usuario: userIds[0] },
+          plataforma: currentRow.plataformas?.nombre || "",
+          correoViejo: currentRow.cuentas?.correo || "",
+          correoNuevo: dataDestino.correo || "",
+          dias: diasSumados,
+        });
+      }
+    } catch (nErr) {
+      console.error("notificacion servicio_reemplazado error", nErr);
     }
 
     try {

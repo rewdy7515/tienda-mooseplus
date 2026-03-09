@@ -501,6 +501,7 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     id_cuenta: idCuenta,
     id_perfil: idPerfil || null,
     id_sub_cuenta: null,
+    id_venta: ventaInfo.id_venta,
   });
 
   try {

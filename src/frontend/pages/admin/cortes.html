@@ -1156,11 +1156,7 @@
                 }
               } else if (replId) {
                 await updateReemplazo();
-                if (shouldBulkCorte) {
-                  await bulkSuspendVentasByCuenta();
-                  markVentasCortadasByCuenta(cuentaId);
-                }
-                markRowCortado(row);
+                row.remove();
               }
             } catch (err) {
               console.error("cortar update error", err);

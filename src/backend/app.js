@@ -78,6 +78,8 @@ const PUBLIC_SITE_URL = (() => {
   return "https://mooseplus.com";
 })();
 
+const buildPublicSiteUrl = () => PUBLIC_SITE_URL;
+
 app.use(
   cors({
     origin: (origin, callback) => {

@@ -833,8 +833,13 @@
                 })
                 .eq("id_tarjeta_de_regalo", pinRecargaSeleccionado.id_tarjeta_de_regalo);
               if (updPinErr) throw updPinErr;
+              // Cargar inmediatamente el siguiente pin de recarga disponible.
+              await fetchPinRecarga();
             } catch (err) {
               console.error("marcar pin recarga error", err);
+              pinRecargaSeleccionado = null;
+              pinRecargaEl.textContent = "Pin de recarga: -";
+              pinRecargaEl.style.display = "block";
             }
           }
 
