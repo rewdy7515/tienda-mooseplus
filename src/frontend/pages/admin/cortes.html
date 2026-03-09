@@ -338,7 +338,8 @@
                 .select(
                   "id_venta, id_cuenta, id_perfil, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(correo, id_plataforma, venta_miembro, plataformas:plataformas(nombre)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo), perfiles:perfiles!ventas_id_perfil_fkey(perfil_hogar), usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido)"
                 )
-                .eq("suspendido", true);
+                .eq("suspendido", true)
+                .or("reportado.is.null,reportado.eq.false");
               if (ventasErr) throw ventasErr;
               return ventasSusp || [];
             };
@@ -718,6 +719,7 @@
             )
             .lte("fecha_corte", today)
             .eq("recordatorio_enviado", true)
+            .or("reportado.is.null,reportado.eq.false")
             .or("suspendido.is.null,suspendido.eq.false")
             .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
           if (error) throw error;

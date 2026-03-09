@@ -201,6 +201,7 @@
       const btnConfirmarRenovar = document.querySelector("#btn-confirmar-renovar");
       const modalCostoRenov = document.querySelector("#modal-costo-renovacion");
       const modalCostoRenovClose = document.querySelector(".modal-costo-renov-close");
+      const costoRenovRefEl = document.querySelector("#costo-renovacion-ref");
       const costoRenovInput = document.querySelector("#costo-renovacion-input");
       const proveedorRenovInput = document.querySelector("#proveedor-renovacion-input");
       const proveedorRenovSugs = document.querySelector("#proveedor-renovacion-sugs");
@@ -356,18 +357,36 @@
         const resolver = pendingCostoRenovResolver;
         pendingCostoRenovResolver = null;
         modalCostoRenov?.classList.add("hidden");
+        if (costoRenovRefEl) costoRenovRefEl.textContent = "";
         clearProveedorRenovSugs();
         if (!resolver) return;
         if (payload) resolver.resolve(payload);
         else resolver.reject(new Error("CANCELLED"));
       };
 
-      const openCostoRenovacionModal = () =>
+      const buildCostoRenovReferencia = (correos = []) => {
+        const uniques = Array.from(
+          new Set(
+            (correos || [])
+              .map((c) => String(c || "").trim())
+              .filter(Boolean),
+          ),
+        );
+        if (!uniques.length) return "";
+        if (uniques.length === 1) return `Correo referenciado: ${uniques[0]}`;
+        if (uniques.length <= 3) return `Correos referenciados: ${uniques.join(", ")}`;
+        return `Correos referenciados: ${uniques.slice(0, 3).join(", ")} (+${uniques.length - 3} más)`;
+      };
+
+      const openCostoRenovacionModal = (referenciaCorreo = "") =>
         new Promise((resolve, reject) => {
           pendingCostoRenovResolver = { resolve, reject };
           proveedorRenovSelectedId = null;
           if (costoRenovInput) costoRenovInput.value = "";
           if (proveedorRenovInput) proveedorRenovInput.value = "";
+          if (costoRenovRefEl) {
+            costoRenovRefEl.textContent = String(referenciaCorreo || "").trim();
+          }
           clearProveedorRenovSugs();
           modalCostoRenov?.classList.remove("hidden");
           if (costoRenovInput) costoRenovInput.focus();
@@ -1206,13 +1225,25 @@
                         <span class="modal-duration-suffix">meses</span>
                       </div>
                     </td>
-                    <td>${
-                      it.monto_loading
-                        ? "Cargando..."
-                        : Number.isFinite(Number(it.monto_base))
-                        ? `$${formatMonto((Number(it.monto_base) || 0) * (Number(it.meses) || 1))}`
-                        : "--"
-                    }</td>
+                    <td>
+                      ${
+                        it.monto_loading
+                          ? "Cargando..."
+                          : `<input
+                               type="number"
+                               class="input-text sel-monto-input"
+                               data-index="${it.uid}"
+                               min="0"
+                               step="0.01"
+                               inputmode="decimal"
+                               value="${formatMontoInput(
+                                 it.monto_manual_touched
+                                   ? it.monto_manual_total
+                                   : (Number(it.monto_base) || 0) * (Number(it.meses) || 1),
+                               )}"
+                             />`
+                      }
+                    </td>
                   </tr>
                 `
               )
@@ -1257,6 +1288,9 @@
             if (reqId !== seleccionMontosReqId) return;
             it.monto_base = Number(base);
             it.monto_loading = false;
+            if (!it.monto_manual_touched) {
+              it.monto_manual_total = Number(base) * (Number(it.meses) || 1);
+            }
           } catch (err) {
             console.error("calcular monto seleccion error", err);
             if (reqId !== seleccionMontosReqId) return;
@@ -1291,6 +1325,8 @@
           hogar_actualizado: chk.dataset.hogar === "true",
           monto_base: null,
           monto_loading: true,
+          monto_manual_total: null,
+          monto_manual_touched: false,
           uid: idx,
         }));
         renderModalSeleccion();
@@ -1316,6 +1352,16 @@
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         });
+      };
+      const formatMontoInput = (value) => {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 0) return "";
+        return n.toFixed(2);
+      };
+      const parseMontoInput = (raw) => {
+        const n = Number(String(raw || "").trim().replace(",", "."));
+        if (!Number.isFinite(n) || n < 0) return null;
+        return n;
       };
 
       const pickPrecioByAcceso = (price, acceso) => {
@@ -1434,26 +1480,30 @@
       };
 
       const renderModalRowMonto = () => {
-        if (!modalRowMonto || !modalRowContext) return;
+        if (!modalRowMontoInput || !modalRowContext) return;
         const base = Number(modalRowContext.monto_base);
         if (!Number.isFinite(base) || base <= 0) {
-          modalRowMonto.textContent = "--";
+          modalRowMontoInput.value = "";
           return;
         }
+        if (modalRowContext.monto_manual_touched) return;
         const total = base * (modalRowMeses || 1);
-        modalRowMonto.textContent = formatMonto(total);
+        modalRowContext.monto_manual_total = total;
+        modalRowMontoInput.value = formatMontoInput(total);
       };
 
       const updateModalRowMonto = async () => {
-        if (!modalRowMonto || !modalRowContext) return;
-        modalRowMonto.textContent = "Cargando...";
+        if (!modalRowMontoInput || !modalRowContext) return;
+        modalRowMontoInput.value = "";
+        modalRowMontoInput.placeholder = "Cargando...";
         try {
           const base = await fetchMontoBaseForRow(modalRowContext);
           modalRowContext.monto_base = base;
           renderModalRowMonto();
         } catch (err) {
           console.error("calcular monto error", err);
-          modalRowMonto.textContent = "--";
+          modalRowMontoInput.value = "";
+          modalRowMontoInput.placeholder = "--";
         }
       };
 
@@ -1490,7 +1540,20 @@
         const delta = btnMas ? 1 : -1;
         const next = Math.max(1, (item.meses || 1) + delta);
         item.meses = next;
+        if (!item.monto_manual_touched && Number.isFinite(Number(item.monto_base))) {
+          item.monto_manual_total = Number(item.monto_base) * (item.meses || 1);
+        }
         renderModalSeleccion();
+      });
+      modalRenovarSelBody?.addEventListener("input", (e) => {
+        const montoInput = e.target.closest(".sel-monto-input");
+        if (!montoInput) return;
+        const uid = montoInput.dataset.index;
+        const item = seleccionActual.find((it) => String(it.uid) === String(uid));
+        if (!item) return;
+        const parsed = parseMontoInput(montoInput.value);
+        item.monto_manual_touched = true;
+        item.monto_manual_total = parsed;
       });
 
       // Cargar métodos de pago
@@ -1624,8 +1687,26 @@
           });
           let costoRenovacionProveedorSel = null;
           if (hasCuentasCompletas) {
+            const correosReferencia = seleccionActual
+              .map((it) => {
+                const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
+                const platIdNum = it.id_plataforma
+                  ? Number(it.id_plataforma)
+                  : cuentaInfo?.id_plataforma || null;
+                const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
+                const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
+                const isCuentaCompletaItem =
+                  cuentaCompleta !== null
+                    ? cuentaCompleta
+                    : (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
+                      (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
+                return isCuentaCompletaItem ? it.correo || "" : "";
+              })
+              .filter(Boolean);
             try {
-              costoRenovacionProveedorSel = await openCostoRenovacionModal();
+              costoRenovacionProveedorSel = await openCostoRenovacionModal(
+                buildCostoRenovReferencia(correosReferencia),
+              );
             } catch (_cancelErr) {
               return;
             }
@@ -1662,10 +1743,12 @@
               .eq("id_venta", it.id_venta);
             if (error) throw error;
 
-            const montoCalc = resolveMonto(platIdNum, cuentaInfo, accesoCliente) * (it.meses || 1);
+            const montoCalculado = resolveMonto(platIdNum, cuentaInfo, accesoCliente) * (it.meses || 1);
+            const montoManual = parseMontoInput(it.monto_manual_total);
+            const montoHistorial = montoManual !== null ? montoManual : montoCalculado;
 
             const { error: histErr } = await supabase.from("historial_ventas").insert({
-              monto: Number(montoCalc) || 0,
+              monto: Number(montoHistorial) || 0,
               fecha_pago: fechaPago,
               venta_cliente: true,
               renovacion: true,
@@ -1760,7 +1843,7 @@
       const modalRowPerfil = document.querySelector("#modal-row-perfil");
       const modalRowFecha = document.querySelector("#modal-row-fecha");
       const modalRowMesesSpan = document.querySelector("#modal-row-meses");
-      const modalRowMonto = document.querySelector("#modal-row-monto");
+      const modalRowMontoInput = document.querySelector("#modal-row-monto-input");
       const modalRowRef = document.querySelector("#modal-row-ref");
       const modalRowClose = document.querySelector(".modal-renovar-row-close");
       const btnRowRenovar = document.querySelector("#btn-row-renovar");
@@ -1778,7 +1861,7 @@
         if (modalRowCliente) modalRowCliente.textContent = data.cliente || "";
         if (modalRowPerfil) modalRowPerfil.textContent = data.perfil || "";
         if (modalRowFecha) modalRowFecha.textContent = data.fecha ? formatFechaCorte(data.fecha) : "";
-        if (modalRowMonto) modalRowMonto.textContent = "--";
+        if (modalRowMontoInput) modalRowMontoInput.value = "";
         if (modalRowRef) modalRowRef.value = "";
         modalRow.dataset.idVenta = data.id_venta || "";
         modalRowContext = {
@@ -1797,6 +1880,8 @@
           suspendido: data.suspendido,
           hogar_actualizado: data.hogar_actualizado === true,
           monto_base: null,
+          monto_manual_total: null,
+          monto_manual_touched: false,
         };
         modalRow.classList.remove("hidden");
         updateModalRowMonto();
@@ -1819,6 +1904,12 @@
           if (modalRowMesesSpan) modalRowMesesSpan.textContent = modalRowMeses;
           renderModalRowMonto();
         }
+      });
+      modalRowMontoInput?.addEventListener("input", () => {
+        if (!modalRowContext) return;
+        const parsed = parseMontoInput(modalRowMontoInput.value);
+        modalRowContext.monto_manual_touched = true;
+        modalRowContext.monto_manual_total = parsed;
       });
 
       resultadoEl?.addEventListener("click", (e) => {
@@ -1873,18 +1964,19 @@
           return;
         }
         const meses = modalRowMeses || 1;
+        const montoManual = parseMontoInput(modalRowMontoInput?.value || "");
         let montoBase = Number(modalRowContext?.monto_base);
-        if (!Number.isFinite(montoBase) || montoBase <= 0) {
+        if (montoManual === null && (!Number.isFinite(montoBase) || montoBase <= 0)) {
           const recalculated = await fetchMontoBaseForRow(modalRowContext);
           modalRowContext.monto_base = recalculated;
           montoBase = Number(recalculated);
           renderModalRowMonto();
         }
-        if (!Number.isFinite(montoBase) || montoBase <= 0) {
+        if (montoManual === null && (!Number.isFinite(montoBase) || montoBase <= 0)) {
           alert("No se pudo calcular el monto.");
           return;
         }
-        const monto = montoBase * meses;
+        const monto = montoManual !== null ? montoManual : montoBase * meses;
         const isSuspendido = isTrue(modalRowContext.suspendido);
         const baseFecha = modalRowContext.fecha_corte || "";
         const baseForCalc = baseFecha || new Date().toISOString().slice(0, 10);
@@ -1897,7 +1989,9 @@
           esCuentaCompleta = await isCuentaCompletaByContext(modalRowContext);
           if (esCuentaCompleta) {
             try {
-              costoRenovacionProveedor = await openCostoRenovacionModal();
+              costoRenovacionProveedor = await openCostoRenovacionModal(
+                buildCostoRenovReferencia([modalRowContext?.correo || ""]),
+              );
             } catch (_cancelErr) {
               return;
             }
@@ -2160,7 +2254,15 @@
             </div>
             <div class="modal-row-aside">
               <p class="monto-label">Monto a cobrar</p>
-              <div id="modal-row-monto" class="monto-value">--</div>
+              <input
+                type="number"
+                id="modal-row-monto-input"
+                class="input-text monto-value"
+                min="0"
+                step="0.01"
+                inputmode="decimal"
+                placeholder="0.00"
+              />
             </div>
           </div>
         </div>
@@ -2171,6 +2273,7 @@
           <button class="modal-close modal-costo-renov-close" aria-label="Cerrar">×</button>
           <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
             <h3 style="margin:0;">Costo de renovación</h3>
+            <p id="costo-renovacion-ref" class="status" style="margin:0;"></p>
             <div class="modal-field">
               <label for="costo-renovacion-input">Costo</label>
               <input

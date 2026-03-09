@@ -425,12 +425,16 @@ const renderReportesList = (plataformas = []) => {
               const correo = r.cuentas?.correo || "-";
               const correoText = escapeHtml(correo);
               const correoCopyAttr = escapeHtml(correo);
+              const inactivaDot = isTrue(r?.cuentas?.inactiva)
+                ? '<span class="reporte-inactiva-dot" title="Cuenta inactiva" aria-label="Cuenta inactiva"></span>'
+                : "";
               const correoCell = normalizeCopyValue(correo)
                 ? `<span class="correo-actions-inline">
                     <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
+                    ${inactivaDot}
                     <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
                   </span>`
-                : correoText;
+                : `${correoText}${inactivaDot}`;
               const motivo = getDescripcion(r);
               const fecha = formatDate(r.fecha_creacion || null);
               return `
@@ -544,7 +548,7 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
+      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro,inactiva),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
