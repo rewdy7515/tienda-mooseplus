@@ -178,7 +178,7 @@ if (!window.__headerActionsInit) {
     }
     return overlay;
   };
-  const startHeaderTutorial = () => {
+  const startHeaderTutorial = ({ onFinish = null } = {}) => {
     const overlay = ensureHeaderTutorialUi();
     const titleEl = overlay.querySelector("#header-tutorial-title");
     const textEl = overlay.querySelector("#header-tutorial-text");
@@ -249,6 +249,7 @@ if (!window.__headerActionsInit) {
         title: "Presionar el producto",
         text: "Primero presiona un producto para abrir sus planes disponibles.",
         openProductModal: false,
+        closeProductModal: true,
       },
       {
         selector: "#modal-precios",
@@ -395,6 +396,7 @@ if (!window.__headerActionsInit) {
     };
     const close = () => {
       clearHighlight();
+      tutorialGuideActive = false;
       if (openedPlatformModalByTutorial) {
         closeProductModalForTutorial();
       }
@@ -476,9 +478,19 @@ if (!window.__headerActionsInit) {
         render();
       }
     };
-    closeBtn.onclick = close;
+    closeBtn.onclick = async () => {
+      try {
+        if (typeof onFinish === "function") {
+          await onFinish();
+        }
+      } catch (err) {
+        console.error("tutorial finish callback error", err);
+      }
+      close();
+    };
 
     overlay.classList.remove("hidden");
+    tutorialGuideActive = true;
     document.addEventListener("keydown", onKeydown);
     window.addEventListener("resize", onResizeReposition);
     window.addEventListener("scroll", onResizeReposition, true);
@@ -527,6 +539,7 @@ if (!window.__headerActionsInit) {
   };
   let headerHeight = 0;
   let hideOffset = 0;
+  let tutorialGuideActive = false;
   const applyHeaderOffset = () => {
     const visible = Math.max(0, headerHeight - hideOffset);
     document.documentElement.style.setProperty("--header-offset", `${visible}px`);
@@ -546,6 +559,13 @@ if (!window.__headerActionsInit) {
     let ticking = false;
     const onScroll = () => {
       const y = window.scrollY || 0;
+      if (tutorialGuideActive) {
+        hideOffset = 0;
+        headerEl.style.transform = "translateY(0)";
+        applyHeaderOffset();
+        lastY = y;
+        return;
+      }
       if (!ticking) {
         window.requestAnimationFrame(() => {
           const delta = y - lastY;
@@ -776,6 +796,22 @@ if (!window.__headerActionsInit) {
           if (href) window.location.href = href;
         }
       });
+
+      if (!tutorialCompletado && tutorialPendiente) {
+        startHeaderTutorial({
+          onFinish: async () => {
+            await markTutorialCompleted();
+          },
+        });
+      }
+
+      tutorialHeaderBtn?.addEventListener("click", () => {
+        startHeaderTutorial({
+          onFinish: async () => {
+            await markTutorialCompleted();
+          },
+        });
+      });
     } catch (err) {
       console.error("header user init error", err);
     }
@@ -798,10 +834,6 @@ if (!window.__headerActionsInit) {
 
   ordenesHeaderBtn?.addEventListener("click", () => {
     window.location.href = toAbs("admin/ordenes.html", basePagesUrl);
-  });
-
-  tutorialHeaderBtn?.addEventListener("click", () => {
-    startHeaderTutorial();
   });
 
   const btnCheckout = document.querySelector("#btn-checkout");
@@ -882,3 +914,24 @@ if (!window.__headerActionsInit) {
       .catch((err) => console.error("header search init error", err));
   }
 }
+      const markTutorialCompleted = async () => {
+        const uid = Number(user?.id_usuario || userId);
+        if (!Number.isFinite(uid) || uid <= 0) return;
+        const { error } = await supabase
+          .from("usuarios")
+          .update({ tutorial_completado: true })
+          .eq("id_usuario", uid);
+        if (error) throw error;
+      };
+      const tutorialCompletado =
+        user?.tutorial_completado === true ||
+        user?.tutorial_completado === "true" ||
+        user?.tutorial_completado === 1 ||
+        user?.tutorial_completado === "1" ||
+        user?.tutorial_completado === "t";
+      const tutorialPendiente =
+        user?.tutorial_completado === false ||
+        user?.tutorial_completado === "false" ||
+        user?.tutorial_completado === 0 ||
+        user?.tutorial_completado === "0" ||
+        user?.tutorial_completado === "f";

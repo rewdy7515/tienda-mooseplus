@@ -407,6 +407,7 @@ main {
   border: none;
   text-align: left;
   padding: 8px 14px;
+  font-family: inherit;
   font-weight: 600;
   font-size: inherit;
   line-height: inherit;
