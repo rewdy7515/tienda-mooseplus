@@ -121,6 +121,9 @@ if (!window.__headerActionsInit) {
       .header-tutorial-card {
         position: fixed;
         width: min(92vw, 420px);
+        max-width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+        overflow: auto;
         z-index: 10004;
         border-radius: 14px;
         background: #fff;
@@ -148,8 +151,31 @@ if (!window.__headerActionsInit) {
       }
       @media (max-width: 640px) {
         .header-tutorial-card {
-          bottom: 10px;
-          padding: 14px;
+          left: max(8px, env(safe-area-inset-left));
+          right: max(8px, env(safe-area-inset-right));
+          width: auto;
+          max-width: none;
+          max-height: calc(100vh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+          bottom: max(8px, env(safe-area-inset-bottom));
+          padding: 12px;
+          border-radius: 12px;
+        }
+        .header-tutorial-card h4 {
+          font-size: 16px;
+        }
+        .header-tutorial-card p {
+          font-size: 14px;
+          line-height: 1.4;
+        }
+        .header-tutorial-actions {
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .header-tutorial-actions .btn-outline,
+        .header-tutorial-actions .btn-primary {
+          flex: 1 1 calc(50% - 6px);
+          min-height: 40px;
+          font-size: 14px;
         }
       }
     `;
