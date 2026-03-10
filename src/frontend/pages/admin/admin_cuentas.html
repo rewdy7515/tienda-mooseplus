@@ -6718,7 +6718,7 @@
           }
           const { data: ventaInfo, error: ventaInfoErr } = await supabase
             .from("ventas")
-            .select("id_usuario, fecha_corte")
+            .select("id_usuario, fecha_corte, id_precio")
             .eq("id_venta", ventaId)
             .maybeSingle();
           if (ventaInfoErr) throw ventaInfoErr;
@@ -6793,6 +6793,7 @@
             id_cuenta: nuevoCuenta || null,
             id_perfil: nuevoPerfil || null,
             id_sub_cuenta: null,
+            id_precio: ventaInfo?.id_precio ?? null,
           };
           const { error: updVentaErr } = await supabase
             .from("ventas")
@@ -7112,7 +7113,7 @@
 
         const { data: ventasRelacionadas, error: ventasErr } = await supabase
           .from("ventas")
-          .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil")
+          .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil, id_precio")
           .or(`id_cuenta.eq.${oldId},id_cuenta_miembro.eq.${oldId}`);
         if (ventasErr) throw ventasErr;
 
@@ -7150,6 +7151,7 @@
               Number.isFinite(mappedPerfil) && mappedPerfil > 0 ? mappedPerfil : null;
           }
           if (!Object.keys(updatePayload).length) continue;
+          updatePayload.id_precio = venta?.id_precio ?? null;
 
           const { error: updVentaErr } = await supabase
             .from("ventas")
@@ -7883,7 +7885,7 @@
 
             let ventaQuery = supabase
               .from("ventas")
-              .select("id_venta, id_usuario, id_cuenta, id_perfil")
+              .select("id_venta, id_usuario, id_cuenta, id_perfil, id_precio")
               .eq("id_usuario", ventaUserId)
               .eq("id_cuenta", cuentaId)
               .order("id_venta", { ascending: false })
@@ -7899,7 +7901,7 @@
             if (!ventaInfo) {
               const { data: fallbackRows, error: fallbackErr } = await supabase
                 .from("ventas")
-                .select("id_venta, id_usuario, id_cuenta, id_perfil")
+                .select("id_venta, id_usuario, id_cuenta, id_perfil, id_precio")
                 .eq("id_usuario", ventaUserId)
                 .eq("id_cuenta", cuentaId)
                 .order("id_venta", { ascending: false })
@@ -7991,6 +7993,7 @@
                 id_cuenta: nuevoCuenta,
                 id_perfil: nuevoPerfil,
                 id_sub_cuenta: null,
+                id_precio: ventaInfo?.id_precio ?? null,
               })
               .eq("id_venta", ventaInfo.id_venta);
             if (updVentaErr) throw updVentaErr;
@@ -8215,7 +8218,7 @@
             btn.dataset.cuenta || currentCuentaDetalle?.id_cuenta || null;
           const { data: ventaInfo, error: ventaErr } = await supabase
             .from("ventas")
-            .select("id_venta, id_usuario, id_cuenta, id_perfil, id_cuenta_miembro")
+            .select("id_venta, id_usuario, id_cuenta, id_perfil, id_cuenta_miembro, id_precio")
             .eq("id_venta", ventaId)
             .maybeSingle();
           if (ventaErr) throw ventaErr;
@@ -8239,6 +8242,7 @@
               id_perfil: nuevoPerfil,
               pendiente: true,
               reportado: true,
+              id_precio: ventaInfo?.id_precio ?? null,
             })
             .eq("id_venta", ventaId);
           if (updVentaErr) throw updVentaErr;

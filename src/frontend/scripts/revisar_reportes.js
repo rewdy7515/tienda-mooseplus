@@ -1072,7 +1072,7 @@ async function reemplazarServicio() {
     const findVentaAsociada = async (withUserFilter) => {
       let query = supabase
         .from("ventas")
-        .select("id_venta, id_usuario, fecha_corte")
+        .select("id_venta, id_usuario, fecha_corte, id_precio")
         .eq("id_cuenta", cuentaId)
         .order("id_venta", { ascending: false })
         .limit(1);
@@ -1097,7 +1097,7 @@ async function reemplazarServicio() {
     if (!ventasData.length && !rowPerfil?.id_perfil) {
       let fallbackAny = supabase
         .from("ventas")
-        .select("id_venta, id_usuario, fecha_corte")
+        .select("id_venta, id_usuario, fecha_corte, id_precio")
         .eq("id_cuenta", cuentaId)
         .order("id_venta", { ascending: false })
         .limit(1);
@@ -1108,7 +1108,7 @@ async function reemplazarServicio() {
       if (!ventasData.length) {
         const finalFallback = await supabase
           .from("ventas")
-          .select("id_venta, id_usuario, fecha_corte")
+          .select("id_venta, id_usuario, fecha_corte, id_precio")
           .eq("id_cuenta", cuentaId)
           .order("id_venta", { ascending: false })
           .limit(1);
@@ -1214,7 +1214,12 @@ async function reemplazarServicio() {
 
     const { error: updVentaErr } = await supabase
       .from("ventas")
-      .update({ id_cuenta: nuevoCuenta || null, id_perfil: nuevoPerfil || null, id_sub_cuenta: null })
+      .update({
+        id_cuenta: nuevoCuenta || null,
+        id_perfil: nuevoPerfil || null,
+        id_sub_cuenta: null,
+        id_precio: ventaInfo?.id_precio ?? null,
+      })
       .eq("id_venta", ventaId);
     if (updVentaErr) throw updVentaErr;
 
