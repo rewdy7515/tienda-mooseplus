@@ -20,24 +20,12 @@
       .historial-controls select {
         min-width: 210px;
       }
-      .historial-table {
+      .historial-table-wrap {
         width: 100%;
-        border-collapse: collapse;
+        overflow-x: auto;
       }
-      .historial-table th,
-      .historial-table td {
-        border: 1px solid #e5e7eb;
-        padding: 8px;
-      }
-      .historial-table th {
-        background: #444;
-        color: #fff;
-      }
-      .historial-table tbody tr:nth-child(odd) {
-        background: #f5f5f5;
-      }
-      .historial-table tbody tr:nth-child(even) {
-        background: #fff;
+      .historial-table-wrap .table-base {
+        min-width: 980px;
       }
       .status {
         margin: 0;
@@ -57,7 +45,7 @@
         </div>
         <p id="historial-status" class="status">Cargando ventas...</p>
         <div class="historial-table-wrap">
-          <table class="historial-table">
+          <table class="table-base">
             <thead>
               <tr>
                 <th>ID de Venta</th>

@@ -51,6 +51,7 @@ const toggleAutoReemplazoEl = document.querySelector("#toggle-auto-reemplazo");
 const modal = document.querySelector("#modal-detalle");
 const modalPlatTitle = document.querySelector("#modal-plat-title");
 const modalCorreo = document.querySelector("#modal-correo");
+const modalFechaCorte = document.querySelector("#modal-fecha-corte");
 const modalClave = document.querySelector("#modal-clave");
 const modalMotivo = document.querySelector("#modal-motivo");
 const modalPerfil = document.querySelector("#modal-perfil");
@@ -602,7 +603,7 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,id_plataforma,venta_perfil,venta_miembro,inactiva),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
+      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
@@ -707,6 +708,7 @@ async function openModal(row) {
     modalPlatTitle.removeAttribute("tabindex");
   }
   if (modalCorreo) modalCorreo.value = row.cuentas?.correo || "-";
+  if (modalFechaCorte) modalFechaCorte.value = formatDate(row.cuentas?.fecha_corte || null);
   oldClave = row.cuentas?.clave || "";
   const rawPin = row.perfiles?.pin ?? row.pin ?? "";
   oldPin = rawPin === null || rawPin === undefined ? "" : String(rawPin);
