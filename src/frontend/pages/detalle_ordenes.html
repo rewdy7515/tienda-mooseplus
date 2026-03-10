@@ -24,6 +24,29 @@
         flex-direction: column;
         gap: 4px;
       }
+      #orden-items .cart-table-scroll {
+        overflow-x: auto;
+      }
+      #orden-items .cart-page-table {
+        min-width: 760px;
+      }
+      #orden-items .status-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #1e3a8a;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      @media (max-width: 700px) {
+        #orden-items .cart-page-table {
+          min-width: 700px;
+        }
+      }
     </style>
   </head>
   <body class="cart-page">

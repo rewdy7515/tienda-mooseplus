@@ -930,6 +930,19 @@
         if (raw.toUpperCase().startsWith("M")) return raw;
         return `M${raw}`;
       };
+      const formatPlataformaReemplazo = ({
+        plataforma = "",
+        idPrecio = null,
+        perfilHogar = false,
+      } = {}) => {
+        const rawName = String(plataforma || "").trim();
+        const isNetflix = /netflix/i.test(rawName);
+        const precioNum = Number(idPrecio);
+        const isPlan2Precio = precioNum === 4 || precioNum === 5;
+        const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfilHogar === true);
+        if (isNetflixPlan2) return "*NETFLIX (HOGAR ACTUALIZADO)*";
+        return rawName;
+      };
       const normalizeExternalLink = (value) => {
         const raw = String(value || "").trim();
         if (!raw) return "";
@@ -6877,7 +6890,11 @@
               const notif = buildNotificationPayload(
                 "servicio_reemplazado",
                 {
-                  plataforma: currentCuentaDetalle.plataformaNombre || "",
+                  plataforma: formatPlataformaReemplazo({
+                    plataforma: currentCuentaDetalle.plataformaNombre || "",
+                    idPrecio: ventaInfo?.id_precio ?? null,
+                    perfilHogar: rowPerfil?.hogar === true,
+                  }),
                   correoViejo: currentCuentaDetalle.correo || "",
                   perfilViejo:
                     rowPerfil?.perfil ||
@@ -7175,9 +7192,13 @@
               const notif = buildNotificationPayload(
                 "servicio_reemplazado",
                 {
-                  plataforma:
-                    String(plataformaNombre || "").trim() ||
-                    String(currentCuentaDetalle?.plataformaNombre || "").trim(),
+                  plataforma: formatPlataformaReemplazo({
+                    plataforma:
+                      String(plataformaNombre || "").trim() ||
+                      String(currentCuentaDetalle?.plataformaNombre || "").trim(),
+                    idPrecio: venta?.id_precio ?? null,
+                    perfilHogar: false,
+                  }),
                   correoViejo:
                     String(correoViejo || "").trim() ||
                     String(currentCuentaDetalle?.correo || "").trim(),
@@ -8072,7 +8093,11 @@
                 const notif = buildNotificationPayload(
                   "servicio_reemplazado",
                   {
-                    plataforma: plataformaNombre || "",
+                    plataforma: formatPlataformaReemplazo({
+                      plataforma: plataformaNombre || "",
+                      idPrecio: ventaInfo?.id_precio ?? null,
+                      perfilHogar: perfilActual?.perfil_hogar === true,
+                    }),
                     correoViejo: cuentaActual.correo || "",
                     perfilViejo: perfilActual?.n_perfil
                       ? `M${perfilActual.n_perfil}`
@@ -8301,7 +8326,11 @@
               const notif = buildNotificationPayload(
                 "servicio_reemplazado",
                 {
-                  plataforma: currentCuentaDetalle?.plataformaNombre || "",
+                  plataforma: formatPlataformaReemplazo({
+                    plataforma: currentCuentaDetalle?.plataformaNombre || "",
+                    idPrecio: ventaInfo?.id_precio ?? null,
+                    perfilHogar: false,
+                  }),
                   correoViejo: String(oldCuentaRes.data?.correo || "").trim(),
                   perfilViejo: oldPerfilRes.data?.n_perfil
                     ? `M${oldPerfilRes.data.n_perfil}`

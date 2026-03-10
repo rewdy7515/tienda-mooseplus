@@ -63,7 +63,7 @@ const formatHora12 = (hora) => {
 
 const buildEstado = (orden) => {
   if (isTrue(orden?.orden_cancelada)) return "Cancelada";
-  if (isTrue(orden?.pago_verificado)) return "Entregado";
+  if (isTrue(orden?.pago_verificado)) return "Procesado";
   if (isTrue(orden?.en_espera)) return "En espera";
   return "Pendiente";
 };
@@ -202,6 +202,8 @@ const renderItems = (items, catalog, useMayor) => {
       const tipo = item?.renovacion ? "Renovación" : "Nuevo";
       const nombre = platform.nombre || `Precio ${item.id_precio}`;
       const imagen = platform.imagen || "";
+      const totalVenta = Number.isFinite(Number(item?.monto)) ? Number(item.monto) : totals.subtotal;
+      const estadoVenta = isTrue(item?.pendiente) ? "Procesandose" : "Entregado";
       return `
         <tr data-index="${idx}">
           <td>
@@ -227,55 +229,12 @@ const renderItems = (items, catalog, useMayor) => {
             <div class="cart-qty-inline"><span class="cart-cantidad-value">${totals.qtyVal}</span></div>
           </td>
           <td class="cart-cell-center">
-            <span class="cart-subtotal-value">${formatMoney(totals.subtotal)}</span>
-            <div class="cart-discount-line">${renderDiscounts(totals)}</div>
+            <span class="cart-subtotal-value">${formatMoney(totalVenta)}</span>
+          </td>
+          <td class="cart-cell-center">
+            <span class="status-chip">${estadoVenta}</span>
           </td>
         </tr>
-      `;
-    })
-    .join("");
-
-  const cards = items
-    .map((item, idx) => {
-      const price = priceById[item.id_precio] || {};
-      const platform = platformById[price.id_plataforma] || {};
-      const totals = calcItemTotals(item, price, platform, descuentos);
-      const detalle =
-        price.plan || (platform.tarjeta_de_regalo ? `Región: ${price.region || "-"}` : "");
-      const tipo = item?.renovacion ? "Renovación" : "Nuevo";
-      const nombre = platform.nombre || `Precio ${item.id_precio}`;
-      const imagen = platform.imagen || "";
-      return `
-        <section class="cart-item-card" data-index="${idx}">
-          <div class="cart-item-top">
-            <div class="cart-item-logo">
-              <img src="${imagen}" alt="${nombre}" loading="lazy" decoding="async" />
-            </div>
-            <div class="cart-item-info">
-              <p class="cart-name">${nombre}</p>
-              ${detalle ? `<p class="cart-detail">${detalle}</p>` : ""}
-              <p class="cart-detail">Tipo: ${tipo}</p>
-              <p class="cart-detail">Precio: ${formatMoney(totals.unit)}</p>
-            </div>
-          </div>
-          <div class="cart-item-bottom">
-            <div class="cart-item-cell">
-              <span class="cart-item-label">Meses</span>
-              <div class="cart-qty-inline"><span class="cart-meses-value">${totals.mesesVal}</span></div>
-            </div>
-            <div class="cart-item-cell">
-              <span class="cart-item-label">Cantidad</span>
-              <div class="cart-qty-inline"><span class="cart-cantidad-value">${totals.qtyVal}</span></div>
-            </div>
-          </div>
-          <div class="cart-item-subtotal">
-            <span class="cart-item-label">Subtotal</span>
-            <div class="cart-subtotal">
-              <span class="cart-subtotal-value">${formatMoney(totals.subtotal)}</span>
-            </div>
-            <div class="cart-discount-line">${renderDiscounts(totals)}</div>
-          </div>
-        </section>
       `;
     })
     .join("");
@@ -283,9 +242,6 @@ const renderItems = (items, catalog, useMayor) => {
   itemsEl.innerHTML = `
     <div class="cart-layout">
       <div class="cart-left">
-        <div class="cart-items-cards">
-          ${cards}
-        </div>
         <div class="cart-table-scroll">
           <table class="table-base cart-page-table">
             <thead>
@@ -294,7 +250,8 @@ const renderItems = (items, catalog, useMayor) => {
                 <th>Meses</th>
                 <th>Precio</th>
                 <th>Cantidad</th>
-                <th>Subtotal</th>
+                <th>Total</th>
+                <th>Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -320,35 +277,30 @@ const fetchItemsByVentasOrden = async (idOrden) => {
   }
   const rows = Array.isArray(resp?.ventas) ? resp.ventas : [];
   if (!rows.length) return [];
-
-  const grouped = new Map();
+  const normalized = [];
   for (const row of rows) {
     const idPrecio = Number(row?.id_precio);
     if (!Number.isFinite(idPrecio) || idPrecio <= 0) continue;
     const meses = Math.max(1, Number(row?.meses_contratados) || 1);
     const renovacion = isTrue(row?.renovacion);
-    const key = `${idPrecio}|${meses}|${renovacion ? 1 : 0}`;
-    const prev = grouped.get(key);
-    if (prev) {
-      prev.cantidad += 1;
-      continue;
-    }
-    grouped.set(key, {
+    normalized.push({
       id_precio: idPrecio,
       cantidad: 1,
       meses,
       renovacion,
       id_venta: row?.id_venta ?? null,
+      pendiente: isTrue(row?.pendiente),
+      monto: null,
     });
   }
-  return Array.from(grouped.values());
+  return normalized;
 };
 
 const fetchItemsByHistorialOrden = async (idOrden, idUsuario) => {
   if (!idOrden || !idUsuario) return [];
   const { data: historialRows, error: histErr } = await supabase
     .from("historial_ventas")
-    .select("id_historial_ventas, id_venta, id_orden, id_usuario_cliente, renovacion")
+    .select("id_historial_ventas, id_venta, id_orden, id_usuario_cliente, renovacion, monto")
     .eq("id_orden", Number(idOrden))
     .eq("id_usuario_cliente", Number(idUsuario))
     .order("id_historial_ventas", { ascending: true });
@@ -361,7 +313,7 @@ const fetchItemsByHistorialOrden = async (idOrden, idUsuario) => {
 
   const { data: ventasRows, error: ventasErr } = await supabase
     .from("ventas")
-    .select("id_venta, id_precio, meses_contratados")
+    .select("id_venta, id_precio, meses_contratados, pendiente")
     .in("id_venta", ventaIds);
   if (ventasErr) throw ventasErr;
   const ventaMap = (ventasRows || []).reduce((acc, row) => {
@@ -369,28 +321,24 @@ const fetchItemsByHistorialOrden = async (idOrden, idUsuario) => {
     return acc;
   }, {});
 
-  const grouped = new Map();
+  const normalized = [];
   for (const row of rows) {
     const venta = ventaMap[row.id_venta];
     const idPrecio = Number(venta?.id_precio);
     if (!Number.isFinite(idPrecio) || idPrecio <= 0) continue;
     const meses = Math.max(1, Number(venta?.meses_contratados) || 1);
     const renovacion = isTrue(row?.renovacion);
-    const key = `${idPrecio}|${meses}|${renovacion ? 1 : 0}`;
-    const prev = grouped.get(key);
-    if (prev) {
-      prev.cantidad += 1;
-      continue;
-    }
-    grouped.set(key, {
+    normalized.push({
       id_precio: idPrecio,
       cantidad: 1,
       meses,
       renovacion,
       id_venta: row?.id_venta ?? null,
+      pendiente: isTrue(venta?.pendiente),
+      monto: Number(row?.monto),
     });
   }
-  return Array.from(grouped.values());
+  return normalized;
 };
 
 const init = async () => {
@@ -433,13 +381,11 @@ const init = async () => {
     renderInfo(orden, clienteNombre);
 
     setStatus("Cargando items...");
-    let items = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
-    if (!items.length) {
-      try {
-        items = await fetchItemsByHistorialOrden(idOrden, userId);
-      } catch (err) {
-        console.error("fetchItemsByHistorialOrden error", err);
-      }
+    let items = [];
+    try {
+      items = await fetchItemsByHistorialOrden(idOrden, userId);
+    } catch (err) {
+      console.error("fetchItemsByHistorialOrden error", err);
     }
     if (!items.length) {
       try {
@@ -447,6 +393,9 @@ const init = async () => {
       } catch (err) {
         console.error("fetchItemsByVentasOrden error", err);
       }
+    }
+    if (!items.length) {
+      items = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
     }
     if (!items.length) {
       setStatus("");

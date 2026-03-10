@@ -236,7 +236,7 @@
               const hora = formatHora12(orden.hora_orden);
               const entregado = isTrue(orden.pago_verificado);
               const cancelada = isTrue(orden.orden_cancelada);
-              const estado = cancelada ? "Cancelada" : entregado ? "Entregado" : "En espera";
+              const estado = cancelada ? "Cancelada" : entregado ? "Procesado" : "En espera";
               const estadoClass = cancelada ? "cancel" : entregado ? "ok" : "wait";
               return `
                 <div class="orden-card" data-orden="${orden.id_orden}" role="button" tabindex="0">

@@ -15,6 +15,23 @@ requireSession();
 const usernameEl = document.querySelector(".username");
 const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+const toPositiveId = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+const formatPlataformaReemplazo = ({
+  plataforma = "",
+  idPrecio = null,
+  perfilHogar = false,
+} = {}) => {
+  const rawName = String(plataforma || "").trim();
+  const isNetflix = /netflix/i.test(rawName);
+  const precioNum = Number(idPrecio);
+  const isPlan2Precio = precioNum === 4 || precioNum === 5;
+  const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfilHogar === true);
+  if (isNetflixPlan2) return "*NETFLIX (HOGAR ACTUALIZADO)*";
+  return rawName;
+};
 const getCaracasDateISO = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Caracas",
@@ -1127,6 +1144,22 @@ async function reemplazarServicio() {
     const ventaMiembro = isTrue(currentRow.cuentas?.venta_miembro);
     const perfilHogar = rowPerfil?.hogar === true;
 
+    const loadReemplazosBloqueados = async () => {
+      const { data, error } = await supabase.from("reemplazos").select("id_cuenta, id_perfil");
+      if (error) throw error;
+      const cuentas = new Set();
+      const perfiles = new Set();
+      (data || []).forEach((row) => {
+        const cuentaId = toPositiveId(row?.id_cuenta);
+        const perfilId = toPositiveId(row?.id_perfil);
+        if (cuentaId) cuentas.add(cuentaId);
+        if (perfilId) perfiles.add(perfilId);
+      });
+      return { cuentas, perfiles };
+    };
+
+    const reemplazosBloqueados = await loadReemplazosBloqueados();
+
     const findPerfilLibre = async (platId, isHogar, excludeCuenta) => {
       let query = supabase
         .from("perfiles")
@@ -1135,8 +1168,7 @@ async function reemplazarServicio() {
         )
         .eq("cuentas.id_plataforma", platId)
         .eq("ocupado", false)
-        .order("id_perfil", { ascending: true })
-        .limit(1);
+        .order("id_perfil", { ascending: true });
       if (isHogar === true) {
         query = query.eq("perfil_hogar", true);
       } else {
@@ -1148,7 +1180,11 @@ async function reemplazarServicio() {
       if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
       const { data, error } = await query;
       if (error) return { error };
-      return { data: data?.[0] || null };
+      const libre = (data || []).find((perfil) => {
+        const perfilId = toPositiveId(perfil?.id_perfil);
+        return !!perfilId && !reemplazosBloqueados.perfiles.has(perfilId);
+      });
+      return { data: libre || null };
     };
 
     const findCuentaMiembroLibre = async (platId, excludeCuenta) => {
@@ -1159,13 +1195,16 @@ async function reemplazarServicio() {
         .eq("venta_perfil", false)
         .eq("venta_miembro", true)
         .eq("ocupado", false)
-        .order("id_cuenta", { ascending: true })
-        .limit(1);
+        .order("id_cuenta", { ascending: true });
       query = query.or("inactiva.is.null,inactiva.eq.false");
       if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
       const { data, error } = await query;
       if (error) return { error };
-      return { data: data?.[0] || null };
+      const libre = (data || []).find((cuenta) => {
+        const cuentaId = toPositiveId(cuenta?.id_cuenta);
+        return !!cuentaId && !reemplazosBloqueados.cuentas.has(cuentaId);
+      });
+      return { data: libre || null };
     };
 
     let nuevoCuenta = null;
@@ -1223,12 +1262,31 @@ async function reemplazarServicio() {
       .eq("id_venta", ventaId);
     if (updVentaErr) throw updVentaErr;
 
-    if (rowPerfil?.id_perfil) {
+    const perfilAnteriorId = toPositiveId(rowPerfil?.id_perfil);
+    let perfilTieneOtraVenta = false;
+    if (perfilAnteriorId) {
+      const { data: perfilVentasRestantes, error: perfilVentasErr } = await supabase
+        .from("ventas")
+        .select("id_venta")
+        .eq("id_perfil", perfilAnteriorId)
+        .neq("id_venta", ventaId)
+        .limit(1);
+      if (perfilVentasErr) throw perfilVentasErr;
+      perfilTieneOtraVenta = (perfilVentasRestantes || []).length > 0;
+    }
+
+    if (perfilAnteriorId && !perfilTieneOtraVenta) {
       const { error: freeErr } = await supabase
         .from("perfiles")
         .update({ ocupado: false })
-        .eq("id_perfil", rowPerfil.id_perfil);
+        .eq("id_perfil", perfilAnteriorId);
       if (freeErr) console.error("[reemplazo] liberar perfil previo error", freeErr);
+    } else if (perfilAnteriorId && perfilTieneOtraVenta) {
+      const { error: keepOccErr } = await supabase
+        .from("perfiles")
+        .update({ ocupado: true })
+        .eq("id_perfil", perfilAnteriorId);
+      if (keepOccErr) console.error("[reemplazo] mantener perfil previo ocupado error", keepOccErr);
     }
     if (nuevoPerfil) {
       const { error: occErr } = await supabase
@@ -1245,12 +1303,15 @@ async function reemplazarServicio() {
       if (occCuentaErr) console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
     }
 
-    await supabase.from("reemplazos").insert({
-      id_cuenta: cuentaId,
-      id_perfil: rowPerfil?.id_perfil || null,
-      id_sub_cuenta: null,
-      id_venta: ventaId,
-    });
+    const debeRegistrarReemplazo = !(perfilAnteriorId && perfilTieneOtraVenta);
+    if (debeRegistrarReemplazo) {
+      await supabase.from("reemplazos").insert({
+        id_cuenta: cuentaId,
+        id_perfil: perfilAnteriorId || null,
+        id_sub_cuenta: null,
+        id_venta: ventaId,
+      });
+    }
 
     const descripcionSolucion = "Servicio reemplazado";
     const { error: repErr } = await supabase
@@ -1280,7 +1341,11 @@ async function reemplazarServicio() {
       if (userIds.length) {
         await notifyReemplazoReporte({
           row: { ...currentRow, id_usuario: userIds[0] },
-          plataforma: currentRow.plataformas?.nombre || "",
+          plataforma: formatPlataformaReemplazo({
+            plataforma: currentRow.plataformas?.nombre || "",
+            idPrecio: ventaInfo?.id_precio ?? null,
+            perfilHogar: rowPerfil?.hogar === true,
+          }),
           correoViejo: currentRow.cuentas?.correo || "",
           correoNuevo: dataDestino.correo || "",
           dias: diasSumados,

@@ -6,6 +6,66 @@
     <title>Crear reporte</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
+      .report-create-page {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 16px 14px 28px;
+      }
+      .report-create-header {
+        margin-bottom: 14px;
+        padding: 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #f7fafc 0%, #eef3f8 100%);
+      }
+      .report-create-header h2 {
+        margin: 0;
+        font-size: 1.35rem;
+        color: #0f172a;
+      }
+      .report-create-header p {
+        margin: 8px 0 0;
+        color: #334155;
+        font-size: 0.94rem;
+      }
+      #reporte-form {
+        display: grid;
+        gap: 12px;
+      }
+      .report-step {
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 12px;
+        background: #ffffff;
+      }
+      .report-step-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 10px;
+        font-size: 1rem;
+        color: #0f172a;
+      }
+      .report-step-index {
+        min-width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #111827;
+        color: #fff;
+        font-size: 0.78rem;
+        font-weight: 800;
+      }
+      .report-help {
+        margin: 6px 0 0;
+        color: #475569;
+        font-size: 0.9rem;
+      }
+      #reporte-form .form-label {
+        margin-top: 6px;
+      }
       #reporte-form .form-select {
         border: 1px solid #d1d5db;
         background: #fff;
@@ -54,71 +114,142 @@
       .correo-sugerencia-item:focus-visible {
         background: #f3f4f6;
       }
+      #select-correo-cuenta.form-select {
+        margin-top: 8px;
+      }
+      .correo-aviso {
+        margin-top: 6px;
+        color: #b91c1c;
+        font-size: 0.92rem;
+        font-weight: 600;
+      }
+      .correo-aviso.hidden {
+        display: none;
+      }
+      .report-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 4px;
+      }
+      .report-actions .btn-primary {
+        min-width: 200px;
+      }
+      @media (max-width: 720px) {
+        .report-create-page {
+          padding: 12px 10px 20px;
+        }
+        .report-create-header {
+          padding: 12px;
+          border-radius: 12px;
+        }
+        .report-create-header h2 {
+          font-size: 1.18rem;
+        }
+        .report-step {
+          padding: 10px;
+          border-radius: 12px;
+        }
+        .report-step-title {
+          font-size: 0.96rem;
+        }
+        .report-help {
+          font-size: 0.87rem;
+        }
+        .report-actions .btn-primary {
+          width: 100%;
+          min-width: 0;
+        }
+      }
     </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
     <script src="../../scripts/header-loader.js"></script>
 
-    <main class="categorias-dinamicas">
-      <h2>Crear reporte</h2>
+    <main class="categorias-dinamicas report-create-page">
+      <section class="report-create-header">
+        <h2>Crear reporte</h2>
+        <p>Completa los pasos en orden para reportar tu servicio rápidamente.</p>
+      </section>
       <form id="reporte-form" class="reporte-form">
-        <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
-        <select id="select-plataforma" class="form-select" required>
-          <option value="">Seleccione plataforma</option>
-        </select>
-        <p class="status">Se muestran únicamente los servicios que tienes actualmente.</p>
-
-        <label class="form-label" for="input-correo-cuenta">Correo de la cuenta <span class="required">*</span></label>
-        <input
-          id="input-correo-cuenta"
-          class="form-input"
-          type="text"
-          placeholder="Buscar correo de la cuenta"
-          autocomplete="off"
-          required
-        />
-        <div id="correo-sugerencias" class="correo-sugerencias hidden"></div>
-
-        <div id="perfil-wrapper" class="hidden">
-          <label class="form-label" for="select-perfil">Perfil <span class="required">*</span></label>
-          <select id="select-perfil" class="form-select">
-            <option value="">Seleccione perfil</option>
+        <section class="report-step">
+          <h3 class="report-step-title">
+            <span class="report-step-index">1</span>
+            Servicio a reportar
+          </h3>
+          <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
+          <select id="select-plataforma" class="form-select" required>
+            <option value="">Seleccione plataforma</option>
           </select>
-        </div>
+          <p class="report-help">Solo se listan plataformas de servicios que tienes activos.</p>
 
-        <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
-        <select id="select-motivo" class="form-select" required>
-          <option value="">Seleccione motivo</option>
-        </select>
+          <label class="form-label" for="input-correo-cuenta">Correo de la cuenta <span class="required">*</span></label>
+          <input
+            id="input-correo-cuenta"
+            class="form-input"
+            type="text"
+            placeholder="Buscar correo de la cuenta"
+            autocomplete="off"
+            required
+          />
+          <select id="select-correo-cuenta" class="form-select" disabled>
+            <option value="">Selecciona un correo disponible</option>
+          </select>
+          <p id="correo-aviso" class="correo-aviso hidden"></p>
+          <div id="correo-sugerencias" class="correo-sugerencias hidden"></div>
 
-        <div id="motivo-otro-wrapper" class="hidden">
-          <label class="form-label" for="input-motivo-otro">Describe el problema <span class="required">*</span></label>
-          <textarea id="input-motivo-otro" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
-        </div>
+          <div id="perfil-wrapper" class="hidden">
+            <label class="form-label" for="select-perfil">Perfil <span class="required">*</span></label>
+            <select id="select-perfil" class="form-select">
+              <option value="">Seleccione perfil</option>
+            </select>
+          </div>
+        </section>
 
-        <label class="form-label">Evidencia</label>
-        <div id="dropzone" class="dropzone">
-          <p>Arrastra una imagen aquí o</p>
-          <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
-          <input id="input-files" type="file" accept="image/*" hidden />
-          <div id="file-preview" class="file-preview"></div>
-        </div>
-        <p class="status">Asegúrate de que la imagen sea legible. Esto nos ayudará a identificar el problema.</p>
+        <section class="report-step">
+          <h3 class="report-step-title">
+            <span class="report-step-index">2</span>
+            Motivo del reporte
+          </h3>
+          <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
+          <select id="select-motivo" class="form-select" required>
+            <option value="">Seleccione motivo</option>
+          </select>
 
-        <div class="form-group checkbox-line">
-          <label class="form-label" for="chk-no-screenshot">
-            <input type="checkbox" id="chk-no-screenshot" />
-            La aplicación no me permite tomar screenshot.
-          </label>
-        </div>
+          <div id="motivo-otro-wrapper" class="hidden">
+            <label class="form-label" for="input-motivo-otro">Describe el problema <span class="required">*</span></label>
+            <textarea id="input-motivo-otro" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
+          </div>
 
-        <div id="motivo-extra-wrapper" class="hidden">
-          <label class="form-label" for="input-motivo-extra">Describe el problema <span class="required">*</span></label>
-          <textarea id="input-motivo-extra" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
-        </div>
+          <div id="motivo-extra-wrapper" class="hidden">
+            <label class="form-label" for="input-motivo-extra">Describe el problema <span class="required">*</span></label>
+            <textarea id="input-motivo-extra" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
+          </div>
+        </section>
 
-        <div class="actions" style="margin-top: 16px;">
+        <section class="report-step">
+          <h3 class="report-step-title">
+            <span class="report-step-index">3</span>
+            Evidencia
+          </h3>
+          <label class="form-label">Adjuntar imagen</label>
+          <div id="dropzone" class="dropzone">
+            <p>Arrastra una imagen aquí o</p>
+            <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
+            <input id="input-files" type="file" accept="image/*" hidden />
+            <div id="file-preview" class="file-preview"></div>
+          </div>
+          <p class="report-help">Asegúrate de que la imagen sea legible para acelerar la solución.</p>
+
+          <div class="form-group checkbox-line">
+            <label class="form-label" for="chk-no-screenshot">
+              <input type="checkbox" id="chk-no-screenshot" />
+              La aplicación no me permite tomar screenshot.
+            </label>
+          </div>
+        </section>
+
+        <div class="report-actions">
           <button type="submit" class="btn-primary">Enviar reporte</button>
         </div>
       </form>

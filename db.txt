@@ -49,6 +49,12 @@ CREATE TABLE public.categorias (
   nombre text NOT NULL,
   CONSTRAINT categorias_pkey PRIMARY KEY (id_categoria)
 );
+CREATE TABLE public.configuracion_sistema (
+  clave text NOT NULL,
+  valor_bool boolean NOT NULL DEFAULT false,
+  actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT configuracion_sistema_pkey PRIMARY KEY (clave)
+);
 CREATE TABLE public.cuentas (
   id_cuenta bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   correo text,
@@ -105,6 +111,25 @@ CREATE TABLE public.eventos_notificacion_nuevo_servicio (
   creado_en timestamp with time zone NOT NULL DEFAULT now(),
   actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT eventos_notificacion_nuevo_servicio_pkey PRIMARY KEY (id_evento)
+);
+CREATE TABLE public.frontend_error_logs (
+  id_error bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  occurred_at timestamp with time zone,
+  id_usuario bigint,
+  level text NOT NULL DEFAULT 'error'::text,
+  kind text NOT NULL DEFAULT 'runtime'::text,
+  message text NOT NULL,
+  stack text,
+  source text,
+  line integer,
+  column_number integer,
+  page_url text,
+  page_path text,
+  user_agent text,
+  metadata jsonb,
+  CONSTRAINT frontend_error_logs_pkey PRIMARY KEY (id_error),
+  CONSTRAINT frontend_error_logs_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.historial_reemplazos (
   id_reemplazo bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -177,6 +202,13 @@ CREATE TABLE public.metricas_mensuales (
   clientes_registrados_web integer,
   clientes_nuevos_web smallint,
   CONSTRAINT metricas_mensuales_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.nomina (
+  id_usuario bigint NOT NULL,
+  mensualidad numeric NOT NULL CHECK (mensualidad >= 0::numeric),
+  actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT nomina_pkey PRIMARY KEY (id_usuario),
+  CONSTRAINT nomina_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.notificacion_plantilla (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -350,6 +382,7 @@ CREATE TABLE public.reemplazos (
   id_cuenta bigint NOT NULL,
   id_perfil bigint,
   id_sub_cuenta bigint,
+  id_venta bigint,
   CONSTRAINT reemplazos_pkey PRIMARY KEY (id_reemplazo),
   CONSTRAINT reemplazos_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT reemplazos_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil)
@@ -375,6 +408,7 @@ CREATE TABLE public.reportes (
   solucionado_por bigint,
   descripcion_solucion text,
   id_tipo_reporte bigint,
+  id_venta bigint,
   CONSTRAINT reportes_pkey PRIMARY KEY (id_reporte),
   CONSTRAINT reportes_id_cuenta_fkey1 FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT reportes_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),
@@ -446,6 +480,7 @@ CREATE TABLE public.usuarios (
   fondo_perfil text,
   fecha_ultima_compra date,
   fecha_registro_admin date,
+  tutorial_completado boolean DEFAULT false,
   CONSTRAINT usuarios_pkey PRIMARY KEY (id_usuario)
 );
 CREATE TABLE public.ventas (
