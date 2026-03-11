@@ -1362,11 +1362,10 @@ btnSendPayment?.addEventListener("click", async () => {
     // Notificaciones de nuevo servicio y renovaciones para el usuario en sesión por cada venta de la orden
     try {
       if (resp?.id_orden) {
-        const PLATFORMS_EN_PROCESO = new Set([9, 12]);
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
-            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente)), perfiles:perfiles(n_perfil)"
+            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), perfiles:perfiles(n_perfil)"
           )
           .eq("id_orden", resp.id_orden);
         if (ventasOrdErr) throw ventasOrdErr;
@@ -1377,6 +1376,7 @@ btnSendPayment?.addEventListener("click", async () => {
           const cuentaRow = v.cuentas_miembro || v.cuentas || null;
           const idPlataforma = Number(cuentaRow?.id_plataforma) || null;
           const platName = cuentaRow?.plataformas?.nombre || "Plataforma";
+          const entregaInmediata = isTrue(cuentaRow?.plataformas?.entrega_inmediata);
           const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
           const correoTxt = v.correo_miembro || cuentaRow?.correo || "";
           const claveTxt = v.clave_miembro || cuentaRow?.clave || "";
@@ -1398,7 +1398,7 @@ btnSendPayment?.addEventListener("click", async () => {
           }
 
           if (!ventaUserId) return;
-          if (idPlataforma && PLATFORMS_EN_PROCESO.has(idPlataforma)) {
+          if (idPlataforma && !entregaInmediata) {
             const itemsProc = serviciosEnProcesoPorUsuario.get(ventaUserId) || [];
             itemsProc.push({
               plataforma: platName,

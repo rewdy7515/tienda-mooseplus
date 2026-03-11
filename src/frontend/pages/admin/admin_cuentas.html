@@ -423,6 +423,20 @@
       .cliente-ventas h3 {
         margin: 0 0 6px;
       }
+      .cliente-ventas-info {
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #0f172a;
+        font-weight: 600;
+      }
+      .cliente-ventas-info.has-inactive {
+        border-color: #fecaca;
+        background: #fef2f2;
+        color: #7f1d1d;
+      }
       .cliente-ventas .ventas-table-wrap {
         overflow-x: auto;
       }
@@ -506,6 +520,14 @@
       }
       .correo-copy {
         cursor: pointer;
+      }
+      .correo-copy.inactiva {
+        color: #dc2626;
+        font-weight: 700;
+      }
+      .copyable-text.inactiva {
+        color: #dc2626;
+        font-weight: 700;
       }
       .btn-delete-venta {
         padding: 6px 10px;
@@ -2777,6 +2799,16 @@
           clienteVentasEl.innerHTML = "";
           return;
         }
+        const allRows = Object.values(grouped).flatMap((groupVal) =>
+          Array.isArray(groupVal) ? groupVal : groupVal?.rows || [],
+        );
+        const totalVentas = allRows.length;
+        const totalInactivas = allRows.filter((row) => row?.cuenta_inactiva === true).length;
+        const infoClass = totalInactivas > 0 ? "cliente-ventas-info has-inactive" : "cliente-ventas-info";
+        const infoMsg =
+          totalInactivas > 0
+            ? `Ventas asociadas al cliente: ${totalVentas}. Cuentas inactivas: ${totalInactivas} (correos en rojo).`
+            : `Ventas asociadas al cliente: ${totalVentas}.`;
         const blocks = Object.entries(grouped).map(([platName, groupVal]) => {
           const rows = Array.isArray(groupVal)
             ? groupVal
@@ -2794,8 +2826,9 @@
             .map((r) => {
               const correo = r.correo || "";
               const correoSafe = correo.replace(/"/g, "&quot;");
+              const correoClass = r.cuenta_inactiva === true ? "copyable-text inactiva" : "copyable-text";
               const correoCell = correo
-                ? `<span class="copyable-text" data-clipboard="${correoSafe}">${correo}</span>`
+                ? `<span class="${correoClass}" data-clipboard="${correoSafe}">${correo}</span>`
                 : "-";
               const alertBtn = correo
                 ? `<button type="button" class="cliente-alert" data-correo="${correoSafe}" title="Ver cuenta">!</button>`
@@ -2882,7 +2915,7 @@
             </div>
           `;
         });
-        clienteVentasEl.innerHTML = blocks.join("");
+        clienteVentasEl.innerHTML = `<p class="${infoClass}">${infoMsg}</p>${blocks.join("")}`;
         decorateCopyColumns(clienteVentasEl);
       };
 
@@ -3007,6 +3040,7 @@
               id_cuenta: v.id_cuenta,
               id_perfil: v.id_perfil,
               correo: correoVenta,
+              cuenta_inactiva: cuenta.inactiva === true,
               clave: claveVenta,
               n_perfil: perfilInfo.n_perfil ?? "",
               pin: perfilInfo.pin ?? "",

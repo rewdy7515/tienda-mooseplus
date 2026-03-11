@@ -180,9 +180,7 @@
             }</div>`,
           );
         }
-        if (item.fechaCorte) {
-          parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
-        }
+        parts.push("Estado: Procesandose");
         return parts.join("<br>");
       });
 

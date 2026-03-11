@@ -402,6 +402,7 @@ const processNuevoServicioNotificationQueue = async () => {
     }
 
     const queueItems = Array.isArray(events) ? events : [];
+    const entregaInmediataByPlataforma = new Map();
     if (nuevoServicioNotifQueueTableMissing) {
       console.log(
         `[Notificaciones] Tabla ${NUEVO_SERVICIO_NOTIF_QUEUE_TABLE} detectada. Worker retomado.`,
@@ -430,7 +431,22 @@ const processNuevoServicioNotificationQueue = async () => {
 
       try {
         const plataformaEventoId = Number(eventRow?.id_plataforma);
-        const esServicioEnProceso = plataformaEventoId === 9 || plataformaEventoId === 12;
+        let esServicioEnProceso = false;
+        if (Number.isFinite(plataformaEventoId) && plataformaEventoId > 0) {
+          if (!entregaInmediataByPlataforma.has(plataformaEventoId)) {
+            const { data: plataformaRow, error: platErr } = await supabaseAdmin
+              .from("plataformas")
+              .select("entrega_inmediata")
+              .eq("id_plataforma", plataformaEventoId)
+              .maybeSingle();
+            if (platErr) throw platErr;
+            entregaInmediataByPlataforma.set(
+              plataformaEventoId,
+              isTrue(plataformaRow?.entrega_inmediata),
+            );
+          }
+          esServicioEnProceso = !entregaInmediataByPlataforma.get(plataformaEventoId);
+        }
         if (Number.isFinite(idVenta) && idVenta > 0) {
           const duplicatePattern = `%ID Venta: #${idVenta}%`;
           const { data: existingRows, error: existingErr } = await supabaseAdmin
@@ -5996,6 +6012,40 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       if (updSaldoErr) throw updSaldoErr;
       return { acreditado: true, monto: amount, saldoNuevo };
     };
+    const processNoItemsOrder = async ({
+      montoAuto = 0,
+      motivo = "sin_items_relacionados",
+    } = {}) => {
+      const montoAutoNorm = Math.round((Number(montoAuto) || 0) * 100) / 100;
+      const montoManualNorm = Math.round((Number(saldoAFavor) || 0) * 100) / 100;
+      const montoTotalAcreditar = Math.max(0, montoAutoNorm) + Math.max(0, montoManualNorm);
+      const saldoAcreditadoInfo = await acreditarSaldoManual(montoTotalAcreditar);
+
+      const ordenUpdate = {
+        pago_verificado: true,
+        en_espera: false,
+      };
+      if (canAssignDeliverAdmin) {
+        ordenUpdate.id_admin = sessionAdminId;
+      }
+      await supabaseAdmin
+        .from("ordenes")
+        .update(ordenUpdate)
+        .eq("id_orden", idOrden);
+
+      return res.json({
+        ok: true,
+        id_orden: idOrden,
+        ventas: 0,
+        pendientes: 0,
+        id_admin: idAdminEntrega,
+        saldo_acreditado: saldoAcreditadoInfo.acreditado,
+        excedente_acreditado: saldoAcreditadoInfo.monto,
+        saldo_nuevo: saldoAcreditadoInfo.saldoNuevo,
+        sin_items: true,
+        motivo_sin_items: motivo,
+      });
+    };
     const isOrderAdmin =
       idUsuarioSesion && orden?.id_admin && Number(orden.id_admin) === Number(idUsuarioSesion);
     const sessionAdminId = Number.isFinite(Number(idUsuarioSesion)) ? Number(idUsuarioSesion) : null;
@@ -6051,7 +6101,14 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       });
     }
     if (!orden?.id_carrito) {
-      return res.status(400).json({ error: "Orden sin carrito asociado." });
+      console.log("[ordenes/procesar] orden sin carrito; se acredita saldo", {
+        id_orden: idOrden,
+        total: orden?.total,
+      });
+      return processNoItemsOrder({
+        montoAuto: Number(orden?.total) || 0,
+        motivo: "orden_sin_carrito",
+      });
     }
 
     const context = await buildCheckoutContext({
@@ -6065,8 +6122,15 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       fallbackTotal: context.total,
     });
     if (!context.items?.length) {
-      console.log("[ordenes/procesar] carrito vacío", { id_orden: idOrden, carritoId: orden?.id_carrito });
-      return res.status(400).json({ error: "El carrito está vacío" });
+      console.log("[ordenes/procesar] carrito vacío; se acredita saldo", {
+        id_orden: idOrden,
+        carritoId: orden?.id_carrito,
+        montoBaseCobrado,
+      });
+      return processNoItemsOrder({
+        montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
+        motivo: "carrito_sin_items",
+      });
     }
     console.log("[ordenes/procesar] contexto", {
       id_orden: idOrden,

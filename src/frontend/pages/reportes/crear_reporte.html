@@ -35,8 +35,31 @@
       .report-step {
         border: 1px solid #e5e7eb;
         border-radius: 14px;
-        padding: 12px;
+        padding: 14px;
         background: #ffffff;
+      }
+      .report-step-body {
+        display: grid;
+        gap: 12px;
+      }
+      .report-grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .field-group {
+        display: grid;
+        gap: 6px;
+        align-content: start;
+      }
+      .field-group.full {
+        grid-column: 1 / -1;
+      }
+      .field-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 10px;
+        background: #fafafa;
       }
       .report-step-title {
         display: inline-flex;
@@ -135,6 +158,9 @@
         min-width: 200px;
       }
       @media (max-width: 720px) {
+        .report-grid-2 {
+          grid-template-columns: 1fr;
+        }
         .report-create-page {
           padding: 12px 10px 20px;
         }
@@ -148,6 +174,10 @@
         .report-step {
           padding: 10px;
           border-radius: 12px;
+        }
+        .field-card {
+          padding: 8px;
+          border-radius: 10px;
         }
         .report-step-title {
           font-size: 0.96rem;
@@ -177,11 +207,15 @@
             <span class="report-step-index">1</span>
             Seleccionar plataforma
           </h3>
-          <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
-          <select id="select-plataforma" class="form-select" required>
-            <option value="">Seleccione plataforma</option>
-          </select>
-          <p class="report-help">Elige la plataforma del servicio que vas a reportar.</p>
+          <div class="report-step-body">
+            <div class="field-group">
+              <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
+              <select id="select-plataforma" class="form-select" required>
+                <option value="">Seleccione plataforma</option>
+              </select>
+              <p class="report-help">Elige la plataforma del servicio que vas a reportar.</p>
+            </div>
+          </div>
         </section>
 
         <section class="report-step">
@@ -189,26 +223,30 @@
             <span class="report-step-index">2</span>
             Seleccionar correo y perfil
           </h3>
-          <label class="form-label" for="input-correo-cuenta">Correo de la cuenta <span class="required">*</span></label>
-          <input
-            id="input-correo-cuenta"
-            class="form-input"
-            type="text"
-            placeholder="Buscar correo de la cuenta"
-            autocomplete="off"
-            required
-          />
-          <select id="select-correo-cuenta" class="form-select" disabled>
-            <option value="">Selecciona un correo disponible</option>
-          </select>
-          <p id="correo-aviso" class="correo-aviso hidden"></p>
-          <div id="correo-sugerencias" class="correo-sugerencias hidden"></div>
+          <div class="report-step-body report-grid-2">
+            <div class="field-group field-card">
+              <label class="form-label" for="input-correo-cuenta">Correo de la cuenta <span class="required">*</span></label>
+              <input
+                id="input-correo-cuenta"
+                class="form-input"
+                type="text"
+                placeholder="Buscar correo de la cuenta"
+                autocomplete="off"
+                required
+              />
+              <select id="select-correo-cuenta" class="form-select" disabled>
+                <option value="">Selecciona un correo disponible</option>
+              </select>
+              <p id="correo-aviso" class="correo-aviso hidden"></p>
+              <div id="correo-sugerencias" class="correo-sugerencias hidden"></div>
+            </div>
 
-          <div id="perfil-wrapper" class="hidden">
-            <label class="form-label" for="select-perfil">Perfil <span class="required">*</span></label>
-            <select id="select-perfil" class="form-select">
-              <option value="">Seleccione perfil</option>
-            </select>
+            <div id="perfil-wrapper" class="field-group field-card hidden">
+              <label class="form-label" for="select-perfil">Perfil <span class="required">*</span></label>
+              <select id="select-perfil" class="form-select">
+                <option value="">Seleccione perfil</option>
+              </select>
+            </div>
           </div>
         </section>
 
@@ -217,34 +255,41 @@
             <span class="report-step-index">3</span>
             Seleccionar motivo e imagen
           </h3>
-          <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
-          <select id="select-motivo" class="form-select" required>
-            <option value="">Seleccione motivo</option>
-          </select>
+          <div class="report-step-body report-grid-2">
+            <div class="field-group field-card">
+              <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
+              <select id="select-motivo" class="form-select" required>
+                <option value="">Seleccione motivo</option>
+              </select>
 
-          <div id="motivo-otro-wrapper" class="hidden">
-            <label class="form-label" for="input-motivo-otro">Describe el problema <span class="required">*</span></label>
-            <textarea id="input-motivo-otro" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
-          </div>
+              <div id="motivo-otro-wrapper" class="hidden">
+                <label class="form-label" for="input-motivo-otro">Describe el problema <span class="required">*</span></label>
+                <textarea id="input-motivo-otro" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
+              </div>
 
-          <div id="motivo-extra-wrapper" class="hidden">
-            <label class="form-label" for="input-motivo-extra">Describe el problema <span class="required">*</span></label>
-            <textarea id="input-motivo-extra" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
-          </div>
-          <label class="form-label">Adjuntar imagen</label>
-          <div id="dropzone" class="dropzone">
-            <p>Arrastra una imagen aquí o</p>
-            <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
-            <input id="input-files" type="file" accept="image/*" hidden />
-            <div id="file-preview" class="file-preview"></div>
-          </div>
-          <p class="report-help">Asegúrate de que la imagen sea legible para acelerar la solución.</p>
+              <div id="motivo-extra-wrapper" class="hidden">
+                <label class="form-label" for="input-motivo-extra">Describe el problema <span class="required">*</span></label>
+                <textarea id="input-motivo-extra" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
+              </div>
+            </div>
 
-          <div class="form-group checkbox-line">
-            <label class="form-label" for="chk-no-screenshot">
-              <input type="checkbox" id="chk-no-screenshot" />
-              La aplicación no me permite tomar screenshot.
-            </label>
+            <div class="field-group field-card">
+              <label class="form-label">Adjuntar imagen</label>
+              <div id="dropzone" class="dropzone">
+                <p>Arrastra una imagen aquí o</p>
+                <button id="btn-add-image" type="button" class="btn-outline">Agregar imagen</button>
+                <input id="input-files" type="file" accept="image/*" hidden />
+                <div id="file-preview" class="file-preview"></div>
+              </div>
+              <p class="report-help">Asegúrate de que la imagen sea legible para acelerar la solución.</p>
+
+              <div class="form-group checkbox-line">
+                <label class="form-label" for="chk-no-screenshot">
+                  <input type="checkbox" id="chk-no-screenshot" />
+                  La aplicación no me permite tomar screenshot.
+                </label>
+              </div>
+            </div>
           </div>
         </section>
 
