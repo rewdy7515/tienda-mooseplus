@@ -175,14 +175,20 @@
         <section class="report-step">
           <h3 class="report-step-title">
             <span class="report-step-index">1</span>
-            Servicio a reportar
+            Seleccionar plataforma
           </h3>
           <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
           <select id="select-plataforma" class="form-select" required>
             <option value="">Seleccione plataforma</option>
           </select>
-          <p class="report-help">Solo se listan plataformas de servicios que tienes activos.</p>
+          <p class="report-help">Elige la plataforma del servicio que vas a reportar.</p>
+        </section>
 
+        <section class="report-step">
+          <h3 class="report-step-title">
+            <span class="report-step-index">2</span>
+            Seleccionar correo y perfil
+          </h3>
           <label class="form-label" for="input-correo-cuenta">Correo de la cuenta <span class="required">*</span></label>
           <input
             id="input-correo-cuenta"
@@ -208,8 +214,8 @@
 
         <section class="report-step">
           <h3 class="report-step-title">
-            <span class="report-step-index">2</span>
-            Motivo del reporte
+            <span class="report-step-index">3</span>
+            Seleccionar motivo e imagen
           </h3>
           <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
           <select id="select-motivo" class="form-select" required>
@@ -225,13 +231,6 @@
             <label class="form-label" for="input-motivo-extra">Describe el problema <span class="required">*</span></label>
             <textarea id="input-motivo-extra" class="form-input" rows="3" placeholder="Escribe el detalle" minlength="3"></textarea>
           </div>
-        </section>
-
-        <section class="report-step">
-          <h3 class="report-step-title">
-            <span class="report-step-index">3</span>
-            Evidencia
-          </h3>
           <label class="form-label">Adjuntar imagen</label>
           <div id="dropzone" class="dropzone">
             <p>Arrastra una imagen aquí o</p>

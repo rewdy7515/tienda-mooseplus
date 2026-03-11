@@ -6749,6 +6749,7 @@
           let nuevoCuenta = null;
           let nuevoPerfil = null;
           let dataDestino = {};
+          const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
 
           console.log("[reemplazo] request", {
             plataformaId,
@@ -6757,18 +6758,15 @@
             ventaPerfil,
             ventaMiembro,
           });
-          if (rowPerfil?.id_perfil) {
+          const tryAsignarPerfil = async (isHogar) => {
             const { data: perfilDestino, error: perfilErr } =
-              await findPerfilLibre(plataformaId, perfilHogar, cuentaId);
+              await findPerfilLibre(plataformaId, isHogar, cuentaId);
             if (perfilErr) {
               console.error("[reemplazo] findPerfilLibre error", perfilErr);
               throw perfilErr;
             }
             console.log("[reemplazo] perfilDestino", perfilDestino);
-            if (!perfilDestino) {
-              alert("Sin stock");
-              return;
-            }
+            if (!perfilDestino) return false;
             nuevoPerfil = perfilDestino.id_perfil;
             nuevoCuenta = perfilDestino.id_cuenta;
             dataDestino = {
@@ -6777,7 +6775,10 @@
               pin: perfilDestino.pin,
               n_perfil: perfilDestino.n_perfil,
             };
-          } else if (ventaMiembro && !ventaPerfil) {
+            return true;
+          };
+
+          const tryAsignarCuentaMiembro = async () => {
             const { data: cuentaDestino, error: cuentaErr } =
               await findCuentaMiembroLibre(plataformaId, cuentaId);
             if (cuentaErr) {
@@ -6787,17 +6788,30 @@
               );
               throw cuentaErr;
             }
-            if (!cuentaDestino) {
-              alert("Sin stock");
-              return;
-            }
+            if (!cuentaDestino) return false;
             nuevoPerfil = null;
             nuevoCuenta = cuentaDestino.id_cuenta;
             dataDestino = {
               correo: cuentaDestino.correo,
               clave: cuentaDestino.clave,
             };
-          } else {
+            return true;
+          };
+
+          let assigned = false;
+          if (rowPerfil?.id_perfil) {
+            assigned = await tryAsignarPerfil(perfilHogar);
+            if (!assigned && isPlanMiembroEquivalente) {
+              assigned = await tryAsignarCuentaMiembro();
+            }
+          } else if (ventaMiembro && !ventaPerfil) {
+            assigned = await tryAsignarCuentaMiembro();
+            if (!assigned) {
+              assigned = await tryAsignarPerfil(true);
+            }
+          }
+
+          if (!assigned) {
             alert("Sin stock");
             return;
           }
@@ -7949,18 +7963,19 @@
             let nuevoCuenta = null;
             let nuevoPerfil = null;
             let dataDestino = {};
-            if (perfilId) {
-              const { data: perfilDestino, error: perfilDestinoErr } =
-                await findPerfilLibre(
-                  plataformaId,
-                  perfilActual?.perfil_hogar === true,
-                  cuentaId,
-                );
+            const perfilHogar = perfilActual?.perfil_hogar === true;
+            const ventaMiembro = isTrue(cuentaActual.venta_miembro);
+            const ventaPerfil = isTrue(cuentaActual.venta_perfil);
+            const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
+
+            const tryAsignarPerfil = async (isHogar) => {
+              const { data: perfilDestino, error: perfilDestinoErr } = await findPerfilLibre(
+                plataformaId,
+                isHogar,
+                cuentaId,
+              );
               if (perfilDestinoErr) throw perfilDestinoErr;
-              if (!perfilDestino) {
-                summary.skipped += 1;
-                continue;
-              }
+              if (!perfilDestino) return false;
               nuevoCuenta = toPositiveId(perfilDestino.id_cuenta);
               nuevoPerfil = toPositiveId(perfilDestino.id_perfil);
               dataDestino = {
@@ -7968,17 +7983,14 @@
                 clave: perfilDestino.cuentas?.clave || "",
                 n_perfil: perfilDestino.n_perfil || null,
               };
-            } else if (
-              isTrue(cuentaActual.venta_miembro) &&
-              !isTrue(cuentaActual.venta_perfil)
-            ) {
+              return true;
+            };
+
+            const tryAsignarCuentaMiembro = async () => {
               const { data: cuentaDestino, error: cuentaDestinoErr } =
                 await findCuentaMiembroLibre(plataformaId, cuentaId);
               if (cuentaDestinoErr) throw cuentaDestinoErr;
-              if (!cuentaDestino) {
-                summary.skipped += 1;
-                continue;
-              }
+              if (!cuentaDestino) return false;
               nuevoCuenta = toPositiveId(cuentaDestino.id_cuenta);
               nuevoPerfil = null;
               dataDestino = {
@@ -7986,7 +7998,23 @@
                 clave: cuentaDestino.clave || "",
                 n_perfil: null,
               };
-            } else {
+              return true;
+            };
+
+            let assigned = false;
+            if (perfilId) {
+              assigned = await tryAsignarPerfil(perfilHogar);
+              if (!assigned && isPlanMiembroEquivalente) {
+                assigned = await tryAsignarCuentaMiembro();
+              }
+            } else if (ventaMiembro && !ventaPerfil) {
+              assigned = await tryAsignarCuentaMiembro();
+              if (!assigned) {
+                assigned = await tryAsignarPerfil(true);
+              }
+            }
+
+            if (!assigned && !(ventaMiembro && !ventaPerfil) && !perfilId) {
               const { data: cuentaDestino, error: cuentaDestinoErr } =
                 await findCuentaCompleta(plataformaId, cuentaId);
               if (cuentaDestinoErr) throw cuentaDestinoErr;
@@ -8001,6 +8029,7 @@
                 clave: cuentaDestino.clave || "",
                 n_perfil: null,
               };
+              assigned = true;
             }
 
             if (!nuevoCuenta) {

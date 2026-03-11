@@ -1212,18 +1212,16 @@ async function reemplazarServicio() {
     let nuevoCuenta = null;
     let nuevoPerfil = null;
     let dataDestino = {};
+    const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
 
-    if (rowPerfil?.id_perfil) {
+    const tryAsignarPerfil = async (isHogar) => {
       const { data: perfilDestino, error: perfilErr } = await findPerfilLibre(
         plataformaId,
-        perfilHogar,
+        isHogar,
         cuentaId,
       );
       if (perfilErr) throw perfilErr;
-      if (!perfilDestino) {
-        alert("Sin stock");
-        return;
-      }
+      if (!perfilDestino) return false;
       nuevoPerfil = perfilDestino.id_perfil;
       nuevoCuenta = perfilDestino.id_cuenta;
       dataDestino = {
@@ -1232,23 +1230,39 @@ async function reemplazarServicio() {
         pin: perfilDestino.pin,
         n_perfil: perfilDestino.n_perfil,
       };
-    } else if (ventaMiembro && !ventaPerfil) {
+      return true;
+    };
+
+    const tryAsignarCuentaMiembro = async () => {
       const { data: cuentaDestino, error: cuentaErr } = await findCuentaMiembroLibre(
         plataformaId,
         cuentaId,
       );
       if (cuentaErr) throw cuentaErr;
-      if (!cuentaDestino) {
-        alert("Sin stock");
-        return;
-      }
+      if (!cuentaDestino) return false;
       nuevoPerfil = null;
       nuevoCuenta = cuentaDestino.id_cuenta;
       dataDestino = {
         correo: cuentaDestino.correo || "",
         clave: cuentaDestino.clave || "",
       };
-    } else {
+      return true;
+    };
+
+    let assigned = false;
+    if (rowPerfil?.id_perfil) {
+      assigned = await tryAsignarPerfil(perfilHogar);
+      if (!assigned && isPlanMiembroEquivalente) {
+        assigned = await tryAsignarCuentaMiembro();
+      }
+    } else if (ventaMiembro && !ventaPerfil) {
+      assigned = await tryAsignarCuentaMiembro();
+      if (!assigned) {
+        assigned = await tryAsignarPerfil(true);
+      }
+    }
+
+    if (!assigned) {
       alert("Sin stock");
       return;
     }
