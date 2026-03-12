@@ -401,6 +401,18 @@ main {
   background: #f2f2f2;
 }
 
+.user-dropdown .mis-cuentas-link {
+  margin: 6px 10px;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.user-dropdown .mis-cuentas-link:hover,
+.user-dropdown .mis-cuentas-link:focus {
+  background: #115e59;
+}
+
 .user-dropdown .admin-link {
   margin: 6px 10px;
   border-radius: 8px;

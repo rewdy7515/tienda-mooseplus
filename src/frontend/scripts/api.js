@@ -242,6 +242,15 @@ const getLoginHref = () => {
   return `${window.location.origin}/src/frontend/pages/login.html`;
 };
 
+const isAnonymousAllowedPath = () => {
+  const path = String(window.location.pathname || "").toLowerCase();
+  return (
+    path === "/" ||
+    path.endsWith("/index.html") ||
+    path.endsWith("/src/frontend/pages/index.html")
+  );
+};
+
 const bufferToBase64 = (buffer) => {
   let binary = "";
   const bytes = new Uint8Array(buffer);
@@ -1049,6 +1058,9 @@ async function handleFatalAuthSessionError(reason = "") {
     clearSupabaseLocalArtifacts();
     await clearServerSession();
   } finally {
+    if (isAnonymousAllowedPath()) {
+      return;
+    }
     const loginHref = getLoginHref();
     const current = `${window.location.origin}${window.location.pathname}`;
     if (current !== loginHref) {

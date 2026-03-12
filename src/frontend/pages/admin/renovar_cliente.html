@@ -431,6 +431,36 @@
         return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
       };
 
+      const toPerfilSortValue = (row = {}) => {
+        const direct = Number(row?.n_perfil);
+        if (Number.isFinite(direct) && direct > 0) return direct;
+        const txt = String(row?.perfil || "").trim();
+        const match = txt.match(/^m?\s*(\d+)$/i);
+        if (match) {
+          const parsed = Number(match[1]);
+          if (Number.isFinite(parsed) && parsed > 0) return parsed;
+        }
+        return null;
+      };
+
+      const sortRowsByPerfilIfAny = (rows = []) => {
+        const cloned = Array.isArray(rows) ? [...rows] : [];
+        return cloned.sort((a, b) => {
+          const ap = toPerfilSortValue(a);
+          const bp = toPerfilSortValue(b);
+          const aHas = Number.isFinite(ap);
+          const bHas = Number.isFinite(bp);
+          if (aHas && bHas && ap !== bp) return ap - bp;
+          if (aHas !== bHas) return aHas ? -1 : 1;
+          const aVenta = Number(a?.id_venta || 0);
+          const bVenta = Number(b?.id_venta || 0);
+          if (Number.isFinite(aVenta) && Number.isFinite(bVenta) && aVenta !== bVenta) {
+            return aVenta - bVenta;
+          }
+          return 0;
+        });
+      };
+
       const renderResultado = (items) => {
         if (!resultadoEl) return;
         console.log("[renovar_cliente] renderResultado items:", items);
@@ -455,10 +485,11 @@
 
         const bloques = Object.entries(grouped)
           .map(([plat, rows]) => {
-            const groupColor = rows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+            const sortedRows = sortRowsByPerfilIfAny(rows);
+            const groupColor = sortedRows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
             const styleAttr = tableHeaderStyleAttr(groupColor);
-            const showPerfilCol = rows.some((r) => r.showPerfil);
-            const showHogarCol = rows.some((r) => r.showHogar);
+            const showPerfilCol = sortedRows.some((r) => r.showPerfil);
+            const showHogarCol = sortedRows.some((r) => r.showHogar);
             const head = [
               "<th>ID Venta</th>",
               "<th>Correo</th>",
@@ -469,7 +500,7 @@
               "<th>Seleccionar</th>",
             ].join("");
 
-            const rowsHtml = rows
+            const rowsHtml = sortedRows
               .map((it) => {
                 const perfilLabel = showPerfilCol ? it.perfil || "-" : "";
                 const hogarLabel = showHogarCol
@@ -562,8 +593,9 @@
 
         const bloques = Object.entries(grouped)
           .map(([plataformaNombre, rowsPlat]) => {
-            const showPerfil = rowsPlat.some((r) => r.perfil);
-            const showHogar = rowsPlat.some((r) => !!r.hogarText);
+            const sortedRowsPlat = sortRowsByPerfilIfAny(rowsPlat);
+            const showPerfil = sortedRowsPlat.some((r) => r.perfil);
+            const showHogar = sortedRowsPlat.some((r) => !!r.hogarText);
             const headCols = [
               "<th>ID Venta</th>",
               "<th>Cliente</th>",
@@ -573,7 +605,7 @@
               "<th>Fecha corte</th>",
               "<th>Acción</th>",
             ].join("");
-            const body = rowsPlat
+            const body = sortedRowsPlat
               .map(
                 (r) => `
                 <tr>
@@ -611,7 +643,7 @@
               `
               )
               .join("");
-            const color = rowsPlat.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+            const color = sortedRowsPlat.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
             const styleAttr = tableHeaderStyleAttr(color);
             return `
               <div class="proximas-bloque">
@@ -1210,9 +1242,10 @@
         }, {});
         const bloques = Object.entries(grouped)
           .map(([plat, rows]) => {
-            const groupColor = rows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
+            const sortedRows = sortRowsByPerfilIfAny(rows);
+            const groupColor = sortedRows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
             const styleAttr = tableHeaderStyleAttr(groupColor);
-            const rowsHtml = rows
+            const rowsHtml = sortedRows
               .map(
                 (it) => `
                   <tr>

@@ -4252,7 +4252,7 @@
                           <td><span class="correo-copy" data-clipboard="${m.correo || ""}">${m.correo || "-"}</span></td>
                           ${showClaveCliente ? `<td><span class="clave-copy" data-clipboard="${m.clave || ""}">${m.clave || "-"}</span></td>` : ""}
                           ${showPin ? `<td><span class="pin-copy" data-clipboard="${m.pin || ""}">${m.pin || "-"}</span></td>` : ""}
-                          <td>${hasVenta ? m.ocupado || "-" : isSuperadmin ? `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" />` : "-"}</td>
+                          <td>${hasVenta ? m.ocupado || "-" : isSuperadmin ? `<input type="text" class="ocupado-input" placeholder="Nombre y apellido" list="sugs-ocupado" />` : "-"}</td>
                           <td>${hasVenta ? `#${m.id_venta}` : "-"}</td>
                           <td>${renderPrecioVentaCell(m.id_venta, m.id_precio)}</td>
                           <td>

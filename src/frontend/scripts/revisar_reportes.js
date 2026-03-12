@@ -303,6 +303,18 @@ async function applyDiasExtraToVentaFechaCorte(row, ventaInfoFromFlow = null) {
   };
 }
 
+async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
+  const ventaInfo = ventaInfoFromFlow || (await findVentaAsociadaFromReporte(row));
+  const ventaId = Number(ventaInfo?.id_venta);
+  if (!Number.isFinite(ventaId) || ventaId <= 0) return null;
+  const { error } = await supabase
+    .from("ventas")
+    .update({ reportado: false })
+    .eq("id_venta", ventaId);
+  if (error) throw error;
+  return ventaInfo;
+}
+
 async function notifyDiasSumados({ row, ventaInfo, dias }) {
   const targetUserId = Number(ventaInfo?.id_usuario || row?.id_usuario);
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
@@ -1040,6 +1052,12 @@ async function guardarCambios() {
     }
 
     try {
+      await clearVentaReportadoFlag(currentRow);
+    } catch (reportadoErr) {
+      console.error("limpiar ventas.reportado al cerrar reporte error", reportadoErr);
+    }
+
+    try {
       await notifyReporteCerrado(currentRow);
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
@@ -1277,6 +1295,12 @@ async function reemplazarServicio() {
       })
       .eq("id_venta", ventaId);
     if (updVentaErr) throw updVentaErr;
+
+    try {
+      await clearVentaReportadoFlag(currentRow, ventaInfo);
+    } catch (reportadoErr) {
+      console.error("limpiar ventas.reportado en reemplazo error", reportadoErr);
+    }
 
     const perfilAnteriorId = toPositiveId(rowPerfil?.id_perfil);
     let perfilTieneOtraVenta = false;
