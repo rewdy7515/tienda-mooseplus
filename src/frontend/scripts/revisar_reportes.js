@@ -87,6 +87,7 @@ let cambioClave = false;
 let cambioPin = false;
 let currentImageDownloadUrl = "";
 let currentImageDownloadName = "";
+let autoReemplazoCuentaInactivaEnabled = false;
 const reportesById = new Map();
 const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
 
@@ -379,21 +380,25 @@ async function saveAutoReemplazoConfig(value) {
 }
 
 async function initAutoReemplazoToggle({ isSuperadmin = false } = {}) {
-  if (!toggleAutoReemplazoEl) return;
+  let currentValue = false;
+  try {
+    currentValue = await loadAutoReemplazoConfig();
+  } catch (err) {
+    console.error("load auto reemplazo config error", err);
+    currentValue = false;
+  }
+  autoReemplazoCuentaInactivaEnabled = currentValue;
+
+  if (!toggleAutoReemplazoEl) return currentValue;
   if (!isSuperadmin) {
     toggleAutoReemplazoWrapEl?.classList.add("hidden");
+    toggleAutoReemplazoEl.checked = currentValue;
     toggleAutoReemplazoEl.disabled = true;
-    return;
+    return currentValue;
   }
   toggleAutoReemplazoWrapEl?.classList.remove("hidden");
   toggleAutoReemplazoEl.disabled = true;
-  try {
-    const currentValue = await loadAutoReemplazoConfig();
-    toggleAutoReemplazoEl.checked = currentValue;
-  } catch (err) {
-    console.error("load auto reemplazo config error", err);
-    toggleAutoReemplazoEl.checked = false;
-  }
+  toggleAutoReemplazoEl.checked = currentValue;
 
   toggleAutoReemplazoEl.disabled = false;
   toggleAutoReemplazoEl.addEventListener("change", async () => {
@@ -402,14 +407,17 @@ async function initAutoReemplazoToggle({ isSuperadmin = false } = {}) {
     toggleAutoReemplazoEl.disabled = true;
     try {
       await saveAutoReemplazoConfig(next);
+      autoReemplazoCuentaInactivaEnabled = next;
     } catch (err) {
       console.error("save auto reemplazo config error", err);
       toggleAutoReemplazoEl.checked = prev;
+      autoReemplazoCuentaInactivaEnabled = prev;
       alert("No se pudo actualizar el estado del auto reemplazo.");
     } finally {
       toggleAutoReemplazoEl.disabled = false;
     }
   });
+  return currentValue;
 }
 
 const extractStorageRef = (rawPath) => {
@@ -810,7 +818,14 @@ async function init() {
     attachLogoHome();
 
     const all = await loadReportes();
-    const activos = (all || []).filter((r) => r.en_revision !== false && r.solucionado === false);
+    let activos = (all || []).filter((r) => r.en_revision !== false && r.solucionado === false);
+    if (autoReemplazoCuentaInactivaEnabled) {
+      const processed = await autoReplaceInactiveReportes(activos);
+      if (processed) {
+        const refreshed = await loadReportes();
+        activos = (refreshed || []).filter((r) => r.en_revision !== false && r.solucionado === false);
+      }
+    }
     if (!activos.length) {
       if (statusEl) statusEl.textContent = "No hay reportes pendientes.";
       if (listEl) listEl.innerHTML = "";
@@ -1075,11 +1090,19 @@ async function guardarCambios() {
   }
 }
 
-async function reemplazarServicio() {
-  if (!currentRow) {
-    alert("Selecciona un reporte.");
-    return;
+async function reemplazarServicio(options = {}) {
+  const rowFromOptions = options?.row || null;
+  const silent = options?.silent === true;
+  const shouldCloseModal = options?.closeModal !== false;
+  const notify = (msg) => {
+    if (!silent) alert(msg);
+  };
+  const targetRow = rowFromOptions || currentRow;
+  if (!targetRow) {
+    notify("Selecciona un reporte.");
+    return { ok: false, reason: "no_row" };
   }
+  const currentRow = targetRow;
   const closedReportId = Number(currentRow?.id_reporte);
 
   try {
@@ -1102,8 +1125,8 @@ async function reemplazarServicio() {
       : null;
 
     if (!plataformaId || !cuentaId) {
-      alert("Faltan datos de plataforma o cuenta.");
-      return;
+      notify("Faltan datos de plataforma o cuenta.");
+      return { ok: false, reason: "missing_data" };
     }
 
     const findVentaAsociada = async (withUserFilter) => {
@@ -1154,8 +1177,8 @@ async function reemplazarServicio() {
       }
     }
     if (ventaErr || !ventasData?.length) {
-      alert("No se encontró la venta asociada.");
-      return;
+      notify("No se encontró la venta asociada.");
+      return { ok: false, reason: "venta_not_found" };
     }
     const ventaInfo = ventasData[0];
     const ventaId = ventaInfo.id_venta;
@@ -1281,8 +1304,8 @@ async function reemplazarServicio() {
     }
 
     if (!assigned) {
-      alert("Sin stock");
-      return;
+      notify("Sin stock");
+      return { ok: false, reason: "sin_stock" };
     }
 
     const { error: updVentaErr } = await supabase
@@ -1401,11 +1424,28 @@ async function reemplazarServicio() {
       console.error("notificacion reporte cerrado error", notifErr);
     }
 
-    alert("Reemplazo realizado.");
+    notify("Reemplazo realizado.");
     removeReporteRowFromUI(closedReportId);
-    closeModal();
+    if (shouldCloseModal) closeModal();
+    return { ok: true };
   } catch (err) {
     console.error("reemplazo reporte error", err);
-    alert("No se pudo reemplazar.");
+    notify("No se pudo reemplazar.");
+    return { ok: false, reason: "error", error: err };
   }
+}
+
+async function autoReplaceInactiveReportes(reportes = []) {
+  if (!autoReemplazoCuentaInactivaEnabled) return false;
+  const targets = (reportes || []).filter((r) => isTrue(r?.cuentas?.inactiva));
+  if (!targets.length) return false;
+
+  for (const row of targets) {
+    try {
+      await reemplazarServicio({ row, silent: true, closeModal: false });
+    } catch (err) {
+      console.error("auto reemplazo por cuenta inactiva error", err);
+    }
+  }
+  return true;
 }

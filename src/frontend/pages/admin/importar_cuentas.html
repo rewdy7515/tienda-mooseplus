@@ -108,7 +108,11 @@
           statusEl.textContent = body?.error || "Error al importar cuentas.";
           return;
         }
-        statusEl.textContent = `Importación completada. Cuentas procesadas: ${body.cuentas}, nuevas: ${body.nuevas}, actualizadas: ${body.actualizadas}.`;
+        statusEl.textContent =
+          `Importación completada. Cuentas procesadas: ${body.cuentas}, nuevas: ${body.nuevas}, ` +
+          `actualizadas: ${body.actualizadas}, ventas reportadas revisadas: ` +
+          `${body.ventas_reportadas_revisadas || 0}, autoasignadas: ` +
+          `${body.ventas_reportadas_asignadas || 0}.`;
       }
 
       btnImportar?.addEventListener("click", importar);

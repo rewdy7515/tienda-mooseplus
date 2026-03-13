@@ -1860,6 +1860,339 @@ const orderSpotifyProfilesByPriority = (profiles = [], preferredMotherId = null)
   return ordered;
 };
 
+const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
+  const summary = { scanned: 0, resolved: 0, skipped: 0, errors: 0 };
+  const platformFilter = uniqPositiveIds(plataformaIds);
+
+  const { data: reemplazosRows, error: reemplazosErr } = await supabaseAdmin
+    .from("reemplazos")
+    .select("id_cuenta, id_perfil");
+  if (reemplazosErr) throw reemplazosErr;
+  const reemplazosBloqueados = buildReemplazosBlocklist(reemplazosRows);
+
+  const { data: ventasRows, error: ventasErr } = await supabaseAdmin
+    .from("ventas")
+    .select(
+      `
+        id_venta,
+        id_usuario,
+        id_precio,
+        id_cuenta,
+        id_cuenta_miembro,
+        id_perfil,
+        pendiente,
+        reportado,
+        precios:precios(id_plataforma, completa, sub_cuenta),
+        cuenta_base:cuentas!ventas_id_cuenta_fkey(
+          id_cuenta,
+          id_plataforma,
+          inactiva,
+          venta_perfil,
+          venta_miembro,
+          cuenta_madre
+        ),
+        cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(
+          id_cuenta,
+          id_plataforma,
+          inactiva,
+          venta_perfil,
+          venta_miembro,
+          cuenta_madre,
+          id_cuenta_madre
+        ),
+        perfiles:perfiles(id_perfil, n_perfil, perfil_hogar)
+      `
+    )
+    .eq("pendiente", true)
+    .eq("reportado", true)
+    .order("id_venta", { ascending: true })
+    .limit(250);
+  if (ventasErr) throw ventasErr;
+
+  const ventas = (ventasRows || []).filter((venta) => {
+    const platId = toPositiveInt(
+      venta?.precios?.id_plataforma ||
+      venta?.cuenta_base?.id_plataforma ||
+      venta?.cuenta_miembro?.id_plataforma
+    );
+    if (!platId) return false;
+    if (platformFilter.length && !platformFilter.includes(platId)) return false;
+    return true;
+  });
+
+  const findCuentaCompletaLibre = async (plataformaId, excludeCuentaIds = []) => {
+    const excludeIds = new Set(uniqPositiveIds(excludeCuentaIds));
+    const { data, error } = await supabaseAdmin
+      .from("cuentas")
+      .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
+      .eq("id_plataforma", plataformaId)
+      .eq("venta_perfil", false)
+      .eq("venta_miembro", false)
+      .or("ocupado.is.null,ocupado.eq.false")
+      .or("inactiva.is.null,inactiva.eq.false")
+      .order("id_cuenta", { ascending: true })
+      .limit(120);
+    if (error) return { error };
+    const libre = (data || []).find((cuenta) => {
+      const cuentaId = toPositiveInt(cuenta?.id_cuenta);
+      return (
+        !!cuentaId &&
+        !excludeIds.has(cuentaId) &&
+        !isInactive(cuenta?.inactiva) &&
+        !isTrue(cuenta?.ocupado) &&
+        !reemplazosBloqueados.cuentas.has(cuentaId)
+      );
+    });
+    return { data: libre || null };
+  };
+
+  const findCuentaMiembroLibre = async (plataformaId, excludeCuentaIds = []) => {
+    const excludeIds = new Set(uniqPositiveIds(excludeCuentaIds));
+    const { data, error } = await supabaseAdmin
+      .from("cuentas")
+      .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
+      .eq("id_plataforma", plataformaId)
+      .eq("venta_perfil", false)
+      .eq("venta_miembro", true)
+      .eq("ocupado", false)
+      .or("inactiva.is.null,inactiva.eq.false")
+      .order("id_cuenta", { ascending: true })
+      .limit(120);
+    if (error) return { error };
+    const libre = (data || []).find((cuenta) => {
+      const cuentaId = toPositiveInt(cuenta?.id_cuenta);
+      return (
+        !!cuentaId &&
+        !excludeIds.has(cuentaId) &&
+        !isInactive(cuenta?.inactiva) &&
+        !reemplazosBloqueados.cuentas.has(cuentaId)
+      );
+    });
+    return { data: libre || null };
+  };
+
+  const findPerfilLibre = async ({
+    plataformaId,
+    perfilHogar = false,
+    onlyCuentaMadre = false,
+    excludeCuentaIds = [],
+  }) => {
+    const excludeIds = new Set(uniqPositiveIds(excludeCuentaIds));
+    let query = supabaseAdmin
+      .from("perfiles")
+      .select(
+        `
+          id_perfil,
+          id_cuenta,
+          n_perfil,
+          perfil_hogar,
+          ocupado,
+          cuentas:cuentas!perfiles_id_cuenta_fkey!inner(
+            id_cuenta,
+            id_plataforma,
+            inactiva,
+            venta_perfil,
+            cuenta_madre
+          )
+        `
+      )
+      .eq("cuentas.id_plataforma", plataformaId)
+      .eq("ocupado", false)
+      .order("id_perfil", { ascending: true })
+      .limit(240);
+    if (perfilHogar === true) {
+      query = query.eq("perfil_hogar", true);
+    } else {
+      query = query.or("perfil_hogar.is.null,perfil_hogar.eq.false");
+    }
+    query = query.or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" });
+    query = onlyCuentaMadre
+      ? query.eq("cuentas.cuenta_madre", true).eq("cuentas.venta_perfil", false)
+      : query
+          .eq("cuentas.venta_perfil", true)
+          .or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" });
+    const { data, error } = await query;
+    if (error) return { error };
+    const disponibles = (data || []).filter((perfil) => {
+      const perfilId = toPositiveInt(perfil?.id_perfil);
+      const cuentaId = toPositiveInt(perfil?.id_cuenta);
+      return (
+        !!perfilId &&
+        !!cuentaId &&
+        !excludeIds.has(cuentaId) &&
+        !isInactive(perfil?.cuentas?.inactiva) &&
+        !reemplazosBloqueados.perfiles.has(perfilId) &&
+        !reemplazosBloqueados.cuentas.has(cuentaId)
+      );
+    });
+    const ordenados =
+      onlyCuentaMadre && Number(plataformaId) === 9
+        ? orderSpotifyProfilesByPriority(disponibles)
+        : disponibles;
+    return { data: ordenados[0] || null };
+  };
+
+  const findOpenReporte = async (venta) => {
+    const userId = toPositiveInt(venta?.id_usuario);
+    const cuentaId = toPositiveInt(venta?.id_cuenta);
+    const perfilId = toPositiveInt(venta?.id_perfil);
+    if (!userId || !cuentaId) return null;
+
+    let query = supabaseAdmin
+      .from("reportes")
+      .select("id_reporte")
+      .eq("id_usuario", userId)
+      .eq("id_cuenta", cuentaId)
+      .eq("solucionado", false)
+      .order("id_reporte", { ascending: true })
+      .limit(1);
+    query = perfilId ? query.eq("id_perfil", perfilId) : query.is("id_perfil", null);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data?.[0] || null;
+  };
+
+  for (const venta of ventas) {
+    summary.scanned += 1;
+    try {
+      const ventaId = toPositiveInt(venta?.id_venta);
+      const plataformaId = toPositiveInt(
+        venta?.precios?.id_plataforma ||
+        venta?.cuenta_base?.id_plataforma ||
+        venta?.cuenta_miembro?.id_plataforma
+      );
+      if (!ventaId || !plataformaId) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      const oldCuentaId = toPositiveInt(venta?.id_cuenta);
+      const oldPerfilId = toPositiveInt(venta?.id_perfil);
+      const oldCuentaMiembroId = toPositiveInt(venta?.id_cuenta_miembro);
+      const currentCuenta = venta?.cuenta_base || venta?.cuenta_miembro || null;
+      const perfilHogar = venta?.perfiles?.perfil_hogar === true;
+      const onlyCuentaMadre =
+        Number(plataformaId) === 9 &&
+        (isTrue(currentCuenta?.cuenta_madre) || !!oldPerfilId);
+      const ventaMiembro =
+        isTrue(currentCuenta?.venta_miembro) || (!!oldCuentaMiembroId && !oldPerfilId);
+      const ventaPerfil =
+        !!oldPerfilId || isTrue(currentCuenta?.venta_perfil) || onlyCuentaMadre;
+      const ventaCompleta =
+        !ventaPerfil &&
+        !ventaMiembro &&
+        (isTrue(venta?.precios?.completa) ||
+          (!isTrue(currentCuenta?.venta_perfil) && !isTrue(currentCuenta?.venta_miembro)));
+
+      let nuevoCuentaId = null;
+      let nuevoPerfilId = null;
+      if (ventaPerfil) {
+        const { data: perfilLibre, error: perfilErr } = await findPerfilLibre({
+          plataformaId,
+          perfilHogar,
+          onlyCuentaMadre,
+          excludeCuentaIds: [oldCuentaId, oldCuentaMiembroId],
+        });
+        if (perfilErr) throw perfilErr;
+        nuevoCuentaId = toPositiveInt(perfilLibre?.id_cuenta);
+        nuevoPerfilId = toPositiveInt(perfilLibre?.id_perfil);
+      } else if (ventaMiembro) {
+        const { data: cuentaLibre, error: cuentaErr } = await findCuentaMiembroLibre(
+          plataformaId,
+          [oldCuentaId, oldCuentaMiembroId]
+        );
+        if (cuentaErr) throw cuentaErr;
+        nuevoCuentaId = toPositiveInt(cuentaLibre?.id_cuenta);
+      } else if (ventaCompleta) {
+        const { data: cuentaLibre, error: cuentaErr } = await findCuentaCompletaLibre(
+          plataformaId,
+          [oldCuentaId, oldCuentaMiembroId]
+        );
+        if (cuentaErr) throw cuentaErr;
+        nuevoCuentaId = toPositiveInt(cuentaLibre?.id_cuenta);
+      }
+
+      if (!nuevoCuentaId) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      const updateVenta = {
+        id_cuenta: nuevoCuentaId,
+        id_perfil: nuevoPerfilId || null,
+        pendiente: false,
+        reportado: false,
+      };
+      if (oldCuentaMiembroId) {
+        updateVenta.id_cuenta_miembro = null;
+      }
+      const { error: updVentaErr } = await supabaseAdmin
+        .from("ventas")
+        .update(updateVenta)
+        .eq("id_venta", ventaId);
+      if (updVentaErr) throw updVentaErr;
+
+      if (nuevoPerfilId) {
+        const { error: occPerfilErr } = await supabaseAdmin
+          .from("perfiles")
+          .update({ ocupado: true })
+          .eq("id_perfil", nuevoPerfilId);
+        if (occPerfilErr) throw occPerfilErr;
+      }
+      const { error: occCuentaErr } = await supabaseAdmin
+        .from("cuentas")
+        .update({ ocupado: true })
+        .eq("id_cuenta", nuevoCuentaId);
+      if (occCuentaErr) throw occCuentaErr;
+
+      if (oldPerfilId && oldPerfilId !== nuevoPerfilId) {
+        const { data: otherVentas, error: otherVentasErr } = await supabaseAdmin
+          .from("ventas")
+          .select("id_venta")
+          .eq("id_perfil", oldPerfilId)
+          .neq("id_venta", ventaId)
+          .limit(1);
+        if (otherVentasErr) throw otherVentasErr;
+        if (!(otherVentas || []).length) {
+          await supabaseAdmin.from("perfiles").update({ ocupado: false }).eq("id_perfil", oldPerfilId);
+        }
+      }
+
+      if (oldCuentaId || oldPerfilId) {
+        const { error: replErr } = await supabaseAdmin
+          .from("reemplazos")
+          .insert({
+            id_cuenta: oldCuentaId || null,
+            id_perfil: oldPerfilId || null,
+            id_sub_cuenta: null,
+            id_venta: ventaId,
+          });
+        if (replErr) throw replErr;
+      }
+
+      const reporteAbierto = await findOpenReporte(venta);
+      if (reporteAbierto?.id_reporte) {
+        const { error: repErr } = await supabaseAdmin
+          .from("reportes")
+          .update({
+            en_revision: false,
+            solucionado: true,
+            descripcion_solucion: "Reemplazo automatico por stock disponible",
+          })
+          .eq("id_reporte", reporteAbierto.id_reporte);
+        if (repErr) throw repErr;
+      }
+
+      summary.resolved += 1;
+    } catch (err) {
+      summary.errors += 1;
+      console.error("[autoAssignReportedPendingVentas] item error", err);
+    }
+  }
+
+  return summary;
+};
+
 const normalizeFilesArray = (value) => {
   if (Array.isArray(value)) return value;
   if (value == null) return [];
@@ -5083,12 +5416,30 @@ app.post("/api/admin/import-cuentas", async (req, res) => {
 
     const nuevas = upsertRows.filter((r) => !r.id_cuenta).length;
     const actualizadas = upsertRows.length - nuevas;
+    const plataformasProcesadas = uniqPositiveIds(upsertRows.map((r) => r.id_plataforma));
+    let autoAsignadasReportadas = {
+      scanned: 0,
+      resolved: 0,
+      skipped: 0,
+      errors: 0,
+    };
+    try {
+      autoAsignadasReportadas = await autoAssignReportedPendingVentas({
+        plataformaIds: plataformasProcesadas,
+      });
+    } catch (autoAssignErr) {
+      console.error("[admin:import-cuentas] auto assign reportadas error", autoAssignErr);
+    }
 
     res.json({
       ok: true,
       cuentas: upsertRows.length,
       nuevas,
       actualizadas,
+      ventas_reportadas_revisadas: autoAsignadasReportadas.scanned,
+      ventas_reportadas_asignadas: autoAsignadasReportadas.resolved,
+      ventas_reportadas_omitidas: autoAsignadasReportadas.skipped,
+      ventas_reportadas_errores: autoAsignadasReportadas.errors,
     });
   } catch (err) {
     console.error("[admin:import-cuentas] error", err);

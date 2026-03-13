@@ -408,6 +408,24 @@
         return num.toFixed(2);
       };
 
+      const formatOrdenMonto = (orden) => {
+        const metodoInfo = metodoMap[orden?.id_metodo_de_pago] || null;
+        const pagoEnBolivares = isTrue(metodoInfo?.bolivares);
+        if (pagoEnBolivares) {
+          const montoBsDirecto = Number(orden?.monto_bs);
+          const montoBsFallback =
+            Number.isFinite(Number(orden?.total)) && Number.isFinite(Number(orden?.tasa_bs))
+              ? round2(Number(orden.total) * Number(orden.tasa_bs))
+              : null;
+          const montoBs = Number.isFinite(montoBsDirecto) ? montoBsDirecto : montoBsFallback;
+          const montoBsTxt = formatMonto(montoBs);
+          return montoBsTxt !== "-" ? `Bs. ${montoBsTxt}` : "-";
+        }
+
+        const totalUsdTxt = formatMonto(orden?.total);
+        return totalUsdTxt !== "-" ? `$${totalUsdTxt}` : "-";
+      };
+
       const buildMap = (rows, idKey, nameBuilder) => {
         return (rows || []).reduce((acc, row) => {
           const id = row?.[idKey];
@@ -552,16 +570,7 @@
             verificacion_automatica: true,
           };
           const metodo = metodoInfo.nombre || "-";
-          const totalUsdTxt = formatMonto(orden.total);
-          const montoBsTxt = formatMonto(orden.monto_bs);
-          const montoVal =
-            isTrue(metodoInfo.bolivares)
-              ? montoBsTxt !== "-"
-                ? `Bs. ${montoBsTxt}`
-                : "-"
-              : totalUsdTxt !== "-"
-                ? `$${totalUsdTxt}`
-                : "-";
+          const montoVal = formatOrdenMonto(orden);
           const referencia = orden.referencia || "-";
           const comprobanteUrl = extractComprobanteUrl(orden.comprobante);
           const referenciaHtml = comprobanteUrl
