@@ -88,7 +88,7 @@
       <div class="modal-backdrop"></div>
       <div class="modal-card rp-modal-card">
         <button type="button" class="modal-close" id="btn-rp-modal-close" aria-label="Cerrar">×</button>
-        <h3 style="margin: 0;">Costo individual de renovacion</h3>
+        <h3 style="margin: 0;">Costo y proveedor de renovacion</h3>
         <p class="status" id="rp-modal-status"></p>
         <div id="rp-modal-groups" class="rp-modal-groups"></div>
         <div class="rp-modal-actions">
@@ -259,10 +259,6 @@
                 return `
                   <tr>
                     <td>#${String(row.id_venta).padStart(4, "0")}</td>
-                    <td>${escapeHtml(row.cliente || "-")}</td>
-                    <td>${escapeHtml(row.correo || "-")}</td>
-                    <td>${escapeHtml(row.clave || "-")}</td>
-                    <td>${formatDDMMYYYY(row.fecha_corte) || "-"}</td>
                     <td>
                       <input
                         type="number"
@@ -295,10 +291,6 @@
                     <thead>
                       <tr>
                         <th>ID Venta</th>
-                        <th>Cliente</th>
-                        <th>Correo</th>
-                        <th>Clave</th>
-                        <th>Fecha Corte</th>
                         <th>Costo individual de renovacion</th>
                         <th>Proveedor</th>
                       </tr>

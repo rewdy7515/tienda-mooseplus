@@ -6970,6 +6970,10 @@
             ? `M${dataDestino.n_perfil}`
             : "-";
           const idVentaFmt = `#${String(ventaId).padStart(4, "0")}`;
+          const fechaCorteVentaRelacionada =
+            String(ventaInfo?.fecha_corte || "").trim() ||
+            String(rowPerfil?.fecha_corte || "").trim() ||
+            String(currentCuentaDetalle?.fecha_corte || "").trim();
           const nuevoCopy = buildServiceCopyText({
             plataforma: currentCuentaDetalle.plataformaNombre,
             idVenta: idVentaFmt?.replace("#", "") || ventaId,
@@ -6977,8 +6981,7 @@
             clave: dataDestino.clave,
             nPerfil: dataDestino.n_perfil,
             pin: dataDestino.pin,
-            fechaCorte:
-              rowPerfil?.fecha_corte || currentCuentaDetalle.fecha_corte,
+            fechaCorte: fechaCorteVentaRelacionada,
             porAcceso: currentCuentaDetalle.por_acceso,
             usaPines: currentCuentaDetalle.usa_pines,
             ventaPerfil: currentCuentaDetalle.venta_perfil,

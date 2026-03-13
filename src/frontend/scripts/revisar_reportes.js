@@ -944,7 +944,7 @@ async function init() {
   modalPlatTitle?.addEventListener("click", () => {
     const href = String(modalPlatTitle?.dataset?.href || "").trim();
     if (!href) return;
-    window.location.href = href;
+    window.open(href, "_blank", "noopener,noreferrer");
   });
 
   modalPlatTitle?.addEventListener("keydown", (e) => {
@@ -952,7 +952,7 @@ async function init() {
     const href = String(modalPlatTitle?.dataset?.href || "").trim();
     if (!href) return;
     e.preventDefault();
-    window.location.href = href;
+    window.open(href, "_blank", "noopener,noreferrer");
   });
 
   btnOpenAdminCuenta?.addEventListener("click", () => {

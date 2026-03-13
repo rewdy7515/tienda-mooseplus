@@ -2970,6 +2970,10 @@ input[type="number"].input-inline {
   font-size: 17px;
   font-weight: 800;
 }
+.table-base thead th,
+.table-base thead th * {
+  color: #fff !important;
+}
 .table-base tbody tr:nth-child(odd) {
   background: #eef1f5;
 }

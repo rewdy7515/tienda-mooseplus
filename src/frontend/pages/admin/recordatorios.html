@@ -288,17 +288,30 @@
         const { data: ventas, error: ventErr } = await supabase
           .from("ventas")
           .select(
-            "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado",
+            "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado, reportado",
           )
           .lte("fecha_corte", fechaManana)
-          .or("recordatorio_enviado.eq.false,recordatorio_enviado.is.null")
           .or("reportado.eq.false,reportado.is.null");
         if (ventErr) throw ventErr;
 
-          const cuentasIds = Array.from(new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)));
-          const precioIds = Array.from(new Set((ventas || []).map((v) => v.id_precio).filter(Boolean)));
-          const userIds = Array.from(new Set((ventas || []).map((v) => v.id_usuario).filter(Boolean)));
-          const perfilIds = Array.from(new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean)));
+          const isUnsentReminder = (value) =>
+            value === false || value === null || value === undefined;
+          const isOneDayBeforeCorte = (fechaCorte) =>
+            String(fechaCorte || "").slice(0, 10) === fechaManana;
+
+          const ventasFiltradas = (ventas || []).filter((v) => {
+            const fechaCorte = String(v?.fecha_corte || "").trim();
+            if (!fechaCorte) return false;
+            const pendiente = isUnsentReminder(v?.recordatorio_enviado);
+            const unDiaAntes = isOneDayBeforeCorte(fechaCorte);
+            // Regla: incluir pendientes y, además, siempre incluir las de mañana.
+            return pendiente || unDiaAntes;
+          });
+
+          const cuentasIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_cuenta).filter(Boolean)));
+          const precioIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_precio).filter(Boolean)));
+          const userIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_usuario).filter(Boolean)));
+          const perfilIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_perfil).filter(Boolean)));
 
           const [
             { data: cuentas, error: cErr },
@@ -385,7 +398,7 @@
           }, {});
 
           // Construir mensajes agrupados por usuario y por plataforma
-          const grouped = (ventas || []).reduce((acc, v) => {
+          const grouped = (ventasFiltradas || []).reduce((acc, v) => {
             const cuenta = mapCuenta[v.id_cuenta] || {};
             const precio = mapPrecio[v.id_precio] || {};
             const platId = cuenta.id_plataforma || precio.id_plataforma || null;

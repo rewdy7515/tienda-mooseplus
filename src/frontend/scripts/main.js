@@ -1793,10 +1793,43 @@ const loadPendingReminderNoPhoneClients = async ({ isSuperadmin = false } = {}) 
 async function init() {
   setEstado("Cargando categorias y plataformas...");
   initModal(modalEls);
-  await loadPageLoaderLogo();
-  await applyLoaderAvatar(null, requireSession());
+  const revealAppShell = () => {
+    const loader = document.getElementById("page-loader");
+    const shell = document.getElementById("app-shell");
+    if (shell) shell.classList.remove("hidden");
+    if (loader) loader.classList.add("hidden");
+    window.dispatchEvent(new CustomEvent("moose:page-loader-hidden"));
+  };
+  const withTimeout = async (promise, ms = 7000) => {
+    let timeoutId = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error("Tiempo de espera excedido"));
+      }, ms);
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    }
+  };
+  const loaderSafetyTimer = window.setTimeout(() => {
+    console.warn("[loader] timeout de seguridad: mostrando app-shell");
+    revealAppShell();
+  }, 15000);
 
   try {
+    try {
+      await withTimeout(loadPageLoaderLogo(), 5000);
+    } catch (err) {
+      console.warn("loadPageLoaderLogo timeout/error", err);
+    }
+    try {
+      await withTimeout(applyLoaderAvatar(null, requireSession()), 5000);
+    } catch (err) {
+      console.warn("applyLoaderAvatar inicial timeout/error", err);
+    }
+
     try {
       const { data, error } = await supabase.auth.getSession();
       if (error) {
@@ -1991,11 +2024,8 @@ async function init() {
   } catch (err) {
     setEstado(`Error: ${err.message}`);
   } finally {
-    const loader = document.getElementById("page-loader");
-    const shell = document.getElementById("app-shell");
-    if (shell) shell.classList.remove("hidden");
-    if (loader) loader.classList.add("hidden");
-    window.dispatchEvent(new CustomEvent("moose:page-loader-hidden"));
+    window.clearTimeout(loaderSafetyTimer);
+    revealAppShell();
   }
 }
 
