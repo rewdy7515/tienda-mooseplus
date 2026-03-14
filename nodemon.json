@@ -1,0 +1,15 @@
+{
+  "watch": [
+    "src",
+    "config"
+  ],
+  "ext": "js,json,html,css",
+  "ignore": [
+    ".git",
+    "node_modules",
+    ".wwebjs_auth/**",
+    ".wwebjs_cache/**",
+    "tienda-mooseplus-main/.wwebjs_auth/**",
+    "tienda-mooseplus-main/.wwebjs_cache/**"
+  ]
+}
