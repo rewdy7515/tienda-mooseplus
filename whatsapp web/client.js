@@ -3,6 +3,7 @@ const qrcode = require("qrcode-terminal");
 
 let clientInstance = null;
 let hasInitialized = false;
+let initializePromise = null;
 const readyListeners = new Set();
 const disconnectedListeners = new Set();
 
@@ -70,16 +71,40 @@ const getWhatsappClient = () => {
 };
 
 const startWhatsappClient = async () => {
+  if (initializePromise) return initializePromise;
+
   const client = getWhatsappClient();
   if (hasInitialized) return client;
 
   hasInitialized = true;
-  await client.initialize();
-  return client;
+  initializePromise = client
+    .initialize()
+    .then(() => client)
+    .catch((err) => {
+      hasInitialized = false;
+      throw err;
+    })
+    .finally(() => {
+      initializePromise = null;
+    });
+  return initializePromise;
 };
 
 const isWhatsappReady = () => {
   return Boolean(clientInstance?.info?.wid?._serialized);
+};
+
+const stopWhatsappClient = async () => {
+  const client = clientInstance;
+  hasInitialized = false;
+  initializePromise = null;
+  clientInstance = null;
+  if (!client) return;
+  try {
+    await client.destroy();
+  } catch (err) {
+    console.error("[WhatsApp] destroy error:", err);
+  }
 };
 
 const onWhatsappReady = (listener) => {
@@ -97,6 +122,7 @@ const onWhatsappDisconnected = (listener) => {
 module.exports = {
   getWhatsappClient,
   startWhatsappClient,
+  stopWhatsappClient,
   isWhatsappReady,
   onWhatsappReady,
   onWhatsappDisconnected,

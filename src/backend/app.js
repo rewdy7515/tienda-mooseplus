@@ -7,6 +7,7 @@ const { supabaseAdmin } = require("../database/db");
 const { port } = require("../../config/config");
 const {
   startWhatsappClient,
+  stopWhatsappClient,
   getWhatsappClient,
   isWhatsappReady,
   onWhatsappReady,
@@ -98,12 +99,6 @@ const jsonParser = express.json({ limit: "25mb" });
 const shouldStartWhatsapp =
   process.env.ENABLE_WHATSAPP === "true" && process.env.VERCEL !== "1";
 
-if (shouldStartWhatsapp) {
-  startWhatsappClient().catch((err) => {
-    console.error("[WhatsApp] init error:", err);
-  });
-}
-
 const clearCorsHeaders = (res) => {
   res.removeHeader("Access-Control-Allow-Origin");
   res.removeHeader("Access-Control-Allow-Credentials");
@@ -117,6 +112,10 @@ const WHATSAPP_AUTO_RECORDATORIOS_WEEKDAY_HOUR = 10;
 const WHATSAPP_AUTO_RECORDATORIOS_WEEKEND_HOUR = 11;
 const WHATSAPP_SEND_DELAY_MIN_MS = 8000;
 const WHATSAPP_SEND_DELAY_MAX_MS = 15000;
+const WHATSAPP_SEND_TIMEOUT_MS = Math.max(
+  15000,
+  Number(process.env.WHATSAPP_SEND_TIMEOUT_MS) || 45000,
+);
 const WHATSAPP_RESET_HOUR = 0;
 let lastAutoRecordatoriosRunDate = null;
 let autoRecordatoriosRetryPending = false;
@@ -126,6 +125,7 @@ let recordatoriosEnviados = false;
 let recordatoriosEnviadosDate = null;
 let autoRecordatoriosSchedulerStarted = false;
 let autoRecordatoriosIntervalId = null;
+let whatsappBootInProgress = false;
 let lastAutoRecordatoriosState = {
   date: null,
   status: "idle",
@@ -237,6 +237,24 @@ const normalizeWhatsappPhone = (rawPhone) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const withTimeout = (promise, timeoutMs, message = "Operacion expirada") =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const timeoutErr = new Error(message);
+      timeoutErr.code = "TIMEOUT";
+      reject(timeoutErr);
+    }, timeoutMs);
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+
 const randomWhatsappDelayMs = () => {
   return (
     WHATSAPP_SEND_DELAY_MIN_MS +
@@ -244,6 +262,36 @@ const randomWhatsappDelayMs = () => {
       Math.random() * (WHATSAPP_SEND_DELAY_MAX_MS - WHATSAPP_SEND_DELAY_MIN_MS + 1),
     )
   );
+};
+
+const ensureWhatsappClientStarted = async ({ reason = "unspecified" } = {}) => {
+  if (!shouldStartWhatsapp) {
+    const err = new Error("WhatsApp deshabilitado");
+    err.code = "WHATSAPP_DISABLED";
+    throw err;
+  }
+  if (isWhatsappReady()) return true;
+  if (whatsappBootInProgress) return false;
+
+  whatsappBootInProgress = true;
+  try {
+    console.log(`[WhatsApp] Iniciando cliente (${reason}).`);
+    await startWhatsappClient();
+    return isWhatsappReady();
+  } catch (err) {
+    console.error(`[WhatsApp] init error (${reason}):`, err);
+    throw err;
+  } finally {
+    whatsappBootInProgress = false;
+  }
+};
+
+const shutdownWhatsappClient = async ({ reason = "unspecified" } = {}) => {
+  if (!shouldStartWhatsapp) return;
+  if (recordatoriosSendInProgress || autoRecordatoriosRunInProgress) return;
+  if (!isWhatsappReady() && !whatsappBootInProgress) return;
+  console.log(`[WhatsApp] Apagando cliente (${reason}).`);
+  await stopWhatsappClient();
 };
 
 const buildWhatsappErrorLog = (err) => {
@@ -562,15 +610,21 @@ const ensureDailyRecordatoriosState = (dateStr) => {
   );
 };
 
-const buildWhatsappRecordatorioItems = async () => {
+const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => {
+  const userIdsFilter = uniqPositiveIds(targetUserIds || []);
+  if (targetUserIds && !userIdsFilter.length) return [];
   const fechaManana = getCaracasDateStr(1);
-  const { data: ventas, error: ventErr } = await supabaseAdmin
+  let ventasQuery = supabaseAdmin
     .from("ventas")
     .select(
       "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado",
     )
     .lte("fecha_corte", fechaManana)
     .or("recordatorio_enviado.eq.false,recordatorio_enviado.is.null");
+  if (userIdsFilter.length) {
+    ventasQuery = ventasQuery.in("id_usuario", userIdsFilter);
+  }
+  const { data: ventas, error: ventErr } = await ventasQuery;
   if (ventErr) throw ventErr;
 
   const ventasList = Array.isArray(ventas) ? ventas : [];
@@ -759,8 +813,8 @@ const buildWhatsappRecordatorioItems = async () => {
   });
 };
 
-const buildWhatsappPendingNoPhoneClients = async () => {
-  const items = await buildWhatsappRecordatorioItems();
+const buildWhatsappPendingNoPhoneClients = async ({ targetUserIds = null } = {}) => {
+  const items = await buildWhatsappRecordatorioItems({ targetUserIds });
   const grouped = {};
 
   (Array.isArray(items) ? items : []).forEach((item) => {
@@ -831,11 +885,14 @@ const attemptWhatsappRecordatoriosForUserOnPhoneUpdate = async (
   if (hour < targetHour) {
     return { ok: false, skipped: true, reason: "before_schedule", targetHour, weekday };
   }
+  if (!isWhatsappReady()) {
+    await ensureWhatsappClientStarted({ reason: source });
+    if (!isWhatsappReady()) {
+      return { ok: false, skipped: true, reason: "not_ready" };
+    }
+  }
 
-  const items = await buildWhatsappRecordatorioItems();
-  const userItems = (Array.isArray(items) ? items : []).filter(
-    (item) => Number(item?.idUsuario) === userId,
-  );
+  const userItems = await buildWhatsappRecordatorioItems({ targetUserIds: [userId] });
   if (!userItems.length) {
     return { ok: false, skipped: true, reason: "no_pending_for_user" };
   }
@@ -843,21 +900,82 @@ const attemptWhatsappRecordatoriosForUserOnPhoneUpdate = async (
     return { ok: false, skipped: true, reason: "no_sendable_pending_for_user" };
   }
 
-  const result = await sendWhatsappRecordatorios({
-    source,
-    itemsOverride: userItems,
-  });
+  try {
+    const result = await sendWhatsappRecordatorios({
+      source,
+      itemsOverride: userItems,
+    });
 
-  console.log(
-    `[WhatsApp] Recordatorios ${source}: usuario=${userId} total=${result.total} sent=${result.sent} failed=${result.failed}`,
-  );
+    console.log(
+      `[WhatsApp] Recordatorios ${source}: usuario=${userId} total=${result.total} sent=${result.sent} failed=${result.failed}`,
+    );
 
-  return {
-    ok: true,
-    skipped: false,
-    userId,
-    ...result,
-  };
+    return {
+      ok: true,
+      skipped: false,
+      userId,
+      ...result,
+    };
+  } finally {
+    await shutdownWhatsappClient({ reason: source });
+  }
+};
+
+const attemptWhatsappRecordatoriosForUsersOnPhoneUpdate = async (
+  userIds,
+  { source = "phone_update_batch" } = {},
+) => {
+  const targetUserIds = uniqPositiveIds(userIds || []);
+  if (!targetUserIds.length) {
+    return { ok: false, skipped: true, reason: "invalid_users" };
+  }
+  if (!shouldStartWhatsapp || !WHATSAPP_AUTO_RECORDATORIOS_ENABLED) {
+    return { ok: false, skipped: true, reason: "disabled" };
+  }
+  if (!isWhatsappReady()) {
+    return { ok: false, skipped: true, reason: "not_ready" };
+  }
+
+  const { dateStr, hour, weekday } = getCaracasClock();
+  const targetHour = getWhatsappAutoRecordatoriosHour({ weekday });
+  ensureDailyRecordatoriosState(dateStr);
+  if (hour < targetHour) {
+    return { ok: false, skipped: true, reason: "before_schedule", targetHour, weekday };
+  }
+  if (!isWhatsappReady()) {
+    await ensureWhatsappClientStarted({ reason: source });
+    if (!isWhatsappReady()) {
+      return { ok: false, skipped: true, reason: "not_ready" };
+    }
+  }
+
+  const items = await buildWhatsappRecordatorioItems({ targetUserIds });
+  if (!items.length) {
+    return { ok: false, skipped: true, reason: "no_pending_for_users" };
+  }
+  if (countWhatsappSendableRecordatorios(items) === 0) {
+    return { ok: false, skipped: true, reason: "no_sendable_pending_for_users" };
+  }
+
+  try {
+    const result = await sendWhatsappRecordatorios({
+      source,
+      itemsOverride: items,
+    });
+
+    console.log(
+      `[WhatsApp] Recordatorios ${source}: usuarios=${targetUserIds.length} total=${result.total} sent=${result.sent} failed=${result.failed}`,
+    );
+
+    return {
+      ok: true,
+      skipped: false,
+      users: targetUserIds,
+      ...result,
+    };
+  } finally {
+    await shutdownWhatsappClient({ reason: source });
+  }
 };
 
 const sendWhatsappRecordatorios = async ({ source = "manual", itemsOverride = null } = {}) => {
@@ -925,7 +1043,14 @@ const sendWhatsappRecordatorios = async ({ source = "manual", itemsOverride = nu
       const progressTag = `${progressIndex}/${sendableItemsCount}`;
       const chatId = `${item.phone}@c.us`;
       try {
-        await client.sendMessage(chatId, item.plain, { linkPreview: false });
+        console.log(
+          `[WhatsApp] Recordatorios ${source}: ${progressTag} enviando cliente="${item.cliente || "Cliente"}" phone="${item.phone}"`,
+        );
+        await withTimeout(
+          client.sendMessage(chatId, item.plain, { linkPreview: false }),
+          WHATSAPP_SEND_TIMEOUT_MS,
+          `Timeout enviando WhatsApp a ${item.phone}`,
+        );
         const ventaIdsItem = uniqPositiveIds(item.ventaIds || []);
         if (ventaIdsItem.length) {
           const { error: updateErr } = await supabaseAdmin
@@ -987,6 +1112,10 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
   ensureDailyRecordatoriosState(dateStr);
   if (hour < targetHour) return;
   if (lastAutoRecordatoriosRunDate === dateStr) return;
+  if (!isWhatsappReady()) {
+    await ensureWhatsappClientStarted({ reason: "auto_schedule" });
+    if (!isWhatsappReady()) return;
+  }
   const pendingItems = await buildWhatsappRecordatorioItems();
   autoRecordatoriosRunInProgress = true;
 
@@ -1076,6 +1205,7 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
     console.error("[WhatsApp] Recordatorios auto error", err);
   } finally {
     autoRecordatoriosRunInProgress = false;
+    await shutdownWhatsappClient({ reason: "auto_run_completed" });
   }
 };
 
@@ -1090,18 +1220,19 @@ const startAutoWhatsappRecordatoriosScheduler = () => {
   if (!autoRecordatoriosSchedulerStarted) {
     autoRecordatoriosSchedulerStarted = true;
     console.log(
-      "[WhatsApp] Recordatorios automáticos activos; lunes a viernes 10:00 y sábado/domingo 11:00 America/Caracas, después de que la sesión quede lista.",
+      "[WhatsApp] Recordatorios automáticos activos; el cliente iniciará a demanda lunes a viernes 10:00 y sábado/domingo 11:00 America/Caracas.",
     );
     autoRecordatoriosIntervalId = setInterval(() => {
       triggerAutoWhatsappRecordatoriosCheck("tick");
     }, 60 * 1000);
   }
-  triggerAutoWhatsappRecordatoriosCheck("ready");
+  triggerAutoWhatsappRecordatoriosCheck("init");
 };
 
 if (shouldStartWhatsapp && WHATSAPP_AUTO_RECORDATORIOS_ENABLED) {
+  startAutoWhatsappRecordatoriosScheduler();
   onWhatsappReady(() => {
-    startAutoWhatsappRecordatoriosScheduler();
+    triggerAutoWhatsappRecordatoriosCheck("ready");
   });
   onWhatsappDisconnected(() => {
     console.warn(
@@ -6345,26 +6476,25 @@ app.post("/api/admin/import-contactos", async (req, res) => {
         if (r.error) throw r.error;
         actualizados += (r.data || []).length;
       });
-
-      for (const { id_usuario } of batch) {
-        try {
-          await attemptWhatsappRecordatoriosForUserOnPhoneUpdate(id_usuario, {
-            source: "phone_update_import",
-          });
-        } catch (triggerErr) {
-          console.error("[admin:import-contactos] trigger recordatorio error", {
-            id_usuario,
-            err: triggerErr,
-          });
-        }
-      }
     }
 
+    const updatedUserIds = updates.map(({ id_usuario }) => id_usuario);
     res.json({
       ok: true,
       filas: rows.length,
       actualizados,
       faltantes,
+    });
+
+    setImmediate(() => {
+      attemptWhatsappRecordatoriosForUsersOnPhoneUpdate(updatedUserIds, {
+        source: "phone_update_import",
+      }).catch((triggerErr) => {
+        console.error("[admin:import-contactos] trigger recordatorio batch error", {
+          totalUsuarios: updatedUserIds.length,
+          err: triggerErr,
+        });
+      });
     });
   } catch (err) {
     console.error("[admin:import-contactos] error", err);
