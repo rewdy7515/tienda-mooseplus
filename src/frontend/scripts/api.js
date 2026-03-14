@@ -467,6 +467,31 @@ export async function createUsuarioSignupLink(idUsuarioTarget) {
   }
 }
 
+export async function triggerWhatsappReminderForUser(idUsuarioTarget) {
+  await ensureServerSession();
+  try {
+    const target = Number(idUsuarioTarget);
+    if (!Number.isFinite(target) || target <= 0) {
+      return { error: "id_usuario inválido" };
+    }
+
+    const res = await fetch(`${API_BASE}/api/whatsapp/recordatorios/trigger-user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id_usuario: target }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo disparar el recordatorio." };
+    }
+    return data;
+  } catch (err) {
+    console.error("triggerWhatsappReminderForUser error", err);
+    return { error: err.message };
+  }
+}
+
 export async function validateSignupRegistrationToken(token) {
   try {
     const value = String(token || "").trim();

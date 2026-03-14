@@ -4,6 +4,7 @@ import {
   ensureServerSession,
   loadCurrentUser,
   supabase,
+  triggerWhatsappReminderForUser,
 } from "./api.js";
 import { attachLogoHome, attachLogout, requireSession } from "./session.js";
 import { AVATAR_RANDOM_COLORS, applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
@@ -491,6 +492,9 @@ const saveTelefono = async () => {
 
     savedTelefonoDigits = digits;
     setTelefonoFromUser(digits);
+    if (digits) {
+      await triggerWhatsappReminderForUser(currentUserId);
+    }
   } catch (err) {
     console.error("save telefono error", err);
     alert("No se pudo guardar el numero de telefono.");

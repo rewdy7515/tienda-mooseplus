@@ -208,6 +208,7 @@
         ensureServerSession,
         loadCurrentUser,
         supabase,
+        triggerWhatsappReminderForUser,
       } from "../../scripts/api.js";
       import { buildNotificationPayload } from "../../scripts/notification-templates.js";
 
@@ -656,6 +657,9 @@
             usuariosFilteredRows = (usuariosFilteredRows || []).map((row) =>
               Number(row?.id_usuario) === uid ? { ...row, [field]: nextVal || null } : row,
             );
+            if (field === "telefono" && nextVal) {
+              await triggerWhatsappReminderForUser(uid);
+            }
           }
           finishEdit(wrap, nextVal);
         } catch (err) {
