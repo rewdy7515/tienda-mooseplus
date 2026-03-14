@@ -12,6 +12,12 @@ const getWhatsappClient = () => {
       clientId: "mooseplus-admin",
       dataPath: ".wwebjs_auth",
     }),
+    puppeteer: {
+      args:
+        process.platform === "linux" && typeof process.getuid === "function" && process.getuid() === 0
+          ? ["--no-sandbox", "--disable-setuid-sandbox"]
+          : [],
+    },
   });
 
   clientInstance.on("qr", (qr) => {

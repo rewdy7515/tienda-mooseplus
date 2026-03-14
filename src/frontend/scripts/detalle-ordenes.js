@@ -264,6 +264,70 @@ const renderItems = (items, catalog, useMayor) => {
   `;
 };
 
+const renderOrdenesItems = (items) => {
+  if (!itemsEl) return;
+  if (!Array.isArray(items) || !items.length) {
+    itemsEl.innerHTML = '<p class="cart-empty">Esta orden no tiene items asociados.</p>';
+    itemsTitleEl?.classList.add("hidden");
+    return;
+  }
+  itemsTitleEl?.classList.remove("hidden");
+
+  const rows = items
+    .map((item, idx) => {
+      const platformName = item?.plataformas?.nombre || `Plataforma ${item?.id_plataforma || "-"}`;
+      const image = String(item?.plataformas?.imagen || "").trim();
+      const tipo = isTrue(item?.renovacion) ? "Renovación" : "Nuevo";
+      const detalle = String(item?.detalle || "").trim() || "-";
+      return `
+        <tr data-index="${idx}">
+          <td>
+            <div class="cart-info tight">
+              <div class="cart-product">
+                <div class="cart-thumb-sm">
+                  ${
+                    image
+                      ? `<img src="${image}" alt="${platformName}" loading="lazy" decoding="async" />`
+                      : ""
+                  }
+                </div>
+                <div class="cart-product-text">
+                  <p class="cart-name">${platformName}</p>
+                  <p class="cart-detail">Tipo: ${tipo}</p>
+                  <p class="cart-detail">${detalle}</p>
+                </div>
+              </div>
+            </div>
+          </td>
+          <td class="cart-cell-center">${formatMoney(item?.monto_usd)}</td>
+          <td class="cart-cell-center">${formatBs(item?.monto_bs)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  itemsEl.innerHTML = `
+    <div class="cart-layout">
+      <div class="cart-left">
+        <div class="cart-table-scroll">
+          <table class="table-base cart-page-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Monto USD</th>
+                <th>Monto Bs</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
 const getIdOrden = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get("id_orden");
@@ -381,6 +445,14 @@ const init = async () => {
     renderInfo(orden, clienteNombre);
 
     setStatus("Cargando items...");
+    const snapshotItems = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
+    const itemsSource = String(detalleResp?.items_source || "").trim();
+    if (itemsSource === "ordenes_items" && snapshotItems.length) {
+      renderOrdenesItems(snapshotItems);
+      setStatus("");
+      return;
+    }
+
     let items = [];
     try {
       items = await fetchItemsByHistorialOrden(idOrden, userId);
@@ -395,7 +467,7 @@ const init = async () => {
       }
     }
     if (!items.length) {
-      items = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
+      items = snapshotItems;
     }
     if (!items.length) {
       setStatus("");

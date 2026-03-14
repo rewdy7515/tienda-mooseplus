@@ -2255,7 +2255,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const { pickPrecio } = await getPrecioPicker(idUsuarioVentas);
   const { data: items, error: itemErr } = await supabaseAdmin
     .from("carrito_items")
-    .select("id_precio, cantidad, meses, renovacion, id_venta")
+    .select("id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
     .eq("id_carrito", carritoId);
   if (itemErr) throw itemErr;
 
@@ -2281,7 +2281,9 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
   const { data: plataformas, error: platErr } = await supabaseAdmin
     .from("plataformas")
-    .select("id_plataforma, nombre, entrega_inmediata, cuenta_madre, correo_cliente, tarjeta_de_regalo")
+    .select(
+      "id_plataforma, nombre, entrega_inmediata, cuenta_madre, correo_cliente, tarjeta_de_regalo, por_pantalla, por_acceso",
+    )
     .in("id_plataforma", plataformaIds);
   if (platErr) throw platErr;
   const platInfoById = (plataformas || []).reduce((acc, p) => {
@@ -2302,6 +2304,206 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
 
   return { items: items || [], priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs };
+};
+
+const buildOrdenItemDetalle = ({
+  item,
+  priceInfo,
+  platformInfo,
+  platformName,
+  cuentaMap,
+  perfilMap,
+  ventaMap,
+}) => {
+  const qty = Math.max(1, Number(item?.cantidad) || 1);
+  const mesesVal = Math.max(1, Number(item?.meses) || 1);
+  const isGiftCard = isTrue(platformInfo?.tarjeta_de_regalo);
+  const unitBase = isGiftCard
+    ? "tarjeta"
+    : isTrue(platformInfo?.por_pantalla)
+      ? "pantalla"
+      : isTrue(platformInfo?.por_acceso)
+        ? "acceso"
+        : "item";
+  const unitLabel = qty === 1 ? unitBase : `${unitBase}s`;
+  const parts = [
+    platformName || "Plataforma",
+    item?.renovacion === true ? "Renovacion" : "Nuevo",
+    `${qty} ${unitLabel}`,
+  ];
+
+  if (!isGiftCard) {
+    parts.push(`${mesesVal} mes${mesesVal === 1 ? "" : "es"}`);
+  }
+
+  const ventaInfo = item?.id_venta ? ventaMap[item.id_venta] || null : null;
+  const cuentaDirecta = item?.id_cuenta ? cuentaMap[item.id_cuenta] || null : null;
+  const perfilDirecto = item?.id_perfil ? perfilMap[item.id_perfil] || null : null;
+  const correoRenovacion =
+    cuentaDirecta?.correo ||
+    ventaInfo?.correo_miembro ||
+    ventaInfo?.cuentas_miembro?.correo ||
+    ventaInfo?.cuentas?.correo ||
+    "";
+  const nPerfil = perfilDirecto?.n_perfil || ventaInfo?.perfiles?.n_perfil || null;
+
+  if (correoRenovacion) {
+    parts.push(`Correo: ${correoRenovacion}`);
+  }
+  if (nPerfil) {
+    parts.push(`Perfil: M${nPerfil}`);
+  }
+  if (item?.id_venta) {
+    parts.push(`Venta #${item.id_venta}`);
+  }
+  if (Number(priceInfo?.id_precio) > 0) {
+    parts.push(`Precio #${priceInfo.id_precio}`);
+  }
+
+  return parts.filter(Boolean).join(" | ");
+};
+
+const syncOrdenItemsSnapshot = async ({
+  ordenId,
+  items,
+  priceMap,
+  platInfoById,
+  platNameById,
+  pickPrecio,
+  totalUsd,
+  montoBsTotal,
+  tasaBs,
+}) => {
+  const orderIdNum = Number(ordenId);
+  if (!Number.isFinite(orderIdNum) || orderIdNum <= 0) return;
+
+  const itemsList = Array.isArray(items) ? items : [];
+  const ventaIds = uniqPositiveIds(itemsList.map((item) => item?.id_venta));
+  const cuentaIds = uniqPositiveIds(itemsList.map((item) => item?.id_cuenta));
+  const perfilIds = uniqPositiveIds(itemsList.map((item) => item?.id_perfil));
+
+  const [
+    { data: ventasData, error: ventasErr },
+    { data: cuentasData, error: cuentasErr },
+    { data: perfilesData, error: perfilesErr },
+  ] = await Promise.all([
+    ventaIds.length
+      ? supabaseAdmin
+          .from("ventas")
+          .select(
+            "id_venta, id_cuenta, id_cuenta_miembro, id_perfil, correo_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(correo), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo), perfiles:perfiles(n_perfil)",
+          )
+          .in("id_venta", ventaIds)
+      : Promise.resolve({ data: [], error: null }),
+    cuentaIds.length
+      ? supabaseAdmin
+          .from("cuentas")
+          .select("id_cuenta, correo")
+          .in("id_cuenta", cuentaIds)
+      : Promise.resolve({ data: [], error: null }),
+    perfilIds.length
+      ? supabaseAdmin
+          .from("perfiles")
+          .select("id_perfil, n_perfil")
+          .in("id_perfil", perfilIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (ventasErr) throw ventasErr;
+  if (cuentasErr) throw cuentasErr;
+  if (perfilesErr) throw perfilesErr;
+
+  const ventaMap = (ventasData || []).reduce((acc, venta) => {
+    acc[venta.id_venta] = venta;
+    return acc;
+  }, {});
+  const cuentaMap = (cuentasData || []).reduce((acc, cuenta) => {
+    acc[cuenta.id_cuenta] = cuenta;
+    return acc;
+  }, {});
+  const perfilMap = (perfilesData || []).reduce((acc, perfil) => {
+    acc[perfil.id_perfil] = perfil;
+    return acc;
+  }, {});
+
+  const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  const draftRows = itemsList.map((item) => {
+    const priceInfo = priceMap?.[item?.id_precio] || {};
+    const platId = Number(priceInfo?.id_plataforma) || null;
+    const platformInfo = platId ? platInfoById?.[platId] || {} : {};
+    const isGiftCard = isTrue(platformInfo?.tarjeta_de_regalo);
+    const qty = Math.max(1, Number(item?.cantidad) || 1);
+    const mesesVal = Math.max(1, Number(item?.meses) || 1);
+    const unitPrice = Number(pickPrecio?.(priceInfo)) || 0;
+    const multiplier = isGiftCard ? qty : qty * mesesVal;
+    const montoBaseUsd = round2(unitPrice * multiplier);
+    const platformName = platId ? platNameById?.[platId] || `Plataforma ${platId}` : "Plataforma";
+
+    return {
+      id_orden: orderIdNum,
+      id_plataforma: platId,
+      renovacion: item?.renovacion === true,
+      detalle: buildOrdenItemDetalle({
+        item,
+        priceInfo,
+        platformInfo,
+        platformName,
+        cuentaMap,
+        perfilMap,
+        ventaMap,
+      }),
+      monto_usd: 0,
+      monto_bs: 0,
+      _montoBaseUsd: montoBaseUsd,
+    };
+  });
+
+  const baseTotalUsd = round2(
+    draftRows.reduce((sum, row) => sum + (Number(row?._montoBaseUsd) || 0), 0),
+  );
+  const targetTotalUsd = Number.isFinite(Number(totalUsd)) ? round2(totalUsd) : baseTotalUsd;
+  const targetMontoBs = Number.isFinite(Number(montoBsTotal))
+    ? round2(montoBsTotal)
+    : Number.isFinite(Number(targetTotalUsd)) && Number.isFinite(Number(tasaBs))
+      ? round2(targetTotalUsd * Number(tasaBs))
+      : null;
+
+  let usdAssigned = 0;
+  let bsAssigned = 0;
+  const snapshotRows = draftRows.map((row, index) => {
+    const isLast = index === draftRows.length - 1;
+    const ratio =
+      baseTotalUsd > 0 ? (Number(row?._montoBaseUsd) || 0) / baseTotalUsd : draftRows.length ? 1 / draftRows.length : 0;
+    const montoUsd = isLast ? round2(targetTotalUsd - usdAssigned) : round2(targetTotalUsd * ratio);
+    usdAssigned = round2(usdAssigned + montoUsd);
+
+    let montoBs = null;
+    if (Number.isFinite(targetMontoBs)) {
+      montoBs = isLast ? round2(targetMontoBs - bsAssigned) : round2(targetMontoBs * ratio);
+      bsAssigned = round2(bsAssigned + montoBs);
+    }
+
+    return {
+      id_orden: row.id_orden,
+      id_plataforma: row.id_plataforma,
+      renovacion: row.renovacion,
+      detalle: row.detalle,
+      monto_usd: montoUsd,
+      monto_bs: montoBs,
+    };
+  });
+
+  const { error: delErr } = await supabaseAdmin
+    .from("ordenes_items")
+    .delete()
+    .eq("id_orden", orderIdNum);
+  if (delErr) throw delErr;
+
+  if (!snapshotRows.length) return;
+
+  const { error: insErr } = await supabaseAdmin
+    .from("ordenes_items")
+    .insert(snapshotRows);
+  if (insErr) throw insErr;
 };
 
 const resolveMontoBaseCarrito = async ({ carritoId, fallbackTotal }) => {
@@ -3961,12 +4163,13 @@ app.post("/api/checkout/draft", async (req, res) => {
       return res.status(400).json({ error: "No hay carrito activo" });
     }
 
-    const { data: items, error: itemsErr } = await supabaseAdmin
-      .from("carrito_items")
-      .select("id_item")
-      .eq("id_carrito", carritoId)
-      .limit(1);
-    if (itemsErr) throw itemsErr;
+    const context = await buildCheckoutContext({
+      idUsuarioVentas: idUsuario,
+      carritoId,
+      totalCliente: null,
+      tasa_bs: null,
+    });
+    const { items, priceMap, platInfoById, platNameById, pickPrecio } = context;
     if (!items?.length) {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
@@ -3983,11 +4186,6 @@ app.post("/api/checkout/draft", async (req, res) => {
     const openDraft = (existingRows || []).find(
       (row) => !isTrue(row?.orden_cancelada) && !isTrue(row?.checkout_finalizado),
     );
-    const existingId = Number(openDraft?.id_orden || 0);
-    if (existingId > 0) {
-      return res.json({ ok: true, id_orden: existingId, existing: true });
-    }
-
     const { data: carritoData, error: carritoErr } = await supabaseAdmin
       .from("carritos")
       .select("monto_usd, tasa_bs, monto_bs")
@@ -4003,6 +4201,22 @@ app.post("/api/checkout/draft", async (req, res) => {
       : Number.isFinite(total) && Number.isFinite(tasaBs)
         ? Math.round(total * tasaBs * 100) / 100
         : null;
+
+    const existingId = Number(openDraft?.id_orden || 0);
+    if (existingId > 0) {
+      await syncOrdenItemsSnapshot({
+        ordenId: existingId,
+        items,
+        priceMap,
+        platInfoById,
+        platNameById,
+        pickPrecio,
+        totalUsd: total,
+        montoBsTotal: montoBs,
+        tasaBs,
+      });
+      return res.json({ ok: true, id_orden: existingId, existing: true });
+    }
 
     const { data: created, error: createErr } = await supabaseAdmin
       .from("ordenes")
@@ -4020,6 +4234,18 @@ app.post("/api/checkout/draft", async (req, res) => {
       .select("id_orden")
       .single();
     if (createErr) throw createErr;
+
+    await syncOrdenItemsSnapshot({
+      ordenId: created?.id_orden,
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      totalUsd: total,
+      montoBsTotal: montoBs,
+      tasaBs,
+    });
 
     return res.json({
       ok: true,
@@ -5311,16 +5537,29 @@ app.get("/api/ordenes/detalle", async (req, res) => {
     }
 
     let items = [];
-    if (orden.id_carrito) {
+    let itemsSource = "none";
+    const { data: ordenesItems, error: ordenesItemsErr } = await supabaseAdmin
+      .from("ordenes_items")
+      .select(
+        "id_item_orden, id_orden, id_plataforma, renovacion, detalle, monto_usd, monto_bs, plataformas:plataformas(nombre, imagen)",
+      )
+      .eq("id_orden", idOrden)
+      .order("id_item_orden", { ascending: true });
+    if (ordenesItemsErr) throw ordenesItemsErr;
+    if (Array.isArray(ordenesItems) && ordenesItems.length) {
+      items = ordenesItems;
+      itemsSource = "ordenes_items";
+    } else if (orden.id_carrito) {
       const { data: cartItems, error: itemErr } = await supabaseAdmin
         .from("carrito_items")
         .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
         .eq("id_carrito", orden.id_carrito);
       if (itemErr) throw itemErr;
       items = cartItems || [];
+      itemsSource = "carrito_items";
     }
 
-    res.json({ orden, items, usuario });
+    res.json({ orden, items, items_source: itemsSource, usuario });
   } catch (err) {
     console.error("[ordenes/detalle] error", err);
     res.status(500).json({ error: err.message });
@@ -6219,6 +6458,18 @@ app.post("/api/checkout", async (req, res) => {
     if (!ordenId) {
       throw new Error("No se pudo crear/actualizar la orden");
     }
+
+    await syncOrdenItemsSnapshot({
+      ordenId,
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      totalUsd: total,
+      montoBsTotal: monto_bs,
+      tasaBs,
+    });
 
     if (requierePendiente) {
       try {

@@ -149,13 +149,83 @@ npm install
 pm2 restart mooseplus
 ```
 
-## 11. Archivos del repo preparados para este deploy
+## 11. Deploy automatico con GitHub Actions
+
+Ya está incluido el workflow:
+
+- `.github/workflows/deploy-hetzner.yml`
+
+Hace deploy cuando empujas cambios a `main` y también se puede lanzar manualmente desde GitHub.
+
+### Secretos que debes crear en GitHub
+
+En tu repositorio de GitHub entra a:
+
+`Settings > Secrets and variables > Actions`
+
+Crea estos secretos:
+
+- `HETZNER_HOST`: `89.167.65.115`
+- `HETZNER_USER`: `root`
+- `HETZNER_PORT`: `22`
+- `HETZNER_SSH_KEY`: tu clave privada SSH para entrar al servidor
+
+### Preparar acceso SSH por clave
+
+En tu Mac, si todavía no tienes una clave dedicada:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/hetzner_actions
+```
+
+Sube la clave publica al servidor:
+
+```bash
+ssh-copy-id -i ~/.ssh/hetzner_actions.pub root@89.167.65.115
+```
+
+Luego copia el contenido de la clave privada:
+
+```bash
+cat ~/.ssh/hetzner_actions
+```
+
+Ese contenido completo va en el secreto `HETZNER_SSH_KEY`.
+
+### Como funciona el workflow
+
+En cada `push` a `main`, GitHub hace esto en el servidor:
+
+```bash
+cd /var/www/tienda-mooseplus-main
+git pull --ff-only origin main
+npm ci
+pm2 restart mooseplus --update-env
+```
+
+Si el proceso `mooseplus` no existe todavía, lo crea con `ecosystem.config.js`.
+
+### Primer arranque
+
+Antes del primer deploy automatico, deja la aplicacion funcionando al menos una vez en el servidor:
+
+```bash
+cd /var/www/tienda-mooseplus-main
+npm install
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+Asi GitHub Actions ya solo tendra que actualizar y reiniciar.
+
+## 12. Archivos del repo preparados para este deploy
 
 - `ecosystem.config.js`
 - `config/.env.example`
 - `deploy/nginx-mooseplus.conf.example`
+- `.github/workflows/deploy-hetzner.yml`
 
-## 12. Notas importantes para este proyecto
+## 13. Notas importantes para este proyecto
 
 - El backend usa Supabase, así que la base de datos sigue en Supabase; Hetzner solo hospeda la aplicación.
 - El backend toma el puerto desde `PORT` y por defecto usa `3000`.
