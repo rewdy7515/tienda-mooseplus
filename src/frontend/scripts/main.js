@@ -10,7 +10,9 @@ import {
   fetchTestingFlag,
   updateTestingFlag,
   fetchP2PRate,
+  fetchP2PMarkup,
   fetchHomeBanners,
+  updateP2PMarkup,
 } from "./api.js";
 import { initCart } from "./cart.js";
 import {
@@ -208,9 +210,7 @@ const getNextRateUpdateDate = () => {
 };
 
 const getTasaBsValue = (rate) => {
-  if (!Number.isFinite(rate)) return null;
-  const tasaVal = Math.round(rate * getTasaMarkup() * 100) / 100;
-  return Number.isFinite(tasaVal) ? tasaVal : null;
+  return Number.isFinite(rate) ? Math.round(rate * 100) / 100 : null;
 };
 
 const renderTasaActual = (rate) => {
@@ -250,12 +250,22 @@ const parseTasaMarkupPercent = (value) => {
 tasaMarkupInputEl?.addEventListener("change", async () => {
   const percent = parseTasaMarkupPercent(tasaMarkupInputEl.value);
   const nextMarkup = percent === null ? DEFAULT_TASA_MARKUP : 1 + percent / 100;
-  const savedMarkup = setTasaMarkup(nextMarkup);
-  tasaMarkupInputEl.value = ((savedMarkup - 1) * 100).toFixed(2);
   try {
+    const result = await updateP2PMarkup(nextMarkup);
+    if (result?.error || !Number.isFinite(result?.markup)) {
+      throw new Error(result?.error || "Markup inválido");
+    }
+    const savedMarkup = setTasaMarkup(result.markup);
+    tasaMarkupInputEl.value = ((savedMarkup - 1) * 100).toFixed(2);
     const rate = await fetchP2PRate();
     renderTasaActual(rate);
   } catch (err) {
+    const fallbackMarkup = getTasaMarkup();
+    tasaMarkupInputEl.value = ((fallbackMarkup - 1) * 100).toFixed(2);
+    alert(
+      err?.message ||
+        "No se pudo actualizar el porcentaje de la tasa. Revisa la configuracion del backend/Supabase."
+    );
     console.error("refresh tasa after markup change error", err);
   }
 });
@@ -1921,6 +1931,12 @@ async function init() {
       isTrue(currentUser?.permiso_superadmin);
     const isSuper =
       isTrue(sessionRoles?.permiso_superadmin) || isTrue(currentUser?.permiso_superadmin);
+    if (isSuper) {
+      const serverMarkup = await fetchP2PMarkup();
+      if (Number.isFinite(serverMarkup)) {
+        setTasaMarkup(serverMarkup);
+      }
+    }
     renderTasaMarkupInput({ isSuper });
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);

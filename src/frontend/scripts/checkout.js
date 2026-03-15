@@ -12,7 +12,6 @@ import {
 import { requireSession, attachLogoHome } from "./session.js";
 import { loadPaginaBranding } from "./branding.js";
 import { buildNotificationPayload, pickNotificationUserIds } from "./notification-templates.js";
-import { getTasaMarkup } from "./rate-config.js";
 
 requireSession();
 attachLogoHome();
@@ -201,9 +200,7 @@ const formatCaracasHour = (date) => {
 };
 
 const refreshRateBs = async () => {
-  const rawRate = await fetchP2PRate();
-  if (!Number.isFinite(rawRate)) return null;
-  return Math.round(rawRate * getTasaMarkup() * 100) / 100;
+  return fetchP2PRate();
 };
 
 const scheduleMontoRefresh = (totalUsdVal) => {
@@ -990,9 +987,7 @@ async function init() {
     if (metodosResp.error) throw metodosResp.error;
     metodos = metodosResp.data || [];
     currentUser = user || null;
-    tasaBs = Number.isFinite(tasaResp)
-      ? Math.round(tasaResp * getTasaMarkup() * 100) / 100
-      : null;
+    tasaBs = Number.isFinite(tasaResp) ? tasaResp : null;
     userAcceso = currentUser?.acceso_cliente;
     currentUserId = currentUser?.id_usuario || null;
     const initialSaldo = Number(currentUser?.saldo);

@@ -11,7 +11,6 @@ import {
   supabase,
   updateCartFlags,
 } from "./api.js";
-import { getTasaMarkup } from "./rate-config.js";
 import { loadPaginaBranding } from "./branding.js";
 import {
   requireSession,
@@ -987,7 +986,7 @@ async function init() {
     cartDescuento = Number.isFinite(Number(cartData?.descuento))
       ? Number(cartData.descuento)
       : null;
-    tasaBs = tasaResp ? Math.round(tasaResp * getTasaMarkup() * 100) / 100 : null;
+    tasaBs = Number.isFinite(tasaResp) ? tasaResp : null;
     setCachedCart(cartData);
     const esCliente =
       isTrue(sessionRoles?.acceso_cliente) ||

@@ -1781,6 +1781,7 @@ app.get("/", async (req, res) => {
 
 const AUTH_REQUIRED = "AUTH_REQUIRED";
 const ADMIN_REQUIRED = "ADMIN_REQUIRED";
+const SUPERADMIN_REQUIRED = "SUPERADMIN_REQUIRED";
 const SESSION_COOKIE_NAME = "session_user_id";
 const SESSION_COOKIE_SIGNING_SECRET = String(
   process.env.SESSION_COOKIE_SECRET ||
@@ -3928,6 +3929,23 @@ const requireAdminSession = async (req) => {
   return idUsuario;
 };
 
+const requireSuperadminSession = async (req) => {
+  const idUsuario = await getSessionUsuario(req);
+  const { data: permRow, error: permErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("permiso_superadmin")
+    .eq("id_usuario", idUsuario)
+    .maybeSingle();
+  if (permErr) throw permErr;
+  const isSuperadmin = isTrue(permRow?.permiso_superadmin);
+  if (!isSuperadmin) {
+    const err = new Error(SUPERADMIN_REQUIRED);
+    err.code = SUPERADMIN_REQUIRED;
+    throw err;
+  }
+  return idUsuario;
+};
+
 const getCurrentCarrito = async (idUsuario) => {
   const { data, error } = await runSupabaseQueryWithRetry(
     () =>
@@ -3989,7 +4007,76 @@ const getOrCreateCarrito = async (idUsuario) => {
 };
 
 const BINANCE_CACHE_MS = 2 * 60 * 1000;
+const TASA_CONFIG_CACHE_MS = 60 * 1000;
+const DEFAULT_TASA_MARKUP = 1.06;
 let cachedP2PRate = { value: null, ts: 0 };
+let cachedTasaMarkup = { value: DEFAULT_TASA_MARKUP, ts: 0 };
+
+const isMissingTasaConfigTableError = (err) => {
+  const msg = String(err?.message || err?.details || err?.hint || "").toLowerCase();
+  return err?.code === "42P01" || msg.includes("tasa_config") && msg.includes("does not exist");
+};
+
+const normalizeTasaMarkupValue = (value, fallback = DEFAULT_TASA_MARKUP) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) return fallback;
+  return parsed;
+};
+
+const getGlobalTasaMarkup = async ({ force = false } = {}) => {
+  const now = Date.now();
+  if (!force && now - cachedTasaMarkup.ts < TASA_CONFIG_CACHE_MS) {
+    return cachedTasaMarkup.value;
+  }
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("tasa_config")
+      .select("markup")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) throw error;
+    const markup = normalizeTasaMarkupValue(data?.markup, DEFAULT_TASA_MARKUP);
+    cachedTasaMarkup = { value: markup, ts: now };
+    return markup;
+  } catch (err) {
+    if (isMissingTasaConfigTableError(err)) {
+      return cachedTasaMarkup.value || DEFAULT_TASA_MARKUP;
+    }
+    if (cachedTasaMarkup.value) return cachedTasaMarkup.value;
+    return DEFAULT_TASA_MARKUP;
+  }
+};
+
+const setGlobalTasaMarkup = async ({ markup, updatedBy = null }) => {
+  const nextMarkup = normalizeTasaMarkupValue(markup, Number.NaN);
+  if (!Number.isFinite(nextMarkup)) {
+    const err = new Error("Markup inválido. Debe ser >= 1 y <= 5.");
+    err.code = "INVALID_TASA_MARKUP";
+    throw err;
+  }
+  const payload = {
+    id: 1,
+    markup: nextMarkup,
+    actualizado_en: new Date().toISOString(),
+    actualizado_por: Number.isFinite(Number(updatedBy)) ? Number(updatedBy) : null,
+  };
+  const { data, error } = await supabaseAdmin
+    .from("tasa_config")
+    .upsert(payload, { onConflict: "id" })
+    .select("markup")
+    .single();
+  if (error) {
+    if (isMissingTasaConfigTableError(error)) {
+      const err = new Error("Falta aplicar la migracion de tasa_config en Supabase.");
+      err.code = "TASA_CONFIG_MISSING";
+      throw err;
+    }
+    throw error;
+  }
+  const saved = normalizeTasaMarkupValue(data?.markup, nextMarkup);
+  cachedTasaMarkup = { value: saved, ts: Date.now() };
+  return saved;
+};
 
 const fetchP2PRate = async (asset = "USDT", fiat = "VES") => {
   const now = Date.now();
@@ -4029,14 +4116,55 @@ const fetchP2PRate = async (asset = "USDT", fiat = "VES") => {
   return rate;
 };
 
-// Tasa Binance P2P USDT/VES (promedio top ofertas BUY)
+// Tasa Binance P2P USDT/VES (promedio top ofertas BUY) con markup global aplicado.
 app.get("/api/p2p/rate", async (_req, res) => {
   try {
-    const rate = await fetchP2PRate();
-    res.json({ rate });
+    const [rawRate, markup] = await Promise.all([
+      fetchP2PRate(),
+      getGlobalTasaMarkup(),
+    ]);
+    const rate = roundMoney(rawRate * markup);
+    res.json({ rate, raw_rate: rawRate, markup });
   } catch (err) {
     console.error("[p2p rate] error", err);
     res.status(502).json({ error: "No se pudo obtener la tasa P2P" });
+  }
+});
+
+app.get("/api/p2p/markup", async (_req, res) => {
+  try {
+    const markup = await getGlobalTasaMarkup();
+    res.json({ markup });
+  } catch (err) {
+    console.error("[p2p markup get] error", err);
+    res.status(500).json({ error: "No se pudo obtener el markup de tasa" });
+  }
+});
+
+app.put("/api/p2p/markup", async (req, res) => {
+  try {
+    const idUsuario = await requireSuperadminSession(req);
+    const markup = Number(req.body?.markup);
+    if (!Number.isFinite(markup) || markup < 1 || markup > 5) {
+      return res.status(400).json({ error: "markup inválido. Debe ser >= 1 y <= 5" });
+    }
+    const savedMarkup = await setGlobalTasaMarkup({ markup, updatedBy: idUsuario });
+    return res.json({ ok: true, markup: savedMarkup });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    if (err?.code === "INVALID_TASA_MARKUP") {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err?.code === "TASA_CONFIG_MISSING") {
+      return res.status(500).json({ error: err.message });
+    }
+    console.error("[p2p markup put] error", err);
+    return res.status(500).json({ error: "No se pudo actualizar el markup de tasa" });
   }
 });
 

@@ -228,6 +228,92 @@
         color: #6b7280;
         margin: 0 0 10px;
       }
+      .dashboard-subchart {
+        margin: 14px 0 10px;
+        padding-top: 12px;
+        border-top: 1px solid #e5e7eb;
+      }
+      .dashboard-subchart-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .dashboard-subchart-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .dashboard-subchart-note {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .dashboard-subchart-control {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 220px;
+      }
+      .dashboard-subchart-control label {
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .dashboard-vertical-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        min-height: 250px;
+        padding: 16px 14px 10px;
+        border: 1px solid #eef2f7;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #f9fbff 0%, #ffffff 100%);
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .dashboard-vertical-chart-empty {
+        color: #6b7280;
+        margin: 0;
+      }
+      .dashboard-vertical-bar {
+        flex: 0 0 64px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        min-height: 210px;
+      }
+      .dashboard-vertical-bar-value {
+        min-height: 18px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .dashboard-vertical-bar-fill-wrap {
+        width: 100%;
+        height: 160px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+      }
+      .dashboard-vertical-bar-fill {
+        width: 100%;
+        min-height: 6px;
+        border-radius: 10px 10px 4px 4px;
+        background: #2563eb;
+        box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+      }
+      .dashboard-vertical-bar-label {
+        text-align: center;
+        font-size: 11px;
+        line-height: 1.2;
+        color: #4b5563;
+        word-break: break-word;
+      }
       @media (max-width: 1024px) {
         .dashboard-kpi {
           grid-column: span 6;
@@ -260,6 +346,16 @@
         }
         .dashboard-bar-value {
           text-align: left;
+        }
+        .dashboard-subchart-control {
+          min-width: 100%;
+        }
+        .dashboard-vertical-chart {
+          gap: 8px;
+          padding: 14px 10px 10px;
+        }
+        .dashboard-vertical-bar {
+          flex-basis: 54px;
         }
       }
     </style>
@@ -406,6 +502,22 @@
           <p class="dashboard-bars-empty hidden" id="empty-chart-activas-plataforma">
             Sin ventas activas para este periodo.
           </p>
+          <div class="dashboard-subchart">
+            <div class="dashboard-subchart-header">
+              <div>
+                <p class="dashboard-subchart-title">Ventas por mes de la plataforma seleccionada</p>
+                <p class="dashboard-subchart-note">Conteo mensual de ventas al cliente registradas en historial.</p>
+              </div>
+              <div class="dashboard-subchart-control">
+                <label for="platform-monthly-select">Plataforma</label>
+                <select id="platform-monthly-select" class="form-input"></select>
+              </div>
+            </div>
+            <div id="platform-monthly-chart" class="dashboard-vertical-chart"></div>
+            <p class="dashboard-vertical-chart-empty hidden" id="empty-platform-monthly-chart">
+              Sin ventas para graficar en esta plataforma.
+            </p>
+          </div>
           <div class="cuenta-table-wrap">
             <table class="table-base" id="table-activas-plataforma">
               <thead>
@@ -489,12 +601,15 @@
       const activeByPlatformTbody = document.querySelector("#table-activas-plataforma tbody");
       const dailyTbody = document.querySelector("#table-diario tbody");
       const activeByPlatformChart = document.querySelector("#chart-activas-plataforma");
+      const platformMonthlySelect = document.querySelector("#platform-monthly-select");
+      const platformMonthlyChart = document.querySelector("#platform-monthly-chart");
 
       const emptyPlataformas = document.querySelector("#empty-plataformas");
       const emptyProveedores = document.querySelector("#empty-proveedores");
       const emptyActivasPlataforma = document.querySelector("#empty-activas-plataforma");
       const emptyDiario = document.querySelector("#empty-diario");
       const emptyChartActivasPlataforma = document.querySelector("#empty-chart-activas-plataforma");
+      const emptyPlatformMonthlyChart = document.querySelector("#empty-platform-monthly-chart");
       const ventasTrendChart = document.querySelector("#ventas-trend-chart");
       const ventasTrendEmpty = document.querySelector("#ventas-trend-empty");
       let trendSelectedDay = null;
@@ -504,6 +619,8 @@
       let trendLastStats = null;
       let trendLastPrevStats = null;
       let trendLastRange = null;
+      let platformSalesMonthlyRows = [];
+      let selectedPlatformMonthlyKey = "";
       const MONTH_NAMES_ES = [
         "Enero",
         "Febrero",
@@ -754,6 +871,11 @@
         if (!joined) return fallback;
         if (Array.isArray(joined)) return joined[0]?.nombre || fallback;
         return joined.nombre || fallback;
+      };
+      const toJoinedField = (joined, field, fallback = null) => {
+        if (!joined) return fallback;
+        if (Array.isArray(joined)) return joined[0]?.[field] ?? fallback;
+        return joined?.[field] ?? fallback;
       };
 
       const formatMoney = (v) => moneyFmt.format(toNumber(v));
@@ -1140,6 +1262,70 @@
             <div class="dashboard-bar-value">${intFmt.format(value)}</div>
           `;
           activeByPlatformChart.appendChild(barRow);
+        });
+      };
+      const buildPlatformMonthlyOptionLabel = (row) => {
+        const nombre = String(row?.nombre || "Sin plataforma").trim() || "Sin plataforma";
+        return nombre;
+      };
+      const syncPlatformMonthlySelect = (rows, preferredKey = "") => {
+        if (!platformMonthlySelect) return "";
+        const prevValue = String(preferredKey || platformMonthlySelect.value || "");
+        platformMonthlySelect.innerHTML = "";
+        if (!rows.length) {
+          platformMonthlySelect.disabled = true;
+          return "";
+        }
+        rows.forEach((row) => {
+          const option = document.createElement("option");
+          option.value = String(row.key);
+          option.textContent = buildPlatformMonthlyOptionLabel(row);
+          platformMonthlySelect.appendChild(option);
+        });
+        platformMonthlySelect.disabled = false;
+        const hasPrev = rows.some((row) => String(row.key) === prevValue);
+        platformMonthlySelect.value = hasPrev ? prevValue : String(rows[0].key);
+        return platformMonthlySelect.value;
+      };
+      const renderPlatformMonthlyChart = (rows, selectedKey = "") => {
+        if (!platformMonthlyChart) return;
+        platformMonthlyChart.innerHTML = "";
+        if (!rows.length) {
+          platformMonthlyChart.classList.add("hidden");
+          emptyPlatformMonthlyChart?.classList.remove("hidden");
+          if (platformMonthlySelect) platformMonthlySelect.disabled = true;
+          return;
+        }
+        const key = syncPlatformMonthlySelect(rows, selectedKey);
+        selectedPlatformMonthlyKey = key;
+        const selected = rows.find((row) => String(row.key) === String(key)) || rows[0];
+        const months = Array.isArray(selected?.months) ? selected.months : [];
+        if (!selected || !months.length) {
+          platformMonthlyChart.classList.add("hidden");
+          emptyPlatformMonthlyChart?.classList.remove("hidden");
+          return;
+        }
+        platformMonthlyChart.classList.remove("hidden");
+        emptyPlatformMonthlyChart?.classList.add("hidden");
+        const maxValue = Math.max(...months.map((row) => Number(row?.count) || 0), 1);
+        const barColor = String(selected?.color_1 || "").trim() || "#2563eb";
+        months.forEach((row) => {
+          const count = Number(row?.count) || 0;
+          const bar = document.createElement("div");
+          bar.className = "dashboard-vertical-bar";
+          const heightPct = Math.max(count > 0 ? 8 : 0, (count / maxValue) * 100);
+          bar.innerHTML = `
+            <div class="dashboard-vertical-bar-value">${intFmt.format(count)}</div>
+            <div class="dashboard-vertical-bar-fill-wrap">
+              <div
+                class="dashboard-vertical-bar-fill"
+                style="height:${heightPct}%; background:${escapeHtml(barColor)};"
+                title="${escapeHtml(selected.nombre)} · ${escapeHtml(formatMonthLabel(row.monthKey))}: ${intFmt.format(count)}"
+              ></div>
+            </div>
+            <div class="dashboard-vertical-bar-label">${escapeHtml(formatMonthLabel(row.monthKey))}</div>
+          `;
+          platformMonthlyChart.appendChild(bar);
         });
       };
       const renderVentasTrendChart = (stats, prevStats, range) => {
@@ -1573,12 +1759,59 @@
           return String(a.nombre || "").localeCompare(String(b.nombre || ""));
         });
       };
+      const fetchPlatformSalesMonthly = async () => {
+        const { data, error } = await supabase
+          .from("historial_ventas")
+          .select("fecha_pago, id_plataforma, plataformas(nombre, color_1), venta_cliente")
+          .eq("venta_cliente", true)
+          .not("fecha_pago", "is", null)
+          .order("fecha_pago", { ascending: true });
+        if (error) throw error;
+        const platformMap = new Map();
+        (data || []).forEach((row) => {
+          const monthKey = monthKeyFromDate(row?.fecha_pago);
+          if (!monthKey) return;
+          const platformId = row?.id_plataforma ?? null;
+          const platformName = toName(row?.plataformas, "Sin plataforma");
+          const key = String(platformId ?? "sin-plataforma");
+          if (!platformMap.has(key)) {
+            platformMap.set(key, {
+              key,
+              id: platformId,
+              nombre: platformName,
+              color_1: toJoinedField(row?.plataformas, "color_1", null),
+              total: 0,
+              monthsMap: new Map(),
+            });
+          }
+          const entry = platformMap.get(key);
+          entry.total += 1;
+          entry.monthsMap.set(monthKey, (entry.monthsMap.get(monthKey) || 0) + 1);
+        });
+        return Array.from(platformMap.values())
+          .map((entry) => ({
+            key: entry.key,
+            id: entry.id,
+            nombre: entry.nombre,
+            color_1: entry.color_1,
+            total: entry.total,
+            months: Array.from(entry.monthsMap.entries())
+              .map(([monthKey, count]) => ({ monthKey, count }))
+              .sort((a, b) => String(a.monthKey).localeCompare(String(b.monthKey))),
+          }))
+          .sort((a, b) => {
+            const totalDiff = Number(b.total || 0) - Number(a.total || 0);
+            if (totalDiff !== 0) return totalDiff;
+            return String(a.nombre || "").localeCompare(String(b.nombre || ""));
+          });
+      };
 
       const renderAll = (
         stats,
         prevStats,
         prevTrendStats,
         activeByPlatformRows,
+        platformMonthlyData,
         range,
         prevRange,
         compareSuffix,
@@ -1593,6 +1826,7 @@
         renderProviders(stats.providerRows);
         renderActiveByPlatform(activeByPlatformRows || []);
         renderActiveByPlatformChart(activeByPlatformRows || []);
+        renderPlatformMonthlyChart(platformMonthlyData || [], selectedPlatformMonthlyKey);
         renderVentasTrendChart(stats, prevTrendStats || prevStats, range);
         renderDaily(stats.dailyRows);
 
@@ -1665,7 +1899,14 @@
           const previousNominaAdjustment = getNominaQuincenalAdjustment(prevRange);
           const prevMonthFullRange = monthRange(previousMonthKey(monthVal));
           const shouldLoadPrevTrendFull = compareCtx.isProgressCut && !!prevMonthFullRange;
-          const [{ historial, gifts }, prevData, prevTrendData, currentActive, previousActive] = await Promise.all([
+          const [
+            { historial, gifts },
+            prevData,
+            prevTrendData,
+            currentActive,
+            previousActive,
+            monthlyPlatformData,
+          ] = await Promise.all([
             fetchMonthData(range),
             prevRange ? fetchMonthData(prevRange) : Promise.resolve({ historial: [], gifts: [] }),
             shouldLoadPrevTrendFull
@@ -1673,10 +1914,12 @@
               : Promise.resolve(null),
             fetchActiveCounts(range.end),
             fetchActiveCounts(prevRange?.end || range.end),
+            fetchPlatformSalesMonthly(),
           ]);
           const [activeByPlatformRows] = await Promise.all([
             fetchActiveByPlatform(range.end),
           ]);
+          platformSalesMonthlyRows = monthlyPlatformData || [];
           const stats = computeStats(historial, gifts);
           const prevStats = computeStats(prevData.historial || [], prevData.gifts || []);
           const prevTrendStats =
@@ -1696,6 +1939,7 @@
             prevStats,
             prevTrendStats,
             activeByPlatformRows,
+            platformSalesMonthlyRows,
             range,
             prevRange || range,
             compareCtx.compareSuffix,
@@ -1746,6 +1990,10 @@
 
       btnLoad?.addEventListener("click", loadDashboard);
       monthFilter?.addEventListener("change", loadDashboard);
+      platformMonthlySelect?.addEventListener("change", () => {
+        selectedPlatformMonthlyKey = platformMonthlySelect.value || "";
+        renderPlatformMonthlyChart(platformSalesMonthlyRows || [], selectedPlatformMonthlyKey);
+      });
       btnBack?.addEventListener("click", () => {
         window.location.href = "admin.html";
       });

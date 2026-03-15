@@ -3,7 +3,7 @@ export const RATE_MARKUP_STORAGE_KEY = "tasa_markup";
 
 const normalizeMarkupValue = (value, fallback = DEFAULT_TASA_MARKUP) => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 1) return fallback;
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return parsed;
 };
 

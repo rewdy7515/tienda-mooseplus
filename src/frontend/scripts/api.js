@@ -990,6 +990,52 @@ export async function fetchP2PRate() {
   }
 }
 
+export async function fetchP2PMarkup() {
+  try {
+    const res = await fetch(`${API_BASE}/api/p2p/markup`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("p2p markup response", res.status, text);
+      return null;
+    }
+    const data = await res.json();
+    return Number.isFinite(data?.markup) ? data.markup : null;
+  } catch (err) {
+    console.error("No se pudo obtener el markup de tasa:", err);
+    return null;
+  }
+}
+
+export async function updateP2PMarkup(markup) {
+  try {
+    const res = await fetch(`${API_BASE}/api/p2p/markup`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ markup }),
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return { error: message || "No se pudo actualizar el markup de tasa", status: res.status };
+    }
+    const data = await res.json();
+    return { markup: Number.isFinite(data?.markup) ? data.markup : null };
+  } catch (err) {
+    console.error("No se pudo actualizar el markup de tasa:", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchTestingFlag() {
   try {
     const { data, error } = await supabase
