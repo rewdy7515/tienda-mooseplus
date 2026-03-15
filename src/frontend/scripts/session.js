@@ -24,6 +24,12 @@ const getCookie = (name) => {
   return match ? decodeURIComponent(match[1]) : null;
 };
 
+const normalizeSessionId = (value) => {
+  const parsed = Number(String(value || "").trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return "";
+  return String(Math.trunc(parsed));
+};
+
 const normalizeRoles = (roles = {}) => ({
   acceso_cliente: normalizeFlag(roles.acceso_cliente),
   permiso_admin: normalizeFlag(roles.permiso_admin),
@@ -31,8 +37,11 @@ const normalizeRoles = (roles = {}) => ({
 });
 
 export function getSessionUserId() {
-  const cookieId = getCookie("session_user_id");
-  const storedId = localStorage.getItem(SESSION_KEY);
+  // La cookie del backend es httpOnly, así que el frontend no puede usarla
+  // como fuente primaria. Si existe una cookie legible (legacy/local), se usa
+  // para sincronizar; en caso contrario, se conserva el id local.
+  const cookieId = normalizeSessionId(getCookie("session_user_id"));
+  const storedId = normalizeSessionId(localStorage.getItem(SESSION_KEY));
   if (cookieId) {
     if (storedId !== cookieId) {
       localStorage.setItem(SESSION_KEY, cookieId);
@@ -40,14 +49,16 @@ export function getSessionUserId() {
     return cookieId;
   }
   if (storedId) {
-    clearSession();
+    return storedId;
   }
+  clearSession();
   return null;
 }
 
 export function setSessionUserId(idUsuario) {
-  if (!idUsuario) return;
-  localStorage.setItem(SESSION_KEY, idUsuario);
+  const normalizedId = normalizeSessionId(idUsuario);
+  if (!normalizedId) return;
+  localStorage.setItem(SESSION_KEY, normalizedId);
 }
 
 export function setSessionRoles(roles = {}) {

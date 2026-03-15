@@ -20,6 +20,12 @@
     return "";
   };
 
+  const normalizeSessionId = (value) => {
+    const parsed = Number(String(value || "").trim());
+    if (!Number.isFinite(parsed) || parsed <= 0) return "";
+    return String(Math.trunc(parsed));
+  };
+
   const readHeaderAvatarCache = (idUsuario = null) => {
     try {
       const key = `${HEADER_AVATAR_CACHE_PREFIX}:${idUsuario ? String(idUsuario) : "anon"}`;
@@ -59,12 +65,11 @@
 
   const applyCachedHeaderAvatar = () => {
     try {
-      const cookieId = getCookie("session_user_id");
-      const storedId = localStorage.getItem("sessionUserId");
-      const sessionId = cookieId || null;
-      if (!cookieId && storedId) {
-        localStorage.removeItem("sessionUserId");
-        localStorage.removeItem("sessionUserRoles");
+      const cookieId = normalizeSessionId(getCookie("session_user_id"));
+      const storedId = normalizeSessionId(localStorage.getItem("sessionUserId"));
+      const sessionId = storedId || cookieId || null;
+      if (cookieId && storedId !== cookieId) {
+        localStorage.setItem("sessionUserId", cookieId);
       }
       if (!sessionId) return;
       const cached = readHeaderAvatarCache(sessionId);
