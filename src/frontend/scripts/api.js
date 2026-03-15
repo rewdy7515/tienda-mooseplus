@@ -1143,7 +1143,9 @@ async function handleFatalAuthSessionError(reason = "") {
 export async function ensureServerSession() {
   const id = requireSession();
   if (!id) {
-    await handleFatalAuthSessionError("session_user_id ausente");
+    if (!isAnonymousAllowedPath()) {
+      await handleFatalAuthSessionError("session_user_id ausente");
+    }
     throw new Error("Sesión no disponible");
   }
   const result = await startSession(id);
@@ -1158,6 +1160,9 @@ export async function ensureServerSession() {
 
 export async function loadCurrentUser() {
   const idUsuario = requireSession();
+  if (!idUsuario) {
+    return null;
+  }
   const { data, error } = await supabase
     .from("usuarios")
     .select(

@@ -31,7 +31,18 @@ const normalizeRoles = (roles = {}) => ({
 });
 
 export function getSessionUserId() {
-  return localStorage.getItem(SESSION_KEY);
+  const cookieId = getCookie("session_user_id");
+  const storedId = localStorage.getItem(SESSION_KEY);
+  if (cookieId) {
+    if (storedId !== cookieId) {
+      localStorage.setItem(SESSION_KEY, cookieId);
+    }
+    return cookieId;
+  }
+  if (storedId) {
+    clearSession();
+  }
+  return null;
 }
 
 export function setSessionUserId(idUsuario) {
@@ -91,16 +102,7 @@ export function redirectIfSession(target = "index.html") {
 }
 
 export function requireSession() {
-  let id = getSessionUserId();
-  if (!id) {
-    const cookieId = getCookie("session_user_id");
-    if (cookieId) {
-      setSessionUserId(cookieId);
-      id = cookieId;
-    }
-  }
-  // Ya no forzamos redirección; devolvemos null si no hay sesión
-  return id;
+  return getSessionUserId();
 }
 
 export async function attachLogout(clearServerSession, clearCartCache) {

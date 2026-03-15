@@ -127,6 +127,12 @@
         color: #6b7280;
         font-size: 12px;
       }
+      .dashboard-trend-summary {
+        margin: 0 0 10px;
+        color: #6b7280;
+        font-size: 13px;
+        line-height: 1.55;
+      }
       .dashboard-trend-dot {
         width: 10px;
         height: 10px;
@@ -264,13 +270,21 @@
       }
       .dashboard-vertical-chart {
         display: flex;
-        align-items: flex-end;
+        align-items: stretch;
         gap: 10px;
         min-height: 250px;
         padding: 16px 14px 10px;
         border: 1px solid #eef2f7;
         border-radius: 12px;
-        background: linear-gradient(180deg, #f9fbff 0%, #ffffff 100%);
+        background:
+          repeating-linear-gradient(
+            to right,
+            rgba(148, 163, 184, 0.14) 0,
+            rgba(148, 163, 184, 0.14) 1px,
+            transparent 1px,
+            transparent 24px
+          ),
+          linear-gradient(180deg, #f9fbff 0%, #ffffff 100%);
         overflow-x: auto;
         overflow-y: hidden;
       }
@@ -280,25 +294,35 @@
       }
       .dashboard-vertical-bar {
         flex: 0 0 64px;
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-rows: 20px 160px 32px;
         align-items: center;
-        justify-content: flex-end;
         gap: 8px;
-        min-height: 210px;
+        min-height: 220px;
       }
       .dashboard-vertical-bar-value {
-        min-height: 18px;
+        min-height: 20px;
         font-size: 12px;
         font-weight: 700;
         color: #111827;
       }
       .dashboard-vertical-bar-fill-wrap {
+        position: relative;
         width: 100%;
         height: 160px;
         display: flex;
         align-items: flex-end;
         justify-content: center;
+        padding-bottom: 0;
+      }
+      .dashboard-vertical-bar-fill-wrap::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 1px;
+        background: rgba(100, 116, 139, 0.45);
       }
       .dashboard-vertical-bar-fill {
         width: 100%;
@@ -313,6 +337,7 @@
         line-height: 1.2;
         color: #4b5563;
         word-break: break-word;
+        align-self: start;
       }
       @media (max-width: 1024px) {
         .dashboard-kpi {
@@ -356,6 +381,7 @@
         }
         .dashboard-vertical-bar {
           flex-basis: 54px;
+          grid-template-rows: 20px 160px 36px;
         }
       }
     </style>
@@ -448,6 +474,7 @@
           <span><span class="dashboard-trend-dot current"></span>Mes actual</span>
           <span><span class="dashboard-trend-dot previous"></span>Mes anterior</span>
         </p>
+        <p id="ventas-trend-summary" class="dashboard-trend-summary">-</p>
         <svg id="ventas-trend-chart" class="dashboard-trend-chart" viewBox="0 0 1000 240" preserveAspectRatio="none"></svg>
         <p id="ventas-trend-empty" class="dashboard-trend-empty hidden">Sin ventas para graficar.</p>
       </section>
@@ -611,6 +638,7 @@
       const emptyChartActivasPlataforma = document.querySelector("#empty-chart-activas-plataforma");
       const emptyPlatformMonthlyChart = document.querySelector("#empty-platform-monthly-chart");
       const ventasTrendChart = document.querySelector("#ventas-trend-chart");
+      const ventasTrendSummary = document.querySelector("#ventas-trend-summary");
       const ventasTrendEmpty = document.querySelector("#ventas-trend-empty");
       let trendSelectedDay = null;
       let trendSelectedSeries = "current";
@@ -1352,6 +1380,20 @@
         const currMap = stats?.ventasDiariasPorDia || {};
         const prevMap = prevStats?.ventasDiariasPorDia || {};
         const currentCutDay = Math.max(1, Math.min(isoDay(range?.end) || endDay, endDay));
+        const currentAccum = days.reduce(
+          (acc, day) => acc + (day <= currentCutDay ? Number(currMap[day]) || 0 : 0),
+          0,
+        );
+        const previousSameCutAccum = days.reduce(
+          (acc, day) => acc + (day <= currentCutDay ? Number(prevMap[day]) || 0 : 0),
+          0,
+        );
+        const currentMonthLabel = formatMonthLabel(monthKeyFromDate(range?.start));
+        const previousMonthLabel = formatMonthLabel(previousMonthKey(monthKeyFromDate(range?.start)));
+        if (ventasTrendSummary) {
+          ventasTrendSummary.textContent =
+            `Al día ${String(currentCutDay).padStart(2, "0")}: ${currentMonthLabel} lleva ${intFmt.format(currentAccum)} ventas y ${previousMonthLabel} llevaba ${intFmt.format(previousSameCutAccum)} ventas para la misma fecha.`;
+        }
         const currVals = days.map((day) => (day <= currentCutDay ? Number(currMap[day]) || 0 : null));
         const prevVals = days.map((day) => Number(prevMap[day]) || 0);
         const currNumericVals = currVals.map((v) => (v == null ? 0 : Number(v) || 0));

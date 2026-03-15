@@ -59,8 +59,13 @@
 
   const applyCachedHeaderAvatar = () => {
     try {
-      const sessionId =
-        localStorage.getItem("sessionUserId") || getCookie("session_user_id") || null;
+      const cookieId = getCookie("session_user_id");
+      const storedId = localStorage.getItem("sessionUserId");
+      const sessionId = cookieId || null;
+      if (!cookieId && storedId) {
+        localStorage.removeItem("sessionUserId");
+        localStorage.removeItem("sessionUserRoles");
+      }
       if (!sessionId) return;
       const cached = readHeaderAvatarCache(sessionId);
       if (!cached?.url) return;

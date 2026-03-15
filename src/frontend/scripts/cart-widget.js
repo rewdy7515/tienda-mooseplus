@@ -1,10 +1,14 @@
 import { fetchCart, loadCatalog, ensureServerSession } from "./api.js";
 import { initCart } from "./cart.js";
+import { requireSession } from "./session.js";
 
 if (!window.__cartWidgetInit) {
   window.__cartWidgetInit = true;
   (async () => {
     try {
+      if (!requireSession()) {
+        return;
+      }
       await ensureServerSession();
       const [cartResp, catalog] = await Promise.all([fetchCart(), loadCatalog()]);
       const cartId = cartResp?.id_carrito;

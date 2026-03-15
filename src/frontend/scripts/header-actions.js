@@ -717,8 +717,30 @@ if (!window.__headerActionsInit) {
         userMenu.style.display = "flex";
       }
       bindCartFallback();
-      await ensureServerSession();
+      try {
+        await ensureServerSession();
+      } catch (err) {
+        await applyHeaderAvatar(null, null);
+        showLogin();
+        if (tutorialHeaderBtn) {
+          tutorialHeaderBtn.classList.add("hidden");
+          tutorialHeaderBtn.style.display = "none";
+        }
+        if (String(err?.message || "").includes("Sesión no disponible")) {
+          return;
+        }
+        throw err;
+      }
       const user = await loadCurrentUser();
+      if (!user?.id_usuario) {
+        await applyHeaderAvatar(null, null);
+        showLogin();
+        if (tutorialHeaderBtn) {
+          tutorialHeaderBtn.classList.add("hidden");
+          tutorialHeaderBtn.style.display = "none";
+        }
+        return;
+      }
       const markTutorialCompleted = async () => {
         const uid = Number(user?.id_usuario || userId);
         if (!Number.isFinite(uid) || uid <= 0) return;
@@ -901,7 +923,9 @@ if (!window.__headerActionsInit) {
         });
       });
     } catch (err) {
-      console.error("header user init error", err);
+      if (!String(err?.message || "").includes("Sesión no disponible")) {
+        console.error("header user init error", err);
+      }
     }
   };
   initUser();

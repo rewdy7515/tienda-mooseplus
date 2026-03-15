@@ -1,4 +1,5 @@
 import { sendCartDelta, fetchCart, loadCatalog, ensureServerSession, loadCurrentUser } from "./api.js";
+import { requireSession } from "./session.js";
 
 let cartItems = [];
 let drawer;
@@ -381,6 +382,12 @@ export function initCart({
 
   const refreshFromServer = async () => {
     try {
+      if (!requireSession()) {
+        cartRawItems = [];
+        cartItems = [];
+        renderCart();
+        return;
+      }
       await ensureServerSession();
       if (!userAcceso) {
         try {
@@ -397,7 +404,9 @@ export function initCart({
       cartItems = mapCartItems(cartRawItems, catalogCache, userAcceso);
       renderCart();
     } catch (err) {
-      console.error("refresh cart error", err);
+      if (!String(err?.message || "").includes("Sesión no disponible")) {
+        console.error("refresh cart error", err);
+      }
     }
   };
   refreshFromServerFn = refreshFromServer;
