@@ -63,6 +63,7 @@ let fixedFecha = null;
 let montoRefreshTimer = null;
 let saldoWatcher = null;
 let lastSaldoValue = null;
+let checkoutSubmitInProgress = false;
 const RATE_SLOT_SECONDS = 2 * 60 * 60;
 const METODO_RECARGO_USD_ID = 4;
 const METODO_RECARGO_USD_PERCENT = 0.0349;
@@ -79,6 +80,17 @@ const isImageFile = (file) => {
   return /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(name);
 };
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const hasTransientNetworkMessage = (value = "") => {
+  const msg = String(value || "").toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network request failed") ||
+    msg.includes("networkerror") ||
+    msg.includes("problema de conexión")
+  );
+};
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -88,6 +100,13 @@ const escapeHtml = (value) =>
     .replace(/'/g, "&#39;");
 const isMetodoVerificacionAutomatica = (metodo) => isTrue(metodo?.verificacion_automatica);
 const isMetodoNoBolivares = (metodo) => !isTrue(metodo?.bolivares);
+const getCheckoutSubmitErrorMessage = (err) => {
+  const message = String(err?.message || err || "").trim();
+  if (hasTransientNetworkMessage(message)) {
+    return "Se perdió la conexión mientras se enviaba el pago. Intenta de nuevo.";
+  }
+  return message || "No se pudo enviar el pago. Intenta de nuevo.";
+};
 const CHECKOUT_PANEL_ANIM_MS = 260;
 const CHECKOUT_PANEL_ANIM_CLASSES = [
   "checkout-panel-animating",
@@ -242,9 +261,12 @@ const startSaldoWatcher = () => {
   }
   saldoWatcher = setInterval(async () => {
     try {
+      if (checkoutSubmitInProgress) return;
       const user = await loadCurrentUser();
+      if (!user) return;
       const saldoVal = Number(user?.saldo);
-      const saldoNum = Number.isFinite(saldoVal) ? saldoVal : 0;
+      if (!Number.isFinite(saldoVal)) return;
+      const saldoNum = saldoVal;
       if (lastSaldoValue === null) {
         lastSaldoValue = saldoNum;
         return;
@@ -1179,105 +1201,113 @@ const persistMetodoSeleccionadoEnOrden = async ({ force = false } = {}) => {
 };
 
 btnSendPayment?.addEventListener("click", async () => {
+  if (checkoutSubmitInProgress) return;
+  let willNavigate = false;
+  checkoutSubmitInProgress = true;
+  if (btnSendPayment) btnSendPayment.disabled = true;
+
   // Toma montos guardados en BD, sin recálculo en frontend
   try {
-    if (!isSaldoCheckout) {
-      const cartData = await fetchCart();
-      cartItems = cartData.items || [];
-      cartId = cartData.id_carrito || null;
-      const useSaldo = isTrue(cartData?.usa_saldo);
-      const montoUsdRaw = Number(cartData?.monto_usd);
-      const montoFinalRaw = Number(cartData?.monto_final);
-      totalUsd =
-        useSaldo && Number.isFinite(montoFinalRaw)
-          ? Number(montoFinalRaw)
-          : Number.isFinite(montoUsdRaw)
+    try {
+      if (!isSaldoCheckout) {
+        const cartData = await fetchCart();
+        cartItems = cartData.items || [];
+        cartId = cartData.id_carrito || null;
+        const useSaldo = isTrue(cartData?.usa_saldo);
+        const montoUsdRaw = Number(cartData?.monto_usd);
+        const montoFinalRaw = Number(cartData?.monto_final);
+        totalUsd =
+          useSaldo && Number.isFinite(montoFinalRaw)
+            ? Number(montoFinalRaw)
+            : Number.isFinite(montoUsdRaw)
+            ? Number(montoUsdRaw)
+            : 0;
+        precioTierLabel = "";
+        fixedMontoUsd = Number.isFinite(montoUsdRaw)
           ? Number(montoUsdRaw)
-          : 0;
-      precioTierLabel = "";
-      fixedMontoUsd = Number.isFinite(montoUsdRaw)
-        ? Number(montoUsdRaw)
-        : totalUsd;
-      fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
-        ? Number(cartData.monto_bs)
-        : null;
-      if (Number.isFinite(fixedMontoBs) && fixedMontoBs <= 0 && totalUsd > 0) {
-        fixedMontoBs = null;
+          : totalUsd;
+        fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
+          ? Number(cartData.monto_bs)
+          : null;
+        if (Number.isFinite(fixedMontoBs) && fixedMontoBs <= 0 && totalUsd > 0) {
+          fixedMontoBs = null;
+        }
+        fixedHora = cartData?.hora ?? null;
+        fixedFecha = cartData?.fecha ?? null;
+        renderTotal();
+      } else if (saldoOrder) {
+        totalUsd = Number.isFinite(Number(saldoOrder?.total))
+          ? Number(saldoOrder.total)
+          : totalUsd;
+        fixedMontoUsd = totalUsd;
+        fixedMontoBs = Number.isFinite(Number(saldoOrder?.monto_bs))
+          ? Number(saldoOrder.monto_bs)
+          : fixedMontoBs;
+        tasaBs = Number.isFinite(Number(saldoOrder?.tasa_bs))
+          ? Number(saldoOrder.tasa_bs)
+          : tasaBs;
+        renderTotal();
       }
-      fixedHora = cartData?.hora ?? null;
-      fixedFecha = cartData?.fecha ?? null;
-      renderTotal();
-    } else if (saldoOrder) {
-      totalUsd = Number.isFinite(Number(saldoOrder?.total))
-        ? Number(saldoOrder.total)
-        : totalUsd;
-      fixedMontoUsd = totalUsd;
-      fixedMontoBs = Number.isFinite(Number(saldoOrder?.monto_bs))
-        ? Number(saldoOrder.monto_bs)
-        : fixedMontoBs;
-      tasaBs = Number.isFinite(Number(saldoOrder?.tasa_bs)) ? Number(saldoOrder.tasa_bs) : tasaBs;
-      renderTotal();
+    } catch (err) {
+      console.error("recalc checkout error", err);
     }
-  } catch (err) {
-    console.error("recalc checkout error", err);
-  }
-  if (seleccionado === null) {
-    alert("Selecciona un método de pago.");
-    showMetodoMenu(true);
-    return;
-  }
-  const metodo = metodos[seleccionado];
-  const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
-  const isMetodoBs = metodoId === 1;
-  const requiereComprobante = !isMetodoVerificacionAutomatica(metodo);
-  const requiereMontoTransferido = isMetodoNoBolivares(metodo);
-  const referenciaRaw = String(refInput?.value || "").trim();
-  if (!referenciaRaw) {
-    alert("Ingresa la referencia.");
-    refInput.classList.add("input-error");
-    return;
-  }
-  const referenciaDigits = normalizeReferenceDigits(referenciaRaw);
-  if (isMetodoBs && referenciaDigits.length < 4) {
-    alert("La referencia debe tener al menos 4 dígitos.");
-    refInput?.classList.add("input-error");
-    return;
-  }
-  const referenciaValue = isMetodoBs ? referenciaDigits : referenciaRaw;
-  if (isMetodoBs && refInput) refInput.value = referenciaValue;
-  let montoTransferidoValue = null;
-  if (requiereMontoTransferido) {
-    const rawMontoTransferido = String(montoTransferidoInput?.value || "")
-      .trim()
-      .replace(",", ".");
-    const parsedMontoTransferido = Number(rawMontoTransferido);
-    if (!Number.isFinite(parsedMontoTransferido) || parsedMontoTransferido <= 0) {
-      alert("Ingresa un monto transferido válido.");
-      montoTransferidoInput?.classList.add("input-error");
-      montoTransferidoInput?.focus();
+    if (seleccionado === null) {
+      alert("Selecciona un método de pago.");
+      showMetodoMenu(true);
       return;
     }
-    montoTransferidoValue = round2(parsedMontoTransferido);
-    if (montoTransferidoInput) {
-      montoTransferidoInput.value = String(montoTransferidoValue.toFixed(2));
-    }
-  }
-  if (isMetodoBs) {
-    if (!Number.isFinite(tasaBs)) {
-      alert("No se pudo obtener la tasa.");
+    const metodo = metodos[seleccionado];
+    const metodoId = Number(metodo?.id_metodo_de_pago ?? metodo?.id);
+    const isMetodoBs = metodoId === 1;
+    const requiereComprobante = !isMetodoVerificacionAutomatica(metodo);
+    const requiereMontoTransferido = isMetodoNoBolivares(metodo);
+    const referenciaRaw = String(refInput?.value || "").trim();
+    if (!referenciaRaw) {
+      alert("Ingresa la referencia.");
+      refInput.classList.add("input-error");
       return;
     }
-  }
-  if (requiereComprobante && !inputFiles?.files?.length) {
-    alert("Adjunta comprobantes de pago.");
-    dropzone?.classList.add("input-error");
-    return;
-  }
-  if (!isSaldoCheckout && !cartItems.length) {
-    alert("No hay items en el carrito.");
-    return;
-  }
-  try {
+    const referenciaDigits = normalizeReferenceDigits(referenciaRaw);
+    if (isMetodoBs && referenciaDigits.length < 4) {
+      alert("La referencia debe tener al menos 4 dígitos.");
+      refInput?.classList.add("input-error");
+      return;
+    }
+    const referenciaValue = isMetodoBs ? referenciaDigits : referenciaRaw;
+    if (isMetodoBs && refInput) refInput.value = referenciaValue;
+    let montoTransferidoValue = null;
+    if (requiereMontoTransferido) {
+      const rawMontoTransferido = String(montoTransferidoInput?.value || "")
+        .trim()
+        .replace(",", ".");
+      const parsedMontoTransferido = Number(rawMontoTransferido);
+      if (!Number.isFinite(parsedMontoTransferido) || parsedMontoTransferido <= 0) {
+        alert("Ingresa un monto transferido válido.");
+        montoTransferidoInput?.classList.add("input-error");
+        montoTransferidoInput?.focus();
+        return;
+      }
+      montoTransferidoValue = round2(parsedMontoTransferido);
+      if (montoTransferidoInput) {
+        montoTransferidoInput.value = String(montoTransferidoValue.toFixed(2));
+      }
+    }
+    if (isMetodoBs) {
+      if (!Number.isFinite(tasaBs)) {
+        alert("No se pudo obtener la tasa.");
+        return;
+      }
+    }
+    if (requiereComprobante && !inputFiles?.files?.length) {
+      alert("Adjunta comprobantes de pago.");
+      dropzone?.classList.add("input-error");
+      return;
+    }
+    if (!isSaldoCheckout && !cartItems.length) {
+      alert("No hay items en el carrito.");
+      return;
+    }
+
     const comprobantes = inputFiles?.files?.length ? await uploadFiles() : [];
     const { fecha, hora } = getCaracasNow();
     if (isSaldoCheckout) {
@@ -1309,6 +1339,7 @@ btnSendPayment?.addEventListener("click", async () => {
       const saldoNextUrl = pendienteVerificacion
         ? `verificando_pago.html?id_orden=${encodeURIComponent(saldoOrderId)}`
         : `entregar_servicios.html?id_orden=${encodeURIComponent(saldoOrderId)}`;
+      willNavigate = true;
       window.location.href = saldoNextUrl;
       return;
     }
@@ -1324,7 +1355,7 @@ btnSendPayment?.addEventListener("click", async () => {
     };
     const resp = await submitCheckout(payload);
     if (resp?.error) {
-      alert(`Error en checkout: ${resp.error}`);
+      alert(resp.error || "No se pudo enviar el pago. Intenta de nuevo.");
       return;
     }
     if (resp?.id_orden) {
@@ -1466,6 +1497,7 @@ btnSendPayment?.addEventListener("click", async () => {
       const manualUrl = resp?.id_orden
         ? `historial_ordenes.html?id_orden=${encodeURIComponent(resp.id_orden)}`
         : "historial_ordenes.html";
+      willNavigate = true;
       window.location.href = manualUrl;
       return;
     }
@@ -1480,10 +1512,16 @@ btnSendPayment?.addEventListener("click", async () => {
       : pendienteVerificacion
       ? "verificando_pago.html"
       : "entregar_servicios.html";
+    willNavigate = true;
     window.location.href = nextUrl;
   } catch (err) {
     console.error("checkout submit error", err);
-    alert("No se pudo enviar el pago. Intenta de nuevo.");
+    alert(getCheckoutSubmitErrorMessage(err));
+  } finally {
+    if (!willNavigate) {
+      checkoutSubmitInProgress = false;
+      if (btnSendPayment) btnSendPayment.disabled = false;
+    }
   }
 });
 

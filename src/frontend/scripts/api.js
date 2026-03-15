@@ -292,15 +292,86 @@ const normalizeImageUploadType = (type = "", fileName = "") => {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const TRANSIENT_NETWORK_ERROR_FRAGMENTS = [
+  "failed to fetch",
+  "fetch failed",
+  "network request failed",
+  "networkerror",
+  "load failed",
+  "timeout",
+  "econnreset",
+  "err_network",
+];
+
+const hasTransientNetworkMessage = (value = "") => {
+  const msg = String(value || "").toLowerCase();
+  if (!msg) return false;
+  return TRANSIENT_NETWORK_ERROR_FRAGMENTS.some((fragment) => msg.includes(fragment));
+};
+
+const isTransientNetworkError = (err) => {
+  if (!err) return false;
+  if (typeof err === "string") return hasTransientNetworkMessage(err);
+  return hasTransientNetworkMessage(err?.message || err?.details || err);
+};
+
+const getFriendlyApiErrorMessage = (err, fallbackMessage = "") => {
+  if (isTransientNetworkError(err)) {
+    return String(fallbackMessage || "Problema de conexión. Intenta de nuevo.");
+  }
+  const message = String(err?.message || err || "").trim();
+  return message || String(fallbackMessage || "Ocurrió un error inesperado.");
+};
+
+const fetchWithRetry = async (url, options = {}, retryOptions = {}) => {
+  const attempts = Math.max(1, Number(retryOptions?.attempts) || 1);
+  const delayMs = Math.max(0, Number(retryOptions?.delayMs) || 250);
+  const label = String(retryOptions?.label || "fetch");
+  let lastErr = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      lastErr = err;
+      const shouldRetry = attempt < attempts && isTransientNetworkError(err);
+      if (!shouldRetry) throw err;
+      console.warn(`[${label}] transient network error, reintentando...`, {
+        attempt,
+        message: String(err?.message || err || "").slice(0, 220),
+      });
+      await wait(delayMs * attempt);
+    }
+  }
+
+  throw lastErr || new Error("Fetch failed");
+};
+
+const runSupabaseQueryWithRetry = async (queryFactory, retryOptions = {}) => {
+  const attempts = Math.max(1, Number(retryOptions?.attempts) || 1);
+  const delayMs = Math.max(0, Number(retryOptions?.delayMs) || 250);
+  const label = String(retryOptions?.label || "supabase");
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = await queryFactory();
+    lastResult = result;
+    const shouldRetry =
+      !!result?.error && attempt < attempts && isTransientNetworkError(result.error);
+    if (!shouldRetry) return result;
+    console.warn(`[${label}] transient supabase error, reintentando...`, {
+      attempt,
+      message: String(result?.error?.message || result?.error || "").slice(0, 220),
+    });
+    await wait(delayMs * attempt);
+  }
+
+  return lastResult;
+};
+
 const isTransientCartBackendError = (status, bodyText = "") => {
   if (Number(status) < 500) return false;
-  const msg = String(bodyText || "").toLowerCase();
-  return (
-    msg.includes("fetch failed") ||
-    msg.includes("network request failed") ||
-    msg.includes("timeout") ||
-    msg.includes("econnreset")
-  );
+  return hasTransientNetworkMessage(bodyText);
 };
 
 export async function loadCatalog() {
@@ -622,15 +693,19 @@ export async function fetchCart() {
 }
 
 export async function submitCheckout(payload) {
-  await ensureServerSession();
   try {
+    await ensureServerSession();
     const id_usuario = requireSession();
-    const res = await fetch(`${API_BASE}/api/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ ...payload, id_usuario, comprobante: payload.comprobantes }),
-    });
+    const res = await fetchWithRetry(
+      `${API_BASE}/api/checkout`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ...payload, id_usuario, comprobante: payload.comprobantes }),
+      },
+      { attempts: 2, label: "submitCheckout" },
+    );
     if (!res.ok) {
       const text = await res.text();
       console.error("checkout response", res.status, text);
@@ -639,19 +714,28 @@ export async function submitCheckout(payload) {
     return res.json();
   } catch (err) {
     console.error("No se pudo completar el checkout:", err);
-    return { error: err.message };
+    return {
+      error: getFriendlyApiErrorMessage(
+        err,
+        "Problema de conexión al enviar el pago. Intenta de nuevo.",
+      ),
+    };
   }
 }
 
 export async function fetchCheckoutDraft() {
-  await ensureServerSession();
   try {
-    const res = await fetch(`${API_BASE}/api/checkout/draft`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({}),
-    });
+    await ensureServerSession();
+    const res = await fetchWithRetry(
+      `${API_BASE}/api/checkout/draft`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}),
+      },
+      { attempts: 2, label: "fetchCheckoutDraft" },
+    );
     if (!res.ok) {
       const text = await res.text();
       console.error("checkout/draft response", res.status, text);
@@ -660,7 +744,12 @@ export async function fetchCheckoutDraft() {
     return res.json();
   } catch (err) {
     console.error("fetchCheckoutDraft error", err);
-    return { error: err.message };
+    return {
+      error: getFriendlyApiErrorMessage(
+        err,
+        "No se pudo preparar la orden de checkout por un problema de conexión.",
+      ),
+    };
   }
 }
 
@@ -760,8 +849,8 @@ export async function updateCartFlags({ usa_saldo } = {}) {
 }
 
 export async function uploadComprobantes(files = []) {
-  await ensureServerSession();
   try {
+    await ensureServerSession();
     const id_usuario = requireSession();
     const payloadFiles = await Promise.all(
       files.map(async (file) => ({
@@ -771,14 +860,18 @@ export async function uploadComprobantes(files = []) {
       }))
     );
 
-    const res = await fetch(`${API_BASE}/api/checkout/upload`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const res = await fetchWithRetry(
+      `${API_BASE}/api/checkout/upload`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ files: payloadFiles, id_usuario }),
       },
-      credentials: "include",
-      body: JSON.stringify({ files: payloadFiles, id_usuario }),
-    });
+      { attempts: 2, label: "uploadComprobantes" },
+    );
 
     if (!res.ok) {
       const text = await res.text();
@@ -789,7 +882,12 @@ export async function uploadComprobantes(files = []) {
     return res.json();
   } catch (err) {
     console.error("No se pudieron subir los comprobantes:", err);
-    return { error: err.message };
+    return {
+      error: getFriendlyApiErrorMessage(
+        err,
+        "Problema de conexión al subir los comprobantes. Intenta de nuevo.",
+      ),
+    };
   }
 }
 
@@ -1131,15 +1229,19 @@ export async function startSession(_idUsuario) {
       return { error: "Sesión de auth no disponible" };
     }
 
-    const res = await fetch(`${API_BASE}/api/session`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+    const res = await fetchWithRetry(
+      `${API_BASE}/api/session`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        credentials: "include",
+        body: "{}",
       },
-      credentials: "include",
-      body: "{}",
-    });
+      { attempts: 2, label: "startSession" },
+    );
     if (!res.ok) {
       const text = await res.text();
       console.error("startSession response", res.status, text);
@@ -1148,7 +1250,12 @@ export async function startSession(_idUsuario) {
     return res.json();
   } catch (err) {
     console.error("startSession error", err);
-    return { error: err.message };
+    return {
+      error: getFriendlyApiErrorMessage(
+        err,
+        "No se pudo validar la sesión por un problema de conexión.",
+      ),
+    };
   }
 }
 
@@ -1215,14 +1322,22 @@ export async function loadCurrentUser() {
   if (!idUsuario) {
     return null;
   }
-  const { data, error } = await supabase
-    .from("usuarios")
-    .select(
-      "id_usuario, nombre, apellido, correo, telefono, foto_perfil, fondo_perfil, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo, recordatorio_dias_antes, tutorial_completado"
-    )
-    .eq("id_usuario", idUsuario)
-    .maybeSingle();
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () =>
+      supabase
+        .from("usuarios")
+        .select(
+          "id_usuario, nombre, apellido, correo, telefono, foto_perfil, fondo_perfil, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo, recordatorio_dias_antes, tutorial_completado"
+        )
+        .eq("id_usuario", idUsuario)
+        .maybeSingle(),
+    { attempts: 3, label: "loadCurrentUser" },
+  );
   if (error) {
+    if (isTransientNetworkError(error)) {
+      console.warn("loadCurrentUser transient error", error);
+      return null;
+    }
     console.error("loadCurrentUser error", error);
     return null;
   }
