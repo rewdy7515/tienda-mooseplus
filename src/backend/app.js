@@ -1734,7 +1734,18 @@ app.post("/api/whatsapp/recordatorios/trigger-user", async (req, res) => {
   }
 });
 
-const INDEX_HTML_PATH = path.join(__dirname, "..", "frontend", "pages", "index.html");
+const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
+[
+  ["/styles", "styles"],
+  ["/scripts", "scripts"],
+  ["/public", "public"],
+  ["/partials", "partials"],
+  ["/assets", "assets"],
+].forEach(([mountPath, dirName]) => {
+  app.use(mountPath, express.static(path.join(FRONTEND_DIR, dirName)));
+});
+
+const INDEX_HTML_PATH = path.join(FRONTEND_DIR, "pages", "index.html");
 const DEFAULT_LOGO_URL =
   "https://ojigtjcwhcrnawdbtqkl.supabase.co/storage/v1/object/public/public_assets/logos/moose.png";
 
