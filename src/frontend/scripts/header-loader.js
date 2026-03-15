@@ -123,6 +123,13 @@
         script2.src = `${root}scripts/header-actions.js`;
         document.body.appendChild(script2);
       }
+      if (!window.__pushNotificationsScriptLoaded) {
+        window.__pushNotificationsScriptLoaded = true;
+        const script3 = document.createElement("script");
+        script3.type = "module";
+        script3.src = `${root}scripts/push-notifications.js`;
+        document.body.appendChild(script3);
+      }
     } else {
       console.error("No se pudo cargar el header:", xhr.status, partialUrl);
     }

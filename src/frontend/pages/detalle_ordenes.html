@@ -13,6 +13,47 @@
         border-radius: 12px;
         padding: 12px 14px;
       }
+      .orden-info-grid {
+        position: relative;
+        padding-right: 132px;
+        align-items: start;
+      }
+      .orden-estado-chip {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 30px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+      }
+      .orden-estado-chip.is-pending {
+        background: #fff7db;
+        color: #8a6100;
+        border-color: #f3d27a;
+      }
+      .orden-estado-chip.is-waiting {
+        background: #e0f2fe;
+        color: #075985;
+        border-color: #9bd4ff;
+      }
+      .orden-estado-chip.is-processed {
+        background: #e7f8ee;
+        color: #166534;
+        border-color: #9fd8b2;
+      }
+      .orden-estado-chip.is-cancelled {
+        background: #fee2e2;
+        color: #b91c1c;
+        border-color: #f5b5b5;
+      }
       .orden-section-title {
         margin: 16px 0 8px;
         font-size: 16px;
@@ -24,11 +65,36 @@
         flex-direction: column;
         gap: 4px;
       }
+      .orden-item-meta {
+        margin: 2px 0 0;
+        font-size: 13px;
+        color: #4b5563;
+      }
       #orden-items .cart-table-scroll {
+        display: block;
+        width: 100%;
+        max-width: 100%;
         overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
+      #orden-items {
+        width: 100%;
+        min-width: 0;
+      }
+      #orden-items .cart-layout,
+      #orden-items .orden-items-panel {
+        width: 100%;
+        min-width: 0;
       }
       #orden-items .cart-page-table {
+        width: max-content;
         min-width: 760px;
+      }
+      .cart-table-wrap {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
       }
       #orden-items .status-chip {
         display: inline-flex;
@@ -43,8 +109,11 @@
         white-space: nowrap;
       }
       @media (max-width: 700px) {
-        #orden-items .cart-page-table {
-          min-width: 700px;
+        .orden-info-grid {
+          padding-right: 110px;
+        }
+        #orden-items .cart-table-scroll {
+          padding-bottom: 4px;
         }
       }
     </style>
@@ -57,7 +126,6 @@
       <div class="cart-title-row">
         <div class="orden-header-row">
           <h2>Detalle de Orden</h2>
-          <p id="detalle-subtitle" class="status"></p>
         </div>
         <button id="btn-volver" type="button" class="btn-outline">Volver</button>
       </div>
@@ -65,7 +133,7 @@
       <p id="detalle-status" class="status">Cargando orden...</p>
 
       <section class="orden-info-card">
-        <div id="orden-info-grid" class="modal-info-grid"></div>
+        <div id="orden-info-grid" class="modal-info-grid orden-info-grid"></div>
       </section>
 
       <h3 id="orden-items-title" class="orden-section-title">Items</h3>

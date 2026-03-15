@@ -27,6 +27,7 @@ import { initSearch, updateSearchData } from "./search.js";
 import { renderCategorias } from "./render.js";
 import { AVATAR_RANDOM_COLORS, applyAvatarImage, resolveAvatarForDisplay } from "./avatar-fallback.js";
 import { STATIC_HEADER_LOGO_HREF } from "./branding.js";
+import { enablePushOnCurrentDevice, getWebPushState } from "./push-notifications.js";
 import {
   attachLogout,
   getCachedCart,
@@ -56,6 +57,10 @@ const logo = document.querySelector(".logo");
 const testingBtn = document.querySelector("#btn-testing-toggle");
 const missingDataWrap = document.querySelector("#missing-data-wrap");
 const missingDataBtn = document.querySelector("#missing-data-btn");
+const pushPermissionWrap = document.querySelector("#push-permission-wrap");
+const pushPermissionMessageEl = document.querySelector("#push-permission-message");
+const btnPushPermissionEl = document.querySelector("#btn-push-permission");
+const btnPushPermissionDismissEl = document.querySelector("#btn-push-permission-dismiss");
 const tasaPanelEl = document.querySelector("#tasa-panel");
 const tasaActualEl = document.querySelector("#tasa-actual");
 const tasaMarkupWrapEl = document.querySelector("#tasa-markup-wrap");
@@ -85,6 +90,7 @@ const MOBILE_PULL_REFRESH_AXIS_LOCK_PX = 14;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
 const PAGE_LOADER_LOGO_FALLBACK =
   STATIC_HEADER_LOGO_HREF;
+const PUSH_PERMISSION_DISMISS_PREFIX = "pushPermissionPromptDismissed";
 let homeBannersSliderTimer = null;
 let homeBannersSliderRunId = 0;
 let homeBannersCurrentIndex = 0;
@@ -164,6 +170,8 @@ let avatarModalPendingColor = AVATAR_MODAL_DEFAULT_COLOR;
 let avatarModalWasPrompted = false;
 let tasaRefreshTimer = null;
 let tasaAutoRefreshEnabled = false;
+let pushPermissionPromptBusy = false;
+let currentPushPromptUserId = null;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -211,6 +219,149 @@ const getNextRateUpdateDate = () => {
 
 const getTasaBsValue = (rate) => {
   return Number.isFinite(rate) ? Math.round(rate * 100) / 100 : null;
+};
+
+const getPushPermissionDismissKey = (userId = currentPushPromptUserId) => {
+  const parsed = Number(userId);
+  if (!Number.isFinite(parsed) || parsed <= 0) return PUSH_PERMISSION_DISMISS_PREFIX;
+  return `${PUSH_PERMISSION_DISMISS_PREFIX}:${Math.trunc(parsed)}`;
+};
+
+const isPushPermissionPromptDismissed = (userId = currentPushPromptUserId) => {
+  try {
+    return sessionStorage.getItem(getPushPermissionDismissKey(userId)) === "1";
+  } catch (_err) {
+    return false;
+  }
+};
+
+const dismissPushPermissionPrompt = (userId = currentPushPromptUserId) => {
+  try {
+    sessionStorage.setItem(getPushPermissionDismissKey(userId), "1");
+  } catch (_err) {
+    // noop
+  }
+};
+
+const clearPushPermissionPromptDismissal = (userId = currentPushPromptUserId) => {
+  try {
+    sessionStorage.removeItem(getPushPermissionDismissKey(userId));
+  } catch (_err) {
+    // noop
+  }
+};
+
+const hidePushPermissionPrompt = () => {
+  pushPermissionWrap?.classList.add("hidden");
+  if (pushPermissionMessageEl) {
+    pushPermissionMessageEl.textContent = "";
+    pushPermissionMessageEl.classList.remove("is-error");
+  }
+  if (btnPushPermissionEl) {
+    btnPushPermissionEl.classList.remove("hidden");
+    btnPushPermissionEl.disabled = false;
+    btnPushPermissionEl.textContent = "Permitir notificaciones";
+  }
+  if (btnPushPermissionDismissEl) {
+    btnPushPermissionDismissEl.disabled = false;
+    btnPushPermissionDismissEl.textContent = "Ahora no";
+  }
+};
+
+const showPushPermissionPrompt = ({
+  message = "",
+  isError = false,
+  showAction = true,
+  actionLabel = "Permitir notificaciones",
+  dismissLabel = "Ahora no",
+} = {}) => {
+  if (!pushPermissionWrap || !pushPermissionMessageEl) return;
+  pushPermissionMessageEl.textContent = message;
+  pushPermissionMessageEl.classList.toggle("is-error", isError);
+  if (btnPushPermissionEl) {
+    btnPushPermissionEl.textContent = actionLabel;
+    btnPushPermissionEl.classList.toggle("hidden", !showAction);
+  }
+  if (btnPushPermissionDismissEl) {
+    btnPushPermissionDismissEl.textContent = dismissLabel;
+  }
+  pushPermissionWrap.classList.remove("hidden");
+};
+
+const maybePromptHomePushPermission = async ({ currentUser = null, sessionRoles = null } = {}) => {
+  if (!pushPermissionWrap) return;
+
+  currentPushPromptUserId = Number(currentUser?.id_usuario || requireSession()) || null;
+  const isClient =
+    !!currentUser &&
+    (isTrue(sessionRoles?.acceso_cliente) || isTrue(currentUser?.acceso_cliente));
+
+  if (!isClient || !currentPushPromptUserId) {
+    hidePushPermissionPrompt();
+    return;
+  }
+
+  let state;
+  try {
+    state = await getWebPushState();
+  } catch (err) {
+    console.error("get web push state error", err);
+    hidePushPermissionPrompt();
+    return;
+  }
+
+  if (!state?.supported || state.tableMissing || !state.backendConfigured) {
+    hidePushPermissionPrompt();
+    return;
+  }
+
+  if (state.permission === "granted") {
+    clearPushPermissionPromptDismissal(currentPushPromptUserId);
+    if (!state.currentDeviceSubscribed) {
+      try {
+        await enablePushOnCurrentDevice();
+        state = await getWebPushState();
+      } catch (err) {
+        console.error("enable web push on granted device error", err);
+        showPushPermissionPrompt({
+          message: err?.message || "No se pudieron activar las notificaciones en este dispositivo.",
+          isError: true,
+          showAction: true,
+          actionLabel: "Reintentar",
+          dismissLabel: "Ocultar",
+        });
+        return;
+      }
+    }
+    if (state.currentDeviceSubscribed) {
+      hidePushPermissionPrompt();
+      return;
+    }
+  }
+
+  if (isPushPermissionPromptDismissed(currentPushPromptUserId)) {
+    hidePushPermissionPrompt();
+    return;
+  }
+
+  if (state.permission === "denied") {
+    showPushPermissionPrompt({
+      message:
+        "Las notificaciones están bloqueadas en este navegador. Actívalas desde la configuración del sitio para recibir recordatorios.",
+      isError: true,
+      showAction: false,
+      dismissLabel: "Cerrar",
+    });
+    return;
+  }
+
+  showPushPermissionPrompt({
+    message: "Activa las notificaciones para recibir recordatorios y avisos de tus servicios.",
+    isError: false,
+    showAction: true,
+    actionLabel: "Permitir notificaciones",
+    dismissLabel: "Ahora no",
+  });
 };
 
 const renderTasaActual = (rate) => {
@@ -1912,6 +2063,9 @@ async function init() {
       console.error("avatar onboarding prompt error", err);
     });
     const sessionRoles = getSessionRoles();
+    maybePromptHomePushPermission({ currentUser, sessionRoles }).catch((err) => {
+      console.error("home push permission prompt error", err);
+    });
     const canSeeRate = !!currentUser && isExplicitFalse(currentUser?.acceso_cliente);
     if (tasaActualEl) {
       if (!canSeeRate) {
@@ -2104,6 +2258,63 @@ async function init() {
 init();
 attachMobilePullToRefresh();
 attachLogout(clearServerSession, clearCachedCart);
+
+btnPushPermissionEl?.addEventListener("click", async () => {
+  if (pushPermissionPromptBusy) return;
+
+  try {
+    pushPermissionPromptBusy = true;
+    if (btnPushPermissionEl) {
+      btnPushPermissionEl.disabled = true;
+      btnPushPermissionEl.textContent = "Solicitando...";
+    }
+    if (btnPushPermissionDismissEl) {
+      btnPushPermissionDismissEl.disabled = true;
+    }
+    if (pushPermissionMessageEl) {
+      pushPermissionMessageEl.textContent = "Solicitando permiso para notificaciones...";
+      pushPermissionMessageEl.classList.remove("is-error");
+    }
+
+    await enablePushOnCurrentDevice();
+    clearPushPermissionPromptDismissal(currentPushPromptUserId);
+    hidePushPermissionPrompt();
+  } catch (err) {
+    console.error("enable web push from home error", err);
+    const permission =
+      typeof Notification !== "undefined" ? Notification.permission : "unsupported";
+    if (permission === "denied") {
+      showPushPermissionPrompt({
+        message:
+          "Las notificaciones quedaron bloqueadas. Debes activarlas desde la configuración del navegador para recibir recordatorios.",
+        isError: true,
+        showAction: false,
+        dismissLabel: "Cerrar",
+      });
+    } else {
+      showPushPermissionPrompt({
+        message: err?.message || "No se pudo activar las notificaciones en este dispositivo.",
+        isError: true,
+        showAction: true,
+        actionLabel: "Reintentar",
+        dismissLabel: "Ahora no",
+      });
+    }
+  } finally {
+    pushPermissionPromptBusy = false;
+    if (btnPushPermissionEl) {
+      btnPushPermissionEl.disabled = false;
+    }
+    if (btnPushPermissionDismissEl) {
+      btnPushPermissionDismissEl.disabled = false;
+    }
+  }
+});
+
+btnPushPermissionDismissEl?.addEventListener("click", () => {
+  dismissPushPermissionPrompt(currentPushPromptUserId);
+  hidePushPermissionPrompt();
+});
 
 // Redirección a la página de carrito
 const viewCartBtn = document.querySelector("#btn-view-cart");

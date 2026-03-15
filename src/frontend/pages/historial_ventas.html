@@ -25,7 +25,26 @@
         overflow-x: auto;
       }
       .historial-table-wrap .table-base {
-        min-width: 980px;
+        min-width: 1060px;
+      }
+      .historial-delete-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 999px;
+        background: #fee2e2;
+        color: #b91c1c;
+        font-size: 16px;
+        font-weight: 800;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .historial-delete-btn:hover {
+        background: #fecaca;
+      }
+      .historial-delete-btn:disabled {
+        opacity: 0.65;
+        cursor: wait;
       }
       .status {
         margin: 0;
@@ -57,6 +76,7 @@
                 <th>Referencia</th>
                 <th>Fecha</th>
                 <th>Hora</th>
+                <th>Accion</th>
               </tr>
             </thead>
             <tbody id="historial-body"></tbody>
@@ -67,7 +87,7 @@
 
     <script type="module">
       import { requireSession, attachLogoHome, attachLogout } from "../scripts/session.js";
-      import { clearServerSession, supabase } from "../scripts/api.js";
+      import { clearServerSession, loadCurrentUser, supabase } from "../scripts/api.js";
       import { formatDDMMYYYY } from "../scripts/date-format.js";
 
       requireSession();
@@ -77,6 +97,7 @@
       const statusEl = document.querySelector("#historial-status");
       const tbodyEl = document.querySelector("#historial-body");
       const monthSelectEl = document.querySelector("#historial-mes-select");
+      let canDeleteVentas = false;
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -144,8 +165,56 @@
         return `${y}-${m}`;
       };
 
+      tbodyEl?.addEventListener("click", async (event) => {
+        const deleteBtn = event.target.closest(".historial-delete-btn");
+        if (!deleteBtn) return;
+
+        const ventaId = Number(deleteBtn.dataset.idVenta || 0);
+        if (!canDeleteVentas || !Number.isFinite(ventaId) || ventaId <= 0) return;
+
+        const confirmed = window.confirm(
+          `¿Seguro que quieres eliminar la venta #${ventaId}?`
+        );
+        if (!confirmed) return;
+
+        const originalLabel = deleteBtn.textContent;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = "…";
+        setStatus(`Eliminando venta #${ventaId}...`);
+
+        try {
+          const { error: ventaErr } = await supabase
+            .from("ventas")
+            .delete()
+            .eq("id_venta", ventaId);
+          if (ventaErr) throw ventaErr;
+
+          const { error: histErr } = await supabase
+            .from("historial_ventas")
+            .delete()
+            .eq("id_venta", ventaId);
+          if (histErr) {
+            console.error("historial ventas delete history error", histErr);
+            alert(
+              "La venta se eliminó, pero no se pudieron limpiar sus registros en historial_ventas."
+            );
+          }
+
+          window.location.reload();
+        } catch (err) {
+          console.error("historial ventas delete venta error", err);
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = originalLabel;
+          setStatus("No se pudo eliminar la venta.");
+          alert("No se pudo eliminar la venta.");
+        }
+      });
+
       const init = async () => {
         try {
+          const currentUser = await loadCurrentUser();
+          canDeleteVentas = isTrue(currentUser?.permiso_superadmin);
+
           const { data: historial, error } = await supabase
             .from("historial_ventas")
             .select(
@@ -302,6 +371,10 @@
                 "-";
               const hora = formatHora(r.hora_pago || orden?.hora_orden);
               const idVentaVisible = r.id_venta ?? orden?.id_orden ?? "-";
+              const actionHtml =
+                canDeleteVentas && r.id_venta
+                  ? `<button type="button" class="historial-delete-btn" data-id-venta="${r.id_venta}" aria-label="Eliminar venta ${r.id_venta}" title="Eliminar venta ${r.id_venta}">X</button>`
+                  : "-";
               return {
                 monthKey: getMonthKey(rawFecha) || "__sin_fecha__",
                 html: `
@@ -315,6 +388,7 @@
                   <td>${referencia}</td>
                   <td>${fecha}</td>
                   <td>${hora}</td>
+                  <td>${actionHtml}</td>
                 </tr>
               `,
               };

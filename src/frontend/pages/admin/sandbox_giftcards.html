@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sandbox Gift Cards</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .sandbox-grid {
+        display: grid;
+        gap: 16px;
+      }
+      .sandbox-card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+      }
+      .sandbox-card h3 {
+        margin: 0 0 12px;
+      }
+      .sandbox-form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .sandbox-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .sandbox-field-full {
+        grid-column: 1 / -1;
+      }
+      .sandbox-field input,
+      .sandbox-field select,
+      .sandbox-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .sandbox-actions {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .sandbox-preview,
+      .sandbox-response {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 14px;
+        padding: 14px;
+        font-size: 12px;
+        line-height: 1.55;
+        overflow-x: auto;
+      }
+      .sandbox-table-wrap {
+        overflow-x: auto;
+      }
+      .sandbox-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .sandbox-table th,
+      .sandbox-table td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #e5e7eb;
+        white-space: nowrap;
+      }
+      .sandbox-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #ecfeff;
+        color: #155e75;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      @media (max-width: 760px) {
+        .sandbox-form {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Sandbox de Gift Cards</h2>
+      <p class="status">
+        Esta vista inserta solo en tablas sandbox. No toca <code>ordenes</code> ni
+        <code>historial_ventas</code>.
+      </p>
+
+      <div class="sandbox-grid">
+        <section class="sandbox-card">
+          <h3>Programar estructura</h3>
+          <form id="sandbox-form" class="sandbox-form">
+            <div class="sandbox-field">
+              <label for="sandbox-user-id">ID usuario cliente</label>
+              <input id="sandbox-user-id" type="number" min="1" placeholder="Opcional" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-platform">Plataforma gift card</label>
+              <select id="sandbox-platform">
+                <option value="">Cargando...</option>
+              </select>
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-price">Precio / valor</label>
+              <select id="sandbox-price" disabled>
+                <option value="">Selecciona una plataforma</option>
+              </select>
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-qty">Cantidad</label>
+              <input id="sandbox-qty" type="number" min="1" step="1" value="1" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-reference">Referencia</label>
+              <input id="sandbox-reference" type="text" placeholder="Ej. 123456" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-rate">Tasa Bs</label>
+              <input id="sandbox-rate" type="number" min="0" step="0.000001" placeholder="Opcional" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-unit-usd">Precio unitario USD</label>
+              <input id="sandbox-unit-usd" type="number" min="0" step="0.01" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-total-usd">Total USD</label>
+              <input id="sandbox-total-usd" type="number" min="0" step="0.01" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-total-bs">Total Bs</label>
+              <input id="sandbox-total-bs" type="number" min="0" step="0.01" />
+            </div>
+            <div class="sandbox-field">
+              <label for="sandbox-notes">Notas</label>
+              <input id="sandbox-notes" type="text" placeholder="Opcional" />
+            </div>
+            <div class="sandbox-actions">
+              <button id="sandbox-submit" type="submit" class="btn-primary">
+                Simular insert
+              </button>
+              <span class="sandbox-badge">Solo tablas sandbox</span>
+            </div>
+          </form>
+          <p id="sandbox-status" class="status"></p>
+        </section>
+
+        <section class="sandbox-card">
+          <h3>Payload a insertar</h3>
+          <pre id="sandbox-preview" class="sandbox-preview">{}</pre>
+        </section>
+
+        <section class="sandbox-card">
+          <h3>Respuesta del backend</h3>
+          <pre id="sandbox-response" class="sandbox-response">Sin ejecutar todavía.</pre>
+        </section>
+
+        <section class="sandbox-card">
+          <h3>Últimas simulaciones</h3>
+          <div class="sandbox-table-wrap">
+            <table class="sandbox-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Cliente</th>
+                  <th>Plataforma</th>
+                  <th>Cantidad</th>
+                  <th>Total USD</th>
+                  <th>Total Bs</th>
+                  <th>Referencia</th>
+                  <th>Creado</th>
+                </tr>
+              </thead>
+              <tbody id="sandbox-recent-body">
+                <tr>
+                  <td colspan="8" class="status">Cargando...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
+      import { API_BASE, clearServerSession, ensureServerSession } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const formEl = document.getElementById("sandbox-form");
+      const statusEl = document.getElementById("sandbox-status");
+      const previewEl = document.getElementById("sandbox-preview");
+      const responseEl = document.getElementById("sandbox-response");
+      const recentBodyEl = document.getElementById("sandbox-recent-body");
+      const userIdEl = document.getElementById("sandbox-user-id");
+      const platformEl = document.getElementById("sandbox-platform");
+      const priceEl = document.getElementById("sandbox-price");
+      const qtyEl = document.getElementById("sandbox-qty");
+      const referenceEl = document.getElementById("sandbox-reference");
+      const rateEl = document.getElementById("sandbox-rate");
+      const unitUsdEl = document.getElementById("sandbox-unit-usd");
+      const totalUsdEl = document.getElementById("sandbox-total-usd");
+      const totalBsEl = document.getElementById("sandbox-total-bs");
+      const notesEl = document.getElementById("sandbox-notes");
+      const submitEl = document.getElementById("sandbox-submit");
+
+      let catalog = { platforms: [], prices: [] };
+
+      const round2 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      const formatAmount = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) ? num.toFixed(2) : "-";
+      };
+      const setStatus = (message = "", isError = false) => {
+        statusEl.textContent = message;
+        statusEl.style.color = isError ? "#b91c1c" : "";
+      };
+      const getSelectedPrice = () =>
+        catalog.prices.find((price) => Number(price.id_precio) === Number(priceEl.value)) || null;
+
+      const buildPayload = () => {
+        const selectedPrice = getSelectedPrice();
+        return {
+          id_usuario_cliente: userIdEl.value ? Number(userIdEl.value) : null,
+          id_plataforma: platformEl.value ? Number(platformEl.value) : null,
+          id_precio: priceEl.value ? Number(priceEl.value) : null,
+          cantidad: qtyEl.value ? Number(qtyEl.value) : 1,
+          referencia: referenceEl.value.trim() || null,
+          tasa_bs: rateEl.value ? Number(rateEl.value) : null,
+          precio_unitario_usd: unitUsdEl.value ? Number(unitUsdEl.value) : null,
+          total_usd: totalUsdEl.value ? Number(totalUsdEl.value) : null,
+          total_bs: totalBsEl.value ? Number(totalBsEl.value) : null,
+          notas: notesEl.value.trim() || null,
+          valor_tarjeta_de_regalo: selectedPrice?.valor_tarjeta_de_regalo || null,
+          moneda: selectedPrice?.moneda || null,
+          region: selectedPrice?.region || null,
+        };
+      };
+
+      const renderPreview = () => {
+        previewEl.textContent = JSON.stringify(buildPayload(), null, 2);
+      };
+
+      const fetchJson = async (url, options = {}) => {
+        await ensureServerSession();
+        const res = await fetch(url, {
+          credentials: "include",
+          ...options,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.error || "No se pudo completar la solicitud.");
+        }
+        return data;
+      };
+
+      const updateTotalsFromInputs = () => {
+        const selectedPrice = getSelectedPrice();
+        const qty = Math.max(1, Number(qtyEl.value) || 1);
+        const rate = Number(rateEl.value);
+        const defaultUnit =
+          Number(unitUsdEl.dataset.defaultValue || selectedPrice?.precio_usd_detal || 0) || 0;
+        const unitValue = Number(unitUsdEl.value);
+        const effectiveUnit = Number.isFinite(unitValue) && unitValue >= 0 ? unitValue : defaultUnit;
+        const totalUsd = round2(effectiveUnit * qty);
+
+        unitUsdEl.value = effectiveUnit ? effectiveUnit.toFixed(2) : "";
+        totalUsdEl.value = totalUsd ? totalUsd.toFixed(2) : "0.00";
+
+        if (Number.isFinite(rate) && rate > 0) {
+          totalBsEl.value = round2(totalUsd * rate).toFixed(2);
+        } else if (!totalBsEl.matches(":focus")) {
+          totalBsEl.value = "";
+        }
+
+        renderPreview();
+      };
+
+      const renderPriceOptions = () => {
+        const platformId = Number(platformEl.value);
+        const filtered = catalog.prices.filter(
+          (price) => Number(price.id_plataforma) === platformId,
+        );
+        if (!filtered.length) {
+          priceEl.innerHTML = `<option value="">No hay precios para esta plataforma</option>`;
+          priceEl.disabled = true;
+          unitUsdEl.value = "";
+          renderPreview();
+          return;
+        }
+
+        priceEl.disabled = false;
+        priceEl.innerHTML =
+          `<option value="">Selecciona un valor</option>` +
+          filtered
+            .map((price) => {
+              const label = [
+                price.valor_tarjeta_de_regalo ? `${price.valor_tarjeta_de_regalo} ${price.moneda || ""}` : "",
+                Number.isFinite(Number(price.precio_usd_detal))
+                  ? `$${Number(price.precio_usd_detal).toFixed(2)}`
+                  : "",
+                price.region ? `(${price.region})` : "",
+              ]
+                .filter(Boolean)
+                .join(" - ");
+              return `<option value="${price.id_precio}">${escapeHtml(label || `Precio ${price.id_precio}`)}</option>`;
+            })
+            .join("");
+        renderPreview();
+      };
+
+      const applySelectedPriceDefaults = () => {
+        const selectedPrice = getSelectedPrice();
+        const defaultUnit = Number(selectedPrice?.precio_usd_detal || 0) || 0;
+        unitUsdEl.dataset.defaultValue = defaultUnit ? String(defaultUnit) : "";
+        unitUsdEl.value = defaultUnit ? defaultUnit.toFixed(2) : "";
+        updateTotalsFromInputs();
+      };
+
+      const renderRecent = (orders = []) => {
+        if (!orders.length) {
+          recentBodyEl.innerHTML = `<tr><td colspan="8" class="status">No hay simulaciones todavía.</td></tr>`;
+          return;
+        }
+
+        recentBodyEl.innerHTML = orders
+          .map((order) => {
+            const cliente = order?.cliente
+              ? `${order.cliente.nombre || ""} ${order.cliente.apellido || ""}`.trim()
+              : order?.id_usuario_cliente
+                ? `Usuario ${order.id_usuario_cliente}`
+                : "-";
+            const plataforma = order?.plataforma?.nombre || `Plataforma ${order.id_plataforma || "-"}`;
+            const createdAt = order?.creado_en
+              ? new Date(order.creado_en).toLocaleString("es-VE")
+              : "-";
+            return `
+              <tr>
+                <td>#${order.id_sandbox_order}</td>
+                <td>${escapeHtml(cliente)}</td>
+                <td>${escapeHtml(plataforma)}</td>
+                <td>${Number(order.cantidad || 0)}</td>
+                <td>$${formatAmount(order.total_usd)}</td>
+                <td>${order.total_bs != null ? formatAmount(order.total_bs) : "-"}</td>
+                <td>${escapeHtml(order.referencia || "-")}</td>
+                <td>${escapeHtml(createdAt)}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      };
+
+      const loadRecent = async () => {
+        try {
+          const data = await fetchJson(`${API_BASE}/api/sandbox/giftcards/recent`);
+          renderRecent(data?.orders || []);
+        } catch (err) {
+          console.error("sandbox recent error", err);
+          recentBodyEl.innerHTML = `<tr><td colspan="8" class="status">No se pudieron cargar las simulaciones.</td></tr>`;
+        }
+      };
+
+      const loadCatalog = async () => {
+        setStatus("Cargando catálogo...");
+        try {
+          const data = await fetchJson(`${API_BASE}/api/sandbox/giftcards/catalog`);
+          catalog = {
+            platforms: Array.isArray(data?.platforms) ? data.platforms : [],
+            prices: Array.isArray(data?.prices) ? data.prices : [],
+          };
+
+          if (!catalog.platforms.length) {
+            platformEl.innerHTML = `<option value="">No hay plataformas gift card</option>`;
+            priceEl.innerHTML = `<option value="">Sin datos</option>`;
+            priceEl.disabled = true;
+            setStatus("No hay plataformas de gift cards configuradas.", true);
+            renderPreview();
+            return;
+          }
+
+          platformEl.innerHTML =
+            `<option value="">Selecciona una plataforma</option>` +
+            catalog.platforms
+              .map(
+                (platform) =>
+                  `<option value="${platform.id_plataforma}">${escapeHtml(platform.nombre || `Plataforma ${platform.id_plataforma}`)}</option>`,
+              )
+              .join("");
+          setStatus("Configura una simulación y ejecuta el insert sandbox.");
+          renderPreview();
+        } catch (err) {
+          console.error("sandbox catalog error", err);
+          platformEl.innerHTML = `<option value="">Error cargando catálogo</option>`;
+          priceEl.innerHTML = `<option value="">Error</option>`;
+          priceEl.disabled = true;
+          setStatus(err?.message || "No se pudo cargar el catálogo.", true);
+        }
+      };
+
+      platformEl.addEventListener("change", () => {
+        renderPriceOptions();
+        unitUsdEl.dataset.defaultValue = "";
+        unitUsdEl.value = "";
+        totalUsdEl.value = "";
+        totalBsEl.value = "";
+      });
+      priceEl.addEventListener("change", applySelectedPriceDefaults);
+      [userIdEl, qtyEl, referenceEl, rateEl, unitUsdEl, totalUsdEl, totalBsEl, notesEl].forEach(
+        (input) => {
+          input.addEventListener("input", () => {
+            if (input === qtyEl || input === rateEl || input === unitUsdEl) {
+              updateTotalsFromInputs();
+            } else {
+              renderPreview();
+            }
+          });
+        },
+      );
+
+      totalUsdEl.addEventListener("focus", renderPreview);
+      totalBsEl.addEventListener("focus", renderPreview);
+
+      formEl.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = buildPayload();
+        if (!payload.id_plataforma || !payload.id_precio) {
+          setStatus("Selecciona plataforma y precio.", true);
+          return;
+        }
+
+        try {
+          submitEl.disabled = true;
+          setStatus("Insertando en tablas sandbox...");
+          const data = await fetchJson(`${API_BASE}/api/sandbox/giftcards/simulate-sale`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          responseEl.textContent = JSON.stringify(data, null, 2);
+          setStatus(`Simulación guardada en sandbox con ID #${data?.order?.id_sandbox_order || "-"}.`);
+          await loadRecent();
+        } catch (err) {
+          console.error("sandbox simulate error", err);
+          responseEl.textContent = JSON.stringify(
+            { error: err?.message || "No se pudo guardar la simulación." },
+            null,
+            2,
+          );
+          setStatus(err?.message || "No se pudo guardar la simulación.", true);
+        } finally {
+          submitEl.disabled = false;
+        }
+      });
+
+      renderPreview();
+      await loadCatalog();
+      await loadRecent();
+    </script>
+  </body>
+</html>

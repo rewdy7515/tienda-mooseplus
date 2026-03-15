@@ -8,6 +8,7 @@
     { "src": "/api/(.*)", "dest": "/api/index.js" },
     { "src": "^/$", "dest": "/api/index.js" },
     { "handle": "filesystem" },
+    { "src": "/service-worker.js", "dest": "/src/frontend/public/service-worker.js" },
     { "src": "/styles/(.*)", "dest": "/src/frontend/styles/$1" },
     { "src": "/scripts/(.*)", "dest": "/src/frontend/scripts/$1" },
     { "src": "/components/(.*)", "dest": "/src/frontend/components/$1" },

@@ -3156,6 +3156,45 @@ input[type="number"].input-inline {
   padding: 0 20px 12px;
 }
 
+.push-permission-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0 20px 12px;
+}
+
+.push-permission-wrap.hidden {
+  display: none;
+}
+
+.push-permission-card {
+  width: min(100%, 720px);
+  padding: 14px 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.08);
+}
+
+.push-permission-message {
+  margin: 0;
+  color: #1d4ed8;
+  font-weight: 600;
+  text-align: center;
+}
+
+.push-permission-message.is-error {
+  color: #b91c1c;
+}
+
+.push-permission-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .home-banners {
   margin: -1px 0 8px;
 }
@@ -3344,6 +3383,22 @@ input[type="number"].input-inline {
 
 .missing-data-wrap .btn-outline:hover {
   background: #fde68a;
+}
+
+@media (max-width: 640px) {
+  .push-permission-card {
+    padding: 12px;
+  }
+
+  .push-permission-actions {
+    gap: 8px;
+  }
+
+  .push-permission-actions .btn-primary,
+  .push-permission-actions .btn-outline {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .testing-toggle-btn {
@@ -3543,6 +3598,7 @@ input[type="number"].input-inline {
   display: flex;
   justify-content: center;
   padding: 32px 16px;
+  box-sizing: border-box;
 }
 
 .auth-card {
@@ -3552,6 +3608,7 @@ input[type="number"].input-inline {
   padding: 28px;
   width: 100%;
   max-width: 420px;
+  box-sizing: border-box;
   text-align: center;
   border: 1px solid #f0f0f0;
 }
@@ -3578,6 +3635,8 @@ input[type="number"].input-inline {
   display: flex;
   flex-direction: column;
   gap: 7px;
+  width: 100%;
+  min-width: 0;
   text-align: left;
   align-items: flex-start;
 }
@@ -3630,6 +3689,8 @@ input[type="number"].input-inline {
 
 .auth-secondary {
   margin-top: 12px;
+  width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* Auth visual polish (login/signup) */
@@ -3643,6 +3704,8 @@ input[type="number"].input-inline {
 .auth-page:is(.login-page, .signup-page) .auth-card {
   position: relative;
   overflow: hidden;
+  width: min(100%, 420px);
+  max-width: min(420px, 100%);
   border: 1px solid #e2e8f0;
   border-radius: 22px;
   padding: 30px 28px 24px;
@@ -3734,6 +3797,12 @@ input[type="number"].input-inline {
 
 .auth-page:is(.login-page, .signup-page) .auth-captcha {
   justify-content: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.auth-page:is(.login-page, .signup-page) .auth-captcha > * {
+  max-width: 100%;
 }
 
 .auth-page:is(.login-page, .signup-page) .auth-submit {
@@ -3919,6 +3988,44 @@ input[type="number"].input-inline {
   }
   .auth-page:is(.login-page, .signup-page) .auth-title {
     font-size: 27px;
+  }
+  .auth-page:is(.login-page, .signup-page) .auth-subtitle {
+    margin-bottom: 18px;
+  }
+}
+
+@media (max-width: 360px) {
+  .auth-page:is(.login-page, .signup-page) .auth-container {
+    padding: 14px 10px;
+  }
+
+  .auth-page:is(.login-page, .signup-page) .auth-card {
+    padding: 22px 14px 18px;
+    border-radius: 16px;
+  }
+
+  .auth-page:is(.login-page, .signup-page) .auth-title {
+    font-size: 24px;
+  }
+
+  .auth-page:is(.login-page, .signup-page) .auth-form .form-input {
+    min-height: 44px;
+  }
+
+  .auth-page:is(.login-page, .signup-page) .auth-captcha {
+    justify-content: flex-start;
+    min-height: 72px;
+  }
+
+  .auth-page:is(.login-page, .signup-page) .auth-captcha > * {
+    transform: scale(0.89);
+    transform-origin: left top;
+  }
+
+  .auth-page:is(.login-page, .signup-page) .auth-secondary,
+  .status-message,
+  .input-message {
+    font-size: 12px;
   }
 }
 

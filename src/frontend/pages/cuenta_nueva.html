@@ -117,6 +117,121 @@
         border-radius: 8px;
         font-size: 14px;
       }
+      .cn-modal.cn-modal-large {
+        max-width: 820px;
+        width: min(100% - 32px, 820px);
+        max-height: min(90vh, 760px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .cn-resumen-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .cn-resumen-head h3,
+      .cn-resumen-head p {
+        margin: 0;
+      }
+      .cn-resumen-meta {
+        color: #4b5563;
+        font-size: 13px;
+      }
+      .cn-resumen-list {
+        display: grid;
+        gap: 10px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      .cn-resumen-item {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+        background: #f9fafb;
+      }
+      .cn-resumen-item-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .cn-resumen-item-title {
+        font-weight: 700;
+        color: #111827;
+      }
+      .cn-resumen-item-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .cn-resumen-tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #e5eefc;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .cn-resumen-item-detail {
+        margin: 0;
+        color: #374151;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .cn-resumen-item-price {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+      .cn-resumen-item-price label {
+        font-size: 13px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .cn-resumen-item-price input {
+        width: 140px;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      .cn-resumen-default {
+        font-size: 12px;
+        color: #6b7280;
+      }
+      .cn-resumen-footer {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid #e5e7eb;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .cn-resumen-total {
+        margin: 0;
+        font-weight: 800;
+        color: #111827;
+      }
+      .cn-resumen-empty {
+        margin: 0;
+        padding: 12px;
+        border: 1px dashed #d1d5db;
+        border-radius: 10px;
+        color: #6b7280;
+        text-align: center;
+      }
       #cn-procesar {
         margin-top: 4px;
         align-self: flex-start;
@@ -144,6 +259,26 @@
         background: #e5e7eb;
         color: #111;
       }
+      @media (max-width: 640px) {
+        .cn-modal.cn-modal-large {
+          width: calc(100% - 20px);
+          max-height: calc(100vh - 20px);
+          padding: 14px;
+        }
+        .cn-resumen-item-price input {
+          width: 100%;
+        }
+        .cn-resumen-footer {
+          align-items: stretch;
+        }
+        .cn-resumen-footer .cn-actions {
+          width: 100%;
+          justify-content: stretch;
+        }
+        .cn-resumen-footer .cn-actions .cn-btn {
+          flex: 1 1 0;
+        }
+      }
     </style>
   </head>
   <body>
@@ -162,7 +297,7 @@
         </div>
         <div class="field">
           <label for="cn-ref">Nro de referencia</label>
-          <input type="number" id="cn-ref" step="1" min="0" inputmode="numeric" />
+          <input type="number" id="cn-ref" step="1" min="0" inputmode="numeric" value="1111" />
         </div>
         <button type="button" class="btn-primary" id="cn-procesar">Procesar</button>
       </div>
@@ -192,9 +327,36 @@
         </div>
       </div>
     </div>
+    <div id="cn-resumen-modal" class="cn-overlay">
+      <div class="cn-modal cn-modal-large">
+        <div class="cn-resumen-head">
+          <div>
+            <h3>Resumen de la orden</h3>
+            <p id="cn-resumen-meta" class="cn-resumen-meta"></p>
+          </div>
+        </div>
+        <div id="cn-resumen-list" class="cn-resumen-list"></div>
+        <div class="cn-resumen-footer">
+          <p id="cn-resumen-total" class="cn-resumen-total">Total: $0.00</p>
+          <div class="cn-actions">
+            <button type="button" class="cn-btn cn-close" id="cn-resumen-cancelar">
+              Cancelar
+            </button>
+            <button type="button" class="cn-btn cn-primary" id="cn-resumen-confirmar">
+              Confirmar y procesar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
     <script type="module">
       import { requireSession, attachLogoHome } from "../scripts/session.js";
-      import { supabase, loadCurrentUser } from "../scripts/api.js";
+      import {
+        supabase,
+        loadCurrentUser,
+        fetchCheckoutSummary,
+        submitCheckout,
+      } from "../scripts/api.js";
       import { buildNotificationPayload, pickNotificationUserIds } from "../scripts/notification-templates.js";
 
       requireSession();
@@ -218,6 +380,13 @@
       const modalGuardarDefaultText = modalGuardar?.textContent || "Guardar";
       const procesarBtn = document.querySelector("#cn-procesar");
       const procesarBtnDefaultText = procesarBtn?.textContent || "Procesar";
+      const resumenModal = document.querySelector("#cn-resumen-modal");
+      const resumenMeta = document.querySelector("#cn-resumen-meta");
+      const resumenList = document.querySelector("#cn-resumen-list");
+      const resumenTotal = document.querySelector("#cn-resumen-total");
+      const resumenCancelar = document.querySelector("#cn-resumen-cancelar");
+      const resumenConfirmar = document.querySelector("#cn-resumen-confirmar");
+      const resumenConfirmarDefaultText = resumenConfirmar?.textContent || "Confirmar y procesar";
       let sugsCounter = 0;
       let suppressBlur = false;
       let usuariosCache = null;
@@ -226,6 +395,7 @@
       let adminId = null;
       let isSuperAdmin = false;
       let clienteSeleccionadoId = null;
+      let checkoutSummaryState = null;
       const toTitleCase = (str) =>
         (str || "").replace(/(\S+)/g, (w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ""));
       const normalizeText = (val) =>
@@ -242,6 +412,103 @@
           month: "2-digit",
           day: "2-digit",
         }).format(new Date());
+      const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+      const formatUsd = (value) => `$${roundMoney(value).toFixed(2)}`;
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      const parseMoneyInput = (value) => {
+        const parsed = Number(String(value ?? "").trim().replace(",", "."));
+        return Number.isFinite(parsed) ? roundMoney(parsed) : Number.NaN;
+      };
+      const setProcesarLoading = (isLoading = false, text = procesarBtnDefaultText) => {
+        if (!procesarBtn) return;
+        procesarBtn.disabled = !!isLoading;
+        procesarBtn.classList.toggle("btn-disabled", !!isLoading);
+        procesarBtn.textContent = isLoading ? text : procesarBtnDefaultText;
+      };
+      const setResumenConfirmLoading = (isLoading = false) => {
+        if (resumenConfirmar) {
+          resumenConfirmar.disabled = !!isLoading;
+          resumenConfirmar.classList.toggle("btn-disabled", !!isLoading);
+          resumenConfirmar.textContent = isLoading ? "Procesando..." : resumenConfirmarDefaultText;
+        }
+        if (resumenCancelar) {
+          resumenCancelar.disabled = !!isLoading;
+        }
+      };
+      const showResumenModal = () => resumenModal && resumenModal.classList.add("show");
+      const hideResumenModal = () => {
+        if (resumenModal) resumenModal.classList.remove("show");
+        checkoutSummaryState = null;
+      };
+      const updateResumenTotal = () => {
+        const total = roundMoney(
+          (checkoutSummaryState?.items || []).reduce((sum, item) => sum + (Number(item?.monto_usd) || 0), 0),
+        );
+        if (resumenTotal) resumenTotal.textContent = `Total: ${formatUsd(total)}`;
+        if (checkoutSummaryState) checkoutSummaryState.total_usd = total;
+      };
+      const renderResumenModal = () => {
+        if (!resumenList) return;
+        const items = Array.isArray(checkoutSummaryState?.items) ? checkoutSummaryState.items : [];
+        if (!items.length) {
+          resumenList.innerHTML = '<p class="cn-resumen-empty">No hay items en la orden.</p>';
+          updateResumenTotal();
+          return;
+        }
+        resumenList.innerHTML = items
+          .map((item, index) => {
+            const tags = [
+              item?.renovacion ? "Renovación" : "Nuevo",
+              `${Number(item?.cantidad) || 1} item(s)`,
+              `${Number(item?.meses) || 1} mes(es)`,
+              checkoutSummaryState?.tipo_precio === "mayor" ? "Precio mayor" : "Precio detal",
+              `Precio #${item?.id_precio || "-"}`,
+            ]
+              .map((tag) => `<span class="cn-resumen-tag">${tag}</span>`)
+              .join("");
+            const montoOriginal = Number(item?.monto_original_usd);
+            const descuento = Number(item?.descuento_usd);
+            const pricingText =
+              Number.isFinite(descuento) && descuento > 0
+                ? `Base: ${formatUsd(montoOriginal)} | Descuento: -${formatUsd(descuento)}`
+                : `Base: ${formatUsd(
+                    Number.isFinite(montoOriginal)
+                      ? montoOriginal
+                      : item?.monto_base_usd || item?.monto_usd || 0,
+                  )}`;
+            return `
+              <article class="cn-resumen-item">
+                <div class="cn-resumen-item-head">
+                  <div class="cn-resumen-item-title">Item ${index + 1}</div>
+                  <div class="cn-resumen-item-tags">${tags}</div>
+                </div>
+                <p class="cn-resumen-item-detail">${escapeHtml(item?.detalle || "Sin detalle")}</p>
+                <div class="cn-resumen-item-price">
+                  <label for="cn-resumen-monto-${item.id_item}">Monto a guardar</label>
+                  <input
+                    type="number"
+                    id="cn-resumen-monto-${item.id_item}"
+                    data-id-item="${item.id_item}"
+                    class="cn-resumen-monto"
+                    step="0.01"
+                    min="0"
+                    inputmode="decimal"
+                    value="${Number(item?.monto_usd || 0).toFixed(2)}"
+                  />
+                  <span class="cn-resumen-default">${pricingText}</span>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+        updateResumenTotal();
+      };
 
       const loadUsuariosCache = async () => {
         if (usuariosCache) return usuariosCache;
@@ -578,70 +845,31 @@
         }
       })();
 
-      // Procesar pedido: intenta checkout para el cliente indicado
-      document.querySelector("#cn-procesar")?.addEventListener("click", async () => {
-        if (procesarBtn?.disabled) return;
-        if (procesarBtn) {
-          procesarBtn.disabled = true;
-          procesarBtn.textContent = "Procesando...";
-          procesarBtn.classList.add("btn-disabled");
-        }
-        const idCliente = clienteSeleccionadoId || null;
-        if (!idCliente) {
-          alert("Selecciona un cliente válido (ID no encontrado).");
+      const finalizeCheckoutResponse = async (resp) => {
+        if (!resp?.id_orden) {
+          alert("La orden se creó sin id_orden.");
           return;
         }
-        if (!isSuperAdmin) {
-          alert("Acceso denegado.");
-          return;
+        if (adminId && resp?.id_orden) {
+          const { error: updOrdenErr } = await supabase
+            .from("ordenes")
+            .update({ id_admin: adminId })
+            .eq("id_orden", resp.id_orden);
+          if (updOrdenErr) {
+            console.error("set id_admin orden error", updOrdenErr);
+          }
         }
-        const referencia = (document.querySelector("#cn-ref")?.value || "").trim() || "N/A";
-        try {
-          const payload = {
-            id_metodo_de_pago: 1,
-            referencia,
-            comprobantes: [],
-            total: null,
-            tasa_bs: 400,
-            id_usuario_override: idCliente,
-            bypass_verificacion: isSuperAdmin === true,
-          };
-          console.log("[cuenta_nueva] payload checkout", {
-            idCliente,
-            adminId,
-            isSuperAdmin,
-            payload,
-          });
-          const { submitCheckout } = await import("../scripts/api.js");
-          const resp = await submitCheckout(payload);
-          console.log("[cuenta_nueva] checkout resp", resp);
-          if (resp?.error) {
-            alert(`Error al procesar: ${resp.error}`);
-            return;
-          }
-          // Marca el admin que procesó la orden
-          if (adminId && resp?.id_orden) {
-            const { error: updOrdenErr } = await supabase
-              .from("ordenes")
-              .update({ id_admin: adminId })
-              .eq("id_orden", resp.id_orden);
-            if (updOrdenErr) {
-              console.error("set id_admin orden error", updOrdenErr);
-            }
-          }
 
-          // Marca el admin que procesó la venta en ventas via id_orden
-          if (adminId && resp?.id_orden) {
-            const { error: updVentaErr } = await supabase
-              .from("ventas")
-              .update({ id_admin_venta: adminId })
-              .eq("id_orden", resp.id_orden);
-            if (updVentaErr) {
-              console.error("set id_admin_venta error", updVentaErr);
-            }
+        if (adminId && resp?.id_orden) {
+          const { error: updVentaErr } = await supabase
+            .from("ventas")
+            .update({ id_admin_venta: adminId })
+            .eq("id_orden", resp.id_orden);
+          if (updVentaErr) {
+            console.error("set id_admin_venta error", updVentaErr);
           }
+        }
 
-        // Notificaciones de nuevo servicio por cada venta de la orden
         try {
           if (resp?.id_orden) {
             const { data: ventasOrden, error: ventasOrdErr } = await supabase
@@ -689,22 +917,155 @@
         } catch (nErr) {
           console.error("nuevo_servicio notif error", nErr);
         }
+
         alert("Pedido procesado y asignado al cliente.");
         const dest = resp?.id_orden
           ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
           : "entregar_servicios.html";
         window.location.href = dest;
-      } catch (err) {
-        console.error("procesar cuenta nueva error", err);
-          alert("No se pudo procesar el pedido.");
+      };
+
+      const openCheckoutSummaryModal = async () => {
+        const idCliente = clienteSeleccionadoId || null;
+        if (!idCliente) {
+          alert("Selecciona un cliente válido (ID no encontrado).");
+          return;
+        }
+        if (!isSuperAdmin) {
+          alert("Acceso denegado.");
+          return;
+        }
+        const referencia = (document.querySelector("#cn-ref")?.value || "").trim() || "N/A";
+        try {
+          setProcesarLoading(true, "Cargando resumen...");
+          const summary = await fetchCheckoutSummary({
+            id_usuario_override: idCliente,
+          });
+          if (summary?.error) {
+            alert(`No se pudo cargar el resumen: ${summary.error}`);
+            return;
+          }
+          const items = Array.isArray(summary?.items)
+            ? summary.items.map((item) => ({
+                ...item,
+                monto_usd: roundMoney(item?.monto_usd || 0),
+                monto_base_usd: roundMoney(item?.monto_base_usd || item?.monto_usd || 0),
+                monto_original_usd: roundMoney(item?.monto_original_usd || item?.monto_base_usd || item?.monto_usd || 0),
+                descuento_usd: roundMoney(item?.descuento_usd || 0),
+              }))
+            : [];
+          if (!items.length) {
+            alert("No hay items en el carrito para procesar.");
+            return;
+          }
+          checkoutSummaryState = {
+            idCliente,
+            referencia,
+            acceso_cliente: summary?.acceso_cliente,
+            es_mayorista: summary?.es_mayorista === true,
+            tipo_precio: summary?.tipo_precio === "mayor" ? "mayor" : "detal",
+            tasa_bs:
+              Number.isFinite(Number(summary?.tasa_bs)) && Number(summary?.tasa_bs) > 0
+                ? Number(summary.tasa_bs)
+                : 400,
+            items,
+            total_usd: roundMoney(summary?.total_usd || 0),
+          };
+          if (resumenMeta) {
+            const accesoLabel = checkoutSummaryState.es_mayorista ? "Revendedor" : "Cliente final";
+            resumenMeta.textContent = `Cliente: ${(clienteInput?.value || "").trim() || idCliente} | Acceso: ${accesoLabel} | Ref: ${referencia}`;
+          }
+          renderResumenModal();
+          showResumenModal();
+        } catch (err) {
+          console.error("load checkout summary error", err);
+          alert("No se pudo cargar el resumen de la orden.");
         } finally {
-          if (procesarBtn) {
-            procesarBtn.disabled = false;
-            procesarBtn.textContent = procesarBtnDefaultText;
-            procesarBtn.classList.remove("btn-disabled");
+          setProcesarLoading(false);
+        }
+      };
+
+      const processCheckoutFromSummary = async () => {
+        if (resumenConfirmar?.disabled || !checkoutSummaryState) return;
+        const idCliente = checkoutSummaryState.idCliente || null;
+        const referencia = checkoutSummaryState.referencia || "N/A";
+        const amountInputs = Array.from(
+          resumenList?.querySelectorAll(".cn-resumen-monto[data-id-item]") || []
+        );
+        for (const input of amountInputs) {
+          const parsed = parseMoneyInput(input.value);
+          if (!Number.isFinite(parsed) || parsed < 0) {
+            alert("Cada monto debe ser un número válido mayor o igual a 0.");
+            input.focus();
+            input.select?.();
+            return;
+          }
+          const itemId = Number(input.dataset.idItem);
+          const row = checkoutSummaryState.items.find((item) => Number(item?.id_item) === itemId);
+          if (row) {
+            row.monto_usd = parsed;
+            input.value = parsed.toFixed(2);
           }
         }
+        updateResumenTotal();
+        try {
+          setResumenConfirmLoading(true);
+          const payload = {
+            id_metodo_de_pago: 1,
+            referencia,
+            comprobantes: [],
+            total: checkoutSummaryState.total_usd,
+            tasa_bs: checkoutSummaryState.tasa_bs,
+            id_usuario_override: idCliente,
+            bypass_verificacion: isSuperAdmin === true,
+            custom_item_amounts: checkoutSummaryState.items.map((item) => ({
+              id_item: item.id_item,
+              monto_usd: item.monto_usd,
+            })),
+          };
+          console.log("[cuenta_nueva] payload checkout", {
+            idCliente,
+            adminId,
+            isSuperAdmin,
+            payload,
+          });
+          const resp = await submitCheckout(payload);
+          console.log("[cuenta_nueva] checkout resp", resp);
+          if (resp?.error) {
+            alert(`Error al procesar: ${resp.error}`);
+            return;
+          }
+          hideResumenModal();
+          await finalizeCheckoutResponse(resp);
+        } catch (err) {
+          console.error("procesar cuenta nueva error", err);
+          alert("No se pudo procesar el pedido.");
+        } finally {
+          setResumenConfirmLoading(false);
+        }
+      };
+
+      resumenList?.addEventListener("input", (e) => {
+        const input = e.target.closest(".cn-resumen-monto[data-id-item]");
+        if (!input || !checkoutSummaryState) return;
+        const itemId = Number(input.dataset.idItem);
+        const row = checkoutSummaryState.items.find((item) => Number(item?.id_item) === itemId);
+        if (!row) return;
+        const parsed = parseMoneyInput(input.value);
+        row.monto_usd = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+        updateResumenTotal();
       });
+
+      resumenCancelar?.addEventListener("click", () => hideResumenModal());
+      resumenConfirmar?.addEventListener("click", processCheckoutFromSummary);
+      resumenModal?.addEventListener("click", (e) => {
+        if (resumenConfirmar?.disabled) return;
+        if (e.target === resumenModal) {
+          hideResumenModal();
+        }
+      });
+
+      document.querySelector("#cn-procesar")?.addEventListener("click", openCheckoutSummaryModal);
     </script>
   </body>
 </html>

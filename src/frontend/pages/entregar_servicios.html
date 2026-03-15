@@ -110,6 +110,44 @@
         width: 100%;
         box-sizing: border-box;
       }
+      .entrega-action-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .entrega-action-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 34px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+      }
+      .entrega-action-badge.is-pending {
+        background: #fff6db;
+        color: #8a6100;
+        border-color: #f2d27a;
+      }
+      .entrega-action-badge.is-delivered {
+        background: #e2f7ea;
+        color: #166534;
+        border-color: #9fd8b2;
+      }
+      .giftcard-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 12px;
+      }
     </style>
   </head>
   <body>
@@ -118,7 +156,7 @@
 
     <main class="categorias-dinamicas">
       <h2>Entregar servicios</h2>
-      <p id="entregar-verificacion-note" class="status">
+      <p id="entregar-verificacion-note" class="status hidden">
         Al verificar su pago se mostrarán sus servicios en esta página. También recibirá una notificación al liberarse la orden
       </p>
       <div id="entregar-status" class="status">Cargando servicios...</div>
@@ -155,6 +193,7 @@
 
       const statusEl = document.querySelector("#entregar-status");
       const tablasEl = document.querySelector("#entregar-tablas");
+      const verificacionNoteEl = document.querySelector("#entregar-verificacion-note");
       const appHeaderEl = document.querySelector("#app-header");
       const mainEl = document.querySelector("main.categorias-dinamicas");
       const clienteModal = document.querySelector("#cliente-modal");
@@ -175,6 +214,10 @@
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
+      };
+      const setVerificacionNoteVisible = (visible) => {
+        if (!verificacionNoteEl) return;
+        verificacionNoteEl.classList.toggle("hidden", !visible);
       };
 
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
@@ -258,8 +301,10 @@
         const ok = await copyTextNotify(text);
         if (!ok) return;
         if (anchor) {
+          const defaultLabel = anchor.dataset.defaultLabel || anchor.textContent || "Copiar";
+          anchor.dataset.defaultLabel = defaultLabel;
           anchor.textContent = "Copiado";
-          setTimeout(() => (anchor.textContent = "Copiar"), 1200);
+          setTimeout(() => (anchor.textContent = defaultLabel), 1200);
         }
       };
 
@@ -286,6 +331,38 @@
         const pinPerfil = normalizeCopyValue(ventaRow?.pin_perfil);
         if (pinPerfil) return pinPerfil;
         return normalizeCopyValue(ventaRow?.pin_cuenta);
+      };
+
+      const getGiftCardPins = (rows = []) =>
+        Array.from(
+          new Set(
+            (rows || [])
+              .map((row) => resolveVentaPin(row))
+              .map((pin) => normalizeCopyValue(pin))
+              .filter(Boolean)
+          )
+        );
+
+      const escapeCsvValue = (value) => `"${String(value || "").replace(/"/g, '""')}"`;
+
+      const downloadGiftCardPinsCsv = (pins = [], platformName = "giftcards") => {
+        if (!pins.length) return false;
+        const csvContent = ["PIN", ...pins.map((pin) => escapeCsvValue(pin))].join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        const slug = String(platformName || "giftcards")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") || "giftcards";
+        anchor.href = url;
+        anchor.download = `${slug}-pines.csv`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        return true;
       };
 
       const buildRenovacionMensaje = (item, fechaCorte, plataformaNombre) => {
@@ -338,20 +415,19 @@
         const sectionHtml = plataformas
           .map((platObj) => {
             const rows = platObj.rows || [];
+            const giftCardPins = getGiftCardPins(rows);
             const hasPendiente = rows.some((r) => r.pendiente);
             const platId = Number(rows?.[0]?.id_plataforma || "");
+            const isGiftCard = !isRenovacion && isTrue(platObj.tarjeta_de_regalo);
             const showClientInputs =
-              FORCE_CLIENT_INPUTS ||
-              platObj.correo_cliente === true ||
-              platId === 9;
+              !isGiftCard && (FORCE_CLIENT_INPUTS || platObj.correo_cliente === true || platId === 9);
             const showClaveInput =
-              showClientInputs && (platObj.clave_cliente === true || platId === 9);
+              !isGiftCard && showClientInputs && (platObj.clave_cliente === true || platId === 9);
             const showPinColumn =
-              !isRenovacion &&
-              (isTrue(platObj.usa_pines) || isTrue(platObj.tarjeta_de_regalo));
-            const showPerfilColumn = !!(platObj.por_acceso || platObj.por_pantalla);
+              isGiftCard || (!isRenovacion && isTrue(platObj.usa_pines));
+            const showPerfilColumn = !isGiftCard && !!(platObj.por_acceso || platObj.por_pantalla);
             const perfilHeader = platObj.por_acceso ? "Acceso" : "Perfil";
-            const showTipoColumn = !isRenovacion && platId === 9;
+            const showTipoColumn = !isGiftCard && !isRenovacion && platId === 9;
             const body = rows
               .map((r) => {
                 const perfilTxt = r.perfil || "";
@@ -364,11 +440,13 @@
                 const hasRequiredClientData = showClaveInput
                   ? hasCorreoData && hasClaveData
                   : hasCorreoData;
-                const hasEntregaData = showClientInputs
-                  ? hasRequiredClientData
-                  : !!(r.correo || r.clave || pinVenta || r.n_perfil);
+                const hasEntregaData = isGiftCard
+                  ? !!pinVenta
+                  : showClientInputs
+                    ? hasRequiredClientData
+                    : !!(r.correo || r.clave || pinVenta || r.n_perfil);
                 const requiresClientInputs =
-                  showClientInputs && isPendiente && !hasRequiredClientData;
+                  !isGiftCard && showClientInputs && isPendiente && !hasRequiredClientData;
                 const pinCellHtml = (() => {
                   if (pinPerfil && pinCuenta && pinPerfil !== pinCuenta) {
                     return `
@@ -408,10 +486,32 @@
                         idPlataforma: r.id_plataforma,
                         perfilHogar: r.perfil_hogar,
                         isSubCuenta: r.es_subcuenta,
+                        esTarjetaDeRegalo: isGiftCard,
+                        region: r.region,
+                        valorTarjeta: r.valor_tarjeta_de_regalo,
+                        moneda: r.moneda,
                       });
                 const annotateBtn = canAnnotateCliente
                   ? `<button type="button" class="btn-outline btn-anotar-cliente" data-venta="${r.id_venta}">Anotar cliente</button>`
                   : "";
+                if (isGiftCard) {
+                  return `
+                    <tr>
+                      <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
+                      <td>${pinCellHtml}</td>
+                      <td>
+                        <div class="entrega-action-wrap">
+                          ${
+                            isPendiente && !hasEntregaData
+                              ? '<span class="entrega-action-badge is-pending">Pendiente</span>'
+                              : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
+                          }
+                          ${annotateBtn}
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }
                 return `
                   <tr>
                     <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
@@ -460,16 +560,18 @@
                     ${showPinColumn ? `<td>${pinCellHtml}</td>` : ""}
                     <td>${r.fecha_corte ? formatDDMMYYYY(r.fecha_corte) : isPendiente ? "Pendiente" : ""}</td>
                     <td>
-                      ${
-                        isRenovacion
-                          ? `<button type="button" class="btn-outline btn-copy-renew" data-copy="${encodeURIComponent(copyText)}">Copiar mensaje de renovación</button>`
-                          : requiresClientInputs
-                            ? `<button type="button" class="btn-outline btn-send-datos" data-venta="${r.id_venta}">Enviar datos</button>`
-                            : isPendiente && !hasEntregaData
-                              ? '<span class="badge badge-warning">Pendiente</span>'
-                              : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
-                      }
-                      ${annotateBtn}
+                      <div class="entrega-action-wrap">
+                        ${
+                          isRenovacion
+                            ? `<button type="button" class="btn-outline btn-copy-renew" data-copy="${encodeURIComponent(copyText)}">Copiar mensaje de renovación</button>`
+                            : requiresClientInputs
+                              ? `<button type="button" class="btn-outline btn-send-datos" data-venta="${r.id_venta}">Enviar datos</button>`
+                              : isPendiente && !hasEntregaData
+                                ? '<span class="entrega-action-badge is-pending">Pendiente</span>'
+                                : `<button type="button" class="btn-outline btn-copy" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
+                        }
+                        ${annotateBtn}
+                      </div>
                     </td>
                   </tr>
                 `;
@@ -479,17 +581,37 @@
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${platObj.nombre}</h3>
                 ${showClientInputs && hasPendiente ? `<p class="status">Ingrese sus datos</p>` : ""}
+                ${
+                  isGiftCard
+                    ? `<div class="giftcard-tools">
+                        <button
+                          type="button"
+                          class="btn-outline btn-copy-pins"
+                          data-platform="${escapeHtml(platObj.nombre || "giftcards")}"
+                          data-pins="${encodeURIComponent(JSON.stringify(giftCardPins))}"
+                          ${giftCardPins.length ? "" : "disabled"}
+                        >Copiar solo pines</button>
+                        <button
+                          type="button"
+                          class="btn-outline btn-download-pins-csv"
+                          data-platform="${escapeHtml(platObj.nombre || "giftcards")}"
+                          data-pins="${encodeURIComponent(JSON.stringify(giftCardPins))}"
+                          ${giftCardPins.length ? "" : "disabled"}
+                        >Descargar CSV</button>
+                      </div>`
+                    : ""
+                }
                 <div class="cuenta-table-wrap">
                   <table class="table-base" style="${platObj.color_1 ? `--table-header-bg:${platObj.color_1};` : ""}">
                     <thead>
                       <tr>
                         <th>ID Venta</th>
-                        <th>Correo</th>
-                        ${isRenovacion ? "" : "<th>Clave</th>"}
-                        ${showTipoColumn ? "<th>Tipo</th>" : ""}
-                        ${isRenovacion ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
+                        ${isGiftCard ? "" : "<th>Correo</th>"}
+                        ${isGiftCard ? "" : isRenovacion ? "" : "<th>Clave</th>"}
+                        ${isGiftCard ? "" : showTipoColumn ? "<th>Tipo</th>" : ""}
+                        ${isGiftCard ? "" : isRenovacion ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
                         ${showPinColumn ? "<th>PIN</th>" : ""}
-                        <th>Fecha de corte</th>
+                        ${isGiftCard ? "" : "<th>Fecha de corte</th>"}
                         <th>Acción</th>
                      </tr>
                    </thead>
@@ -511,6 +633,7 @@
           if (!idOrdenParam) {
             if (tablasEl) tablasEl.innerHTML = "";
             setStatus("");
+            setVerificacionNoteVisible(false);
             appHeaderEl?.classList.add("hidden");
             mainEl?.classList.add("hidden");
             return;
@@ -522,6 +645,7 @@
           if (resp?.error) {
             setStatus(resp.error);
             if (tablasEl) tablasEl.innerHTML = "";
+            setVerificacionNoteVisible(false);
             return;
           }
           ventas = resp?.ventas || [];
@@ -643,6 +767,9 @@
               perfil_hogar: v.perfiles?.perfil_hogar,
               perfil: perfilTxt,
               pendiente: isPendienteVenta,
+              region: v.precios?.region || "",
+              valor_tarjeta_de_regalo: v.precios?.valor_tarjeta_de_regalo || "",
+              moneda: v.precios?.moneda || "",
             });
           });
 
@@ -710,6 +837,9 @@
               perfil_hogar: v.perfiles?.perfil_hogar,
               perfil: perfilTxt,
               pendiente: isPendienteVenta,
+              region: v.precios?.region || "",
+              valor_tarjeta_de_regalo: v.precios?.valor_tarjeta_de_regalo || "",
+              moneda: v.precios?.moneda || "",
             });
           });
 
@@ -778,9 +908,11 @@
             });
           }
           renderTablas(groupedNew, { title: "Cuentas nuevas" });
+          setVerificacionNoteVisible(!String(tablasEl?.innerHTML || "").trim());
         } catch (err) {
           console.error("entregar servicios error", err);
           setStatus("No se pudieron cargar los servicios.");
+          setVerificacionNoteVisible(false);
         }
       };
 
@@ -801,6 +933,36 @@
         if (!btn) return;
         const text = decodeURIComponent(btn.dataset.copy || "");
         copyToClipboard(text, btn);
+      });
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-copy-pins");
+        if (!btn || btn.disabled) return;
+        let pins = [];
+        try {
+          pins = JSON.parse(decodeURIComponent(btn.dataset.pins || "%5B%5D"));
+        } catch (_err) {
+          pins = [];
+        }
+        if (!pins.length) {
+          setStatus("No hay pines disponibles para copiar.");
+          return;
+        }
+        copyToClipboard(pins.join("\n"), btn);
+      });
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-download-pins-csv");
+        if (!btn || btn.disabled) return;
+        let pins = [];
+        try {
+          pins = JSON.parse(decodeURIComponent(btn.dataset.pins || "%5B%5D"));
+        } catch (_err) {
+          pins = [];
+        }
+        if (!pins.length) {
+          setStatus("No hay pines disponibles para descargar.");
+          return;
+        }
+        downloadGiftCardPinsCsv(pins, btn.dataset.platform || "giftcards");
       });
       tablasEl?.addEventListener("click", (e) => {
         const btn = e.target.closest(".btn-anotar-cliente");
@@ -1029,8 +1191,8 @@
           if (error) throw error;
           btn.classList.add("hidden");
           const status = document.createElement("span");
-          status.className = "badge badge-green";
-          status.textContent = "Datos enviados ✅";
+          status.className = "entrega-action-badge is-delivered";
+          status.textContent = "Servicio entregado";
           btn.parentElement?.appendChild(status);
           alert("Datos enviados.");
         } catch (err) {

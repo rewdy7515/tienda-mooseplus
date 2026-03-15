@@ -1701,6 +1701,15 @@
           ventasDiariasPorDia,
         };
       };
+      const buildVentasTrendStats = (historial) => {
+        const ventasDiariasPorDia = {};
+        (historial || []).forEach((row) => {
+          if (!isTrue(row?.venta_cliente)) return;
+          const day = isoDay(row?.fecha_pago);
+          if (day) ventasDiariasPorDia[day] = (ventasDiariasPorDia[day] || 0) + 1;
+        });
+        return { ventasDiariasPorDia };
+      };
 
       const fetchMonthData = async (range) => {
         const [{ data: historialData, error: histErr }, { data: giftData, error: giftErr }] =
@@ -1851,6 +1860,7 @@
       const renderAll = (
         stats,
         prevStats,
+        trendStats,
         prevTrendStats,
         activeByPlatformRows,
         platformMonthlyData,
@@ -1860,8 +1870,8 @@
         isProgressCut,
         adjustments = {},
       ) => {
-        trendLastStats = stats || null;
-        trendLastPrevStats = prevTrendStats || prevStats || null;
+        trendLastStats = trendStats || null;
+        trendLastPrevStats = prevTrendStats || null;
         trendLastRange = range || null;
         fillKpis(stats, prevStats, compareSuffix);
         renderPlatforms(stats.platformRows);
@@ -1869,7 +1879,7 @@
         renderActiveByPlatform(activeByPlatformRows || []);
         renderActiveByPlatformChart(activeByPlatformRows || []);
         renderPlatformMonthlyChart(platformMonthlyData || [], selectedPlatformMonthlyKey);
-        renderVentasTrendChart(stats, prevTrendStats || prevStats, range);
+        renderVentasTrendChart(trendStats, prevTrendStats, range);
         renderDaily(stats.dailyRows);
 
         if (summaryNoteEl) {
@@ -1964,10 +1974,12 @@
           platformSalesMonthlyRows = monthlyPlatformData || [];
           const stats = computeStats(historial, gifts);
           const prevStats = computeStats(prevData.historial || [], prevData.gifts || []);
+          const trendStats = buildVentasTrendStats(historial);
+          const basePrevTrendStats = buildVentasTrendStats(prevData.historial || []);
           const prevTrendStats =
             shouldLoadPrevTrendFull && prevTrendData
-              ? computeStats(prevTrendData.historial || [], prevTrendData.gifts || [])
-              : prevStats;
+              ? buildVentasTrendStats(prevTrendData.historial || [])
+              : basePrevTrendStats;
           stats.clientesActivosCount = currentActive?.clientesActivosCount || 0;
           stats.ventasActivasCount = currentActive?.ventasActivasCount || 0;
           prevStats.clientesActivosCount = previousActive?.clientesActivosCount || 0;
@@ -1979,6 +1991,7 @@
           renderAll(
             stats,
             prevStats,
+            trendStats,
             prevTrendStats,
             activeByPlatformRows,
             platformSalesMonthlyRows,

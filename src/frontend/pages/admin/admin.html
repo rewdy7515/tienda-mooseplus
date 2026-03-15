@@ -187,6 +187,7 @@
         <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
         <button class="btn-primary admin-action" id="btn-agregar-pines">Agregar pines</button>
+        <button class="btn-primary admin-action" id="btn-sandbox-giftcards">Sandbox Gift Cards</button>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
@@ -868,6 +869,10 @@
         window.location.href = "agregar_pines.html";
       });
 
+      document.querySelector("#btn-sandbox-giftcards")?.addEventListener("click", () => {
+        window.location.href = "sandbox_giftcards.html";
+      });
+
       document.querySelector("#btn-editar-precios")?.addEventListener("click", () => {
         window.location.href = "/src/frontend/pages/admin/editar_precios.html";
       });
@@ -915,11 +920,23 @@
         if (!text || text === "-") return;
         await copyTextNotify(text);
       };
+      const getSelectedSpotifyRenewChecks = () =>
+        Array.from(document.querySelectorAll(".spotify-renovar-check:checked"));
+      const buildSpotifyRenewCredentialsText = (checks = getSelectedSpotifyRenewChecks()) =>
+        checks
+          .map((check) => {
+            const correo = check.dataset.correo ? decodeURIComponent(check.dataset.correo) : "";
+            const clave = check.dataset.clave ? decodeURIComponent(check.dataset.clave) : "";
+            if (!correo && !clave) return "";
+            return `correo: ${correo}\nclave: ${clave}`;
+          })
+          .filter(Boolean)
+          .join("\n\n");
       spotifyTable?.addEventListener("click", handleCopyClick);
       netflixTable?.addEventListener("click", handleCopyClick);
 
       spotifyRenovarBtn?.addEventListener("click", () => {
-        const checks = document.querySelectorAll(".spotify-renovar-check:checked");
+        const checks = getSelectedSpotifyRenewChecks();
         if (!checks.length) {
           alert("Selecciona al menos una cuenta.");
           return;
@@ -939,30 +956,19 @@
       });
 
       modalRenovarCopy?.addEventListener("click", async () => {
-        const checks = document.querySelectorAll(".spotify-renovar-check:checked");
+        const checks = getSelectedSpotifyRenewChecks();
         if (!checks.length) {
           alert("Selecciona al menos una cuenta.");
           return;
         }
-        const lines = Array.from(checks)
-          .map((c) => {
-            const correo = c.dataset.correo ? decodeURIComponent(c.dataset.correo) : "";
-            const clave = c.dataset.clave ? decodeURIComponent(c.dataset.clave) : "";
-            return `correo: ${correo}\nclave: ${clave}`;
-          })
-          .join("\n\n");
+        const lines = buildSpotifyRenewCredentialsText(checks);
+        if (!lines) {
+          alert("No hay datos para copiar.");
+          return;
+        }
         try {
-          if (navigator?.clipboard?.writeText) {
-            await navigator.clipboard.writeText(lines);
-          } else {
-            const ta = document.createElement("textarea");
-            ta.value = lines;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            ta.remove();
-          }
-          alert("Copiado al portapapeles.");
+          const copied = await copyTextNotify(lines);
+          if (!copied) throw new Error("clipboard unavailable");
         } catch (err) {
           console.error("copy renovar spotify error", err);
           alert("No se pudo copiar.");
@@ -975,9 +981,10 @@
       modalRenovarNo?.addEventListener("click", hideRenovarSpotifyModal);
       modalRenovarYes?.addEventListener("click", async () => {
         if (!modalRenovarList) return;
-        const montoVal = Number(modalRenovarMonto?.value || 0);
-        if (!Number.isFinite(montoVal) || montoVal <= 0) {
-          alert("Ingresa un monto válido.");
+        const montoRaw = modalRenovarMonto?.value ?? "";
+        const montoVal = Number(montoRaw);
+        if (montoRaw.trim() === "" || !Number.isFinite(montoVal) || montoVal < 0) {
+          alert("Ingresa un monto válido de 0 o mayor.");
           return;
         }
         const correos = Array.from(modalRenovarList.querySelectorAll("div"))
@@ -987,6 +994,7 @@
           alert("No hay correos seleccionados.");
           return;
         }
+        const credentialsText = buildSpotifyRenewCredentialsText();
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
@@ -1036,8 +1044,19 @@
             .insert(rows);
           if (histErr) throw histErr;
           hideRenovarSpotifyModal();
+          let copied = false;
+          if (credentialsText) {
+            copied = await copyTextNotify(
+              credentialsText,
+              "Correo y clave copiados al portapapeles.",
+            );
+          }
           await loadSpotifyMadres();
-          alert("Renovación registrada.");
+          alert(
+            copied
+              ? "Renovación registrada. Correo y clave copiados al portapapeles."
+              : "Renovación registrada.",
+          );
         } catch (err) {
           console.error("renovar spotify error", err);
           alert("No se pudo registrar la renovación.");

@@ -269,7 +269,12 @@
     </div>
 
     <script type="module">
-      import { supabase, loadCurrentUser, clearServerSession } from "../../scripts/api.js";
+      import {
+        supabase,
+        loadCurrentUser,
+        clearServerSession,
+        entregarGiftCardPendiente,
+      } from "../../scripts/api.js";
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
       import { buildNotificationPayload } from "../../scripts/notification-templates.js";
@@ -608,7 +613,7 @@
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -790,7 +795,7 @@
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
               .select(
-                "id_plataforma, nombre, color_1, link_pagina, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines",
+                "id_plataforma, nombre, color_1, link_pagina, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines, tarjeta_de_regalo",
               )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
@@ -840,6 +845,10 @@
                   platInfo.usa_pines === true ||
                   platInfo.usa_pines === "true" ||
                   platInfo.usa_pines === "1",
+                tarjeta_de_regalo:
+                  platInfo.tarjeta_de_regalo === true ||
+                  platInfo.tarjeta_de_regalo === "true" ||
+                  platInfo.tarjeta_de_regalo === "1",
                 groups: {},
                 color_1: platInfo.color_1 || null,
                 link_pagina: platInfo.link_pagina || "",
@@ -880,6 +889,7 @@
               completa: isCompleta,
               por_acceso: grouped[platId].por_acceso,
               usa_pines: grouped[platId].usa_pines,
+              tarjeta_de_regalo: grouped[platId].tarjeta_de_regalo,
               meses_contratados: v.meses_contratados || 1,
               id_cuenta: v.id_cuenta || null,
               id_perfil: v.id_perfil || null,
@@ -899,6 +909,7 @@
         const idUsuario = btn?.dataset?.usuario;
         const plataforma = btn?.dataset?.plataforma || "";
         const idPlataforma = btn?.dataset?.idPlataforma || "";
+        const isGiftCard = btn?.dataset?.tarjetaRegalo === "true";
         const correoCuenta = btn?.dataset?.correo || "";
         const claveCuenta = btn?.dataset?.clave || "";
         const fechaCorteRaw = (btn?.dataset?.fecha || "").trim();
@@ -919,10 +930,29 @@
         const cuentaMadreFlag =
           btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
         const requireMadreActiva = idPlataformaNum === 9;
+        if (!idVenta) return;
+        if (isGiftCard) {
+          const resp = await entregarGiftCardPendiente(idVenta);
+          if (resp?.error) {
+            throw new Error(resp.error);
+          }
+          const status = document.createElement("span");
+          status.className = "badge badge-green";
+          status.textContent = "Servicio entregado";
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.className = "btn-outline btn-copy-row";
+          copyBtn.textContent = "Copiar";
+          copyBtn.dataset.copy = encodeURIComponent(
+            resp.copy_text || `*${String(plataforma || "").toUpperCase()}*\n\n*PIN:* ${resp.pin || "Pendiente"}`,
+          );
+          btn.parentElement?.appendChild(status);
+          btn.parentElement?.appendChild(copyBtn);
+          btn.remove();
+          return;
+        }
         const { data: reemplazosBloqueados, error: replErr } = await loadReemplazosBloqueados();
         if (replErr) throw replErr;
-
-        if (!idVenta) return;
         const correoCuentaNorm = String(correoCuenta || "").trim().toLowerCase();
         if (!correoCuentaNorm) {
           alert("Falta el correo del cliente.");
@@ -1416,7 +1446,7 @@
           await handleEntregarServicio(btn);
         } catch (err) {
           console.error("entregar servicio error", err);
-          alert("No se pudo entregar el servicio.");
+          alert(err?.message || "No se pudo entregar el servicio.");
         }
       });
       const closeMadreOptions = () => {
@@ -1701,7 +1731,7 @@
           await handleEntregarServicio(btn, payload);
         } catch (err) {
           console.error("entregar servicio con activacion error", err);
-          alert("No se pudo entregar el servicio.");
+          alert(err?.message || "No se pudo entregar el servicio.");
         }
       });
       document.addEventListener("keydown", (e) => {

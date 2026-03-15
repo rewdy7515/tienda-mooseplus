@@ -15,9 +15,26 @@ export function buildServiceCopyText({
   perfilHogar = false,
   isSubCuenta = false,
   ventaMiembro = false,
+  esTarjetaDeRegalo = false,
+  region = "",
+  valorTarjeta = "",
+  moneda = "",
 } = {}) {
   const lines = [];
   const platLabelRaw = (plataforma || "").toString().toUpperCase();
+  const regionTxt = String(region || "").trim() || "-";
+  const giftValueTxt =
+    [String(valorTarjeta || "").trim(), String(moneda || "").trim()].filter(Boolean).join(" ") || "-";
+  const pinTxt = String(pin || "").trim() || "Pendiente";
+  if (esTarjetaDeRegalo) {
+    lines.push(`*${platLabelRaw || "GIFT CARD"}* 🫎 \`ID Venta: #${idVenta || ""}\``);
+    lines.push(`(Región: ${regionTxt})`);
+    lines.push("_Pagina Web: www.mooseplus.com_");
+    lines.push("");
+    lines.push(`\`${giftValueTxt}\``);
+    lines.push(`PIN: ${pinTxt}`);
+    return lines.join("\n");
+  }
   const showHogar =
     Number(idPlataforma) === 1 &&
     (perfilHogar === true || isSubCuenta === true || ventaMiembro === true);

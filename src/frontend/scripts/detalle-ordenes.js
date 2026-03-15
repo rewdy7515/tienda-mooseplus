@@ -14,7 +14,6 @@ attachLogoHome();
 attachLogout(clearServerSession);
 
 const statusEl = document.querySelector("#detalle-status");
-const subtitleEl = document.querySelector("#detalle-subtitle");
 const infoGridEl = document.querySelector("#orden-info-grid");
 const itemsEl = document.querySelector("#orden-items");
 const itemsTitleEl = document.querySelector("#orden-items-title");
@@ -24,16 +23,17 @@ const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
 };
 
-const setSubtitle = (msg) => {
-  if (subtitleEl) subtitleEl.textContent = msg || "";
-};
-
 backBtn?.addEventListener("click", () => {
   window.location.href = "historial_ordenes.html";
 });
 
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const METODO_RECARGO_USD_ID = 4;
+const METODO_RECARGO_USD_PERCENT = 0.0349;
+const METODO_RECARGO_USD_FIJO = 0.49;
+const METODO_COMISION_20_ID = 3;
+const METODO_COMISION_20_PERCENT = 0.2;
 
 const formatMoney = (value) => {
   const n = Number(value);
@@ -61,11 +61,53 @@ const formatHora12 = (hora) => {
   return `${hh}:${mm} ${suffix}`;
 };
 
-const buildEstado = (orden) => {
-  if (isTrue(orden?.orden_cancelada)) return "Cancelada";
-  if (isTrue(orden?.pago_verificado)) return "Procesado";
-  if (isTrue(orden?.en_espera)) return "En espera";
-  return "Pendiente";
+const normalizeTextValue = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const lowered = text.toLowerCase();
+  if (lowered === "null" || lowered === "undefined") return "";
+  return text;
+};
+
+const buildEstadoMeta = (orden) => {
+  if (isTrue(orden?.orden_cancelada)) {
+    return { label: "Cancelada", toneClass: "is-cancelled" };
+  }
+  if (isTrue(orden?.pago_verificado)) {
+    return { label: "Procesado", toneClass: "is-processed" };
+  }
+  if (isTrue(orden?.en_espera)) {
+    return { label: "En espera", toneClass: "is-waiting" };
+  }
+  return { label: "Pendiente", toneClass: "is-pending" };
+};
+
+const getTotalUsdMostrado = (baseUsd, metodoId) => {
+  const montoBase = Number(baseUsd);
+  if (!Number.isFinite(montoBase)) return 0;
+  const id = Number(metodoId);
+  if (id === METODO_RECARGO_USD_ID) {
+    return round2(montoBase * (1 + METODO_RECARGO_USD_PERCENT) + METODO_RECARGO_USD_FIJO);
+  }
+  if (id === METODO_COMISION_20_ID) {
+    return round2(montoBase * (1 + METODO_COMISION_20_PERCENT));
+  }
+  return round2(montoBase);
+};
+
+const getDisplayTasaBs = (orden) => {
+  const tasaBase = Number(orden?.tasa_bs);
+  if (!Number.isFinite(tasaBase)) return Number.NaN;
+  const totalBase = Number(orden?.total);
+  const metodoId = Number(orden?.id_metodo_de_pago);
+  if (!Number.isFinite(totalBase) || totalBase <= 0) {
+    return tasaBase;
+  }
+  const totalMostrado = getTotalUsdMostrado(totalBase, metodoId);
+  if (!Number.isFinite(totalMostrado) || totalMostrado <= 0) {
+    return tasaBase;
+  }
+  return round2(tasaBase * (totalMostrado / totalBase));
 };
 
 const formatNombreApellido = (user) => {
@@ -74,31 +116,101 @@ const formatNombreApellido = (user) => {
   return [nombre, apellido].filter(Boolean).join(" ").trim() || "-";
 };
 
-const renderInfo = (orden, clienteNombre = "-") => {
+const buildMetodoPagoHtml = (metodo) => {
+  if (!metodo) return "-";
+  const nombre = String(metodo?.nombre || "").trim();
+  return nombre || "-";
+};
+
+const buildGiftCardPinLookups = (ventasRows = [], targetUserId = null) => {
+  const pinByVentaId = new Map();
+  const pinsByPlatformId = new Map();
+  const targetUserNum = Number(targetUserId);
+
+  for (const row of Array.isArray(ventasRows) ? ventasRows : []) {
+    const pin = normalizeTextValue(row?.tarjetas_de_regalo?.pin);
+    if (!pin) continue;
+
+    const vendidoA = Number(row?.tarjetas_de_regalo?.vendido_a);
+    if (
+      Number.isFinite(targetUserNum) &&
+      targetUserNum > 0 &&
+      Number.isFinite(vendidoA) &&
+      vendidoA > 0 &&
+      vendidoA !== targetUserNum
+    ) {
+      continue;
+    }
+
+    const ventaId = Number(row?.id_venta);
+    if (Number.isFinite(ventaId) && ventaId > 0 && !pinByVentaId.has(ventaId)) {
+      pinByVentaId.set(ventaId, pin);
+    }
+
+    const platformId = Number(row?.precios?.id_plataforma);
+    if (!Number.isFinite(platformId) || platformId <= 0) continue;
+    const currentPins = pinsByPlatformId.get(platformId) || [];
+    if (!currentPins.includes(pin)) {
+      currentPins.push(pin);
+      pinsByPlatformId.set(platformId, currentPins);
+    }
+  }
+
+  return { pinByVentaId, pinsByPlatformId };
+};
+
+const getGiftCardPinDisplay = ({ item = null, platformId = null, giftCardLookups = null } = {}) => {
+  const pinByVentaId =
+    giftCardLookups?.pinByVentaId instanceof Map ? giftCardLookups.pinByVentaId : new Map();
+  const pinsByPlatformId =
+    giftCardLookups?.pinsByPlatformId instanceof Map
+      ? giftCardLookups.pinsByPlatformId
+      : new Map();
+
+  const ventaId = Number(item?.id_venta);
+  if (Number.isFinite(ventaId) && ventaId > 0) {
+    const pin = normalizeTextValue(pinByVentaId.get(ventaId));
+    if (pin) return pin;
+  }
+
+  const platformIdNum = Number(platformId ?? item?.id_plataforma);
+  if (Number.isFinite(platformIdNum) && platformIdNum > 0) {
+    const pins = (pinsByPlatformId.get(platformIdNum) || [])
+      .map((value) => normalizeTextValue(value))
+      .filter(Boolean);
+    if (pins.length) return pins.join(", ");
+  }
+
+  return "Pendiente";
+};
+
+const renderInfo = (orden, clienteNombre = "-", metodoPago = null) => {
   if (!infoGridEl) return;
   const fecha = formatDDMMYYYY(orden?.fecha) || orden?.fecha || "-";
   const hora = formatHora12(orden?.hora_orden);
-  const estado = buildEstado(orden);
+  const estado = buildEstadoMeta(orden);
+  const tasaDisplay = getDisplayTasaBs(orden);
   const rows = [
     { label: "N. orden", value: orden?.id_orden ?? "-" },
     { label: "Cliente", value: clienteNombre || "-" },
     { label: "Fecha", value: fecha },
     { label: "Hora", value: hora },
-    { label: "Estado", value: estado },
     { label: "Total", value: formatMoney(orden?.total) },
-    { label: "Tasa (Bs)", value: formatBs(orden?.tasa_bs) },
     { label: "Monto (Bs)", value: formatBs(orden?.monto_bs) },
+    { label: "Método de pago", value: buildMetodoPagoHtml(metodoPago) },
     { label: "Referencia", value: orden?.referencia || "-" },
-    { label: "Carrito", value: orden?.id_carrito ? `#${orden.id_carrito}` : "Sin carrito" },
   ];
-  infoGridEl.innerHTML = rows
-    .map(
-      (row) => `
+  infoGridEl.innerHTML = `
+    <div class="orden-estado-chip ${estado.toneClass}">${estado.label}</div>
+    ${rows
+      .map(
+        (row) => `
         <div class="label">${row.label}</div>
         <div class="value">${row.value}</div>
       `
-    )
-    .join("");
+      )
+      .join("")}
+  `;
 };
 
 const getClosestDiscountPct = (rows, value, column) => {
@@ -154,7 +266,7 @@ const calcItemTotals = (item, price, platform, descuentos) => {
   };
 };
 
-const renderItems = (items, catalog, useMayor) => {
+const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
   if (!itemsEl) return;
   if (!Array.isArray(items) || !items.length) {
     itemsEl.innerHTML = '<p class="cart-empty">Esta orden no tiene items asociados.</p>';
@@ -197,6 +309,7 @@ const renderItems = (items, catalog, useMayor) => {
       const price = priceById[item.id_precio] || {};
       const platform = platformById[price.id_plataforma] || {};
       const totals = calcItemTotals(item, price, platform, descuentos);
+      const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
       const detalle =
         price.plan || (platform.tarjeta_de_regalo ? `Región: ${price.region || "-"}` : "");
       const tipo = item?.renovacion ? "Renovación" : "Nuevo";
@@ -204,6 +317,19 @@ const renderItems = (items, catalog, useMayor) => {
       const imagen = platform.imagen || "";
       const totalVenta = Number.isFinite(Number(item?.monto)) ? Number(item.monto) : totals.subtotal;
       const estadoVenta = isTrue(item?.pendiente) ? "Procesandose" : "Entregado";
+      const itemMeta = [
+        detalle ? `<p class="orden-item-meta">${detalle}</p>` : "",
+        isGiftCard
+          ? `<p class="orden-item-meta">PIN: ${getGiftCardPinDisplay({
+              item,
+              platformId: price?.id_plataforma,
+              giftCardLookups,
+            })}</p>`
+          : `<p class="orden-item-meta">Tipo: ${tipo}</p>`,
+        `<p class="orden-item-meta">Precio: ${formatMoney(totals.unit)}</p>`,
+      ]
+        .filter(Boolean)
+        .join("");
       return `
         <tr data-index="${idx}">
           <td>
@@ -214,9 +340,7 @@ const renderItems = (items, catalog, useMayor) => {
                 </div>
                 <div class="cart-product-text">
                   <p class="cart-name">${nombre}</p>
-                  ${detalle ? `<p class="cart-detail">${detalle}</p>` : ""}
-                  <p class="cart-detail">Tipo: ${tipo}</p>
-                  <p class="cart-detail cart-price-line">Precio: ${formatMoney(totals.unit)}</p>
+                  ${itemMeta}
                 </div>
               </div>
             </div>
@@ -241,7 +365,7 @@ const renderItems = (items, catalog, useMayor) => {
 
   itemsEl.innerHTML = `
     <div class="cart-layout">
-      <div class="cart-left">
+      <div class="orden-items-panel">
         <div class="cart-table-scroll">
           <table class="table-base cart-page-table">
             <thead>
@@ -264,7 +388,7 @@ const renderItems = (items, catalog, useMayor) => {
   `;
 };
 
-const renderOrdenesItems = (items) => {
+const renderOrdenesItems = (items, giftCardLookups = null) => {
   if (!itemsEl) return;
   if (!Array.isArray(items) || !items.length) {
     itemsEl.innerHTML = '<p class="cart-empty">Esta orden no tiene items asociados.</p>';
@@ -277,8 +401,15 @@ const renderOrdenesItems = (items) => {
     .map((item, idx) => {
       const platformName = item?.plataformas?.nombre || `Plataforma ${item?.id_plataforma || "-"}`;
       const image = String(item?.plataformas?.imagen || "").trim();
+      const isGiftCard = isTrue(item?.plataformas?.tarjeta_de_regalo);
       const tipo = isTrue(item?.renovacion) ? "Renovación" : "Nuevo";
-      const detalle = String(item?.detalle || "").trim() || "-";
+      const itemMeta = isGiftCard
+        ? `<p class="orden-item-meta">PIN: ${getGiftCardPinDisplay({
+            item,
+            platformId: item?.id_plataforma,
+            giftCardLookups,
+          })}</p>`
+        : `<p class="orden-item-meta">Tipo: ${tipo}</p>`;
       return `
         <tr data-index="${idx}">
           <td>
@@ -293,8 +424,7 @@ const renderOrdenesItems = (items) => {
                 </div>
                 <div class="cart-product-text">
                   <p class="cart-name">${platformName}</p>
-                  <p class="cart-detail">Tipo: ${tipo}</p>
-                  <p class="cart-detail">${detalle}</p>
+                  ${itemMeta}
                 </div>
               </div>
             </div>
@@ -308,7 +438,7 @@ const renderOrdenesItems = (items) => {
 
   itemsEl.innerHTML = `
     <div class="cart-layout">
-      <div class="cart-left">
+      <div class="orden-items-panel">
         <div class="cart-table-scroll">
           <table class="table-base cart-page-table">
             <thead>
@@ -328,36 +458,41 @@ const renderOrdenesItems = (items) => {
   `;
 };
 
+const normalizeVentasOrdenRows = (rows = []) => {
+  const normalized = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const idPrecio = Number(row?.id_precio || row?.precios?.id_precio);
+    if (!Number.isFinite(idPrecio) || idPrecio <= 0) continue;
+    const meses = Math.max(1, Number(row?.meses_contratados) || 1);
+    normalized.push({
+      id_precio: idPrecio,
+      cantidad: 1,
+      meses,
+      renovacion: isTrue(row?.renovacion),
+      id_venta: row?.id_venta ?? null,
+      pendiente: isTrue(row?.pendiente),
+      monto: null,
+      id_plataforma: row?.precios?.id_plataforma ?? null,
+    });
+  }
+  return normalized;
+};
+
 const getIdOrden = () => {
   const params = new URLSearchParams(window.location.search);
   return params.get("id_orden");
 };
 
-const fetchItemsByVentasOrden = async (idOrden) => {
+const fetchItemsByVentasOrden = async (idOrden, prefetchedVentas = null) => {
   if (!idOrden) return [];
+  if (Array.isArray(prefetchedVentas)) {
+    return normalizeVentasOrdenRows(prefetchedVentas);
+  }
   const resp = await fetchVentasOrden(idOrden);
   if (resp?.error) {
     throw new Error(resp.error);
   }
-  const rows = Array.isArray(resp?.ventas) ? resp.ventas : [];
-  if (!rows.length) return [];
-  const normalized = [];
-  for (const row of rows) {
-    const idPrecio = Number(row?.id_precio);
-    if (!Number.isFinite(idPrecio) || idPrecio <= 0) continue;
-    const meses = Math.max(1, Number(row?.meses_contratados) || 1);
-    const renovacion = isTrue(row?.renovacion);
-    normalized.push({
-      id_precio: idPrecio,
-      cantidad: 1,
-      meses,
-      renovacion,
-      id_venta: row?.id_venta ?? null,
-      pendiente: isTrue(row?.pendiente),
-      monto: null,
-    });
-  }
-  return normalized;
+  return normalizeVentasOrdenRows(resp?.ventas || []);
 };
 
 const fetchItemsByHistorialOrden = async (idOrden, idUsuario) => {
@@ -414,7 +549,6 @@ const init = async () => {
     return;
   }
   setStatus("Cargando orden...");
-  setSubtitle(`Orden #${idOrden}`);
   try {
     const currentUser = await loadCurrentUser();
     const userId = currentUser?.id_usuario;
@@ -437,18 +571,32 @@ const init = async () => {
       return;
     }
     const usuarioOrden = detalleResp?.usuario || null;
+    const metodoPago = detalleResp?.metodo_pago || null;
     const nombreUsuarioOrden = formatNombreApellido(usuarioOrden);
     let clienteNombre = nombreUsuarioOrden;
     if (clienteNombre === "-" && Number(orden?.id_usuario) === Number(currentUser?.id_usuario)) {
       clienteNombre = formatNombreApellido(currentUser);
     }
-    renderInfo(orden, clienteNombre);
+    renderInfo(orden, clienteNombre, metodoPago);
+
+    let ventasOrdenRows = [];
+    try {
+      const ventasResp = await fetchVentasOrden(idOrden);
+      if (ventasResp?.error) {
+        console.error("fetchVentasOrden prefetch error", ventasResp.error);
+      } else {
+        ventasOrdenRows = Array.isArray(ventasResp?.ventas) ? ventasResp.ventas : [];
+      }
+    } catch (err) {
+      console.error("fetchVentasOrden prefetch error", err);
+    }
+    const giftCardLookups = buildGiftCardPinLookups(ventasOrdenRows, orden?.id_usuario);
 
     setStatus("Cargando items...");
     const snapshotItems = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
     const itemsSource = String(detalleResp?.items_source || "").trim();
     if (itemsSource === "ordenes_items" && snapshotItems.length) {
-      renderOrdenesItems(snapshotItems);
+      renderOrdenesItems(snapshotItems, giftCardLookups);
       setStatus("");
       return;
     }
@@ -461,7 +609,7 @@ const init = async () => {
     }
     if (!items.length) {
       try {
-        items = await fetchItemsByVentasOrden(idOrden);
+        items = await fetchItemsByVentasOrden(idOrden, ventasOrdenRows);
       } catch (err) {
         console.error("fetchItemsByVentasOrden error", err);
       }
@@ -487,7 +635,7 @@ const init = async () => {
       return;
     }
     const useMayor = currentUser ? !isTrue(currentUser.acceso_cliente) : false;
-    renderItems(items, catalog, useMayor);
+    renderItems(items, catalog, useMayor, giftCardLookups);
     setStatus("");
   } catch (err) {
     console.error("detalle ordenes error", err);

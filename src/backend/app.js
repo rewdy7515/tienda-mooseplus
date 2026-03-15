@@ -3,8 +3,14 @@ const cors = require("cors");
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs/promises");
+const webpush = require("web-push");
 const { supabaseAdmin } = require("../database/db");
-const { port } = require("../../config/config");
+const {
+  port,
+  webPushVapidPublicKey,
+  webPushVapidPrivateKey,
+  webPushSubject,
+} = require("../../config/config");
 const {
   startWhatsappClient,
   stopWhatsappClient,
@@ -151,6 +157,25 @@ const NUEVO_SERVICIO_NOTIF_QUEUE_BATCH = Math.max(
   Math.min(50, Number(process.env.NUEVO_SERVICIO_NOTIF_QUEUE_BATCH) || 20),
 );
 const NUEVO_SERVICIO_NOTIF_QUEUE_TABLE = "eventos_notificacion_nuevo_servicio";
+const WEB_PUSH_SUBSCRIPTIONS_TABLE = "web_push_subscriptions";
+const WEB_PUSH_DELIVERY_QUEUE_TABLE = "web_push_delivery_queue";
+const SANDBOX_GIFTCARD_ORDERS_TABLE = "sandbox_giftcard_orders";
+const SANDBOX_GIFTCARD_ORDER_ITEMS_TABLE = "sandbox_giftcard_order_items";
+const SANDBOX_GIFTCARD_HISTORY_TABLE = "sandbox_giftcard_historial_ventas";
+const WEB_PUSH_ENABLED = process.env.WEB_PUSH_NOTIFICATIONS !== "false";
+const WEB_PUSH_QUEUE_WORKER_ENABLED = WEB_PUSH_ENABLED && process.env.VERCEL !== "1";
+const WEB_PUSH_QUEUE_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.WEB_PUSH_QUEUE_INTERVAL_MS) || 15000,
+);
+const WEB_PUSH_QUEUE_BATCH = Math.max(
+  1,
+  Math.min(100, Number(process.env.WEB_PUSH_QUEUE_BATCH) || 30),
+);
+const WEB_PUSH_QUEUE_MAX_RETRIES = Math.max(
+  1,
+  Math.min(10, Number(process.env.WEB_PUSH_QUEUE_MAX_RETRIES) || 3),
+);
 const HOME_BANNERS_TABLE = "banners";
 let nuevoServicioNotifQueueInProgress = false;
 let nuevoServicioNotifQueueTableMissing = false;
@@ -163,6 +188,32 @@ let nuevoServicioNotifQueueLastResult = {
   invalidUser: 0,
 };
 let nuevoServicioNotifQueueLastError = null;
+const WEB_PUSH_IS_CONFIGURED =
+  Boolean(String(webPushVapidPublicKey || "").trim()) &&
+  Boolean(String(webPushVapidPrivateKey || "").trim());
+let webPushQueueInProgress = false;
+let webPushQueueTableMissing = false;
+let webPushQueueLastRunAt = null;
+let webPushQueueLastResult = {
+  fetched: 0,
+  sent: 0,
+  skipped: 0,
+  failed: 0,
+  removedSubscriptions: 0,
+};
+let webPushQueueLastError = null;
+
+if (WEB_PUSH_IS_CONFIGURED) {
+  try {
+    webpush.setVapidDetails(
+      String(webPushSubject || "mailto:soporte@mooseplus.com").trim(),
+      String(webPushVapidPublicKey || "").trim(),
+      String(webPushVapidPrivateKey || "").trim(),
+    );
+  } catch (err) {
+    console.error("[WebPush] No se pudieron configurar las claves VAPID", err);
+  }
+}
 
 const uniqPositiveIds = (values = []) =>
   Array.from(
@@ -172,6 +223,229 @@ const uniqPositiveIds = (values = []) =>
         .filter((value) => Number.isFinite(value) && value > 0),
     ),
   );
+
+const isMissingHistorialGiftCardColumnError = (err) => {
+  const message = String(err?.message || err?.details || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("id_tarjeta_de_regalo") &&
+    message.includes("historial_ventas") &&
+    message.includes("schema cache")
+  );
+};
+
+const isMissingHistorialGiftCardRelationError = (err) => {
+  const message = String(err?.message || err?.details || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("historial_ventas") &&
+    message.includes("tarjetas_de_regalo") &&
+    message.includes("relationship") &&
+    message.includes("schema cache")
+  );
+};
+
+const isMissingHistorialGiftCardSchemaError = (err) =>
+  isMissingHistorialGiftCardColumnError(err) || isMissingHistorialGiftCardRelationError(err);
+
+const stripHistorialGiftCardColumn = (rows = []) =>
+  (rows || []).map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const nextRow = { ...row };
+    delete nextRow.id_tarjeta_de_regalo;
+    return nextRow;
+  });
+
+const normalizeGiftCardFaceValue = (value) => {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(",", ".");
+  if (!raw) return null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+};
+
+const fetchAvailableGiftCardStock = async ({
+  idPlataforma,
+  valorTarjetaDeRegalo,
+  limit = 1,
+} = {}) => {
+  const platId = toPositiveInt(idPlataforma);
+  const monto = normalizeGiftCardFaceValue(valorTarjetaDeRegalo);
+  const queryLimit = Math.max(1, Math.min(500, Number(limit) || 1));
+  if (!platId || !Number.isFinite(monto) || monto <= 0) {
+    return [];
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("tarjetas_de_regalo")
+    .select("id_tarjeta_de_regalo, id_plataforma, pin, para_venta, usado, monto")
+    .eq("id_plataforma", platId)
+    .eq("para_venta", true)
+    .eq("usado", false)
+    .eq("monto", monto)
+    .order("id_tarjeta_de_regalo", { ascending: true })
+    .limit(queryLimit);
+  if (error) throw error;
+  return data || [];
+};
+
+const buildGiftCardSaleCopyText = ({
+  plataformaNombre = "",
+  idVenta = null,
+  region = "",
+  valorTarjeta = "",
+  moneda = "",
+  pin = "",
+} = {}) => {
+  const lines = [];
+  const plataformaTxt = String(plataformaNombre || "").trim().toUpperCase();
+  const idVentaTxt = toPositiveInt(idVenta);
+  const regionTxt = String(region || "").trim() || "-";
+  const valueParts = [String(valorTarjeta || "").trim(), String(moneda || "").trim()].filter(Boolean);
+  const valueTxt = valueParts.join(" ") || "-";
+  const pinTxt = String(pin || "").trim() || "Pendiente";
+
+  if (plataformaTxt || idVentaTxt) {
+    lines.push(
+      `*${plataformaTxt || "GIFT CARD"}*${idVentaTxt ? ` 🫎 \`ID Venta: #${idVentaTxt}\`` : ""}`.trim(),
+    );
+  }
+  lines.push(`(Región: ${regionTxt})`);
+  lines.push("_Pagina Web: www.mooseplus.com_");
+  lines.push("");
+  lines.push(`\`${valueTxt}\``);
+  lines.push(`PIN: ${pinTxt}`);
+  return lines.join("\n");
+};
+
+const attachGiftCardPriceInfo = async (rows = []) => {
+  const baseRows = Array.isArray(rows) ? rows : [];
+  if (!baseRows.length) return [];
+
+  const platformIds = uniqPositiveIds(baseRows.map((row) => row?.id_plataforma));
+  if (!platformIds.length) {
+    return baseRows.map((row) => ({ ...row, precio_tarjeta_de_regalo: null }));
+  }
+
+  const { data: priceRows, error: priceErr } = await supabaseAdmin
+    .from("precios")
+    .select("id_precio, id_plataforma, plan, region, valor_tarjeta_de_regalo, moneda")
+    .in("id_plataforma", platformIds)
+    .not("valor_tarjeta_de_regalo", "is", null);
+  if (priceErr) throw priceErr;
+
+  const priceMap = new Map();
+  (priceRows || []).forEach((row) => {
+    const platId = toPositiveInt(row?.id_plataforma);
+    const amount = normalizeGiftCardFaceValue(row?.valor_tarjeta_de_regalo);
+    if (!platId || !Number.isFinite(amount) || amount <= 0) return;
+    const key = `${platId}::${amount.toFixed(2)}`;
+    if (!priceMap.has(key)) {
+      priceMap.set(key, row);
+    }
+  });
+
+  return baseRows.map((row) => {
+    const platId = toPositiveInt(row?.id_plataforma);
+    const amount = normalizeGiftCardFaceValue(row?.tarjetas_de_regalo?.monto);
+    const key = platId && Number.isFinite(amount) && amount > 0 ? `${platId}::${amount.toFixed(2)}` : "";
+    return {
+      ...row,
+      precio_tarjeta_de_regalo: key ? priceMap.get(key) || null : null,
+    };
+  });
+};
+
+const fetchHistorialGiftCardRowsByOrder = async (idOrden, idUsuarioCliente) => {
+  const joinedSelect = `
+    id_historial_ventas,
+    id_venta,
+    id_orden,
+    id_usuario_cliente,
+    renovacion,
+    monto,
+    id_plataforma,
+    id_tarjeta_de_regalo,
+    tarjetas_de_regalo:tarjetas_de_regalo!historial_ventas_id_tarjeta_de_regalo_fkey(
+      id_tarjeta_de_regalo,
+      pin,
+      vendido_a,
+      monto
+    ),
+    plataformas:plataformas!historial_ventas_id_plataforma_fkey(
+      id_plataforma,
+      nombre
+    )
+  `;
+  const fallbackSelect = `
+    id_historial_ventas,
+    id_venta,
+    id_orden,
+    id_usuario_cliente,
+    renovacion,
+    monto,
+    id_plataforma,
+    id_tarjeta_de_regalo,
+    plataformas:plataformas!historial_ventas_id_plataforma_fkey(
+      id_plataforma,
+      nombre
+    )
+  `;
+
+  const runJoinedQuery = () =>
+    supabaseAdmin
+      .from("historial_ventas")
+      .select(joinedSelect)
+      .eq("id_orden", idOrden)
+      .eq("id_usuario_cliente", idUsuarioCliente)
+      .not("id_tarjeta_de_regalo", "is", null)
+      .order("id_historial_ventas", { ascending: false });
+
+  const runFallbackQuery = () =>
+    supabaseAdmin
+      .from("historial_ventas")
+      .select(fallbackSelect)
+      .eq("id_orden", idOrden)
+      .eq("id_usuario_cliente", idUsuarioCliente)
+      .not("id_tarjeta_de_regalo", "is", null)
+      .order("id_historial_ventas", { ascending: false });
+
+  const { data, error } = await runJoinedQuery();
+  if (!error) return attachGiftCardPriceInfo(data || []);
+  if (isMissingHistorialGiftCardColumnError(error)) return [];
+  if (!isMissingHistorialGiftCardRelationError(error)) throw error;
+
+  const { data: fallbackRows, error: fallbackErr } = await runFallbackQuery();
+  if (fallbackErr) {
+    if (isMissingHistorialGiftCardColumnError(fallbackErr)) return [];
+    throw fallbackErr;
+  }
+
+  const giftCardIds = uniqPositiveIds((fallbackRows || []).map((row) => row?.id_tarjeta_de_regalo));
+  if (!giftCardIds.length) {
+    return (fallbackRows || []).map((row) => ({ ...row, tarjetas_de_regalo: null }));
+  }
+
+  const { data: giftCardRows, error: giftCardErr } = await supabaseAdmin
+    .from("tarjetas_de_regalo")
+    .select("id_tarjeta_de_regalo, pin, vendido_a, monto")
+    .in("id_tarjeta_de_regalo", giftCardIds);
+  if (giftCardErr) throw giftCardErr;
+
+  const giftCardMap = (giftCardRows || []).reduce((acc, row) => {
+    const id = toPositiveInt(row?.id_tarjeta_de_regalo);
+    if (id) acc[id] = row;
+    return acc;
+  }, {});
+
+  return attachGiftCardPriceInfo((fallbackRows || []).map((row) => ({
+    ...row,
+    tarjetas_de_regalo: giftCardMap[toPositiveInt(row?.id_tarjeta_de_regalo)] || null,
+  })));
+};
 
 const getCaracasDateStr = (offsetDays = 0) => {
   const now = new Date();
@@ -266,6 +540,346 @@ const withTimeout = (promise, timeoutMs, message = "Operacion expirada") =>
         reject(err);
       });
   });
+
+const trimWebPushText = (value, max = 4000) => {
+  const txt = String(value ?? "").trim();
+  if (!txt) return "";
+  return txt.length > max ? `${txt.slice(0, max)}…` : txt;
+};
+
+const decodeHtmlEntities = (value = "") =>
+  String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+
+const htmlToPlainText = (html = "") => {
+  const normalized = String(html || "")
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*\/p\s*>/gi, "\n\n")
+    .replace(/<[^>]+>/g, " ");
+  return trimWebPushText(
+    decodeHtmlEntities(normalized)
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim(),
+    3000,
+  );
+};
+
+const buildWebPushTargetUrl = (pathName = "/notificaciones.html") => {
+  try {
+    return new URL(pathName, buildPublicSiteUrl()).toString();
+  } catch (_err) {
+    return buildPublicSiteUrl();
+  }
+};
+
+const buildWebPushPayload = (notification = {}, extra = {}) => {
+  const idNotificacion = Number(notification?.id_notificacion);
+  const titulo = trimWebPushText(notification?.titulo || extra?.titulo || "Nueva notificación", 120);
+  const body = htmlToPlainText(notification?.mensaje || extra?.mensaje || "Tienes una nueva novedad.");
+  const url = trimWebPushText(
+    extra?.url || buildWebPushTargetUrl("/notificaciones.html"),
+    1000,
+  );
+  return {
+    title: titulo || "Nueva notificación",
+    body: body || "Tienes una nueva notificación en Moose+.",
+    url,
+    tag: Number.isFinite(idNotificacion) && idNotificacion > 0 ? `notif-${idNotificacion}` : "notif",
+    notificationId: Number.isFinite(idNotificacion) && idNotificacion > 0 ? idNotificacion : null,
+    icon: "/assets/favicon/logo-corto-blanco-icono.png",
+    badge: "/assets/favicon/logo-corto-blanco-icono.png",
+  };
+};
+
+const parseWebPushSubscriptionInput = (body = {}) => {
+  const payload = body?.subscription && typeof body.subscription === "object"
+    ? body.subscription
+    : body;
+  const endpoint = trimWebPushText(payload?.endpoint || "", 3000);
+  const p256dh = trimWebPushText(payload?.keys?.p256dh || body?.p256dh || "", 512);
+  const auth = trimWebPushText(payload?.keys?.auth || body?.auth || "", 512);
+  const expirationRaw = payload?.expirationTime;
+  const expirationTime = Number.isFinite(Number(expirationRaw)) ? Number(expirationRaw) : null;
+  const deviceLabel = trimWebPushText(body?.device_label || "", 160) || null;
+  const userAgent = trimWebPushText(body?.user_agent || "", 1000) || null;
+  if (!endpoint || !p256dh || !auth) {
+    const err = new Error("Suscripción push incompleta.");
+    err.code = "INVALID_PUSH_SUBSCRIPTION";
+    throw err;
+  }
+  return {
+    endpoint,
+    p256dh,
+    auth,
+    expirationTime,
+    deviceLabel,
+    userAgent,
+  };
+};
+
+const serializeWebPushError = (err) => {
+  const parts = [
+    err?.message,
+    err?.body,
+    err?.details,
+    err?.statusCode ? `status ${err.statusCode}` : "",
+  ]
+    .map((value) => trimWebPushText(value, 500))
+    .filter(Boolean);
+  return trimWebPushText(parts.join(" | "), 1000) || "Error desconocido";
+};
+
+const isObsoleteWebPushError = (err) => {
+  const status = Number(err?.statusCode || err?.status || 0);
+  return status === 404 || status === 410;
+};
+
+const markWebPushQueueItem = async (idQueue, patch = {}) => {
+  const queueId = Number(idQueue);
+  if (!Number.isFinite(queueId) || queueId <= 0) return;
+  const { error } = await supabaseAdmin
+    .from(WEB_PUSH_DELIVERY_QUEUE_TABLE)
+    .update(patch)
+    .eq("id_queue", queueId);
+  if (error) throw error;
+};
+
+const deleteWebPushSubscription = async (idSubscription) => {
+  const subscriptionId = Number(idSubscription);
+  if (!Number.isFinite(subscriptionId) || subscriptionId <= 0) return;
+  const { error } = await supabaseAdmin
+    .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+    .delete()
+    .eq("id_subscription", subscriptionId);
+  if (error) throw error;
+};
+
+const sendWebPushToSubscription = async (subscriptionRow = {}, payload = {}) => {
+  if (!WEB_PUSH_ENABLED) {
+    const err = new Error("Web push deshabilitado.");
+    err.code = "WEB_PUSH_DISABLED";
+    throw err;
+  }
+  if (!WEB_PUSH_IS_CONFIGURED) {
+    const err = new Error("Faltan claves VAPID para web push.");
+    err.code = "WEB_PUSH_NOT_CONFIGURED";
+    throw err;
+  }
+
+  const endpoint = trimWebPushText(subscriptionRow?.endpoint || "", 3000);
+  const p256dh = trimWebPushText(subscriptionRow?.p256dh || "", 512);
+  const auth = trimWebPushText(subscriptionRow?.auth || "", 512);
+  if (!endpoint || !p256dh || !auth) {
+    const err = new Error("Suscripción push inválida.");
+    err.code = "INVALID_PUSH_SUBSCRIPTION";
+    throw err;
+  }
+
+  await webpush.sendNotification(
+    {
+      endpoint,
+      expirationTime: subscriptionRow?.expiration_time ?? null,
+      keys: { p256dh, auth },
+    },
+    JSON.stringify(payload),
+    {
+      TTL: 60,
+      urgency: "normal",
+      topic: trimWebPushText(payload?.tag || "", 32) || undefined,
+    },
+  );
+};
+
+const sendWebPushPayloadToUserSubscriptions = async (idUsuario, payload = {}) => {
+  const userId = Number(idUsuario);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    const err = new Error("id_usuario inválido.");
+    err.code = "INVALID_USER_ID";
+    throw err;
+  }
+
+  const { data: subscriptions, error } = await supabaseAdmin
+    .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+    .select("id_subscription, endpoint, p256dh, auth, expiration_time, disabled_at")
+    .eq("id_usuario", userId)
+    .is("disabled_at", null);
+  if (error) throw error;
+
+  const rows = Array.isArray(subscriptions) ? subscriptions : [];
+  const result = { total: rows.length, sent: 0, failed: 0, removedSubscriptions: 0 };
+
+  for (const subscriptionRow of rows) {
+    try {
+      await sendWebPushToSubscription(subscriptionRow, payload);
+      result.sent += 1;
+    } catch (err) {
+      result.failed += 1;
+      if (isObsoleteWebPushError(err)) {
+        try {
+          await deleteWebPushSubscription(subscriptionRow.id_subscription);
+          result.removedSubscriptions += 1;
+        } catch (deleteErr) {
+          console.error("[WebPush] No se pudo borrar suscripción obsoleta", deleteErr);
+        }
+      } else {
+        console.error("[WebPush] Error enviando test push", {
+          id_usuario: userId,
+          id_subscription: subscriptionRow.id_subscription,
+          error: serializeWebPushError(err),
+        });
+      }
+    }
+  }
+
+  return result;
+};
+
+const processWebPushDeliveryQueue = async () => {
+  if (!WEB_PUSH_QUEUE_WORKER_ENABLED || !WEB_PUSH_IS_CONFIGURED) {
+    return {
+      fetched: 0,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      removedSubscriptions: 0,
+    };
+  }
+  if (webPushQueueInProgress) {
+    return webPushQueueLastResult;
+  }
+
+  webPushQueueInProgress = true;
+  webPushQueueLastRunAt = new Date().toISOString();
+  webPushQueueLastError = null;
+
+  try {
+    const { data: queueRows, error: queueErr } = await supabaseAdmin
+      .from(WEB_PUSH_DELIVERY_QUEUE_TABLE)
+      .select("id_queue, id_notificacion, id_subscription, id_usuario, intentos")
+      .eq("estado", "pending")
+      .order("id_queue", { ascending: true })
+      .limit(WEB_PUSH_QUEUE_BATCH);
+    if (queueErr) {
+      if (String(queueErr?.code || "") === "42P01") {
+        webPushQueueTableMissing = true;
+        return webPushQueueLastResult;
+      }
+      throw queueErr;
+    }
+
+    webPushQueueTableMissing = false;
+    const rows = Array.isArray(queueRows) ? queueRows : [];
+    const notificationIds = uniqPositiveIds(rows.map((row) => row.id_notificacion));
+    const subscriptionIds = uniqPositiveIds(rows.map((row) => row.id_subscription));
+    const result = {
+      fetched: rows.length,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      removedSubscriptions: 0,
+    };
+
+    if (!rows.length) {
+      webPushQueueLastResult = result;
+      return result;
+    }
+
+    const [
+      { data: notifications, error: notificationsErr },
+      { data: subscriptions, error: subscriptionsErr },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("notificaciones")
+        .select("id_notificacion, titulo, mensaje, fecha, id_usuario")
+        .in("id_notificacion", notificationIds),
+      supabaseAdmin
+        .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+        .select("id_subscription, endpoint, p256dh, auth, expiration_time, disabled_at")
+        .in("id_subscription", subscriptionIds),
+    ]);
+    if (notificationsErr) throw notificationsErr;
+    if (subscriptionsErr) throw subscriptionsErr;
+
+    const notificationById = new Map(
+      (notifications || []).map((row) => [Number(row.id_notificacion), row]),
+    );
+    const subscriptionById = new Map(
+      (subscriptions || []).map((row) => [Number(row.id_subscription), row]),
+    );
+
+    for (const row of rows) {
+      const queueId = Number(row.id_queue);
+      const attempts = Number(row.intentos || 0) + 1;
+      const notification = notificationById.get(Number(row.id_notificacion)) || null;
+      const subscription = subscriptionById.get(Number(row.id_subscription)) || null;
+
+      if (!notification || !subscription || subscription?.disabled_at) {
+        await markWebPushQueueItem(queueId, {
+          estado: "skipped",
+          intentos: attempts,
+          ultimo_error: "Notificación o suscripción no disponible.",
+          procesado_en: new Date().toISOString(),
+        });
+        result.skipped += 1;
+        continue;
+      }
+
+      try {
+        await sendWebPushToSubscription(subscription, buildWebPushPayload(notification));
+        await markWebPushQueueItem(queueId, {
+          estado: "sent",
+          intentos: attempts,
+          ultimo_error: null,
+          procesado_en: new Date().toISOString(),
+        });
+        result.sent += 1;
+      } catch (err) {
+        if (isObsoleteWebPushError(err)) {
+          try {
+            await deleteWebPushSubscription(subscription.id_subscription);
+            result.removedSubscriptions += 1;
+            result.skipped += 1;
+          } catch (deleteErr) {
+            console.error("[WebPush] No se pudo eliminar la suscripción obsoleta", deleteErr);
+            await markWebPushQueueItem(queueId, {
+              estado: attempts >= WEB_PUSH_QUEUE_MAX_RETRIES ? "failed" : "pending",
+              intentos: attempts,
+              ultimo_error: serializeWebPushError(deleteErr),
+              procesado_en:
+                attempts >= WEB_PUSH_QUEUE_MAX_RETRIES ? new Date().toISOString() : null,
+            });
+            result.failed += 1;
+          }
+          continue;
+        }
+
+        const finalState = attempts >= WEB_PUSH_QUEUE_MAX_RETRIES ? "failed" : "pending";
+        await markWebPushQueueItem(queueId, {
+          estado: finalState,
+          intentos: attempts,
+          ultimo_error: serializeWebPushError(err),
+          procesado_en: finalState === "failed" ? new Date().toISOString() : null,
+        });
+        result.failed += 1;
+      }
+    }
+
+    webPushQueueLastResult = result;
+    return result;
+  } catch (err) {
+    webPushQueueLastError = serializeWebPushError(err);
+    throw err;
+  } finally {
+    webPushQueueInProgress = false;
+  }
+};
 
 const randomWhatsappDelayMs = () => {
   return (
@@ -1293,6 +1907,24 @@ if (NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED) {
   });
 }
 
+if (WEB_PUSH_QUEUE_WORKER_ENABLED) {
+  if (WEB_PUSH_IS_CONFIGURED) {
+    console.log(
+      `[WebPush] Worker activo (cada ${Math.round(WEB_PUSH_QUEUE_INTERVAL_MS / 1000)}s).`,
+    );
+    setInterval(() => {
+      processWebPushDeliveryQueue().catch((err) => {
+        console.error("[WebPush] Worker error", err);
+      });
+    }, WEB_PUSH_QUEUE_INTERVAL_MS);
+    processWebPushDeliveryQueue().catch((err) => {
+      console.error("[WebPush] Worker init error", err);
+    });
+  } else {
+    console.warn("[WebPush] Worker desactivado: faltan WEB_PUSH_VAPID_PUBLIC_KEY/PRIVATE_KEY.");
+  }
+}
+
 const normalizeMontoBs = (value) => {
   if (value === null || value === undefined || value === "") return null;
   const raw = String(value).trim();
@@ -1483,6 +2115,531 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
 });
 
 app.use(jsonParser);
+
+app.get("/api/web-push/status", async (req, res) => {
+  try {
+    const idUsuario = requireSessionUserId(req);
+    const { count, error } = await supabaseAdmin
+      .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+      .select("id_subscription", { count: "exact", head: true })
+      .eq("id_usuario", idUsuario)
+      .is("disabled_at", null);
+    if (error) throw error;
+
+    return res.json({
+      enabled: WEB_PUSH_ENABLED && WEB_PUSH_IS_CONFIGURED,
+      configured: WEB_PUSH_IS_CONFIGURED,
+      workerEnabled: WEB_PUSH_QUEUE_WORKER_ENABLED && WEB_PUSH_IS_CONFIGURED,
+      deviceCount: Number(count || 0),
+      lastRunAt: webPushQueueLastRunAt,
+      lastResult: webPushQueueLastResult,
+      lastError: webPushQueueLastError,
+      tableMissing: webPushQueueTableMissing,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (String(err?.code || "") === "42P01") {
+      return res.status(503).json({ error: "Tablas de web push aún no creadas." });
+    }
+    console.error("[web-push/status] error", err);
+    return res.status(500).json({ error: "No se pudo consultar el estado de web push." });
+  }
+});
+
+app.get("/api/web-push/public-key", (req, res) => {
+  try {
+    requireSessionUserId(req);
+    return res.json({
+      enabled: WEB_PUSH_ENABLED && WEB_PUSH_IS_CONFIGURED,
+      publicKey: WEB_PUSH_IS_CONFIGURED ? String(webPushVapidPublicKey || "").trim() : null,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res.status(500).json({ error: "No se pudo leer la clave pública." });
+  }
+});
+
+app.post("/api/web-push/subscribe", async (req, res) => {
+  try {
+    if (!WEB_PUSH_ENABLED) {
+      return res.status(503).json({ error: "Web push está deshabilitado." });
+    }
+    if (!WEB_PUSH_IS_CONFIGURED) {
+      return res.status(503).json({ error: "Faltan claves VAPID en el backend." });
+    }
+
+    const idUsuario = requireSessionUserId(req);
+    const subscription = parseWebPushSubscriptionInput(req.body || {});
+    const payload = {
+      id_usuario: idUsuario,
+      endpoint: subscription.endpoint,
+      p256dh: subscription.p256dh,
+      auth: subscription.auth,
+      expiration_time: subscription.expirationTime,
+      user_agent: subscription.userAgent || trimWebPushText(req.get("user-agent") || "", 1000) || null,
+      device_label: subscription.deviceLabel,
+      last_seen_at: new Date().toISOString(),
+      disabled_at: null,
+    };
+
+    const { data: savedRow, error } = await supabaseAdmin
+      .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+      .upsert(payload, { onConflict: "endpoint" })
+      .select("id_subscription")
+      .maybeSingle();
+    if (error) throw error;
+
+    const { count, error: countErr } = await supabaseAdmin
+      .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+      .select("id_subscription", { count: "exact", head: true })
+      .eq("id_usuario", idUsuario)
+      .is("disabled_at", null);
+    if (countErr) throw countErr;
+
+    return res.json({
+      ok: true,
+      id_subscription: Number(savedRow?.id_subscription || 0) || null,
+      deviceCount: Number(count || 0),
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "INVALID_PUSH_SUBSCRIPTION") {
+      return res.status(400).json({ error: err.message });
+    }
+    if (String(err?.code || "") === "42P01") {
+      return res.status(503).json({ error: "Tablas de web push aún no creadas." });
+    }
+    console.error("[web-push/subscribe] error", err);
+    return res.status(500).json({ error: "No se pudo registrar el dispositivo." });
+  }
+});
+
+app.delete("/api/web-push/subscribe", async (req, res) => {
+  try {
+    const idUsuario = requireSessionUserId(req);
+    const endpoint = trimWebPushText(req.body?.endpoint || "", 3000);
+    if (!endpoint) {
+      return res.status(400).json({ error: "Endpoint requerido." });
+    }
+
+    const { error } = await supabaseAdmin
+      .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+      .delete()
+      .eq("id_usuario", idUsuario)
+      .eq("endpoint", endpoint);
+    if (error) throw error;
+
+    const { count, error: countErr } = await supabaseAdmin
+      .from(WEB_PUSH_SUBSCRIPTIONS_TABLE)
+      .select("id_subscription", { count: "exact", head: true })
+      .eq("id_usuario", idUsuario)
+      .is("disabled_at", null);
+    if (countErr) throw countErr;
+
+    return res.json({ ok: true, deviceCount: Number(count || 0) });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (String(err?.code || "") === "42P01") {
+      return res.status(503).json({ error: "Tablas de web push aún no creadas." });
+    }
+    console.error("[web-push/unsubscribe] error", err);
+    return res.status(500).json({ error: "No se pudo desregistrar el dispositivo." });
+  }
+});
+
+app.post("/api/web-push/test", async (req, res) => {
+  try {
+    if (!WEB_PUSH_ENABLED) {
+      return res.status(503).json({ error: "Web push está deshabilitado." });
+    }
+    if (!WEB_PUSH_IS_CONFIGURED) {
+      return res.status(503).json({ error: "Faltan claves VAPID en el backend." });
+    }
+
+    const idUsuario = requireSessionUserId(req);
+    const title = trimWebPushText(req.body?.title || "Notificaciones activadas", 120);
+    const body =
+      trimWebPushText(
+        req.body?.body || "Este dispositivo ya puede recibir notificaciones de Moose+.",
+        400,
+      ) || "Este dispositivo ya puede recibir notificaciones de Moose+.";
+    const result = await sendWebPushPayloadToUserSubscriptions(
+      idUsuario,
+      buildWebPushPayload(
+        { titulo: title || "Notificaciones activadas", mensaje: body },
+        { url: buildWebPushTargetUrl("/notificaciones.html") },
+      ),
+    );
+
+    if (!result.total) {
+      return res.status(404).json({ error: "No hay dispositivos registrados para este usuario." });
+    }
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (String(err?.code || "") === "42P01") {
+      return res.status(503).json({ error: "Tablas de web push aún no creadas." });
+    }
+    console.error("[web-push/test] error", err);
+    return res.status(500).json({ error: "No se pudo enviar la notificación de prueba." });
+  }
+});
+
+app.post("/api/web-push/process-queue", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const result = await processWebPushDeliveryQueue();
+    return res.json({
+      ok: true,
+      result,
+      lastRunAt: webPushQueueLastRunAt,
+      lastError: webPushQueueLastError,
+      tableMissing: webPushQueueTableMissing,
+    });
+  } catch (err) {
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[web-push/process-queue] error", err);
+    return res.status(500).json({ error: "No se pudo procesar la cola de web push." });
+  }
+});
+
+app.get("/api/sandbox/giftcards/catalog", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+
+    const [platformsRes, pricesRes] = await Promise.all([
+      supabaseAdmin
+        .from("plataformas")
+        .select("id_plataforma, nombre, color_1, tarjeta_de_regalo")
+        .eq("tarjeta_de_regalo", true)
+        .order("nombre", { ascending: true }),
+      supabaseAdmin
+        .from("precios")
+        .select(
+          "id_precio, id_plataforma, precio_usd_detal, precio_usd_mayor, valor_tarjeta_de_regalo, moneda, region, plan",
+        )
+        .not("valor_tarjeta_de_regalo", "is", null)
+        .order("id_precio", { ascending: true }),
+    ]);
+    if (platformsRes.error) throw platformsRes.error;
+    if (pricesRes.error) throw pricesRes.error;
+
+    return res.json({
+      platforms: platformsRes.data || [],
+      prices: pricesRes.data || [],
+    });
+  } catch (err) {
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[sandbox/giftcards/catalog] error", err);
+    return res.status(500).json({ error: "No se pudo cargar el catálogo sandbox." });
+  }
+});
+
+app.get("/api/sandbox/giftcards/recent", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const limit = Math.max(1, Math.min(30, Number(req.query?.limit) || 15));
+
+    const { data: orders, error: ordersErr } = await supabaseAdmin
+      .from(SANDBOX_GIFTCARD_ORDERS_TABLE)
+      .select(
+        `
+          id_sandbox_order,
+          id_usuario_cliente,
+          id_usuario_admin,
+          id_plataforma,
+          id_precio,
+          cantidad,
+          referencia,
+          estado,
+          total_usd,
+          total_bs,
+          tasa_bs,
+          valor_tarjeta_de_regalo,
+          moneda,
+          notas,
+          payload,
+          creado_en,
+          cliente:usuarios!sandbox_giftcard_orders_id_usuario_cliente_fkey(id_usuario, nombre, apellido),
+          admin:usuarios!sandbox_giftcard_orders_id_usuario_admin_fkey(id_usuario, nombre, apellido),
+          plataforma:plataformas!sandbox_giftcard_orders_id_plataforma_fkey(id_plataforma, nombre)
+        `,
+      )
+      .order("id_sandbox_order", { ascending: false })
+      .limit(limit);
+    if (ordersErr) throw ordersErr;
+
+    const orderIds = uniqPositiveIds((orders || []).map((row) => row.id_sandbox_order));
+    if (!orderIds.length) {
+      return res.json({ orders: [] });
+    }
+
+    const [itemsRes, historyRes] = await Promise.all([
+      supabaseAdmin
+        .from(SANDBOX_GIFTCARD_ORDER_ITEMS_TABLE)
+        .select(
+          "id_sandbox_item, id_sandbox_order, id_plataforma, id_precio, cantidad, precio_unitario_usd, total_usd, valor_tarjeta_de_regalo, moneda, region, detalle, payload, creado_en",
+        )
+        .in("id_sandbox_order", orderIds)
+        .order("id_sandbox_item", { ascending: true }),
+      supabaseAdmin
+        .from(SANDBOX_GIFTCARD_HISTORY_TABLE)
+        .select(
+          "id_sandbox_historial, id_sandbox_order, id_usuario_cliente, id_usuario_admin, id_plataforma, monto_usd, monto_bs, referencia, venta_cliente, renovacion, detalle, payload, creado_en",
+        )
+        .in("id_sandbox_order", orderIds)
+        .order("id_sandbox_historial", { ascending: true }),
+    ]);
+    if (itemsRes.error) throw itemsRes.error;
+    if (historyRes.error) throw historyRes.error;
+
+    const itemsByOrder = new Map();
+    (itemsRes.data || []).forEach((row) => {
+      const key = Number(row.id_sandbox_order);
+      if (!itemsByOrder.has(key)) itemsByOrder.set(key, []);
+      itemsByOrder.get(key).push(row);
+    });
+    const historyByOrder = new Map();
+    (historyRes.data || []).forEach((row) => {
+      const key = Number(row.id_sandbox_order);
+      if (!historyByOrder.has(key)) historyByOrder.set(key, []);
+      historyByOrder.get(key).push(row);
+    });
+
+    return res.json({
+      orders: (orders || []).map((order) => ({
+        ...order,
+        items: itemsByOrder.get(Number(order.id_sandbox_order)) || [],
+        history: historyByOrder.get(Number(order.id_sandbox_order)) || [],
+      })),
+    });
+  } catch (err) {
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (String(err?.code || "") === "42P01") {
+      return res.status(503).json({ error: "Las tablas sandbox aún no existen." });
+    }
+    console.error("[sandbox/giftcards/recent] error", err);
+    return res.status(500).json({ error: "No se pudieron cargar las simulaciones." });
+  }
+});
+
+app.post("/api/sandbox/giftcards/simulate-sale", async (req, res) => {
+  const round2 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  const round6 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 1_000_000) / 1_000_000;
+
+  try {
+    await requireAdminSession(req);
+    const idUsuarioAdmin = requireSessionUserId(req);
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+
+    const idUsuarioCliente = toPositiveInt(body.id_usuario_cliente);
+    const idPlataforma = toPositiveInt(body.id_plataforma);
+    const idPrecio = toPositiveInt(body.id_precio);
+    const cantidad = Math.max(1, Math.min(500, toPositiveInt(body.cantidad) || 1));
+    const referencia = trimWebPushText(body.referencia || "", 120) || null;
+    const notas = trimWebPushText(body.notas || "", 2000) || null;
+    const tasaBsRaw = Number(body.tasa_bs);
+    const tasaBs = Number.isFinite(tasaBsRaw) && tasaBsRaw > 0 ? round6(tasaBsRaw) : null;
+    const unitUsdOverrideRaw = Number(body.precio_unitario_usd);
+    const unitUsdOverride =
+      Number.isFinite(unitUsdOverrideRaw) && unitUsdOverrideRaw >= 0 ? round2(unitUsdOverrideRaw) : null;
+    const totalUsdOverrideRaw = Number(body.total_usd);
+    const totalUsdOverride =
+      Number.isFinite(totalUsdOverrideRaw) && totalUsdOverrideRaw >= 0 ? round2(totalUsdOverrideRaw) : null;
+    const totalBsOverrideRaw = Number(body.total_bs);
+    const totalBsOverride =
+      Number.isFinite(totalBsOverrideRaw) && totalBsOverrideRaw >= 0 ? round2(totalBsOverrideRaw) : null;
+
+    if (!idPlataforma || !idPrecio) {
+      return res.status(400).json({ error: "id_plataforma e id_precio son obligatorios." });
+    }
+
+    const [platformRes, priceRes, userRes] = await Promise.all([
+      supabaseAdmin
+        .from("plataformas")
+        .select("id_plataforma, nombre, tarjeta_de_regalo")
+        .eq("id_plataforma", idPlataforma)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("precios")
+        .select(
+          "id_precio, id_plataforma, precio_usd_detal, precio_usd_mayor, valor_tarjeta_de_regalo, moneda, region, plan",
+        )
+        .eq("id_precio", idPrecio)
+        .maybeSingle(),
+      idUsuarioCliente
+        ? supabaseAdmin
+            .from("usuarios")
+            .select("id_usuario, nombre, apellido, correo")
+            .eq("id_usuario", idUsuarioCliente)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    if (platformRes.error) throw platformRes.error;
+    if (priceRes.error) throw priceRes.error;
+    if (userRes.error) throw userRes.error;
+
+    const platformRow = platformRes.data;
+    const priceRow = priceRes.data;
+    if (!platformRow) {
+      return res.status(404).json({ error: "Plataforma no encontrada." });
+    }
+    if (!priceRow) {
+      return res.status(404).json({ error: "Precio no encontrado." });
+    }
+    if (!isTrue(platformRow?.tarjeta_de_regalo)) {
+      return res.status(400).json({ error: "La plataforma seleccionada no es una gift card." });
+    }
+    if (Number(priceRow.id_plataforma) !== Number(idPlataforma)) {
+      return res.status(400).json({ error: "El precio no pertenece a la plataforma seleccionada." });
+    }
+    if (idUsuarioCliente && !userRes.data?.id_usuario) {
+      return res.status(404).json({ error: "Cliente no encontrado." });
+    }
+
+    const unitUsd =
+      unitUsdOverride ??
+      round2(
+        Number.isFinite(Number(priceRow.precio_usd_detal))
+          ? Number(priceRow.precio_usd_detal)
+          : Number(priceRow.precio_usd_mayor) || 0,
+      );
+    const totalUsd = totalUsdOverride ?? round2(unitUsd * cantidad);
+    const totalBs = totalBsOverride ?? (tasaBs ? round2(totalUsd * tasaBs) : null);
+    const valorTarjeta =
+      trimWebPushText(body.valor_tarjeta_de_regalo || priceRow.valor_tarjeta_de_regalo || "", 80) ||
+      null;
+    const moneda = trimWebPushText(body.moneda || priceRow.moneda || "", 20) || null;
+    const detalle = [
+      platformRow.nombre || `Plataforma ${idPlataforma}`,
+      valorTarjeta ? `Valor: ${valorTarjeta}${moneda ? ` ${moneda}` : ""}` : "",
+      referencia ? `Ref: ${referencia}` : "",
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
+    const orderPayload = {
+      id_usuario_cliente: idUsuarioCliente || null,
+      id_usuario_admin: idUsuarioAdmin,
+      id_plataforma: idPlataforma,
+      id_precio: idPrecio,
+      cantidad,
+      referencia,
+      estado: "simulada",
+      total_usd: totalUsd,
+      total_bs: totalBs,
+      tasa_bs: tasaBs,
+      valor_tarjeta_de_regalo: valorTarjeta,
+      moneda,
+      notas,
+      payload: {
+        source: "sandbox-giftcards",
+        platform_name: platformRow.nombre || null,
+        price: priceRow,
+        client: userRes.data || null,
+        request: body,
+      },
+    };
+
+    const { data: insertedOrder, error: orderErr } = await supabaseAdmin
+      .from(SANDBOX_GIFTCARD_ORDERS_TABLE)
+      .insert(orderPayload)
+      .select("*")
+      .maybeSingle();
+    if (orderErr) throw orderErr;
+
+    const itemPayload = {
+      id_sandbox_order: insertedOrder.id_sandbox_order,
+      id_plataforma: idPlataforma,
+      id_precio: idPrecio,
+      cantidad,
+      precio_unitario_usd: unitUsd,
+      total_usd: totalUsd,
+      valor_tarjeta_de_regalo: valorTarjeta,
+      moneda,
+      region: trimWebPushText(body.region || priceRow.region || "", 80) || null,
+      detalle,
+      payload: {
+        plan: priceRow.plan || null,
+        request: body,
+      },
+    };
+    const { data: insertedItem, error: itemErr } = await supabaseAdmin
+      .from(SANDBOX_GIFTCARD_ORDER_ITEMS_TABLE)
+      .insert(itemPayload)
+      .select("*")
+      .maybeSingle();
+    if (itemErr) throw itemErr;
+
+    const historyPayload = {
+      id_sandbox_order: insertedOrder.id_sandbox_order,
+      id_usuario_cliente: idUsuarioCliente || null,
+      id_usuario_admin: idUsuarioAdmin,
+      id_plataforma: idPlataforma,
+      monto_usd: totalUsd,
+      monto_bs: totalBs,
+      referencia,
+      venta_cliente: true,
+      renovacion: false,
+      detalle,
+      payload: {
+        order: insertedOrder,
+        item: insertedItem,
+      },
+    };
+    const { data: insertedHistory, error: historyErr } = await supabaseAdmin
+      .from(SANDBOX_GIFTCARD_HISTORY_TABLE)
+      .insert(historyPayload)
+      .select("*")
+      .maybeSingle();
+    if (historyErr) throw historyErr;
+
+    return res.json({
+      ok: true,
+      order: insertedOrder,
+      item: insertedItem,
+      history: insertedHistory,
+    });
+  } catch (err) {
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (String(err?.code || "") === "42P01") {
+      return res.status(503).json({ error: "Las tablas sandbox aún no existen." });
+    }
+    console.error("[sandbox/giftcards/simulate-sale] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudo guardar la simulación." });
+  }
+});
 
 app.get("/api/whatsapp/status", (req, res) => {
   res.json({ ready: isWhatsappReady() });
@@ -1743,6 +2900,11 @@ const FRONTEND_DIR = path.join(__dirname, "..", "frontend");
   ["/assets", "assets"],
 ].forEach(([mountPath, dirName]) => {
   app.use(mountPath, express.static(path.join(FRONTEND_DIR, dirName)));
+});
+
+app.get("/service-worker.js", (_req, res) => {
+  res.set("Cache-Control", "no-cache");
+  res.sendFile(path.join(FRONTEND_DIR, "public", "service-worker.js"));
 });
 
 const INDEX_HTML_PATH = path.join(FRONTEND_DIR, "pages", "index.html");
@@ -2536,7 +3698,7 @@ const getPrecioPicker = async (idUsuarioVentas) => {
     const mayor = Number(price?.precio_usd_mayor) || 0;
     return esMayorista ? mayor || detal : detal || mayor;
   };
-  return { esMayorista, pickPrecio };
+  return { accesoCliente: accesoCliente ?? null, esMayorista, pickPrecio };
 };
 
 const isValidPrecioId = (value) => {
@@ -2560,18 +3722,279 @@ const assertItemsValidPrecioId = (items = []) => {
   throw err;
 };
 
+const roundCheckoutMoney = (value) =>
+  Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
+const parseOptionalCheckoutNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = Number(raw.replace(",", "."));
+  return Number.isFinite(normalized) ? normalized : null;
+};
+
+const isCheckoutExplicitFalse = (value) =>
+  value === false || value === 0 || value === "0" || value === "false" || value === "f";
+
+const normalizeCheckoutPlatformRow = (row = {}) => {
+  const idDescMesBase = row.id_descuento_mes ?? 1;
+  const idDescCantidadBase = row.id_descuento_cantidad ?? 2;
+  return {
+    ...row,
+    id_descuento_mes: idDescMesBase,
+    id_descuento_cantidad: idDescCantidadBase,
+    id_descuento_mes_detal: row.id_descuento_mes_detal ?? idDescMesBase,
+    id_descuento_mes_mayor: row.id_descuento_mes_mayor ?? idDescMesBase,
+    id_descuento_cantidad_detal: row.id_descuento_cantidad_detal ?? idDescCantidadBase,
+    id_descuento_cantidad_mayor: row.id_descuento_cantidad_mayor ?? idDescCantidadBase,
+    aplica_descuento_mes_detal: isCheckoutExplicitFalse(row.aplica_descuento_mes_detal)
+      ? false
+      : true,
+    aplica_descuento_mes_mayor: isCheckoutExplicitFalse(row.aplica_descuento_mes_mayor)
+      ? false
+      : true,
+    aplica_descuento_cantidad_detal: isCheckoutExplicitFalse(row.aplica_descuento_cantidad_detal)
+      ? false
+      : true,
+    aplica_descuento_cantidad_mayor: isCheckoutExplicitFalse(row.aplica_descuento_cantidad_mayor)
+      ? false
+      : true,
+  };
+};
+
+const getClosestCheckoutDiscountPct = (rows = [], value, column) => {
+  const key = Number(value) || 0;
+  if (!Array.isArray(rows) || key <= 0 || !column) return 0;
+  const exact = rows.find((row) => Number(row?.meses) === key);
+  const exactVal = exact?.[column];
+  if (exactVal !== null && exactVal !== undefined && exactVal !== "") {
+    return Number(exactVal) || 0;
+  }
+  let best = null;
+  for (const row of rows) {
+    const meses = Number(row?.meses);
+    if (!Number.isFinite(meses) || meses > key) continue;
+    const raw = row?.[column];
+    if (raw === null || raw === undefined || raw === "") continue;
+    if (!best || meses > Number(best?.meses)) best = row;
+  }
+  return Number(best?.[column]) || 0;
+};
+
+const getCheckoutDiscountColumnsFromRows = (rows = []) => {
+  const cols = new Set();
+  (rows || []).forEach((row) => {
+    Object.keys(row || {}).forEach((key) => {
+      const normalized = String(key || "").toLowerCase();
+      if (/^descuento_\d+$/i.test(normalized)) cols.add(normalized);
+    });
+  });
+  const out = Array.from(cols).sort((a, b) => {
+    const na = Number(a.split("_")[1]) || 0;
+    const nb = Number(b.split("_")[1]) || 0;
+    return na - nb;
+  });
+  return out.length ? out : ["descuento_1", "descuento_2"];
+};
+
+const buildCheckoutDiscountColumnByIdMap = (rows = [], cols = []) => {
+  const ids = [];
+  (rows || []).forEach((row) => {
+    const id = Number(row?.id_descuento);
+    if (!Number.isFinite(id) || ids.includes(id)) return;
+    ids.push(id);
+  });
+  return ids.reduce((acc, id, index) => {
+    if (cols[index]) acc[id] = cols[index];
+    return acc;
+  }, {});
+};
+
+const resolveCheckoutDiscountColumn = (
+  platformInfo,
+  mode,
+  discountColumns,
+  discountColumnById,
+  isCliente = true,
+) => {
+  const isItemsMode = mode === "items";
+  const groupField = isItemsMode
+    ? isCliente
+      ? "id_descuento_cantidad_detal"
+      : "id_descuento_cantidad_mayor"
+    : isCliente
+      ? "id_descuento_mes_detal"
+      : "id_descuento_mes_mayor";
+  const legacyField = isItemsMode ? "id_descuento_cantidad" : "id_descuento_mes";
+  const preferredRaw = platformInfo?.[groupField];
+  const hasPreferredRaw =
+    preferredRaw !== null &&
+    preferredRaw !== undefined &&
+    String(preferredRaw).trim() !== "";
+  const raw = hasPreferredRaw ? preferredRaw : platformInfo?.[legacyField];
+  const asText = String(raw || "").trim();
+  if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) {
+    const direct = `descuento_${Math.trunc(asNum)}`;
+    if ((discountColumns || []).includes(direct)) return direct;
+    const mapped = discountColumnById?.[Math.trunc(asNum)];
+    if (mapped) return mapped;
+  }
+  return mode === "items" ? "descuento_2" : "descuento_1";
+};
+
+const isCheckoutDiscountEnabledForAudience = (platformInfo, mode = "months", isCliente = true) => {
+  if (mode === "items") {
+    return isCliente
+      ? !isCheckoutExplicitFalse(platformInfo?.aplica_descuento_cantidad_detal)
+      : !isCheckoutExplicitFalse(platformInfo?.aplica_descuento_cantidad_mayor);
+  }
+  return isCliente
+    ? !isCheckoutExplicitFalse(platformInfo?.aplica_descuento_mes_detal)
+    : !isCheckoutExplicitFalse(platformInfo?.aplica_descuento_mes_mayor);
+};
+
+const computeCheckoutItemPricing = ({
+  item,
+  priceInfo,
+  platformInfo,
+  pickPrecio,
+  descuentos = [],
+  discountColumns = [],
+  discountColumnById = {},
+  isCliente = true,
+}) => {
+  const qty = Math.max(1, Number(item?.cantidad || priceInfo?.cantidad || 1) || 1);
+  const isGiftCard = isTrue(platformInfo?.tarjeta_de_regalo);
+  const mesesVal = isGiftCard
+    ? 1
+    : Math.max(1, Number(item?.meses || priceInfo?.duracion || 1) || 1);
+  const unitPrice = Number(pickPrecio?.(priceInfo)) || 0;
+  const baseSubtotalUsd = roundCheckoutMoney(unitPrice * qty * (isGiftCard ? 1 : mesesVal));
+  const monthEnabled =
+    !!platformInfo?.descuento_meses &&
+    !isGiftCard &&
+    isCheckoutDiscountEnabledForAudience(platformInfo, "months", isCliente);
+  const qtyEnabled = isCheckoutDiscountEnabledForAudience(platformInfo, "items", isCliente);
+  const monthColumn = resolveCheckoutDiscountColumn(
+    platformInfo,
+    "months",
+    discountColumns,
+    discountColumnById,
+    isCliente,
+  );
+  const qtyColumn = resolveCheckoutDiscountColumn(
+    platformInfo,
+    "items",
+    discountColumns,
+    discountColumnById,
+    isCliente,
+  );
+  const rawRateMeses = monthEnabled
+    ? getClosestCheckoutDiscountPct(descuentos, mesesVal, monthColumn)
+    : 0;
+  const rawRateQty = qtyEnabled
+    ? getClosestCheckoutDiscountPct(descuentos, qty, qtyColumn)
+    : 0;
+  const rateMeses = rawRateMeses > 1 ? rawRateMeses / 100 : rawRateMeses;
+  const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
+  const descuentoMesesUsd = rateMeses > 0 ? roundCheckoutMoney(baseSubtotalUsd * rateMeses) : 0;
+  const descuentoCantidadUsd = rateQty > 0 ? roundCheckoutMoney(baseSubtotalUsd * rateQty) : 0;
+  const descuentoUsd = roundCheckoutMoney(descuentoMesesUsd + descuentoCantidadUsd);
+  const subtotalUsd = roundCheckoutMoney(baseSubtotalUsd - descuentoUsd);
+  return {
+    qty,
+    mesesVal,
+    unitPrice,
+    baseSubtotalUsd,
+    descuentoMesesUsd,
+    descuentoCantidadUsd,
+    descuentoUsd,
+    subtotalUsd,
+    isGiftCard,
+  };
+};
+
+const computeCheckoutItemBaseAmount = ({
+  item,
+  priceInfo,
+  platformInfo,
+  pickPrecio,
+  descuentos = [],
+  discountColumns = [],
+  discountColumnById = {},
+  isCliente = true,
+}) =>
+  computeCheckoutItemPricing({
+    item,
+    priceInfo,
+    platformInfo,
+    pickPrecio,
+    descuentos,
+    discountColumns,
+    discountColumnById,
+    isCliente,
+  }).subtotalUsd;
+
+const normalizeCheckoutCustomItemAmounts = (input = []) => {
+  if (input == null) return new Map();
+  if (!Array.isArray(input)) {
+    const err = new Error("custom_item_amounts debe ser un arreglo.");
+    err.code = "INVALID_CUSTOM_ITEM_AMOUNTS";
+    err.httpStatus = 400;
+    throw err;
+  }
+
+  return input.reduce((acc, row) => {
+    const itemId = toPositiveInt(row?.id_item);
+    if (!itemId) {
+      const err = new Error("Cada monto personalizado debe incluir id_item válido.");
+      err.code = "INVALID_CUSTOM_ITEM_AMOUNTS";
+      err.httpStatus = 400;
+      throw err;
+    }
+    const amountRaw = Number(String(row?.monto_usd ?? "").trim().replace(",", "."));
+    if (!Number.isFinite(amountRaw) || amountRaw < 0) {
+      const err = new Error(`Monto personalizado inválido para el item ${itemId}.`);
+      err.code = "INVALID_CUSTOM_ITEM_AMOUNTS";
+      err.httpStatus = 400;
+      throw err;
+    }
+    acc.set(itemId, roundCheckoutMoney(amountRaw));
+    return acc;
+  }, new Map());
+};
+
 const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, tasa_bs }) => {
-  const { pickPrecio } = await getPrecioPicker(idUsuarioVentas);
+  const { accesoCliente, esMayorista, pickPrecio } = await getPrecioPicker(idUsuarioVentas);
+  const isCliente = !esMayorista;
+  const totalClienteParsed = parseOptionalCheckoutNumber(totalCliente);
+  const tasaBsParsed = parseOptionalCheckoutNumber(tasa_bs);
   const { data: items, error: itemErr } = await supabaseAdmin
     .from("carrito_items")
-    .select("id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
+    .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
     .eq("id_carrito", carritoId);
   if (itemErr) throw itemErr;
 
   if (!items?.length) {
-    const total = Number.isFinite(Number(totalCliente)) ? Number(totalCliente) : 0;
-    const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
-    return { items: [], priceMap: {}, platInfoById: {}, platNameById: {}, pickPrecio, total, tasaBs };
+    const total = totalClienteParsed ?? 0;
+    const tasaBs = tasaBsParsed ?? 400;
+    return {
+      items: [],
+      priceMap: {},
+      platInfoById: {},
+      platNameById: {},
+      pickPrecio,
+      total,
+      tasaBs,
+      accesoCliente,
+      esMayorista,
+      isCliente,
+      descuentos: [],
+      discountColumns: ["descuento_1", "descuento_2"],
+      discountColumnById: {},
+    };
   }
 
   assertItemsValidPrecioId(items);
@@ -2579,7 +4002,9 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const preciosIds = (items || []).map((i) => i.id_precio).filter(Boolean);
   const { data: precios, error: precioErr } = await supabaseAdmin
     .from("precios")
-    .select("id_precio, precio_usd_detal, precio_usd_mayor, id_plataforma, completa, sub_cuenta")
+    .select(
+      "id_precio, cantidad, duracion, precio_usd_detal, precio_usd_mayor, id_plataforma, completa, sub_cuenta, valor_tarjeta_de_regalo",
+    )
     .in("id_precio", preciosIds);
   if (precioErr) throw precioErr;
   const priceMap = (precios || []).reduce((acc, p) => {
@@ -2588,31 +4013,63 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   }, {});
 
   const plataformaIds = [...new Set((precios || []).map((p) => p.id_plataforma).filter(Boolean))];
-  const { data: plataformas, error: platErr } = await supabaseAdmin
-    .from("plataformas")
-    .select(
-      "id_plataforma, nombre, entrega_inmediata, cuenta_madre, correo_cliente, tarjeta_de_regalo, por_pantalla, por_acceso",
-    )
-    .in("id_plataforma", plataformaIds);
+  const [
+    { data: plataformas, error: platErr },
+    { data: descuentos, error: descuentosErr },
+  ] = await Promise.all([
+    supabaseAdmin.from("plataformas").select("*").in("id_plataforma", plataformaIds),
+    supabaseAdmin.from("descuentos").select("*").order("meses", { ascending: true }),
+  ]);
   if (platErr) throw platErr;
-  const platInfoById = (plataformas || []).reduce((acc, p) => {
+  if (descuentosErr) throw descuentosErr;
+  const normalizedPlataformas = (plataformas || []).map((row) => normalizeCheckoutPlatformRow(row));
+  const platInfoById = normalizedPlataformas.reduce((acc, p) => {
     acc[p.id_plataforma] = p;
     return acc;
   }, {});
-  const platNameById = (plataformas || []).reduce((acc, p) => {
+  const platNameById = normalizedPlataformas.reduce((acc, p) => {
     acc[p.id_plataforma] = p.nombre || `Plataforma ${p.id_plataforma}`;
     return acc;
   }, {});
+  const discountColumns = getCheckoutDiscountColumnsFromRows(descuentos || []);
+  const discountColumnById = buildCheckoutDiscountColumnByIdMap(descuentos || [], discountColumns);
 
   const totalCalc = (items || []).reduce((sum, it) => {
-    const unit = pickPrecio(priceMap[it.id_precio]);
-    const mesesVal = it.meses || 1;
-    return sum + unit * (it.cantidad || 0) * mesesVal;
+    const priceInfo = priceMap[it.id_precio] || {};
+    const platId = Number(priceInfo?.id_plataforma) || null;
+    const platformInfo = platId ? platInfoById?.[platId] || {} : {};
+    return (
+      sum +
+      computeCheckoutItemBaseAmount({
+        item: it,
+        priceInfo,
+        platformInfo,
+        pickPrecio,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        isCliente,
+      })
+    );
   }, 0);
-  const total = Number.isFinite(Number(totalCliente)) ? Number(totalCliente) : totalCalc;
-  const tasaBs = Number.isFinite(Number(tasa_bs)) ? Number(tasa_bs) : 400;
+  const total = totalClienteParsed ?? totalCalc;
+  const tasaBs = tasaBsParsed ?? 400;
 
-  return { items: items || [], priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs };
+  return {
+    items: items || [],
+    priceMap,
+    platInfoById,
+    platNameById,
+    pickPrecio,
+    total,
+    tasaBs,
+    accesoCliente,
+    esMayorista,
+    isCliente,
+    descuentos: descuentos || [],
+    discountColumns,
+    discountColumnById,
+  };
 };
 
 const buildOrdenItemDetalle = ({
@@ -2672,20 +4129,21 @@ const buildOrdenItemDetalle = ({
   return parts.filter(Boolean).join(" | ");
 };
 
-const syncOrdenItemsSnapshot = async ({
-  ordenId,
+const buildCheckoutItemSummaryRows = async ({
   items,
   priceMap,
   platInfoById,
   platNameById,
   pickPrecio,
+  descuentos = [],
+  discountColumns = [],
+  discountColumnById = {},
+  isCliente = true,
   totalUsd,
   montoBsTotal,
   tasaBs,
+  customItemAmountMap = null,
 }) => {
-  const orderIdNum = Number(ordenId);
-  if (!Number.isFinite(orderIdNum) || orderIdNum <= 0) return;
-
   const itemsList = Array.isArray(items) ? items : [];
   const ventaIds = uniqPositiveIds(itemsList.map((item) => item?.id_venta));
   const cuentaIds = uniqPositiveIds(itemsList.map((item) => item?.id_cuenta));
@@ -2734,23 +4192,32 @@ const syncOrdenItemsSnapshot = async ({
     return acc;
   }, {});
 
-  const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  const totalUsdOverride = parseOptionalCheckoutNumber(totalUsd);
+  const montoBsOverride = parseOptionalCheckoutNumber(montoBsTotal);
+  const tasaBsValue = parseOptionalCheckoutNumber(tasaBs);
+  const hasCustomAmounts = customItemAmountMap instanceof Map && customItemAmountMap.size > 0;
   const draftRows = itemsList.map((item) => {
     const priceInfo = priceMap?.[item?.id_precio] || {};
     const platId = Number(priceInfo?.id_plataforma) || null;
     const platformInfo = platId ? platInfoById?.[platId] || {} : {};
-    const isGiftCard = isTrue(platformInfo?.tarjeta_de_regalo);
-    const qty = Math.max(1, Number(item?.cantidad) || 1);
-    const mesesVal = Math.max(1, Number(item?.meses) || 1);
-    const unitPrice = Number(pickPrecio?.(priceInfo)) || 0;
-    const multiplier = isGiftCard ? qty : qty * mesesVal;
-    const montoBaseUsd = round2(unitPrice * multiplier);
     const platformName = platId ? platNameById?.[platId] || `Plataforma ${platId}` : "Plataforma";
-
+    const pricing = computeCheckoutItemPricing({
+      item,
+      priceInfo,
+      platformInfo,
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+    });
     return {
-      id_orden: orderIdNum,
+      id_item: toPositiveInt(item?.id_item) || null,
+      id_precio: toPositiveInt(item?.id_precio) || null,
       id_plataforma: platId,
       renovacion: item?.renovacion === true,
+      cantidad: Math.max(1, Number(item?.cantidad) || 1),
+      meses: Math.max(1, Number(item?.meses) || 1),
       detalle: buildOrdenItemDetalle({
         item,
         priceInfo,
@@ -2760,45 +4227,125 @@ const syncOrdenItemsSnapshot = async ({
         perfilMap,
         ventaMap,
       }),
-      monto_usd: 0,
-      monto_bs: 0,
-      _montoBaseUsd: montoBaseUsd,
+      monto_original_usd: pricing.baseSubtotalUsd,
+      descuento_usd: pricing.descuentoUsd,
+      monto_base_usd: pricing.subtotalUsd,
     };
   });
 
-  const baseTotalUsd = round2(
-    draftRows.reduce((sum, row) => sum + (Number(row?._montoBaseUsd) || 0), 0),
-  );
-  const targetTotalUsd = Number.isFinite(Number(totalUsd)) ? round2(totalUsd) : baseTotalUsd;
-  const targetMontoBs = Number.isFinite(Number(montoBsTotal))
-    ? round2(montoBsTotal)
-    : Number.isFinite(Number(targetTotalUsd)) && Number.isFinite(Number(tasaBs))
-      ? round2(targetTotalUsd * Number(tasaBs))
-      : null;
+  let rows = [];
+  let resolvedTotalUsd = 0;
+  let resolvedMontoBsTotal = null;
 
-  let usdAssigned = 0;
+  if (hasCustomAmounts) {
+    rows = draftRows.map((row) => ({
+      ...row,
+      monto_usd: customItemAmountMap.has(row.id_item)
+        ? roundCheckoutMoney(customItemAmountMap.get(row.id_item))
+        : roundCheckoutMoney(row.monto_base_usd),
+    }));
+    resolvedTotalUsd = roundCheckoutMoney(
+      rows.reduce((sum, row) => sum + (Number(row?.monto_usd) || 0), 0),
+    );
+    resolvedMontoBsTotal = Number.isFinite(montoBsOverride)
+      ? roundCheckoutMoney(montoBsOverride)
+      : Number.isFinite(tasaBsValue)
+        ? roundCheckoutMoney(resolvedTotalUsd * tasaBsValue)
+        : null;
+  } else {
+    const baseTotalUsd = roundCheckoutMoney(
+      draftRows.reduce((sum, row) => sum + (Number(row?.monto_base_usd) || 0), 0),
+    );
+    resolvedTotalUsd = Number.isFinite(totalUsdOverride)
+      ? roundCheckoutMoney(totalUsdOverride)
+      : baseTotalUsd;
+    resolvedMontoBsTotal = Number.isFinite(montoBsOverride)
+      ? roundCheckoutMoney(montoBsOverride)
+      : Number.isFinite(resolvedTotalUsd) && Number.isFinite(tasaBsValue)
+        ? roundCheckoutMoney(resolvedTotalUsd * tasaBsValue)
+        : null;
+
+    let usdAssigned = 0;
+    rows = draftRows.map((row, index) => {
+      const isLast = index === draftRows.length - 1;
+      const ratio =
+        baseTotalUsd > 0
+          ? (Number(row?.monto_base_usd) || 0) / baseTotalUsd
+          : draftRows.length
+            ? 1 / draftRows.length
+            : 0;
+      const montoUsd = isLast
+        ? roundCheckoutMoney(resolvedTotalUsd - usdAssigned)
+        : roundCheckoutMoney(resolvedTotalUsd * ratio);
+      usdAssigned = roundCheckoutMoney(usdAssigned + montoUsd);
+      return {
+        ...row,
+        monto_usd: montoUsd,
+      };
+    });
+  }
+
   let bsAssigned = 0;
-  const snapshotRows = draftRows.map((row, index) => {
-    const isLast = index === draftRows.length - 1;
-    const ratio =
-      baseTotalUsd > 0 ? (Number(row?._montoBaseUsd) || 0) / baseTotalUsd : draftRows.length ? 1 / draftRows.length : 0;
-    const montoUsd = isLast ? round2(targetTotalUsd - usdAssigned) : round2(targetTotalUsd * ratio);
-    usdAssigned = round2(usdAssigned + montoUsd);
-
+  rows = rows.map((row, index) => {
     let montoBs = null;
-    if (Number.isFinite(targetMontoBs)) {
-      montoBs = isLast ? round2(targetMontoBs - bsAssigned) : round2(targetMontoBs * ratio);
-      bsAssigned = round2(bsAssigned + montoBs);
+    if (Number.isFinite(Number(resolvedMontoBsTotal))) {
+      const isLast = index === rows.length - 1;
+      const ratio =
+        resolvedTotalUsd > 0
+          ? (Number(row?.monto_usd) || 0) / resolvedTotalUsd
+          : rows.length
+            ? 1 / rows.length
+            : 0;
+      montoBs = isLast
+        ? roundCheckoutMoney(resolvedMontoBsTotal - bsAssigned)
+        : roundCheckoutMoney(resolvedMontoBsTotal * ratio);
+      bsAssigned = roundCheckoutMoney(bsAssigned + montoBs);
     }
-
     return {
-      id_orden: row.id_orden,
-      id_plataforma: row.id_plataforma,
-      renovacion: row.renovacion,
-      detalle: row.detalle,
-      monto_usd: montoUsd,
+      ...row,
       monto_bs: montoBs,
     };
+  });
+
+  return {
+    rows,
+    totalUsd: resolvedTotalUsd,
+    montoBsTotal: resolvedMontoBsTotal,
+  };
+};
+
+const syncOrdenItemsSnapshot = async ({
+  ordenId,
+  items,
+  priceMap,
+  platInfoById,
+  platNameById,
+  pickPrecio,
+  descuentos = [],
+  discountColumns = [],
+  discountColumnById = {},
+  isCliente = true,
+  totalUsd,
+  montoBsTotal,
+  tasaBs,
+  customItemAmountMap = null,
+}) => {
+  const orderIdNum = Number(ordenId);
+  if (!Number.isFinite(orderIdNum) || orderIdNum <= 0) return;
+  const { rows } = await buildCheckoutItemSummaryRows({
+    items,
+    priceMap,
+    platInfoById,
+    platNameById,
+    pickPrecio,
+    descuentos,
+    discountColumns,
+    discountColumnById,
+    isCliente,
+    totalUsd,
+    montoBsTotal,
+    tasaBs,
+    customItemAmountMap,
   });
 
   const { error: delErr } = await supabaseAdmin
@@ -2807,7 +4354,16 @@ const syncOrdenItemsSnapshot = async ({
     .eq("id_orden", orderIdNum);
   if (delErr) throw delErr;
 
-  if (!snapshotRows.length) return;
+  if (!rows.length) return;
+
+  const snapshotRows = rows.map((row) => ({
+    id_orden: orderIdNum,
+    id_plataforma: row.id_plataforma,
+    renovacion: row.renovacion,
+    detalle: row.detalle,
+    monto_usd: row.monto_usd,
+    monto_bs: row.monto_bs,
+  }));
 
   const { error: insErr } = await supabaseAdmin
     .from("ordenes_items")
@@ -2842,16 +4398,22 @@ const processOrderFromItems = async ({
   ordenId,
   idUsuarioSesion,
   idUsuarioVentas,
+  adminInvolucradoId = null,
   items,
   priceMap,
   platInfoById,
   platNameById,
   pickPrecio,
+  descuentos = [],
+  discountColumns = [],
+  discountColumnById = {},
+  isCliente = true,
   referencia,
   archivos,
   id_metodo_de_pago,
   carritoId,
   montoHistorialTotalOverride,
+  itemAmountMapById = null,
 }) => {
   console.log("[checkout] processOrderFromItems start", {
     ordenId,
@@ -2867,6 +4429,28 @@ const processOrderFromItems = async ({
   const isCuentaCompletaByFlags = (cuentaRow) =>
     !!cuentaRow && !isTrue(cuentaRow?.venta_perfil) && !isTrue(cuentaRow?.venta_miembro);
   const cuentaFlagsById = {};
+  const hasCustomItemAmounts = itemAmountMapById instanceof Map && itemAmountMapById.size > 0;
+  const getLineAmountForItem = (item, fallbackAmount = 0) => {
+    const itemId = toPositiveInt(item?.id_item);
+    if (itemId && hasCustomItemAmounts && itemAmountMapById.has(itemId)) {
+      return roundCheckoutMoney(itemAmountMapById.get(itemId));
+    }
+    return roundCheckoutMoney(fallbackAmount);
+  };
+  const buildDistributedAmounts = (totalAmount, count) => {
+    const safeCount = Math.max(0, Number(count) || 0);
+    if (safeCount <= 0) return [];
+    const resolvedTotal = roundCheckoutMoney(totalAmount);
+    let assigned = 0;
+    return Array.from({ length: safeCount }, (_row, index) => {
+      const isLast = index === safeCount - 1;
+      const value = isLast
+        ? roundCheckoutMoney(resolvedTotal - assigned)
+        : roundCheckoutMoney(resolvedTotal / safeCount);
+      assigned = roundCheckoutMoney(assigned + value);
+      return value;
+    });
+  };
 
   // Renovaciones (no asignan stock nuevo)
   const renovaciones = (items || []).filter((it) => it.renovacion === true && it.id_venta);
@@ -2888,10 +4472,23 @@ const processOrderFromItems = async ({
   let renovacionesPendientesCount = 0;
   const renovPromises = renovaciones.map((it) => {
     const price = priceMap[it.id_precio] || {};
-    const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
-    const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
-    const base = pickPrecio(price) * cantidadVal * mesesVal;
-    const monto = Number(base.toFixed(2));
+    const platId = Number(price?.id_plataforma) || null;
+    const platformInfo = platId ? platInfoById?.[platId] || {} : {};
+    const monto = getLineAmountForItem(
+      it,
+      computeCheckoutItemBaseAmount({
+        item: it,
+        priceInfo: price,
+        platformInfo,
+        pickPrecio,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        isCliente,
+      }),
+    );
+    const mesesVal =
+      Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
     const ventaAnt = ventaMap[it.id_venta] || {};
     const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
     const renovarPendiente = isSuspendidaAnt;
@@ -2908,6 +4505,7 @@ const processOrderFromItems = async ({
       monto,
       id_orden: ordenId,
       renovacion: true,
+      recordatorio_enviado: false,
       pendiente: renovarPendiente,
       suspendido: false,
     };
@@ -3015,19 +4613,16 @@ const processOrderFromItems = async ({
     });
 
     if (isGiftCardSale) {
-      const { data: giftCardsStock, error: giftErr } = await supabaseAdmin
-        .from("tarjetas_de_regalo")
-        .select("id_tarjeta_de_regalo, id_plataforma, pin, para_venta, usado")
-        .eq("id_plataforma", platId)
-        .eq("para_venta", true)
-        .eq("usado", false)
-        .order("id_tarjeta_de_regalo", { ascending: true })
-        .limit(stockScanLimit(cantidad));
-      if (giftErr) throw giftErr;
+      const giftCardsStock = await fetchAvailableGiftCardStock({
+        idPlataforma: platId,
+        valorTarjetaDeRegalo: price?.valor_tarjeta_de_regalo,
+        limit: stockScanLimit(cantidad),
+      });
       const disponibles = (giftCardsStock || []).filter((row) => toPositiveInt(row?.id_tarjeta_de_regalo));
       const faltantes = Math.max(0, cantidad - disponibles.length);
       disponibles.slice(0, cantidad).forEach((row) => {
         asignaciones.push({
+          id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
           monto: pickPrecio(price),
           id_cuenta: null,
@@ -3041,6 +4636,7 @@ const processOrderFromItems = async ({
       if (faltantes > 0) {
         for (let i = 0; i < faltantes; i += 1) {
           pendientes.push({
+            id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
             monto: pickPrecio(price),
             id_cuenta: null,
@@ -3079,6 +4675,7 @@ const processOrderFromItems = async ({
       const faltantes = Math.max(0, cantidad - disponibles.length);
       disponibles.slice(0, cantidad).forEach((cta) => {
         asignaciones.push({
+          id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
           monto: pickPrecio(price),
           id_cuenta: cta.id_cuenta,
@@ -3091,6 +4688,7 @@ const processOrderFromItems = async ({
       if (faltantes > 0) {
         for (let i = 0; i < faltantes; i += 1) {
           pendientes.push({
+            id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
             monto: pickPrecio(price),
             id_cuenta: null,
@@ -3129,6 +4727,7 @@ const processOrderFromItems = async ({
       const takeHogar = libresHogar.slice(0, cantidad);
       takeHogar.forEach((p) => {
         asignaciones.push({
+          id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
           monto: pickPrecio(price),
           id_cuenta: p.id_cuenta,
@@ -3164,6 +4763,7 @@ const processOrderFromItems = async ({
         const takeCtas = cuentasLibres.slice(0, faltantesPerf);
         takeCtas.forEach((cta) => {
           asignaciones.push({
+            id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
             monto: pickPrecio(price),
             id_cuenta: cta.id_cuenta,
@@ -3177,6 +4777,7 @@ const processOrderFromItems = async ({
         if (faltantesPerf2 > 0) {
           for (let i = 0; i < faltantesPerf2; i += 1) {
             pendientes.push({
+              id_item_carrito: toPositiveInt(it?.id_item) || null,
               id_precio: price.id_precio,
               monto: pickPrecio(price),
               id_cuenta: null,
@@ -3264,6 +4865,7 @@ const processOrderFromItems = async ({
       const faltantes = Math.max(0, cantidad - disponiblesPriorizados.length);
       disponiblesPriorizados.slice(0, cantidad).forEach((p) => {
         asignaciones.push({
+          id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
           monto: pickPrecio(price),
           id_cuenta: p.id_cuenta,
@@ -3276,6 +4878,7 @@ const processOrderFromItems = async ({
       if (faltantes > 0) {
         for (let i = 0; i < faltantes; i += 1) {
           pendientes.push({
+            id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
             monto: pickPrecio(price),
             id_cuenta: null,
@@ -3355,6 +4958,34 @@ const processOrderFromItems = async ({
     }
   }
 
+  const lineDistributedAmountsByItemId = new Map();
+  const rowsByItemId = new Map();
+  [...asignaciones, ...pendientes].forEach((row) => {
+    const itemId = toPositiveInt(row?.id_item_carrito);
+    if (!itemId) return;
+    const bucket = rowsByItemId.get(itemId) || [];
+    bucket.push(row);
+    rowsByItemId.set(itemId, bucket);
+  });
+  items.forEach((item) => {
+    const itemId = toPositiveInt(item?.id_item);
+    if (!itemId) return;
+    const itemRows = rowsByItemId.get(itemId) || [];
+    const defaultLineAmount = computeCheckoutItemBaseAmount({
+      item,
+      priceInfo: priceMap[item.id_precio] || {},
+      platformInfo:
+        platInfoById[Number(priceMap[item.id_precio]?.id_plataforma) || 0] || {},
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+    });
+    const lineAmount = getLineAmountForItem(item, defaultLineAmount);
+    lineDistributedAmountsByItemId.set(itemId, buildDistributedAmounts(lineAmount, itemRows.length));
+  });
+
   const ventasToInsert = [...asignaciones, ...pendientes].map((a) => {
     const mesesValRaw = a.meses || 1;
     const mesesVal =
@@ -3388,12 +5019,22 @@ const processOrderFromItems = async ({
       id_perfil: a.id_perfil,
       // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
       id_orden: ordenId,
-      monto: Number(a.monto) || 0,
+      monto: (() => {
+        const itemId = toPositiveInt(a?.id_item_carrito);
+        if (itemId && lineDistributedAmountsByItemId.has(itemId)) {
+          const bucket = lineDistributedAmountsByItemId.get(itemId) || [];
+          const nextAmount = bucket.length ? bucket.shift() : null;
+          lineDistributedAmountsByItemId.set(itemId, bucket);
+          if (Number.isFinite(Number(nextAmount))) return Number(nextAmount);
+        }
+        return Number(a.monto) || 0;
+      })(),
       pendiente: !!a.pendiente,
       meses_contratados: mesesVal,
       fecha_corte: fechaCorte,
       fecha_pago: isoHoy,
       renovacion: false,
+      recordatorio_enviado: false,
       completa: isCompleta && isCorreoCliente ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? false : null,
     };
@@ -3426,6 +5067,8 @@ const processOrderFromItems = async ({
         usado: true,
         vendido_a: toPositiveInt(idUsuarioVentas) || null,
         fecha_uso: isoHoy,
+        admin_involucrado: toPositiveInt(adminInvolucradoId) || null,
+        id_orden: toPositiveInt(ordenId) || null,
       })
       .eq("para_venta", true)
       .in("id_tarjeta_de_regalo", giftSoldIds);
@@ -3459,6 +5102,7 @@ const processOrderFromItems = async ({
       referencia: referenciaNum,
       comprobante: comprobanteHist,
       hora_pago: horaPago,
+      id_tarjeta_de_regalo: toPositiveInt(v.id_tarjeta_de_regalo) || null,
     });
   });
   // Renovaciones
@@ -3467,15 +5111,25 @@ const processOrderFromItems = async ({
     const ventaAnt = ventaMap[it.id_venta] || {};
     const cuentaAnt = ventaAnt.id_cuenta || null;
     const usuarioAnt = ventaAnt.id_usuario || idUsuarioVentas;
-    // monto ya calculado arriba como base (unit * cantidad * meses)
     const price = priceMap[it.id_precio] || {};
-    const mesesVal = Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
-    const cantidadVal = Number.isFinite(Number(it.cantidad)) && Number(it.cantidad) > 0 ? Number(it.cantidad) : 0;
-    const base = pickPrecio(price) * cantidadVal * mesesVal;
+    const platformInfo = platInfoById[Number(price?.id_plataforma) || 0] || {};
+    const monto = getLineAmountForItem(
+      it,
+      computeCheckoutItemBaseAmount({
+        item: it,
+        priceInfo: price,
+        platformInfo,
+        pickPrecio,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        isCliente,
+      }),
+    );
     histRows.push({
       id_usuario_cliente: usuarioAnt,
       id_proveedor: null,
-      monto: Number(base) || 0,
+      monto: Number(monto) || 0,
       fecha_pago: isoHoy,
       venta_cliente: true,
       renovacion: true,
@@ -3491,7 +5145,8 @@ const processOrderFromItems = async ({
     });
   });
   if (histRows.length) {
-    const targetHistTotalNum = Number(montoHistorialTotalOverride);
+    let historialGiftCardLinkFallback = false;
+    const targetHistTotalNum = hasCustomItemAmounts ? Number.NaN : Number(montoHistorialTotalOverride);
     if (Number.isFinite(targetHistTotalNum) && targetHistTotalNum >= 0) {
       const targetHistTotal = Math.round(targetHistTotalNum * 100) / 100;
       const baseTotal = histRows.reduce((acc, row) => acc + (Number(row?.monto) || 0), 0);
@@ -3515,7 +5170,34 @@ const processOrderFromItems = async ({
       }
     }
     const { error: histErr } = await supabaseAdmin.from("historial_ventas").insert(histRows);
-    if (histErr) throw histErr;
+    if (histErr) {
+      if (!isMissingHistorialGiftCardColumnError(histErr)) throw histErr;
+      historialGiftCardLinkFallback = true;
+      const { error: histFallbackErr } = await supabaseAdmin
+        .from("historial_ventas")
+        .insert(stripHistorialGiftCardColumn(histRows));
+      if (histFallbackErr) throw histFallbackErr;
+    }
+
+    const deliveredGiftCardVentaIds = insertedVentas
+      .map((venta, idx) => {
+        const src = ventasToInsert[idx] || {};
+        if (src?.pendiente) return null;
+        if (!toPositiveInt(venta?.id_tarjeta_de_regalo)) return null;
+        return toPositiveInt(venta?.id_venta);
+      })
+      .filter((value) => value > 0);
+
+    if (deliveredGiftCardVentaIds.length && !historialGiftCardLinkFallback) {
+      const { error: deleteDeliveredGiftErr } = await supabaseAdmin
+        .from("ventas")
+        .delete()
+        .in("id_venta", deliveredGiftCardVentaIds);
+      if (deleteDeliveredGiftErr) throw deleteDeliveredGiftErr;
+      insertedVentas = insertedVentas.filter(
+        (venta) => !deliveredGiftCardVentaIds.includes(toPositiveInt(venta?.id_venta)),
+      );
+    }
   }
 
   // marca recursos como ocupados
@@ -3599,6 +5281,16 @@ const parseSessionUserId = (req) => {
     return acc;
   }, {});
   return parseSignedSessionCookieValue(cookieMap[SESSION_COOKIE_NAME]);
+};
+
+const requireSessionUserId = (req) => {
+  const idUsuario = parseSessionUserId(req);
+  if (Number.isFinite(Number(idUsuario)) && Number(idUsuario) > 0) {
+    return Math.trunc(Number(idUsuario));
+  }
+  const err = new Error(AUTH_REQUIRED);
+  err.code = AUTH_REQUIRED;
+  throw err;
 };
 
 const getBearerTokenFromRequest = (req) => {
@@ -4605,7 +6297,17 @@ app.post("/api/checkout/draft", async (req, res) => {
       totalCliente: null,
       tasa_bs: null,
     });
-    const { items, priceMap, platInfoById, platNameById, pickPrecio } = context;
+    const {
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+    } = context;
     if (!items?.length) {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
@@ -4629,9 +6331,9 @@ app.post("/api/checkout/draft", async (req, res) => {
       .maybeSingle();
     if (carritoErr) throw carritoErr;
 
-    const total = Number(carritoData?.monto_usd);
-    const tasaBs = Number(carritoData?.tasa_bs);
-    const montoBsRaw = Number(carritoData?.monto_bs);
+    const total = parseOptionalCheckoutNumber(carritoData?.monto_usd);
+    const tasaBs = parseOptionalCheckoutNumber(carritoData?.tasa_bs);
+    const montoBsRaw = parseOptionalCheckoutNumber(carritoData?.monto_bs);
     const montoBs = Number.isFinite(montoBsRaw)
       ? montoBsRaw
       : Number.isFinite(total) && Number.isFinite(tasaBs)
@@ -4647,6 +6349,10 @@ app.post("/api/checkout/draft", async (req, res) => {
         platInfoById,
         platNameById,
         pickPrecio,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        isCliente,
         totalUsd: total,
         montoBsTotal: montoBs,
         tasaBs,
@@ -4678,6 +6384,10 @@ app.post("/api/checkout/draft", async (req, res) => {
       platInfoById,
       platNameById,
       pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
       totalUsd: total,
       montoBsTotal: montoBs,
       tasaBs,
@@ -4690,6 +6400,117 @@ app.post("/api/checkout/draft", async (req, res) => {
     });
   } catch (err) {
     console.error("[checkout:draft] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/checkout/summary", async (req, res) => {
+  try {
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    const sessionUserId = parseSessionUserId(req) || idUsuarioSesion;
+    const idUsuarioOverride =
+      req.body?.id_usuario_override && Number.isFinite(Number(req.body?.id_usuario_override))
+        ? Number(req.body.id_usuario_override)
+        : null;
+
+    if (idUsuarioOverride) {
+      const { data: permRow, error: permErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("permiso_superadmin")
+        .eq("id_usuario", sessionUserId)
+        .maybeSingle();
+      if (permErr) throw permErr;
+      if (!isTrue(permRow?.permiso_superadmin)) {
+        return res.status(403).json({ error: "Solo superadmin puede crear órdenes para otros usuarios" });
+      }
+    }
+
+    const idUsuarioVentas = idUsuarioOverride || idUsuarioSesion;
+    const carritoId = await getCurrentCarrito(idUsuarioSesion);
+    if (!carritoId) {
+      return res.status(400).json({ error: "No hay carrito activo" });
+    }
+
+    const context = await buildCheckoutContext({
+      idUsuarioVentas,
+      carritoId,
+      totalCliente: null,
+      tasa_bs: null,
+    });
+    const {
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+      total: totalByAccess,
+      accesoCliente,
+      esMayorista,
+    } = context;
+    if (!items?.length) {
+      return res.status(400).json({ error: "El carrito está vacío" });
+    }
+
+    const { data: carritoData, error: carritoErr } = await supabaseAdmin
+      .from("carritos")
+      .select("tasa_bs")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (carritoErr) throw carritoErr;
+
+    const tasaBs = parseOptionalCheckoutNumber(carritoData?.tasa_bs);
+    const total = roundCheckoutMoney(parseOptionalCheckoutNumber(totalByAccess) ?? 0);
+    const montoBs = Number.isFinite(tasaBs) ? roundCheckoutMoney(total * tasaBs) : null;
+
+    const summary = await buildCheckoutItemSummaryRows({
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+      totalUsd: total,
+      montoBsTotal: montoBs,
+      tasaBs,
+    });
+
+    return res.json({
+      ok: true,
+      carrito_id: carritoId,
+      id_usuario_ventas: idUsuarioVentas,
+      acceso_cliente: accesoCliente,
+      es_mayorista: esMayorista,
+      tipo_precio: esMayorista ? "mayor" : "detal",
+      total_usd: summary.totalUsd,
+      monto_bs: summary.montoBsTotal,
+      tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+      items: summary.rows.map((row) => ({
+        id_item: row.id_item,
+        id_precio: row.id_precio,
+        id_plataforma: row.id_plataforma,
+        detalle: row.detalle,
+        cantidad: row.cantidad,
+        meses: row.meses,
+        renovacion: row.renovacion,
+        monto_usd: row.monto_usd,
+        monto_base_usd: row.monto_base_usd,
+        monto_original_usd: row.monto_original_usd,
+        descuento_usd: row.descuento_usd,
+        monto_bs: row.monto_bs,
+      })),
+    });
+  } catch (err) {
+    console.error("[checkout:summary] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
@@ -5587,7 +7408,7 @@ app.post("/api/client-errors", jsonParser, async (req, res) => {
       stack: truncateText(body?.stack || "", 12000),
       source: truncateText(body?.source || "", 1200),
       line: asInt(body?.line),
-      column: asInt(body?.column),
+      column_number: asInt(body?.column),
       page_url: truncateText(body?.page_url || "", 2000),
       page_path: truncateText(body?.page_path || "", 600),
       user_agent: truncateText(body?.user_agent || req.get("user-agent") || "", 1200),
@@ -5860,6 +7681,174 @@ app.get("/api/inventario", async (req, res) => {
 });
 
 // Ventas por orden (para entregar_servicios con id_orden)
+app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const adminId = requireSessionUserId(req);
+    const idVenta = toPositiveInt(req.body?.id_venta);
+    if (!idVenta) {
+      return res.status(400).json({ error: "id_venta inválido" });
+    }
+
+    const { data: venta, error: ventaErr } = await supabaseAdmin
+      .from("ventas")
+      .select(
+        `
+        id_venta,
+        id_usuario,
+        id_orden,
+        id_precio,
+        id_tarjeta_de_regalo,
+        pendiente,
+        precios:precios(id_precio, id_plataforma, plan, valor_tarjeta_de_regalo, region, moneda),
+        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(
+          id_tarjeta_de_regalo,
+          pin,
+          vendido_a
+        )
+      `,
+      )
+      .eq("id_venta", idVenta)
+      .maybeSingle();
+    if (ventaErr) throw ventaErr;
+    if (!venta) {
+      return res.status(404).json({ error: "Venta no encontrada" });
+    }
+    if (!isTrue(venta?.pendiente)) {
+      return res.status(409).json({ error: "La venta ya no está pendiente." });
+    }
+
+    const idUsuarioVenta = toPositiveInt(venta?.id_usuario);
+    const idOrden = toPositiveInt(venta?.id_orden);
+    const idPlataforma = toPositiveInt(venta?.precios?.id_plataforma);
+    if (!idUsuarioVenta || !idPlataforma) {
+      return res.status(400).json({ error: "La venta no tiene plataforma o usuario válidos." });
+    }
+
+    const { data: plataformaRow, error: plataformaErr } = await supabaseAdmin
+      .from("plataformas")
+      .select("id_plataforma, nombre, tarjeta_de_regalo")
+      .eq("id_plataforma", idPlataforma)
+      .maybeSingle();
+    if (plataformaErr) throw plataformaErr;
+    if (!isTrue(plataformaRow?.tarjeta_de_regalo)) {
+      return res.status(400).json({ error: "La venta indicada no es una gift card." });
+    }
+
+    let idTarjetaDeRegalo = toPositiveInt(venta?.id_tarjeta_de_regalo);
+    let pinGiftCard = String(venta?.tarjetas_de_regalo?.pin || "").trim();
+
+    if (!idTarjetaDeRegalo) {
+      const [giftCardRow] = await fetchAvailableGiftCardStock({
+        idPlataforma,
+        valorTarjetaDeRegalo: venta?.precios?.valor_tarjeta_de_regalo,
+        limit: 1,
+      });
+      if (!giftCardRow?.id_tarjeta_de_regalo) {
+        return res.status(409).json({ error: "No hay stock disponible para esta gift card." });
+      }
+      idTarjetaDeRegalo = toPositiveInt(giftCardRow.id_tarjeta_de_regalo);
+      pinGiftCard = String(giftCardRow.pin || "").trim();
+    }
+
+    const fechaUso = todayInVenezuela();
+    const { error: updGiftErr } = await supabaseAdmin
+      .from("tarjetas_de_regalo")
+      .update({
+        usado: true,
+        vendido_a: idUsuarioVenta,
+        fecha_uso: fechaUso,
+        admin_involucrado: toPositiveInt(adminId) || null,
+        id_orden: idOrden || null,
+      })
+      .eq("id_tarjeta_de_regalo", idTarjetaDeRegalo)
+      .eq("id_plataforma", idPlataforma)
+      .eq("para_venta", true);
+    if (updGiftErr) throw updGiftErr;
+
+    const { error: histUpdErr } = await supabaseAdmin
+      .from("historial_ventas")
+      .update({ id_tarjeta_de_regalo: idTarjetaDeRegalo })
+      .eq("id_venta", idVenta);
+    if (histUpdErr && !isMissingHistorialGiftCardColumnError(histUpdErr)) throw histUpdErr;
+
+    const plataformaNombre = String(plataformaRow?.nombre || "").trim() || `Plataforma ${idPlataforma}`;
+    const giftRegion = String(venta?.precios?.region || "").trim();
+    const giftValue = String(venta?.precios?.valor_tarjeta_de_regalo || "").trim();
+    const giftCurrency = String(venta?.precios?.moneda || "").trim();
+    const notifPayload = buildNotificationPayload(
+      "nuevo_servicio",
+      {
+        items: [
+          {
+            plataforma: plataformaNombre,
+            idVenta,
+            region: giftRegion,
+            valorTarjeta: giftValue,
+            moneda: giftCurrency,
+            pin: pinGiftCard || "Pendiente",
+          },
+        ],
+      },
+      { idCuenta: null },
+    );
+    const { error: notifErr } = await supabaseAdmin.from("notificaciones").insert({
+      ...notifPayload,
+      id_usuario: idUsuarioVenta,
+      id_orden: idOrden || null,
+    });
+    if (notifErr) throw notifErr;
+
+    const { error: deleteVentaErr } = await supabaseAdmin
+      .from("ventas")
+      .delete()
+      .eq("id_venta", idVenta);
+    if (deleteVentaErr) throw deleteVentaErr;
+
+    if (idOrden) {
+      const { data: pendingRows, error: pendingErr } = await supabaseAdmin
+        .from("ventas")
+        .select("id_venta")
+        .eq("id_orden", idOrden)
+        .eq("pendiente", true);
+      if (pendingErr) throw pendingErr;
+      const { error: updOrdenErr } = await supabaseAdmin
+        .from("ordenes")
+        .update({ en_espera: (pendingRows || []).length > 0 })
+        .eq("id_orden", idOrden);
+      if (updOrdenErr) throw updOrdenErr;
+    }
+
+    const copyText = buildGiftCardSaleCopyText({
+      plataformaNombre,
+      idVenta,
+      region: giftRegion,
+      valorTarjeta: giftValue,
+      moneda: giftCurrency,
+      pin: pinGiftCard || "Pendiente",
+    });
+
+    return res.json({
+      ok: true,
+      id_venta: idVenta,
+      id_orden: idOrden || null,
+      id_tarjeta_de_regalo: idTarjetaDeRegalo,
+      plataforma: plataformaNombre,
+      pin: pinGiftCard || "Pendiente",
+      copy_text: copyText,
+    });
+  } catch (err) {
+    console.error("[admin/ventas/entregar-giftcard] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/ventas/orden", async (req, res) => {
   try {
     const idOrden = Number(req.query?.id_orden);
@@ -5878,19 +7867,17 @@ app.get("/api/ventas/orden", async (req, res) => {
       .maybeSingle();
     if (permErr) throw permErr;
     isSuper = isTrue(permRow?.permiso_superadmin);
-    if (!isSuper) {
-      const { data: ordenRow, error: ordErr } = await supabaseAdmin
-        .from("ordenes")
-        .select("id_orden, id_usuario")
-        .eq("id_orden", idOrden)
-        .maybeSingle();
-      if (ordErr) throw ordErr;
-      if (!ordenRow) {
-        return res.status(404).json({ error: "Orden no encontrada" });
-      }
-      if (Number(ordenRow.id_usuario) !== Number(idUsuarioSesion)) {
-        return res.status(403).json({ error: "Orden no pertenece al usuario." });
-      }
+    const { data: ordenRow, error: ordErr } = await supabaseAdmin
+      .from("ordenes")
+      .select("id_orden, id_usuario")
+      .eq("id_orden", idOrden)
+      .maybeSingle();
+    if (ordErr) throw ordErr;
+    if (!ordenRow) {
+      return res.status(404).json({ error: "Orden no encontrada" });
+    }
+    if (!isSuper && Number(ordenRow.id_usuario) !== Number(idUsuarioSesion)) {
+      return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
     console.log("[ventas/orden] request", { id_orden: idOrden });
     const { data, error } = await supabaseAdmin
@@ -5912,15 +7899,76 @@ app.get("/api/ventas/orden", async (req, res) => {
         cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, pin, id_plataforma, venta_perfil, venta_miembro),
         cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, pin, id_plataforma, id_cuenta_madre),
         perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
-        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(id_tarjeta_de_regalo, pin),
-        precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta)
+        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(id_tarjeta_de_regalo, pin, vendido_a),
+        precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta, region, valor_tarjeta_de_regalo, moneda)
       `
       )
       .eq("id_orden", idOrden)
       .order("id_venta", { ascending: false });
     if (error) throw error;
-    console.log("[ventas/orden] result", { id_orden: idOrden, ventas: data?.length || 0 });
-    res.json({ ventas: data || [] });
+
+    const liveVentas = Array.isArray(data) ? data : [];
+    const liveVentaIds = new Set(
+      liveVentas.map((row) => toPositiveInt(row?.id_venta)).filter((value) => value > 0),
+    );
+
+    let fulfilledGiftCardVentas = [];
+    if (Number(ordenRow?.id_usuario) > 0) {
+      const historialGiftRows = await fetchHistorialGiftCardRowsByOrder(
+        idOrden,
+        Number(ordenRow.id_usuario),
+      );
+      fulfilledGiftCardVentas = (historialGiftRows || [])
+        .filter((row) => {
+          const saleId = toPositiveInt(row?.id_venta);
+          return !saleId || !liveVentaIds.has(saleId);
+        })
+        .map((row) => {
+          const matchedPrice = row?.precio_tarjeta_de_regalo || null;
+          const fallbackMonto = row?.tarjetas_de_regalo?.monto ?? null;
+          const fallbackValue =
+            Number.isFinite(Number(fallbackMonto)) && Number(fallbackMonto) > 0
+              ? Number(fallbackMonto)
+              : fallbackMonto;
+          return {
+            id_venta: toPositiveInt(row?.id_venta) || null,
+            meses_contratados: 1,
+            renovacion: isTrue(row?.renovacion),
+            fecha_corte: null,
+            id_perfil: null,
+            id_cuenta_miembro: null,
+            id_precio: null,
+            id_tarjeta_de_regalo: toPositiveInt(row?.id_tarjeta_de_regalo) || null,
+            pendiente: false,
+            id_orden: idOrden,
+            correo_miembro: "",
+            clave_miembro: "",
+            cuentas: null,
+            cuentas_miembro: null,
+            perfiles: null,
+            tarjetas_de_regalo: row?.tarjetas_de_regalo || null,
+            precios: {
+              id_precio: toPositiveInt(matchedPrice?.id_precio) || null,
+              id_plataforma: toPositiveInt(row?.id_plataforma) || null,
+              plan:
+                String(matchedPrice?.plan || row?.plataformas?.nombre || "").trim() || "Gift Card",
+              completa: false,
+              sub_cuenta: null,
+              region: String(matchedPrice?.region || "").trim() || null,
+              valor_tarjeta_de_regalo: matchedPrice?.valor_tarjeta_de_regalo ?? fallbackValue ?? null,
+              moneda: String(matchedPrice?.moneda || "").trim() || null,
+            },
+          };
+        });
+    }
+
+    const ventas = [...liveVentas, ...fulfilledGiftCardVentas].sort((a, b) => {
+      const aId = Number(a?.id_venta) || 0;
+      const bId = Number(b?.id_venta) || 0;
+      return bId - aId;
+    });
+    console.log("[ventas/orden] result", { id_orden: idOrden, ventas: ventas.length });
+    res.json({ ventas });
   } catch (err) {
     console.error("[ventas/orden] error", err);
     res.status(500).json({ error: err.message });
@@ -5972,12 +8020,25 @@ app.get("/api/ordenes/detalle", async (req, res) => {
       usuario = usuarioRow || null;
     }
 
+    let metodoPago = null;
+    if (orden.id_metodo_de_pago) {
+      const { data: metodoRow, error: metodoErr } = await supabaseAdmin
+        .from("metodos_de_pago")
+        .select(
+          "id_metodo_de_pago, nombre, correo, id, cedula, telefono, bolivares, verificacion_automatica",
+        )
+        .eq("id_metodo_de_pago", orden.id_metodo_de_pago)
+        .maybeSingle();
+      if (metodoErr) throw metodoErr;
+      metodoPago = metodoRow || null;
+    }
+
     let items = [];
     let itemsSource = "none";
     const { data: ordenesItems, error: ordenesItemsErr } = await supabaseAdmin
       .from("ordenes_items")
       .select(
-        "id_item_orden, id_orden, id_plataforma, renovacion, detalle, monto_usd, monto_bs, plataformas:plataformas(nombre, imagen)",
+        "id_item_orden, id_orden, id_plataforma, renovacion, detalle, monto_usd, monto_bs, plataformas:plataformas(nombre, imagen, tarjeta_de_regalo)",
       )
       .eq("id_orden", idOrden)
       .order("id_item_orden", { ascending: true });
@@ -5995,7 +8056,7 @@ app.get("/api/ordenes/detalle", async (req, res) => {
       itemsSource = "carrito_items";
     }
 
-    res.json({ orden, items, items_source: itemsSource, usuario });
+    res.json({ orden, items, items_source: itemsSource, usuario, metodo_pago: metodoPago });
   } catch (err) {
     console.error("[ordenes/detalle] error", err);
     res.status(500).json({ error: err.message });
@@ -6697,6 +8758,7 @@ app.post("/api/checkout", async (req, res) => {
     id_usuario_override,
     bypass_verificacion,
     id_admin,
+    custom_item_amounts,
   } = req.body || {};
   const archivos = Array.isArray(comprobantes) ? comprobantes : Array.isArray(comprobante) ? comprobante : [];
   if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
@@ -6735,6 +8797,12 @@ app.post("/api/checkout", async (req, res) => {
       return res.status(403).json({ error: "No autorizado para omitir verificación" });
     }
     const bypassVerificacion = sessionIsSuper || bypassRequested;
+    const customItemAmountMap = normalizeCheckoutCustomItemAmounts(custom_item_amounts);
+    const hasCustomItemAmounts = customItemAmountMap.size > 0;
+    const adminInvolucradoGiftId =
+      sessionIsSuper && Number.isFinite(Number(adminCandidate)) && Number(adminCandidate) > 0
+        ? Number(adminCandidate)
+        : null;
     const idUsuarioVentas =
       hasOverride ? Number(id_usuario_override)
         : idUsuarioSesion;
@@ -6760,11 +8828,48 @@ app.post("/api/checkout", async (req, res) => {
       totalCliente,
       tasa_bs,
     });
-    const { items, priceMap, platInfoById, platNameById, pickPrecio, total, tasaBs } = context;
-    const montoBaseCobrado = await resolveMontoBaseCarrito({ carritoId, fallbackTotal: total });
+    const {
+      items,
+      priceMap,
+      platInfoById,
+      platNameById,
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+      total,
+      tasaBs,
+    } = context;
     if (!items?.length) {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
+    const itemIds = new Set((items || []).map((item) => toPositiveInt(item?.id_item)).filter(Boolean));
+    const invalidCustomItemId = [...customItemAmountMap.keys()].find((itemId) => !itemIds.has(itemId));
+    if (invalidCustomItemId) {
+      return res.status(400).json({ error: `El item ${invalidCustomItemId} no existe en el carrito actual.` });
+    }
+    const customSummary = hasCustomItemAmounts
+      ? await buildCheckoutItemSummaryRows({
+          items,
+          priceMap,
+          platInfoById,
+          platNameById,
+          pickPrecio,
+          descuentos,
+          discountColumns,
+          discountColumnById,
+          isCliente,
+          totalUsd: total,
+          montoBsTotal: null,
+          tasaBs,
+          customItemAmountMap,
+        })
+      : null;
+    const checkoutTotal = hasCustomItemAmounts ? customSummary?.totalUsd || 0 : total;
+    const montoBaseCobrado = hasCustomItemAmounts
+      ? checkoutTotal
+      : await resolveMontoBaseCarrito({ carritoId, fallbackTotal: total });
     console.log("[checkout] carrito items", items);
     console.log("[checkout] precios usados", priceMap);
 
@@ -6818,20 +8923,20 @@ app.post("/api/checkout", async (req, res) => {
       !bypassVerificacion && Number(id_metodo_de_pago) === 1 && referenciaTrim.toUpperCase() !== "SALDO";
     const requiereEntregaManual = !bypassVerificacion && metodoVerificacionAutomatica === false;
     const monto_bs =
-      Number.isFinite(total) && Number.isFinite(tasaBs)
-        ? Math.round(total * tasaBs * 100) / 100
+      Number.isFinite(checkoutTotal) && Number.isFinite(tasaBs)
+        ? Math.round(checkoutTotal * tasaBs * 100) / 100
         : null;
     const montoRecibidoReal = calcularMontoRecibidoReal(montoTransferido, metodoPagoIdNum);
     const excedenteTransferido =
-      Number.isFinite(montoRecibidoReal) && Number.isFinite(total)
-        ? Math.round((montoRecibidoReal - total) * 100) / 100
+      Number.isFinite(montoRecibidoReal) && Number.isFinite(checkoutTotal)
+        ? Math.round((montoRecibidoReal - checkoutTotal) * 100) / 100
         : 0;
     const montoMayor = excedenteTransferido > 0;
     const requierePendiente = requiereVerificacionPago || requiereEntregaManual || montoMayor;
     const en_espera = requierePendiente;
     console.log("[checkout] contexto", {
       itemsCount: items?.length || 0,
-      total,
+      total: checkoutTotal,
       tasaBs,
       monto_bs,
       monto_transferido: montoTransferido,
@@ -6848,7 +8953,7 @@ app.post("/api/checkout", async (req, res) => {
     const parsedOrderId = Number(id_orden);
     const checkoutOrderPayload = {
       id_usuario: idUsuarioVentas,
-      total,
+      total: checkoutTotal,
       tasa_bs: tasaBs,
       monto_bs,
       monto_transferido: montoTransferido,
@@ -6914,9 +9019,14 @@ app.post("/api/checkout", async (req, res) => {
       platInfoById,
       platNameById,
       pickPrecio,
-      totalUsd: total,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+      totalUsd: checkoutTotal,
       montoBsTotal: monto_bs,
       tasaBs,
+      customItemAmountMap: hasCustomItemAmounts ? customItemAmountMap : null,
     });
 
     if (requierePendiente) {
@@ -6930,7 +9040,7 @@ app.post("/api/checkout", async (req, res) => {
       return res.json({
         ok: true,
         id_orden: ordenId,
-        total,
+        total: checkoutTotal,
         ventas: 0,
         pendiente_verificacion: true,
         entrega_manual: requiereEntregaManual,
@@ -6946,11 +9056,17 @@ app.post("/api/checkout", async (req, res) => {
       platInfoById,
       platNameById,
       pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
       referencia,
       archivos,
       id_metodo_de_pago,
       carritoId,
-      montoHistorialTotalOverride: montoBaseCobrado,
+      montoHistorialTotalOverride: hasCustomItemAmounts ? null : montoBaseCobrado,
+      itemAmountMapById: hasCustomItemAmounts ? customItemAmountMap : null,
+      adminInvolucradoId: adminInvolucradoGiftId,
     });
     console.log("[checkout] procesado", {
       id_orden: ordenId,
@@ -6966,7 +9082,7 @@ app.post("/api/checkout", async (req, res) => {
     res.json({
       ok: true,
       id_orden: ordenId,
-      total,
+      total: checkoutTotal,
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
     });
@@ -6974,6 +9090,9 @@ app.post("/api/checkout", async (req, res) => {
     console.error("[checkout] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "INVALID_CUSTOM_ITEM_AMOUNTS") {
+      return res.status(Number(err?.httpStatus) || 400).json({ error: err.message });
     }
     if (err?.code === "INVALID_PRECIO_ID") {
       return res.status(Number(err?.httpStatus) || 400).json({
@@ -7199,11 +9318,16 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       platInfoById: context.platInfoById,
       platNameById: context.platNameById,
       pickPrecio: context.pickPrecio,
+      descuentos: context.descuentos,
+      discountColumns: context.discountColumns,
+      discountColumnById: context.discountColumnById,
+      isCliente: context.isCliente,
       referencia: orden?.referencia,
       archivos,
       id_metodo_de_pago: orden?.id_metodo_de_pago,
       carritoId: orden.id_carrito,
       montoHistorialTotalOverride: montoBaseCobrado,
+      adminInvolucradoId: idAdminEntrega,
     });
     console.log("[ordenes/procesar] procesado", {
       id_orden: idOrden,
@@ -7257,14 +9381,33 @@ app.get("/api/ventas/entregadas", async (req, res) => {
     const idUsuario = await getOrCreateUsuario(req);
     if (!idUsuario) throw new Error("Usuario no autenticado");
 
-    const { data, error } = await supabaseAdmin
+    const { data: ventasRows, error: ventasErr } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta", { count: "exact" })
+      .select("id_venta")
       .eq("id_usuario", idUsuario)
       .eq("pendiente", false);
-    if (error) throw error;
+    if (ventasErr) throw ventasErr;
 
-    res.json({ entregadas: data?.length || 0 });
+    const ventasIds = new Set(
+      (ventasRows || []).map((row) => toPositiveInt(row?.id_venta)).filter((value) => value > 0),
+    );
+
+    let extraGiftDelivered = 0;
+    const { data: historialGiftRows, error: historialGiftErr } = await supabaseAdmin
+      .from("historial_ventas")
+      .select("id_historial_ventas, id_venta")
+      .eq("id_usuario_cliente", idUsuario)
+      .not("id_tarjeta_de_regalo", "is", null);
+    if (historialGiftErr) {
+      if (!isMissingHistorialGiftCardSchemaError(historialGiftErr)) throw historialGiftErr;
+    } else {
+      extraGiftDelivered = (historialGiftRows || []).filter((row) => {
+        const saleId = toPositiveInt(row?.id_venta);
+        return !saleId || !ventasIds.has(saleId);
+      }).length;
+    }
+
+    res.json({ entregadas: ventasIds.size + extraGiftDelivered });
   } catch (err) {
     console.error("[ventas entregadas] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {

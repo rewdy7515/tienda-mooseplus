@@ -3116,6 +3116,7 @@
         plataformaId = null,
         ventaPerfil = false,
         ventaMiembro = false,
+        ventaDominio = false,
       } = {}) => {
         const perfilIdNum = toPositiveId(perfilId);
         const cuentaIdNum = toPositiveId(cuentaId);
@@ -3138,16 +3139,19 @@
           return toPositiveId(data?.id_precio);
         };
 
-        // Prioriza coincidencias exactas del contexto de asignación.
-        const directChecks = [
-          ["id_perfil", perfilIdNum],
-          ["id_cuenta_miembro", cuentaMiembroIdNum],
-          ["id_cuenta", cuentaIdNum],
-          ...(ventaMiembro && cuentaIdNum ? [["id_cuenta_miembro", cuentaIdNum]] : []),
-        ];
-        for (const [field, value] of directChecks) {
-          const match = await fetchVentaPrecioBy(field, value);
-          if (match) return match;
+        // Para cuentas dominio no se recicla el id_precio de ventas previas:
+        // se fuerza a resolver desde la grilla de precios de la plataforma.
+        if (!ventaDominio) {
+          const directChecks = [
+            ["id_perfil", perfilIdNum],
+            ["id_cuenta_miembro", cuentaMiembroIdNum],
+            ["id_cuenta", cuentaIdNum],
+            ...(ventaMiembro && cuentaIdNum ? [["id_cuenta_miembro", cuentaIdNum]] : []),
+          ];
+          for (const [field, value] of directChecks) {
+            const match = await fetchVentaPrecioBy(field, value);
+            if (match) return match;
+          }
         }
 
         if (!plataformaIdNum) return null;
@@ -3161,11 +3165,27 @@
         if (!rows.length) return null;
 
         const preferSubCuenta = ventaPerfil || ventaMiembro;
-        const preferred = preferSubCuenta
-          ? rows.find((p) => isTrue(p?.sub_cuenta) || !isTrue(p?.completa))
-          : rows.find((p) => isTrue(p?.completa) && !isTrue(p?.sub_cuenta));
+        const preferred = ventaDominio
+          ? rows.find((p) => !isTrue(p?.completa) && !isTrue(p?.sub_cuenta))
+          : preferSubCuenta
+            ? rows.find((p) => isTrue(p?.sub_cuenta) || !isTrue(p?.completa))
+            : rows.find((p) => isTrue(p?.completa) && !isTrue(p?.sub_cuenta));
         const fallback = preferred || rows[0];
         return toPositiveId(fallback?.id_precio);
+      };
+
+      const markCuentaAsDominio = async ({ cuentaId = null, idUsuario = null } = {}) => {
+        const cuentaIdNum = toPositiveId(cuentaId);
+        const userIdNum = toPositiveId(idUsuario);
+        if (!cuentaIdNum || !userIdNum) return;
+        const { error } = await supabase
+          .from("cuentas")
+          .update({
+            venta_dominio: true,
+            dominio_de: userIdNum,
+          })
+          .eq("id_cuenta", cuentaIdNum);
+        if (error) throw error;
       };
 
       const bindPrecioInputEvents = (rootEl) => {
@@ -3916,6 +3936,13 @@
             });
             const hasVenta = !!p.id_venta;
             const clienteCell = hasVenta ? (ocupadoRaw || "-") : ocupadoCell;
+            const actionButtons = hasVenta
+              ? `<button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
+              : isSuperadmin
+                ? `<button type="button" class="btn-primary btn-registrar-servicio btn-disabled" disabled
+                    data-cuenta="${info.id_cuenta || ""}"
+                  >Asignar servicio</button>`
+                : "";
             return `<tr>
               <td>${p.id_venta ? `#${p.id_venta}` : ""}</td>
               <td class="${p.reemplazado ? "ocupado-reemplazo" : ""}">${p.reemplazado ? "Reemplazado" : clienteCell}</td>
@@ -3931,7 +3958,7 @@
               <td class="estado-cell ${estado.className}">${estado.label}</td>
               <td>${renderPrecioVentaCell(p.id_venta, p.id_precio)}</td>
               <td class="action-cell">
-                <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
+                ${actionButtons}
               </td>
             </tr>`;
           })
@@ -5644,6 +5671,12 @@
               const nombreVal = (nameInput?.value || "").trim();
               const correoVal = (correoInput?.value || "").trim();
               const claveVal = (claveInput?.value || "").trim();
+              const plataformaIdNum = toPositiveId(
+                currentCuentaDetalle?.plataformaId || currentCuentaDetalle?.id_plataforma,
+              );
+              const usaCorreoCliente = isTrue(currentCuentaDetalle?.correo_cliente);
+              const usaClaveCliente = isTrue(currentCuentaDetalle?.clave_cliente);
+              const usaCredencialesCliente = usaCorreoCliente || usaClaveCliente;
               if (!nombreVal || !/\s+/.test(nombreVal)) {
                 alert("Ingresa nombre y apellido.");
                 return;
@@ -5678,7 +5711,7 @@
                   }
                 }
               }
-              const isSpotify = Number(currentCuentaDetalle?.plataformaId) === 9;
+              const isSpotify = plataformaIdNum === 9;
               let memberCuentaId = null;
               if (isSpotify) {
                 if (!finalUserId) {
@@ -5756,32 +5789,45 @@
                   if (perfErr) throw perfErr;
                 }
               }
+              if (!isSpotify && usaCredencialesCliente) {
+                await markCuentaAsDominio({
+                  cuentaId,
+                  idUsuario: finalUserId,
+                });
+              }
               resolvedIdPrecio = await resolveRegistroServicioIdPrecio({
                 perfilId,
                 cuentaId,
                 cuentaMiembroId: isSpotify ? memberCuentaId : null,
-                plataformaId: currentCuentaDetalle?.plataformaId || null,
+                plataformaId: plataformaIdNum,
                 ventaPerfil: currentCuentaDetalle?.venta_perfil === true,
                 ventaMiembro: currentCuentaDetalle?.venta_miembro === true,
+                ventaDominio: !isSpotify && usaCredencialesCliente,
               });
               if (!resolvedIdPrecio) {
                 alert("Se pondrá id_precio = null");
               }
+              const ventaPayload = {
+                id_usuario: finalUserId,
+                id_cuenta: Number(cuentaId),
+                id_cuenta_miembro: isSpotify ? memberCuentaId : null,
+                id_perfil: perfilId ? Number(perfilId) : null,
+                id_precio: resolvedIdPrecio,
+                fecha_corte: fechaVal,
+                fecha_pago: new Date().toISOString().slice(0, 10),
+                pendiente: false,
+                meses_contratados: 1,
+                recordatorio_enviado: false,
+              };
+              if (usaCorreoCliente || correoVal) {
+                ventaPayload.correo_miembro = correoVal;
+              }
+              if (usaClaveCliente || claveVal) {
+                ventaPayload.clave_miembro = claveVal || null;
+              }
               const { data: ventaRow, error } = await supabase
                 .from("ventas")
-                .insert({
-                  id_usuario: finalUserId,
-                  id_cuenta: Number(cuentaId),
-                  id_cuenta_miembro: isSpotify ? memberCuentaId : null,
-                  id_perfil: perfilId ? Number(perfilId) : null,
-                  id_precio: resolvedIdPrecio,
-                  fecha_corte: fechaVal,
-                  fecha_pago: new Date().toISOString().slice(0, 10),
-                  pendiente: false,
-                  meses_contratados: 1,
-                  correo_miembro: correoVal,
-                  clave_miembro: claveVal || null,
-                })
+                .insert(ventaPayload)
                 .select("id_venta")
                 .single();
               if (error) throw error;
@@ -5843,6 +5889,7 @@
                   fecha_pago: new Date().toISOString().slice(0, 10),
                   pendiente: false,
                   meses_contratados: 1,
+                  recordatorio_enviado: false,
                 })
                 .select("id_venta")
                 .single();

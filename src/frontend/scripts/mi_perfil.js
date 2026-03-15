@@ -25,6 +25,8 @@ const apellidoInputEl = document.querySelector("#perfil-apellido-input");
 const correoInputEl = document.querySelector("#perfil-correo-input");
 const telefonoInputEl = document.querySelector("#perfil-telefono-input");
 const recordatorioDiasInputEl = document.querySelector("#perfil-recordatorio-dias-input");
+const btnPerfilSaveEl = document.querySelector("#btn-perfil-save");
+const perfilSaveStatusEl = document.querySelector("#perfil-save-status");
 const avatarModalEl = document.querySelector("#avatar-modal");
 const avatarModalCloseEl = document.querySelector("#avatar-modal-close");
 const avatarModalGridEl = document.querySelector("#avatar-modal-grid");
@@ -36,16 +38,22 @@ let savedAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let savedBgColor = DEFAULT_BG_COLOR;
 let pendingAvatarUrl = EMPTY_AVATAR_DATA_URL;
 let pendingBgColor = DEFAULT_BG_COLOR;
+let savedNombre = "";
+let savedApellido = "";
+let savedCorreo = "";
 let savedRecordatorioDiasAntes = null;
 let savedTelefonoDigits = "";
 let telefonoIti = null;
 let telefonoMaxDigits = null;
 let telefonoPattern = "";
+let saveProfileInProgress = false;
 
 const setInput = (el, value) => {
   if (!el) return;
   el.value = String(value ?? "").trim();
 };
+
+const normalizeTextValue = (value) => String(value ?? "").trim();
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -63,11 +71,17 @@ const normalizeColor = (value) => {
   return "";
 };
 
+const setProfileSaveStatus = (message = "", isError = false) => {
+  if (!perfilSaveStatusEl) return;
+  perfilSaveStatusEl.textContent = message;
+  perfilSaveStatusEl.style.color = isError ? "#b91c1c" : "";
+};
+
 const parseRecordatorioDias = (value) => {
   const raw = String(value ?? "").trim();
   if (!raw) return { valid: false, value: null };
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 5 || !Number.isInteger(parsed)) {
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 5 || !Number.isInteger(parsed)) {
     return { valid: false, value: null };
   }
   return { valid: true, value: parsed };
@@ -432,9 +446,12 @@ const init = async () => {
     pendingAvatarUrl = savedAvatarUrl;
     pendingBgColor = savedBgColor;
 
-    setInput(nombreInputEl, user.nombre);
-    setInput(apellidoInputEl, user.apellido);
-    setInput(correoInputEl, user.correo);
+    savedNombre = normalizeTextValue(user.nombre);
+    savedApellido = normalizeTextValue(user.apellido);
+    savedCorreo = normalizeTextValue(user.correo);
+    setInput(nombreInputEl, savedNombre);
+    setInput(apellidoInputEl, savedApellido);
+    setInput(correoInputEl, savedCorreo);
     setTelefonoFromUser(user.telefono);
     savedTelefonoDigits = normalizePhoneDigits(user.telefono);
     const parsedRecordatorio = parseRecordatorioDias(user.recordatorio_dias_antes);
@@ -451,54 +468,85 @@ const init = async () => {
   }
 };
 
-const saveRecordatorioDiasAntes = async () => {
-  if (!currentUserId || !recordatorioDiasInputEl) return;
-  const parsed = parseRecordatorioDias(recordatorioDiasInputEl.value);
-  if (!parsed.valid) {
-    alert("Selecciona entre 1 y 4 días de anticipación.");
+const saveProfile = async () => {
+  if (!currentUserId || saveProfileInProgress) return;
+
+  const nombre = normalizeTextValue(nombreInputEl?.value);
+  const apellido = normalizeTextValue(apellidoInputEl?.value);
+  const correo = normalizeTextValue(correoInputEl?.value);
+  const telefono = getTelefonoDigitsForSave();
+  const parsedRecordatorio = parseRecordatorioDias(recordatorioDiasInputEl?.value);
+
+  if (correoInputEl && !correoInputEl.checkValidity()) {
+    correoInputEl.reportValidity?.();
+    setProfileSaveStatus("Ingresa un correo válido.", true);
+    return;
+  }
+
+  if (!parsedRecordatorio.valid) {
+    setProfileSaveStatus("Selecciona entre 1 y 5 días de anticipación.", true);
     setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes || 1);
     return;
   }
-  if (parsed.value === savedRecordatorioDiasAntes) {
-    setInput(recordatorioDiasInputEl, parsed.value);
+
+  const hasChanges =
+    nombre !== savedNombre ||
+    apellido !== savedApellido ||
+    correo !== savedCorreo ||
+    telefono !== savedTelefonoDigits ||
+    parsedRecordatorio.value !== savedRecordatorioDiasAntes;
+
+  if (!hasChanges) {
+    setProfileSaveStatus("No hay cambios para guardar.");
     return;
   }
+
   try {
+    saveProfileInProgress = true;
+    btnPerfilSaveEl && (btnPerfilSaveEl.disabled = true);
+    setProfileSaveStatus("Guardando...");
+
+    const payload = {
+      nombre: nombre || null,
+      apellido: apellido || null,
+      correo: correo || null,
+      telefono: telefono || null,
+      recordatorio_dias_antes: parsedRecordatorio.value,
+    };
+
     const { error } = await supabase
       .from("usuarios")
-      .update({ recordatorio_dias_antes: parsed.value })
+      .update(payload)
       .eq("id_usuario", currentUserId);
     if (error) throw error;
-    savedRecordatorioDiasAntes = parsed.value;
+
+    const telefonoChanged = telefono !== savedTelefonoDigits;
+    savedNombre = nombre;
+    savedApellido = apellido;
+    savedCorreo = correo;
+    savedTelefonoDigits = telefono;
+    savedRecordatorioDiasAntes = parsedRecordatorio.value;
+
+    setInput(nombreInputEl, savedNombre);
+    setInput(apellidoInputEl, savedApellido);
+    setInput(correoInputEl, savedCorreo);
+    setTelefonoFromUser(savedTelefonoDigits);
     setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes);
-  } catch (err) {
-    console.error("save recordatorio_dias_antes error", err);
-    alert("No se pudo guardar los dias de recordatorio.");
-    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes || 1);
-  }
-};
+    setProfileSaveStatus("Perfil guardado correctamente.");
 
-const saveTelefono = async () => {
-  if (!currentUserId || !telefonoInputEl) return;
-  const digits = getTelefonoDigitsForSave();
-  if (digits === savedTelefonoDigits) return;
-
-  try {
-    const { error } = await supabase
-      .from("usuarios")
-      .update({ telefono: digits || null })
-      .eq("id_usuario", currentUserId);
-    if (error) throw error;
-
-    savedTelefonoDigits = digits;
-    setTelefonoFromUser(digits);
-    if (digits) {
-      await triggerWhatsappReminderForUser(currentUserId);
+    if (telefonoChanged && telefono) {
+      try {
+        await triggerWhatsappReminderForUser(currentUserId);
+      } catch (err) {
+        console.error("trigger whatsapp reminder error", err);
+      }
     }
   } catch (err) {
-    console.error("save telefono error", err);
-    alert("No se pudo guardar el numero de telefono.");
-    setTelefonoFromUser(savedTelefonoDigits);
+    console.error("save profile error", err);
+    setProfileSaveStatus(err?.message || "No se pudo guardar el perfil.", true);
+  } finally {
+    saveProfileInProgress = false;
+    btnPerfilSaveEl && (btnPerfilSaveEl.disabled = false);
   }
 };
 
@@ -527,19 +575,13 @@ avatarModalEl?.addEventListener("click", (e) => {
 
 avatarModalCloseEl?.addEventListener("click", () => closeAvatarModal(true));
 btnAvatarSaveEl?.addEventListener("click", saveAvatarProfile);
-telefonoInputEl?.addEventListener("change", saveTelefono);
-telefonoInputEl?.addEventListener("blur", saveTelefono);
-telefonoInputEl?.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  e.preventDefault();
-  saveTelefono();
-});
-recordatorioDiasInputEl?.addEventListener("change", saveRecordatorioDiasAntes);
-recordatorioDiasInputEl?.addEventListener("blur", saveRecordatorioDiasAntes);
-recordatorioDiasInputEl?.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter") return;
-  e.preventDefault();
-  saveRecordatorioDiasAntes();
+btnPerfilSaveEl?.addEventListener("click", saveProfile);
+[nombreInputEl, apellidoInputEl, correoInputEl, telefonoInputEl, recordatorioDiasInputEl].forEach((el) => {
+  el?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    saveProfile();
+  });
 });
 
 initTelefonoInput();

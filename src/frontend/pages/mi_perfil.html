@@ -20,12 +20,10 @@
         flex-direction: column;
         align-items: center;
       }
-      .perfil-wrap > h2,
       .perfil-wrap > #perfil-status,
       .perfil-wrap > .perfil-card {
         width: 100%;
       }
-      .perfil-wrap h2,
       .perfil-wrap #perfil-status {
         text-align: center;
       }
@@ -100,6 +98,20 @@
         justify-self: center;
         text-align: left;
       }
+      .perfil-actions {
+        width: 92%;
+        max-width: 520px;
+        margin: 16px auto 0;
+        display: grid;
+        gap: 8px;
+      }
+      .perfil-actions button {
+        width: 100%;
+      }
+      .perfil-save-status {
+        margin: 0;
+        text-align: center;
+      }
       @media (max-width: 640px) {
         .perfil-wrap {
           padding: 8px 0 0;
@@ -115,7 +127,6 @@
     <script src="../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas perfil-wrap">
-      <h2>Mi perfil</h2>
       <p id="perfil-status" class="status">Cargando perfil...</p>
 
       <section id="perfil-card" class="perfil-card hidden">
@@ -170,17 +181,21 @@
           />
 
           <label for="perfil-recordatorio-dias-input" class="form-label">
-            ¿Con cuántos días de anticipación quieres recibir recordatorios de vencimiento de servicio?
+            Quiero recibir los recordatorios de vecimiento...
           </label>
-          <select
-            id="perfil-recordatorio-dias-input"
-            class="form-input"
-          >
+          <select id="perfil-recordatorio-dias-input" class="form-input">
             <option value="1">1 día antes</option>
             <option value="2">2 días antes</option>
             <option value="3">3 días antes</option>
             <option value="4">4 días antes</option>
+            <option value="5">5 días antes</option>
           </select>
+        </div>
+        <div class="perfil-actions">
+          <button type="button" id="btn-perfil-save" class="btn-primary">
+            Guardar
+          </button>
+          <p id="perfil-save-status" class="status perfil-save-status"></p>
         </div>
       </section>
     </main>

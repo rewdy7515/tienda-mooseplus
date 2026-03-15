@@ -12,6 +12,9 @@ const {
   SUPABASE_PUBLISHABLE_KEY,
   SUPABASE_SERVICE_ROLE_KEY,
   PORT,
+  WEB_PUSH_VAPID_PUBLIC_KEY,
+  WEB_PUSH_VAPID_PRIVATE_KEY,
+  WEB_PUSH_SUBJECT,
 } = process.env;
 
 module.exports = {
@@ -19,4 +22,7 @@ module.exports = {
   supabaseAnonKey: SUPABASE_ANON_KEY || SUPABASE_PUBLISHABLE_KEY,
   supabaseServiceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
   port: PORT || 3000,
+  webPushVapidPublicKey: WEB_PUSH_VAPID_PUBLIC_KEY || "",
+  webPushVapidPrivateKey: WEB_PUSH_VAPID_PRIVATE_KEY || "",
+  webPushSubject: WEB_PUSH_SUBJECT || "mailto:soporte@mooseplus.com",
 };

@@ -162,7 +162,9 @@ CREATE TABLE public.historial_ventas (
   comprobante text,
   hora_pago time without time zone,
   id_orden bigint,
+  id_tarjeta_de_regalo bigint,
   CONSTRAINT historial_ventas_pkey PRIMARY KEY (id_historial_ventas),
+  CONSTRAINT historial_ventas_id_tarjeta_de_regalo_fkey FOREIGN KEY (id_tarjeta_de_regalo) REFERENCES public.tarjetas_de_regalo(id_tarjeta_de_regalo),
   CONSTRAINT historial_ventas_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT historial_ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT historial_ventas_id_usuario_cliente_fkey FOREIGN KEY (id_usuario_cliente) REFERENCES public.usuarios(id_usuario),
@@ -458,12 +460,22 @@ CREATE TABLE public.tarjetas_de_regalo (
   fecha_uso date,
   id_cuenta bigint,
   admin_involucrado bigint,
+  id_orden bigint,
   CONSTRAINT tarjetas_de_regalo_pkey PRIMARY KEY (id_tarjeta_de_regalo),
   CONSTRAINT tarjetas_de_regalo_id_proveedor_fkey FOREIGN KEY (id_proveedor) REFERENCES public.proveedores(id_proveedor),
   CONSTRAINT tarjetas_de_regalo_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT tarjetas_de_regalo_admin_involucrado_fkey FOREIGN KEY (admin_involucrado) REFERENCES public.usuarios(id_usuario),
+  CONSTRAINT tarjetas_de_regalo_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden),
   CONSTRAINT tarjetas_de_regalo_vendido_a_fkey FOREIGN KEY (vendido_a) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT tarjetas_de_regalo_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta)
+);
+CREATE TABLE public.tasa_config (
+  id smallint NOT NULL CHECK (id = 1),
+  markup double precision NOT NULL DEFAULT 1.06,
+  actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
+  actualizado_por bigint,
+  CONSTRAINT tasa_config_pkey PRIMARY KEY (id),
+  CONSTRAINT tasa_config_actualizado_por_fkey FOREIGN KEY (actualizado_por) REFERENCES public.usuarios(id_usuario)
 );
 CREATE TABLE public.testing (
   id_testing bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -487,7 +499,7 @@ CREATE TABLE public.usuarios (
   claim_expires timestamp with time zone,
   notificacion_inventario boolean,
   saldo double precision,
-  recordatorio_dias_antes smallint,
+  recordatorio_dias_antes smallint DEFAULT '1'::smallint,
   foto_perfil text,
   fondo_perfil text,
   fecha_ultima_compra date,

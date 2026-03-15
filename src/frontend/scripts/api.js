@@ -664,6 +664,32 @@ export async function fetchCheckoutDraft() {
   }
 }
 
+export async function fetchCheckoutSummary(payload = {}) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/checkout/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return { error: message || "No se pudo cargar el resumen del checkout", status: res.status };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("fetchCheckoutSummary error", err);
+    return { error: err.message };
+  }
+}
+
 export async function procesarOrden(id_orden, options = {}) {
   await ensureServerSession();
   try {
@@ -893,6 +919,32 @@ export async function fetchVentasOrden(idOrden) {
     return json;
   } catch (err) {
     console.error("fetchVentasOrden error", err);
+    return { error: err.message };
+  }
+}
+
+export async function entregarGiftCardPendiente(idVenta) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/ventas/entregar-giftcard`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id_venta: idVenta }),
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return { error: message || "No se pudo entregar la gift card", status: res.status };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("entregarGiftCardPendiente error", err);
     return { error: err.message };
   }
 }

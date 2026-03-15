@@ -174,6 +174,7 @@
       import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
       import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
+      import { copyTextNotify } from "../../scripts/copy-toast.js";
 
       requireSession();
       attachLogoHome();
@@ -205,6 +206,7 @@
       const costoRenovInput = document.querySelector("#costo-renovacion-input");
       const proveedorRenovInput = document.querySelector("#proveedor-renovacion-input");
       const proveedorRenovSugs = document.querySelector("#proveedor-renovacion-sugs");
+      const btnCostoRenovCopy = document.querySelector("#btn-costo-renov-copy");
       const btnCostoRenovCancelar = document.querySelector("#btn-costo-renov-cancelar");
       const btnCostoRenovGuardar = document.querySelector("#btn-costo-renov-guardar");
       let fetchCounter = 0;
@@ -215,6 +217,7 @@
       let proveedorRenovSelectedId = null;
       let proveedorRenovFetchCounter = 0;
       let pendingCostoRenovResolver = null;
+      let costoRenovCopyText = "";
 
       const normalizeSearchText = (value) =>
         String(value || "")
@@ -315,6 +318,14 @@
         proveedorRenovSugs.classList.add("hidden");
       };
 
+      const setCostoRenovCopyState = (text = "") => {
+        costoRenovCopyText = String(text || "").trim();
+        if (!btnCostoRenovCopy) return;
+        btnCostoRenovCopy.classList.toggle("hidden", !costoRenovCopyText);
+        btnCostoRenovCopy.disabled = !costoRenovCopyText;
+        btnCostoRenovCopy.textContent = "Copiar correo y clave";
+      };
+
       const renderProveedorRenovSugs = (items = []) => {
         if (!proveedorRenovSugs) return;
         if (!items.length) {
@@ -358,6 +369,7 @@
         pendingCostoRenovResolver = null;
         modalCostoRenov?.classList.add("hidden");
         if (costoRenovRefEl) costoRenovRefEl.textContent = "";
+        setCostoRenovCopyState("");
         clearProveedorRenovSugs();
         if (!resolver) return;
         if (payload) resolver.resolve(payload);
@@ -378,7 +390,46 @@
         return `Correos referenciados: ${uniques.slice(0, 3).join(", ")} (+${uniques.length - 3} más)`;
       };
 
-      const openCostoRenovacionModal = (referenciaCorreo = "") =>
+      const buildCostoRenovCopyText = (items = []) => {
+        const grouped = new Map();
+        (Array.isArray(items) ? items : []).forEach((item) => {
+          const correo = String(item?.correo || item?.correo_miembro || "").trim();
+          const clave = String(item?.clave || item?.clave_miembro || "").trim();
+          if (!correo && !clave) return;
+          const plataforma = formatPlataformaLabel(
+            item?.plataforma_nombre || item?.plataforma || "",
+            item?.hogar_actualizado === true,
+          );
+          const idCuenta = Number(item?.id_cuenta || item?.idCuenta || 0) || null;
+          const key = idCuenta ? `cuenta:${idCuenta}` : `${correo.toLowerCase()}|${clave}|${plataforma.toLowerCase()}`;
+          const current = grouped.get(key) || {
+            correo: "",
+            clave: "",
+            plataforma: plataforma || "",
+          };
+          if (!current.correo && correo) current.correo = correo;
+          if (!current.clave && clave) current.clave = clave;
+          if (!current.plataforma && plataforma) current.plataforma = plataforma;
+          grouped.set(key, current);
+        });
+        const cuentas = Array.from(grouped.values()).filter((item) => item.correo || item.clave);
+        if (!cuentas.length) return "";
+        return cuentas
+          .map((item, idx) => {
+            const lines = [];
+            if (cuentas.length > 1) {
+              lines.push(item.plataforma ? `Cuenta ${idx + 1} - ${item.plataforma}` : `Cuenta ${idx + 1}`);
+            } else if (item.plataforma) {
+              lines.push(item.plataforma);
+            }
+            if (item.correo) lines.push(`Correo: ${item.correo}`);
+            if (item.clave) lines.push(`Clave: ${item.clave}`);
+            return lines.join("\n");
+          })
+          .join("\n\n");
+      };
+
+      const openCostoRenovacionModal = ({ referenciaCorreo = "", copyItems = [] } = {}) =>
         new Promise((resolve, reject) => {
           pendingCostoRenovResolver = { resolve, reject };
           proveedorRenovSelectedId = null;
@@ -387,6 +438,7 @@
           if (costoRenovRefEl) {
             costoRenovRefEl.textContent = String(referenciaCorreo || "").trim();
           }
+          setCostoRenovCopyState(buildCostoRenovCopyText(copyItems));
           clearProveedorRenovSugs();
           modalCostoRenov?.classList.remove("hidden");
           if (costoRenovInput) costoRenovInput.focus();
@@ -1737,9 +1789,32 @@
               })
               .filter(Boolean);
             try {
-              costoRenovacionProveedorSel = await openCostoRenovacionModal(
-                buildCostoRenovReferencia(correosReferencia),
-              );
+              costoRenovacionProveedorSel = await openCostoRenovacionModal({
+                referenciaCorreo: buildCostoRenovReferencia(correosReferencia),
+                copyItems: seleccionActual
+                  .map((it) => {
+                    const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
+                    const platIdNum = it.id_plataforma
+                      ? Number(it.id_plataforma)
+                      : cuentaInfo?.id_plataforma || null;
+                    const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
+                    const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
+                    const isCuentaCompletaItem =
+                      cuentaCompleta !== null
+                        ? cuentaCompleta
+                        : (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
+                          (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
+                    if (!isCuentaCompletaItem) return null;
+                    return {
+                      id_cuenta: it.id_cuenta || cuentaInfo?.id_cuenta || null,
+                      correo: it.correo || cuentaInfo?.correo || "",
+                      clave: it.clave || cuentaInfo?.clave || "",
+                      plataforma: it.plataforma || "",
+                      hogar_actualizado: it.hogar_actualizado === true,
+                    };
+                  })
+                  .filter(Boolean),
+              });
             } catch (_cancelErr) {
               return;
             }
@@ -2022,9 +2097,10 @@
           esCuentaCompleta = await isCuentaCompletaByContext(modalRowContext);
           if (esCuentaCompleta) {
             try {
-              costoRenovacionProveedor = await openCostoRenovacionModal(
-                buildCostoRenovReferencia([modalRowContext?.correo || ""]),
-              );
+              costoRenovacionProveedor = await openCostoRenovacionModal({
+                referenciaCorreo: buildCostoRenovReferencia([modalRowContext?.correo || ""]),
+                copyItems: [modalRowContext],
+              });
             } catch (_cancelErr) {
               return;
             }
@@ -2171,6 +2247,10 @@
 
       modalCostoRenovClose?.addEventListener("click", () => resolveCostoRenovPromise(null));
       btnCostoRenovCancelar?.addEventListener("click", () => resolveCostoRenovPromise(null));
+      btnCostoRenovCopy?.addEventListener("click", async () => {
+        if (!costoRenovCopyText) return;
+        await copyTextNotify(costoRenovCopyText, "Correo y clave copiados");
+      });
       modalCostoRenov?.addEventListener("click", (e) => {
         if (e.target.classList.contains("modal-backdrop")) resolveCostoRenovPromise(null);
       });
@@ -2307,6 +2387,9 @@
           <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
             <h3 style="margin:0;">Costo de renovación</h3>
             <p id="costo-renovacion-ref" class="status" style="margin:0;"></p>
+            <button type="button" class="btn-outline hidden" id="btn-costo-renov-copy">
+              Copiar correo y clave
+            </button>
             <div class="modal-field">
               <label for="costo-renovacion-input">Costo</label>
               <input

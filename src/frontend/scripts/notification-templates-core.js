@@ -72,6 +72,7 @@
                 correoCuenta: data.correoCuenta,
                 clave: data.clave,
                 perfil: data.perfil,
+                pin: data.pin,
                 fechaCorte: data.fechaCorte,
                 idVenta: data.idVenta,
               },
@@ -81,6 +82,7 @@
                 it.correoCuenta ||
                 it.clave ||
                 it.perfil ||
+                it.pin ||
                 it.fechaCorte,
             );
 
@@ -95,6 +97,7 @@
           );
         }
         if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
+        if (item.pin) parts.push(`PIN: ${item.pin}`);
         if (item.fechaCorte) {
           parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
         }
@@ -120,6 +123,10 @@
                 correoCuenta: data.correoCuenta,
                 clave: data.clave,
                 perfil: data.perfil,
+                region: data.region,
+                valorTarjeta: data.valorTarjeta,
+                moneda: data.moneda,
+                pin: data.pin,
                 fechaCorte: data.fechaCorte,
                 idVenta: data.idVenta,
               },
@@ -129,6 +136,10 @@
                 it.correoCuenta ||
                 it.clave ||
                 it.perfil ||
+                it.region ||
+                it.valorTarjeta ||
+                it.moneda ||
+                it.pin ||
                 it.fechaCorte,
             );
 
@@ -143,6 +154,13 @@
           );
         }
         if (item.correoCuenta) parts.push(`Correo: ${item.correoCuenta}`);
+        if (item.region) parts.push(`Región: ${item.region}`);
+        if (item.valorTarjeta || item.moneda) {
+          parts.push(
+            `Valor: ${[item.valorTarjeta || "", item.moneda || ""].filter(Boolean).join(" ")}`,
+          );
+        }
+        if (item.pin) parts.push(`PIN: ${item.pin}`);
         if (item.fechaCorte) {
           parts.push(`Fecha de corte: ${formatDDMMYYYY(item.fechaCorte)}`);
         }
