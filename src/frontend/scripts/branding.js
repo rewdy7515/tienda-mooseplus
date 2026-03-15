@@ -1,5 +1,11 @@
-export const STATIC_HEADER_LOGO_HREF = "/src/frontend/assets/logo-header-carga/logo-blanco.webp";
-export const STATIC_FAVICON_HREF = "/src/frontend/assets/favicon/logo-corto-blanco-icono.png";
+export const STATIC_HEADER_LOGO_HREF = new URL(
+  "../assets/logo-header-carga/logo-blanco.webp",
+  import.meta.url,
+).href;
+export const STATIC_FAVICON_HREF = new URL(
+  "../assets/favicon/logo-corto-blanco-icono.png",
+  import.meta.url,
+).href;
 
 const ensureFaviconLink = () => {
   document
@@ -56,4 +62,3 @@ export async function loadPaginaBranding(options = {}) {
     error: null,
   };
 }
-

@@ -199,11 +199,15 @@ const getCaracasClock = () => {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   }).formatToParts(now);
   const year = parts.find((part) => part.type === "year")?.value || "0000";
   const month = parts.find((part) => part.type === "month")?.value || "00";
   const day = parts.find((part) => part.type === "day")?.value || "00";
-  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  // Algunos runtimes devuelven medianoche como 24:00; la normalizamos a 00:00
+  // para no habilitar envíos antes de la hora programada.
+  const rawHour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const hour = rawHour === 24 ? 0 : rawHour;
   const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
   const weekday = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Caracas",

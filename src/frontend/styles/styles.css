@@ -881,7 +881,7 @@ main {
   width: var(--loader-logo-width);
   height: var(--loader-logo-height);
   transform: translate(-50%, -50%);
-  background: url("/src/frontend/assets/logo-header-carga/logo-blanco.webp")
+  background: url("../assets/logo-header-carga/logo-blanco.webp")
     center / contain no-repeat;
 }
 .page-loader__logo::after {

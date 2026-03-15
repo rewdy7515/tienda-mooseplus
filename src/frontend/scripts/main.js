@@ -1957,8 +1957,9 @@ async function init() {
     await loadPendingReminderDates({ isSuperadmin: isSuper });
     await loadPendingReminderNoPhoneClients({ isSuperadmin: isSuper });
 
+    const sessionUserId = requireSession();
     const cachedCart = getCachedCart();
-    const cartData = await fetchCart();
+    const cartData = sessionUserId ? await fetchCart() : cachedCart || { items: [] };
     setCachedCart(cartData);
     const [catalog, stockMap, homeBannersResp] = await Promise.all([
       loadCatalog(),
@@ -2034,8 +2035,8 @@ async function init() {
       iconEl: cartIcon,
       itemsContainer: cartItemsEl,
       catalog,
-      initialItems: mapCartItems(cartData.items || [], preciosVisibles, plataformas),
-      initialRawItems: cartData.items || [],
+      initialItems: mapCartItems(cartData?.items || [], preciosVisibles, plataformas),
+      initialRawItems: cartData?.items || [],
     });
     initSearch({
       input: searchInput,
@@ -2052,6 +2053,9 @@ async function init() {
     // Aviso de servicios entregados (solo si hay nuevos) sin badge
     try {
       const userId = requireSession();
+      if (!userId) {
+        throw new Error("Usuario invitado");
+      }
       const entregas = await fetchEntregadas();
       if (!entregas?.error) {
         const count = entregas.entregadas || 0;
@@ -2062,7 +2066,9 @@ async function init() {
         }
       }
     } catch (err) {
-      console.warn("No se pudo cargar entregas", err);
+      if (String(err?.message || "") !== "Usuario invitado") {
+        console.warn("No se pudo cargar entregas", err);
+      }
     }
 
     // Toggle Testing/Production
