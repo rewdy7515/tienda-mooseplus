@@ -1,6 +1,6 @@
 import { loadCurrentUser, supabase, fetchP2PRate } from "./api.js";
 import { requireSession } from "./session.js";
-import { TASA_MARKUP } from "./rate-config.js";
+import { getTasaMarkup } from "./rate-config.js";
 
 requireSession();
 
@@ -63,7 +63,7 @@ saldoCheckoutBtn?.addEventListener("click", async () => {
       return;
     }
     const tasaResp = await fetchP2PRate();
-    const tasaBs = tasaResp ? Math.round(tasaResp * TASA_MARKUP * 100) / 100 : null;
+    const tasaBs = tasaResp ? Math.round(tasaResp * getTasaMarkup() * 100) / 100 : null;
     if (!Number.isFinite(tasaBs)) {
       alert("No se pudo obtener la tasa.");
       return;

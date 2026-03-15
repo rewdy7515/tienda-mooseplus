@@ -3496,6 +3496,31 @@ input[type="number"].input-inline {
   font-weight: 700;
 }
 
+.tasa-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tasa-markup-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tasa-markup-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.tasa-markup-input {
+  width: 96px;
+  min-width: 96px;
+  padding: 8px 10px;
+}
+
 .auth-page {
   min-height: 100vh;
   display: flex;

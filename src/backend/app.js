@@ -219,6 +219,14 @@ const getWhatsappAutoRecordatoriosHour = ({ weekday } = {}) => {
     : WHATSAPP_AUTO_RECORDATORIOS_WEEKDAY_HOUR;
 };
 
+const normalizeRecordatorioDiasAntes = (value, fallback = 1) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+    return fallback;
+  }
+  return parsed;
+};
+
 const formatDDMMYYYY = (value) => {
   const str = String(value || "").trim().slice(0, 10);
   const [year, month, day] = str.split("-");
@@ -613,32 +621,62 @@ const ensureDailyRecordatoriosState = (dateStr) => {
 const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => {
   const userIdsFilter = uniqPositiveIds(targetUserIds || []);
   if (targetUserIds && !userIdsFilter.length) return [];
-  const fechaManana = getCaracasDateStr(1);
+  let usersQuery = supabaseAdmin
+    .from("usuarios")
+    .select("id_usuario, nombre, apellido, telefono, fecha_registro, recordatorio_dias_antes");
+  if (userIdsFilter.length) {
+    usersQuery = usersQuery.in("id_usuario", userIdsFilter);
+  }
+  const { data: users, error: uErr } = await usersQuery;
+  if (uErr) throw uErr;
+
+  const usersList = Array.isArray(users) ? users : [];
+  if (!usersList.length) return [];
+  const userById = usersList.reduce((acc, user) => {
+    const userId = Number(user?.id_usuario);
+    if (!Number.isFinite(userId) || userId <= 0) return acc;
+    acc[userId] = user;
+    return acc;
+  }, {});
+
+  const maxRecordatorioDiasAntes = usersList.reduce((max, user) => {
+    return Math.max(max, normalizeRecordatorioDiasAntes(user?.recordatorio_dias_antes, 1));
+  }, 1);
+  const fechaMaxRecordatorio = getCaracasDateStr(maxRecordatorioDiasAntes);
+
   let ventasQuery = supabaseAdmin
     .from("ventas")
     .select(
       "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado",
     )
-    .lte("fecha_corte", fechaManana)
+    .lte("fecha_corte", fechaMaxRecordatorio)
     .or("recordatorio_enviado.eq.false,recordatorio_enviado.is.null");
-  if (userIdsFilter.length) {
-    ventasQuery = ventasQuery.in("id_usuario", userIdsFilter);
+  const userIds = uniqPositiveIds(usersList.map((user) => user.id_usuario));
+  if (userIds.length) {
+    ventasQuery = ventasQuery.in("id_usuario", userIds);
   }
   const { data: ventas, error: ventErr } = await ventasQuery;
   if (ventErr) throw ventErr;
 
-  const ventasList = Array.isArray(ventas) ? ventas : [];
+  const todayCaracas = getCaracasDateStr(0);
+  const ventasList = (Array.isArray(ventas) ? ventas : []).filter((venta) => {
+    const user = userById[Number(venta?.id_usuario)] || null;
+    const diasAntes = normalizeRecordatorioDiasAntes(user?.recordatorio_dias_antes, 1);
+    const fechaLimite = getCaracasDateStr(diasAntes);
+    const fechaCorte = String(venta?.fecha_corte || "").trim().slice(0, 10);
+    if (!fechaCorte) return false;
+    if (fechaCorte < todayCaracas) return true;
+    return fechaCorte <= fechaLimite;
+  });
   if (!ventasList.length) return [];
 
   const cuentasIds = uniqPositiveIds(ventasList.map((venta) => venta.id_cuenta));
   const precioIds = uniqPositiveIds(ventasList.map((venta) => venta.id_precio));
-  const userIds = uniqPositiveIds(ventasList.map((venta) => venta.id_usuario));
   const perfilIds = uniqPositiveIds(ventasList.map((venta) => venta.id_perfil));
 
   const [
     { data: cuentas, error: cErr },
     { data: precios, error: pErr },
-    { data: users, error: uErr },
     { data: perfiles, error: perfErr },
   ] = await Promise.all([
     cuentasIds.length
@@ -653,12 +691,6 @@ const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => 
           .select("id_precio, id_plataforma")
           .in("id_precio", precioIds)
       : Promise.resolve({ data: [], error: null }),
-    userIds.length
-      ? supabaseAdmin
-          .from("usuarios")
-          .select("id_usuario, nombre, apellido, telefono, fecha_registro")
-          .in("id_usuario", userIds)
-      : Promise.resolve({ data: [], error: null }),
     perfilIds.length
       ? supabaseAdmin
           .from("perfiles")
@@ -668,7 +700,6 @@ const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => 
   ]);
   if (cErr) throw cErr;
   if (pErr) throw pErr;
-  if (uErr) throw uErr;
   if (perfErr) throw perfErr;
 
   const platIds = uniqPositiveIds([
@@ -695,7 +726,7 @@ const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => 
     acc[plat.id_plataforma] = plat;
     return acc;
   }, {});
-  const mapUser = (users || []).reduce((acc, user) => {
+  const mapUser = usersList.reduce((acc, user) => {
     const userId = Number(user.id_usuario);
     if (!Number.isFinite(userId) || userId <= 0) return acc;
     const isRegistered = Boolean(user?.fecha_registro);
@@ -712,6 +743,7 @@ const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => 
       telefono: String(user.telefono || "").trim(),
       registrado: isRegistered,
       signupUrl,
+      recordatorioDiasAntes: normalizeRecordatorioDiasAntes(user?.recordatorio_dias_antes, 1),
     };
     return acc;
   }, {});

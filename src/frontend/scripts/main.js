@@ -38,7 +38,7 @@ import {
   setDeliverySeen,
   requireSession,
 } from "./session.js";
-import { TASA_MARKUP } from "./rate-config.js";
+import { DEFAULT_TASA_MARKUP, getTasaMarkup, setTasaMarkup } from "./rate-config.js";
 
 const contenedor = document.querySelector("#categorias-container");
 const estado = document.querySelector("#categorias-status");
@@ -54,7 +54,10 @@ const logo = document.querySelector(".logo");
 const testingBtn = document.querySelector("#btn-testing-toggle");
 const missingDataWrap = document.querySelector("#missing-data-wrap");
 const missingDataBtn = document.querySelector("#missing-data-btn");
+const tasaPanelEl = document.querySelector("#tasa-panel");
 const tasaActualEl = document.querySelector("#tasa-actual");
+const tasaMarkupWrapEl = document.querySelector("#tasa-markup-wrap");
+const tasaMarkupInputEl = document.querySelector("#tasa-markup-input");
 const pageLoaderLogoEl = document.querySelector(".page-loader__logo");
 const homeBannersWrap = document.querySelector("#home-banners");
 const homeBannersViewport = document.querySelector(".home-banners-viewport");
@@ -206,7 +209,7 @@ const getNextRateUpdateDate = () => {
 
 const getTasaBsValue = (rate) => {
   if (!Number.isFinite(rate)) return null;
-  const tasaVal = Math.round(rate * TASA_MARKUP * 100) / 100;
+  const tasaVal = Math.round(rate * getTasaMarkup() * 100) / 100;
   return Number.isFinite(tasaVal) ? tasaVal : null;
 };
 
@@ -215,11 +218,56 @@ const renderTasaActual = (rate) => {
   const tasaVal = getTasaBsValue(rate);
   if (!Number.isFinite(tasaVal)) {
     tasaActualEl.classList.add("hidden");
+    tasaPanelEl?.classList.add("hidden");
     return;
   }
   tasaActualEl.textContent = `Tasa actual: Bs. ${tasaVal.toFixed(2)}`;
   tasaActualEl.classList.remove("hidden");
+  tasaPanelEl?.classList.remove("hidden");
 };
+
+const renderTasaMarkupInput = ({ isSuper = false } = {}) => {
+  if (!tasaMarkupWrapEl || !tasaMarkupInputEl) return;
+  if (!isSuper) {
+    tasaMarkupWrapEl.classList.add("hidden");
+    tasaMarkupInputEl.value = "";
+    return;
+  }
+  const porcentajeMarkup = (getTasaMarkup() - 1) * 100;
+  tasaMarkupInputEl.value = Number.isFinite(porcentajeMarkup)
+    ? porcentajeMarkup.toFixed(2)
+    : "";
+  tasaMarkupWrapEl.classList.remove("hidden");
+  tasaPanelEl?.classList.remove("hidden");
+};
+
+const parseTasaMarkupPercent = (value) => {
+  const parsed = Number(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return parsed;
+};
+
+tasaMarkupInputEl?.addEventListener("change", async () => {
+  const percent = parseTasaMarkupPercent(tasaMarkupInputEl.value);
+  const nextMarkup = percent === null ? DEFAULT_TASA_MARKUP : 1 + percent / 100;
+  const savedMarkup = setTasaMarkup(nextMarkup);
+  tasaMarkupInputEl.value = ((savedMarkup - 1) * 100).toFixed(2);
+  try {
+    const rate = await fetchP2PRate();
+    renderTasaActual(rate);
+  } catch (err) {
+    console.error("refresh tasa after markup change error", err);
+  }
+});
+
+window.addEventListener("tasa-markup-change", async () => {
+  try {
+    const rate = await fetchP2PRate();
+    renderTasaActual(rate);
+  } catch (err) {
+    console.error("tasa markup change listener error", err);
+  }
+});
 
 const stopTasaAutoRefresh = () => {
   tasaAutoRefreshEnabled = false;
@@ -1859,6 +1907,7 @@ async function init() {
       if (!canSeeRate) {
         stopTasaAutoRefresh();
         tasaActualEl.classList.add("hidden");
+        tasaPanelEl?.classList.add("hidden");
       } else {
         const rate = await fetchP2PRate();
         renderTasaActual(rate);
@@ -1872,6 +1921,7 @@ async function init() {
       isTrue(currentUser?.permiso_superadmin);
     const isSuper =
       isTrue(sessionRoles?.permiso_superadmin) || isTrue(currentUser?.permiso_superadmin);
+    renderTasaMarkupInput({ isSuper });
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);
       adminLink.style.display = isAdmin ? "block" : "none";

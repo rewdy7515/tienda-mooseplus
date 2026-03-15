@@ -65,9 +65,9 @@ const normalizeColor = (value) => {
 
 const parseRecordatorioDias = (value) => {
   const raw = String(value ?? "").trim();
-  if (!raw) return { valid: true, value: null };
+  if (!raw) return { valid: false, value: null };
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 5 || !Number.isInteger(parsed)) {
     return { valid: false, value: null };
   }
   return { valid: true, value: parsed };
@@ -438,8 +438,8 @@ const init = async () => {
     setTelefonoFromUser(user.telefono);
     savedTelefonoDigits = normalizePhoneDigits(user.telefono);
     const parsedRecordatorio = parseRecordatorioDias(user.recordatorio_dias_antes);
-    savedRecordatorioDiasAntes = parsedRecordatorio.valid ? parsedRecordatorio.value : null;
-    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
+    savedRecordatorioDiasAntes = parsedRecordatorio.valid ? parsedRecordatorio.value : 1;
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes);
 
     applyAvatarSavedState({ url: savedAvatarUrl, color: savedBgColor });
 
@@ -455,12 +455,12 @@ const saveRecordatorioDiasAntes = async () => {
   if (!currentUserId || !recordatorioDiasInputEl) return;
   const parsed = parseRecordatorioDias(recordatorioDiasInputEl.value);
   if (!parsed.valid) {
-    alert("Ingresa un numero entero de dias (0 o mayor).");
-    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
+    alert("Selecciona entre 1 y 4 días de anticipación.");
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes || 1);
     return;
   }
   if (parsed.value === savedRecordatorioDiasAntes) {
-    setInput(recordatorioDiasInputEl, parsed.value ?? "");
+    setInput(recordatorioDiasInputEl, parsed.value);
     return;
   }
   try {
@@ -470,11 +470,11 @@ const saveRecordatorioDiasAntes = async () => {
       .eq("id_usuario", currentUserId);
     if (error) throw error;
     savedRecordatorioDiasAntes = parsed.value;
-    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes);
   } catch (err) {
     console.error("save recordatorio_dias_antes error", err);
     alert("No se pudo guardar los dias de recordatorio.");
-    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes ?? "");
+    setInput(recordatorioDiasInputEl, savedRecordatorioDiasAntes || 1);
   }
 };
 

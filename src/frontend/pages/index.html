@@ -65,7 +65,23 @@
           </button>
         </div>
         <section class="categorias-dinamicas">
-          <p id="tasa-actual" class="status tasa-actual hidden"></p>
+          <div id="tasa-panel" class="tasa-panel hidden">
+            <p id="tasa-actual" class="status tasa-actual hidden"></p>
+            <label
+              id="tasa-markup-wrap"
+              for="tasa-markup-input"
+              class="tasa-markup-wrap hidden"
+            >
+              <span class="tasa-markup-label">% subida</span>
+              <input
+                id="tasa-markup-input"
+                type="number"
+                step="0.01"
+                inputmode="decimal"
+                class="form-input tasa-markup-input"
+              />
+            </label>
+          </div>
           <div id="recordatorios-pendientes-wrap" class="status hidden">
             <strong>Fechas faltantes por recordar:</strong>
             <ul id="recordatorios-pendientes-list"></ul>

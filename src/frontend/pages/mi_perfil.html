@@ -170,17 +170,17 @@
           />
 
           <label for="perfil-recordatorio-dias-input" class="form-label">
-            Recordatorio de renovación (días antes)
+            ¿Con cuántos días de anticipación quieres recibir recordatorios de vencimiento de servicio?
           </label>
-          <input
+          <select
             id="perfil-recordatorio-dias-input"
-            type="number"
-            min="0"
-            step="1"
-            inputmode="numeric"
             class="form-input"
-            placeholder="3"
-          />
+          >
+            <option value="1">1 día antes</option>
+            <option value="2">2 días antes</option>
+            <option value="3">3 días antes</option>
+            <option value="4">4 días antes</option>
+          </select>
         </div>
       </section>
     </main>
