@@ -319,7 +319,7 @@ const buildGiftCardSaleCopyText = ({
     );
   }
   lines.push(`(Región: ${regionTxt})`);
-  lines.push("_Pagina Web: www.mooseplus.com_");
+  lines.push("_Pagina Web: mooseplus.com_");
   lines.push("");
   lines.push(`\`${valueTxt}\``);
   lines.push(`PIN: ${pinTxt}`);
