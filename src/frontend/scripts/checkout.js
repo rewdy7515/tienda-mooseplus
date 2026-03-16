@@ -64,6 +64,7 @@ let montoRefreshTimer = null;
 let saldoWatcher = null;
 let lastSaldoValue = null;
 let checkoutSubmitInProgress = false;
+let selectedComprobantePayload = null;
 const RATE_SLOT_SECONDS = 2 * 60 * 60;
 const METODO_RECARGO_USD_ID = 4;
 const METODO_RECARGO_USD_PERCENT = 0.0349;
@@ -127,6 +128,61 @@ const getTotalUsdMostrado = (baseUsd, metodoId) => {
   }
   return round2(montoBase);
 };
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    if (!(file instanceof Blob)) {
+      reject(new Error("Archivo inválido."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+
+const extractBase64FromDataUrl = (value = "") => {
+  const raw = String(value || "");
+  const commaIndex = raw.indexOf(",");
+  return commaIndex >= 0 ? raw.slice(commaIndex + 1) : raw;
+};
+
+const clearSelectedComprobante = () => {
+  selectedComprobantePayload = null;
+  if (filePreview) filePreview.innerHTML = "";
+  if (inputFiles) inputFiles.value = "";
+};
+
+const setSelectedComprobante = async (file) => {
+  if (!isImageFile(file)) {
+    clearSelectedComprobante();
+    return false;
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const content = extractBase64FromDataUrl(dataUrl);
+  if (!content) {
+    throw new Error("No se pudo procesar la imagen seleccionada.");
+  }
+
+  selectedComprobantePayload = {
+    name: String(file.name || "comprobante"),
+    type: String(file.type || ""),
+    content,
+  };
+
+  if (filePreview) {
+    filePreview.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = String(file.name || "comprobante");
+    filePreview.appendChild(img);
+  }
+  dropzone?.classList.remove("input-error");
+  if (inputFiles) inputFiles.value = "";
+  return true;
+};
+
 let isMetodoMenuAnimating = false;
 
 const getCaracasNow = () => {
@@ -687,27 +743,16 @@ btnAddImage?.addEventListener("click", () => {
 });
 
 inputFiles?.addEventListener("change", () => {
-  if (!filePreview) return;
   const files = Array.from(inputFiles.files || []).filter((f) => isImageFile(f));
   if (!files.length) {
-    filePreview.innerHTML = "";
-    inputFiles.value = "";
+    clearSelectedComprobante();
     return;
   }
-  const file = files[0];
-  const reader = new FileReader();
-  reader.onload = () => {
-    filePreview.innerHTML = "";
-    const img = document.createElement("img");
-    img.src = String(reader.result || "");
-    img.alt = String(file.name || "comprobante");
-    filePreview.appendChild(img);
-  };
-  reader.readAsDataURL(file);
-  // keep only one file
-  const dt = new DataTransfer();
-  dt.items.add(file);
-  inputFiles.files = dt.files;
+  setSelectedComprobante(files[0]).catch((err) => {
+    console.error("checkout comprobante read error", err);
+    clearSelectedComprobante();
+    alert("No se pudo leer la imagen seleccionada. Intenta con otra imagen.");
+  });
 });
 
 // Drag and drop visual feedback
@@ -734,20 +779,11 @@ dropzone?.addEventListener("drop", (e) => {
     dropzone.classList.remove("drag-over");
     return;
   }
-  const file = files[0];
-  const dt = new DataTransfer();
-  dt.items.add(file);
-  inputFiles.files = dt.files;
-  filePreview.innerHTML = "";
-  const reader = new FileReader();
-  reader.onload = () => {
-    filePreview.innerHTML = "";
-    const img = document.createElement("img");
-    img.src = String(reader.result || "");
-    img.alt = String(file.name || "comprobante");
-    filePreview.appendChild(img);
-  };
-  reader.readAsDataURL(file);
+  setSelectedComprobante(files[0]).catch((err) => {
+    console.error("checkout comprobante drop read error", err);
+    clearSelectedComprobante();
+    alert("No se pudo leer la imagen soltada. Intenta con otra imagen.");
+  });
   dropzone.classList.remove("drag-over");
 });
 
@@ -1109,9 +1145,8 @@ window.addEventListener("beforeunload", () => {
 });
 
 const uploadFiles = async () => {
-  const files = Array.from(inputFiles.files || []);
-  if (!files.length) return [];
-  const resp = await uploadComprobantes(files);
+  if (!selectedComprobantePayload) return [];
+  const resp = await uploadComprobantes([selectedComprobantePayload]);
   if (resp?.error) throw new Error(resp.error);
   return resp?.urls || [];
 };
@@ -1298,7 +1333,7 @@ btnSendPayment?.addEventListener("click", async () => {
         return;
       }
     }
-    if (requiereComprobante && !inputFiles?.files?.length) {
+    if (requiereComprobante && !selectedComprobantePayload) {
       alert("Adjunta comprobantes de pago.");
       dropzone?.classList.add("input-error");
       return;
@@ -1308,7 +1343,7 @@ btnSendPayment?.addEventListener("click", async () => {
       return;
     }
 
-    const comprobantes = inputFiles?.files?.length ? await uploadFiles() : [];
+    const comprobantes = selectedComprobantePayload ? await uploadFiles() : [];
     const { fecha, hora } = getCaracasNow();
     if (isSaldoCheckout) {
       const pendienteVerificacion = isMetodoVerificacionAutomatica(metodo);

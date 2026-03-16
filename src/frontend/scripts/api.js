@@ -261,6 +261,59 @@ const bufferToBase64 = (buffer) => {
   return btoa(binary);
 };
 
+const readBlobAsDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    if (!(blob instanceof Blob)) {
+      reject(new Error("Archivo inválido para lectura."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(blob);
+  });
+
+const extractBase64Content = (value = "") => {
+  const raw = String(value || "");
+  const commaIndex = raw.indexOf(",");
+  return commaIndex >= 0 ? raw.slice(commaIndex + 1) : raw;
+};
+
+const buildUploadPayloadFile = async (file = {}, { normalizeType = false } = {}) => {
+  const name = String(file?.name || "file").trim() || "file";
+  const baseType = String(file?.type || "").trim();
+  const type = normalizeType ? normalizeImageUploadType(baseType, name) : baseType;
+  const inlineContent = String(file?.content || "").trim();
+  if (inlineContent) {
+    return { name, type, content: inlineContent };
+  }
+
+  let lastError = null;
+  if (typeof file?.arrayBuffer === "function") {
+    try {
+      return {
+        name,
+        type,
+        content: bufferToBase64(await file.arrayBuffer()),
+      };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (file instanceof Blob) {
+    try {
+      const dataUrl = await readBlobAsDataUrl(file);
+      const content = extractBase64Content(dataUrl);
+      if (content) return { name, type, content };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error("No se pudo leer el archivo para subir.");
+};
+
 const IMAGE_MIME_BY_EXT = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -852,13 +905,7 @@ export async function uploadComprobantes(files = []) {
   try {
     await ensureServerSession();
     const id_usuario = requireSession();
-    const payloadFiles = await Promise.all(
-      files.map(async (file) => ({
-        name: file.name,
-        type: file.type,
-        content: bufferToBase64(await file.arrayBuffer()),
-      }))
-    );
+    const payloadFiles = await Promise.all(files.map((file) => buildUploadPayloadFile(file)));
 
     const res = await fetchWithRetry(
       `${API_BASE}/api/checkout/upload`,
@@ -898,11 +945,7 @@ export async function uploadPlatformLogos(files = [], options = {}) {
     const folder = String(options?.folder || "").trim();
     const overwriteByName = !!options?.overwriteByName;
     const payloadFiles = await Promise.all(
-      files.map(async (file) => ({
-        name: file.name,
-        type: normalizeImageUploadType(file.type, file.name),
-        content: bufferToBase64(await file.arrayBuffer()),
-      }))
+      files.map((file) => buildUploadPayloadFile(file, { normalizeType: true }))
     );
 
     const res = await fetch(`${API_BASE}/api/logos/upload`, {
