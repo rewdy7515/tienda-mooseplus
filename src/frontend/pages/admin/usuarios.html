@@ -136,7 +136,9 @@
       <h2>Usuarios</h2>
       <div class="usuarios-wrapper">
         <p id="usuarios-status" class="status">Cargando usuarios...</p>
-        <p id="usuarios-registro-stat" class="status"></p>
+        <p id="usuarios-clientes-stat" class="status"></p>
+        <p id="usuarios-vendedores-stat" class="status"></p>
+        <p id="usuarios-auth-verified-stat" class="status"></p>
         <p id="usuarios-phone-stat" class="status"></p>
         <div class="usuarios-tools">
           <input
@@ -206,6 +208,7 @@
         clearServerSession,
         createUsuarioSignupLink,
         ensureServerSession,
+        fetchAuthVerifiedUsersStats,
         loadCurrentUser,
         supabase,
         triggerWhatsappReminderForUser,
@@ -219,7 +222,9 @@
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const statusEl = document.querySelector("#usuarios-status");
-      const registroStatEl = document.querySelector("#usuarios-registro-stat");
+      const clientesStatEl = document.querySelector("#usuarios-clientes-stat");
+      const vendedoresStatEl = document.querySelector("#usuarios-vendedores-stat");
+      const authVerifiedStatEl = document.querySelector("#usuarios-auth-verified-stat");
       const tbodyEl = document.querySelector("#usuarios-body");
       const phoneStatEl = document.querySelector("#usuarios-phone-stat");
       const searchInputEl = document.querySelector("#usuarios-search");
@@ -241,6 +246,26 @@
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
+      };
+
+      const renderAuthVerifiedStat = (stats) => {
+        if (!authVerifiedStatEl) return;
+        if (stats?.error) {
+          authVerifiedStatEl.textContent = "Usuarios verificados en Auth: no disponible.";
+          return;
+        }
+        const totalUsers = Number(stats?.total_users);
+        const verifiedUsers = Number(stats?.verified_users);
+        if (!Number.isFinite(totalUsers) || totalUsers < 0) {
+          authVerifiedStatEl.textContent = "";
+          return;
+        }
+        const safeVerifiedUsers =
+          Number.isFinite(verifiedUsers) && verifiedUsers >= 0 ? verifiedUsers : 0;
+        const pct = totalUsers
+          ? Math.round((safeVerifiedUsers / totalUsers) * 1000) / 10
+          : 0;
+        authVerifiedStatEl.textContent = `Usuarios verificados en Auth: ${safeVerifiedUsers} de ${totalUsers} (${pct}%)`;
       };
 
       const formatSaldo = (value) => {
@@ -321,7 +346,18 @@
 
       const buildSignupInviteMessage = (linkValue) => {
         const link = String(linkValue || "").trim();
-        return ["Regístrate en nuestra Pagina Web", link].join("\n");
+        return [
+          "*Regístrate en nuestra Pagina Web*",
+          link,
+          "",
+          "*Al registrarte podrás:*",
+          "",
+          "   📦 Ver todos tus servicios activos.",
+          "   🛍️ Comprar y renovar a *cualquier hora* con *verificación de pagos automatizado*.",
+          "   🚨 *Reportar* y recibir *soluciones inmediatas* de ciertos reportes.",
+          "",
+          "_Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartirlo._",
+        ].join("\n");
       };
 
       const agregarSaldo = async () => {
@@ -524,25 +560,37 @@
             return;
           }
 
-          const { data, error } = await supabase
-            .from("usuarios")
-            .select("id_usuario, nombre, apellido, telefono, correo, saldo, acceso_cliente, fecha_registro")
-            .order("nombre", { ascending: true })
-            .order("apellido", { ascending: true });
-          if (error) throw error;
-          usuariosRows = data || [];
+          const [{ data: usuariosData, error: usuariosErr }, authVerifiedStats] = await Promise.all([
+              supabase
+                .from("usuarios")
+                .select(
+                  "id_usuario, nombre, apellido, telefono, correo, saldo, acceso_cliente, fecha_registro",
+                )
+                .order("nombre", { ascending: true })
+                .order("apellido", { ascending: true }),
+              fetchAuthVerifiedUsersStats(),
+            ]);
+          if (usuariosErr) throw usuariosErr;
+          renderAuthVerifiedStat(authVerifiedStats);
+
+          usuariosRows = usuariosData || [];
           if (!usuariosRows.length) {
             setStatus("No hay usuarios registrados.");
             if (tbodyEl) tbodyEl.innerHTML = "";
-            if (registroStatEl) registroStatEl.textContent = "";
+            if (clientesStatEl) clientesStatEl.textContent = "";
+            if (vendedoresStatEl) vendedoresStatEl.textContent = "";
             if (phoneStatEl) phoneStatEl.textContent = "";
             if (paginationEl) paginationEl.classList.add("hidden");
             return;
           }
-          const registradosCount = usuariosRows.filter((u) => !!u?.fecha_registro).length;
-          const registradosPct = Math.round((registradosCount / usuariosRows.length) * 1000) / 10;
-          if (registroStatEl) {
-            registroStatEl.textContent = `Usuarios registrados: ${registradosCount} de ${usuariosRows.length} (${registradosPct}%)`;
+
+          const clientesRows = usuariosRows.filter((u) => isTrue(u?.acceso_cliente));
+          const vendedoresRows = usuariosRows.filter((u) => !isTrue(u?.acceso_cliente));
+          if (clientesStatEl) {
+            clientesStatEl.textContent = `Cantidad de clientes: ${clientesRows.length}`;
+          }
+          if (vendedoresStatEl) {
+            vendedoresStatEl.textContent = `Cantidad de vendedores: ${vendedoresRows.length}`;
           }
           const invalidPhones = usuariosRows.filter((u) => {
             const raw = String(u?.telefono ?? "").trim();

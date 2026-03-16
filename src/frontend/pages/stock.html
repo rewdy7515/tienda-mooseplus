@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock</title>
+    <link rel="stylesheet" href="../styles/styles.css" />
+  </head>
+  <body>
+    <main class="categorias-dinamicas">
+      <p class="status" id="stock-redirect-status">Validando acceso...</p>
+    </main>
+
+    <script type="module">
+      import { requireSession } from "../scripts/session.js";
+      import { loadCurrentUser } from "../scripts/api.js";
+
+      requireSession();
+
+      const statusEl = document.querySelector("#stock-redirect-status");
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const setStatus = (message = "") => {
+        if (statusEl) statusEl.textContent = message;
+      };
+
+      try {
+        const user = await loadCurrentUser();
+        if (!isTrue(user?.permiso_superadmin)) {
+          window.location.replace("./index.html");
+        } else {
+          setStatus("Redirigiendo...");
+          window.location.replace("./admin/stock.html");
+        }
+      } catch (err) {
+        console.error("stock redirect error", err);
+        window.location.replace("./index.html");
+      }
+    </script>
+  </body>
+</html>

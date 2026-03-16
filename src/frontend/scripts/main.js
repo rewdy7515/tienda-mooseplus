@@ -116,6 +116,16 @@ const recordatoriosPendientesBtn = document.querySelector("#recordatorios-pendie
 const recordatoriosSinTelefonoWrap = document.querySelector("#recordatorios-sin-telefono-wrap");
 const recordatoriosSinTelefonoList = document.querySelector("#recordatorios-sin-telefono-list");
 const recordatoriosSinTelefonoEmpty = document.querySelector("#recordatorios-sin-telefono-empty");
+const normalizeGiftCardAmountKey = (value) => {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(",", ".");
+  if (!raw) return "";
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+  return amount.toFixed(2);
+};
 
 recordatoriosPendientesBtn?.addEventListener("click", () => {
   window.location.href = "admin/recordatorios.html";
@@ -894,6 +904,7 @@ const isIndexLikePath = (pathname = "") => {
   const normalized = normalizePathnameForCompare(pathname).toLowerCase();
   return (
     normalized === "/" ||
+    normalized === "/src/frontend/pages" ||
     normalized.endsWith("/index.html") ||
     normalized.endsWith("/src/frontend/pages/index.html")
   );
@@ -1700,7 +1711,7 @@ const loadStockSummary = async (canLogStock = false) => {
       .eq("inactiva", false),
     supabase
       .from("tarjetas_de_regalo")
-      .select("id_plataforma")
+      .select("id_plataforma, monto")
       .eq("para_venta", true)
       .eq("usado", false)
       .not("id_plataforma", "is", null),
@@ -1801,12 +1812,21 @@ const loadStockSummary = async (canLogStock = false) => {
     const platId = Number(row?.id_plataforma);
     if (!Number.isFinite(platId) || platId <= 0) return acc;
     acc[platId] = (acc[platId] || 0) + 1;
+    const amountKey = normalizeGiftCardAmountKey(row?.monto);
+    if (amountKey) {
+      const stockKey = `${platId}_gift_${amountKey}`;
+      acc[stockKey] = (acc[stockKey] || 0) + 1;
+    }
     return acc;
   }, {});
   (giftPlatforms || []).forEach((plat) => {
     const platId = Number(plat?.id_plataforma);
     if (!Number.isFinite(platId) || platId <= 0) return;
     stockObj[platId] = giftStockByPlat[platId] || 0;
+  });
+  Object.entries(giftStockByPlat).forEach(([key, value]) => {
+    if (!String(key).includes("_gift_")) return;
+    stockObj[key] = value;
   });
 
   stockObj["1_plan1"] = netflixPlan1;

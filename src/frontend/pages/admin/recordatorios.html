@@ -64,6 +64,77 @@
         white-space: pre-wrap;
         font-family: "Inter", system-ui, -apple-system, sans-serif;
       }
+      .rec-card.is-failed,
+      .rec-card.is-skipped,
+      .rec-card.is-pending {
+        border-color: #fecaca;
+        background: #fff7f7;
+      }
+      .rec-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 6px;
+      }
+      .rec-card-head h4 {
+        margin: 0;
+      }
+      .rec-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .rec-badge.is-sent {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .rec-badge.is-failed {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .rec-badge.is-skipped {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .rec-badge.is-pending {
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
+      .rec-log {
+        margin-top: 18px;
+        padding: 14px;
+        border: 1px solid #fecaca;
+        border-radius: 12px;
+        background: #fff7f7;
+      }
+      .rec-log[hidden] {
+        display: none;
+      }
+      .rec-log h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+      .rec-log-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .rec-log-item {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #fff;
+        border: 1px solid #fee2e2;
+      }
+      .rec-log-item p {
+        margin: 4px 0;
+        font-size: 13px;
+      }
       .status {
         margin-top: 8px;
       }
@@ -80,15 +151,21 @@
           <button type="button" id="btn-generar-recordatorios">
             Generar recordatorios
           </button>
+          <button type="button" id="btn-enviar-mensajes" hidden>
+            Enviar mensajes
+          </button>
         </div>
         <div id="rec-status" class="status"></div>
         <div id="rec-results" class="rec-results"></div>
+        <section id="rec-log" class="rec-log" hidden>
+          <h3>Servicios no enviados</h3>
+          <div id="rec-log-list" class="rec-log-list"></div>
+        </section>
       </div>
     </main>
     <script type="module">
+      import { API_BASE } from "../../scripts/api.js";
       import { requireSession, attachLogoHome } from "../../scripts/session.js";
-      import { createUsuarioSignupLink, supabase } from "../../scripts/api.js";
-      import { formatDDMMYYYY } from "../../scripts/date-format.js";
 
       requireSession();
       attachLogoHome();
@@ -96,29 +173,19 @@
       const btnGenerarRecordatorios = document.querySelector(
         "#btn-generar-recordatorios",
       );
+      const btnEnviarMensajes = document.querySelector("#btn-enviar-mensajes");
       const statusEl = document.querySelector("#rec-status");
       const resultsEl = document.querySelector("#rec-results");
+      const logEl = document.querySelector("#rec-log");
+      const logListEl = document.querySelector("#rec-log-list");
+      let pendingPreviewEndpointAvailable = true;
+      let generatedItems = [];
+      let generatedSendableCount = 0;
 
-      const setStatus = (msg) => {
-        if (statusEl) statusEl.textContent = msg || "";
-      };
-      const SEND_DELAY_MIN_MS = 8000;
-      const SEND_DELAY_MAX_MS = 15000;
-
-      const getCaracasDateStr = (offsetDays = 0) => {
-        const now = new Date();
-        const parts = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/Caracas",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).formatToParts(now);
-        const year = Number(parts.find((p) => p.type === "year")?.value || 0);
-        const month = Number(parts.find((p) => p.type === "month")?.value || 0);
-        const day = Number(parts.find((p) => p.type === "day")?.value || 0);
-        const base = new Date(Date.UTC(year, month - 1, day));
-        base.setUTCDate(base.getUTCDate() + offsetDays);
-        return base.toISOString().slice(0, 10);
+      const setStatus = (msg, isError = false) => {
+        if (!statusEl) return;
+        statusEl.textContent = msg || "";
+        statusEl.style.color = isError ? "#b91c1c" : "";
       };
 
       const copyToClipboard = async (text) => {
@@ -134,20 +201,13 @@
         }
       };
 
-      const sleep = (ms) =>
-        new Promise((resolve) => {
-          setTimeout(resolve, ms);
-        });
-
-      const randomSendDelayMs = () =>
-        SEND_DELAY_MIN_MS +
-        Math.floor(Math.random() * (SEND_DELAY_MAX_MS - SEND_DELAY_MIN_MS + 1));
-
-      const sendWhatsappRecordatorio = async ({ phone, message, ventaIds = [] }) => {
-        const resp = await fetch("/api/whatsapp/send-recordatorio", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone, message, ventaIds }),
+      const fetchJson = async (url, options = {}) => {
+        const targetUrl = /^https?:\/\//i.test(String(url || ""))
+          ? String(url)
+          : `${API_BASE}${String(url || "").startsWith("/") ? "" : "/"}${String(url || "")}`;
+        const resp = await fetch(targetUrl, {
+          credentials: "include",
+          ...options,
         });
         let body = null;
         try {
@@ -156,86 +216,134 @@
           body = null;
         }
         if (!resp.ok) {
-          throw new Error(body?.error || `HTTP ${resp.status}`);
+          const err = new Error(body?.error || `HTTP ${resp.status}`);
+          err.status = resp.status;
+          err.body = body;
+          throw err;
         }
-        return body;
+        return body || {};
       };
 
-      const ensureWhatsappReady = async () => {
-        const resp = await fetch("/api/whatsapp/status");
-        let body = null;
-        try {
-          body = await resp.json();
-        } catch (_) {
-          body = null;
-        }
-        if (!resp.ok || !body?.ready) {
-          throw new Error(body?.error || "WhatsApp no está listo");
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const uniqPositiveIds = (values = []) =>
+        Array.from(
+          new Set(
+            (values || [])
+              .map((value) => Number(value))
+              .filter((value) => Number.isFinite(value) && value > 0),
+          ),
+        );
+
+      const isSendableItem = (item = {}) => {
+        const phone = String(item?.phone || "").trim();
+        const rawPhone = String(item?.telefonoRaw || "").trim();
+        return Boolean(phone && rawPhone) && item?.status !== "sent";
+      };
+
+      const getPendingTargetUserIds = (items = []) =>
+        uniqPositiveIds(
+          (items || [])
+            .filter((item) => isSendableItem(item))
+            .map((item) => item?.idUsuario),
+        );
+
+      const syncGeneratedState = (items = [], sendableCount = null) => {
+        generatedItems = Array.isArray(items) ? items : [];
+        const calculated = generatedItems.filter((item) => isSendableItem(item)).length;
+        generatedSendableCount = Number.isFinite(Number(sendableCount))
+          ? Number(sendableCount)
+          : calculated;
+      };
+
+      const updateSendButtonState = ({ sending = false } = {}) => {
+        if (!btnEnviarMensajes) return;
+        const visible = generatedItems.some((item) => item?.status !== "sent");
+        btnEnviarMensajes.hidden = !visible;
+        btnEnviarMensajes.disabled = sending || generatedSendableCount <= 0;
+      };
+
+      const getStatusMeta = (item = {}) => {
+        switch (item.status) {
+          case "sent":
+            return { label: "Enviado", badgeClass: "is-sent", cardClass: "" };
+          case "failed":
+            return { label: "Fallido", badgeClass: "is-failed", cardClass: "is-failed" };
+          case "skipped_no_phone":
+            return {
+              label: "Sin teléfono",
+              badgeClass: "is-skipped",
+              cardClass: "is-skipped",
+            };
+          case "skipped_invalid_phone":
+            return {
+              label: "Teléfono inválido",
+              badgeClass: "is-skipped",
+              cardClass: "is-skipped",
+            };
+          case "pending":
+            return {
+              label: "Pendiente",
+              badgeClass: "is-pending",
+              cardClass: "is-pending",
+            };
+          default:
+            return { label: "Pendiente", badgeClass: "is-pending", cardClass: "is-pending" };
         }
       };
 
-      const sendGeneratedMessages = async (messages = []) => {
-        await ensureWhatsappReady();
-        let sent = 0;
-        let failed = 0;
-        let skippedNoPhone = 0;
-        let updatedVentas = 0;
-        const sendableCount = (messages || []).filter((msg) =>
-          Boolean(String(msg?.telefono || "").trim()),
-        ).length;
-        let sendableProcessed = 0;
-
-        for (const msg of messages || []) {
-          const phone = String(msg.telefono || "").trim();
-          if (!phone) {
-            skippedNoPhone += 1;
-            continue;
-          }
-          try {
-            const resp = await sendWhatsappRecordatorio({
-              phone,
-              message: msg.plain,
-              ventaIds: msg.ventaIds || [],
-            });
-            sent += 1;
-            updatedVentas += Number(resp?.updatedVentas || 0);
-          } catch (err) {
-            failed += 1;
-            console.error("recordatorios send error", {
-              idUsuario: msg.idUsuario,
-              phone,
-              error: err,
-            });
-          }
-
-          sendableProcessed += 1;
-          if (sendableProcessed < sendableCount) {
-            const delayMs = randomSendDelayMs();
-            await sleep(delayMs);
-          }
+      const getItemReason = (item = {}) => {
+        if (item.error) return String(item.error);
+        if (item.status === "skipped_no_phone") return "Cliente sin teléfono registrado";
+        if (item.status === "skipped_invalid_phone") {
+          return `Teléfono inválido: ${item.telefonoRaw || "sin valor"}`;
         }
-
-        return { total: messages.length, sent, failed, skippedNoPhone, updatedVentas };
+        if (item.status === "pending") return "Pendiente de envío manual";
+        return "No se pudo enviar el recordatorio";
       };
 
-      const renderCards = (items) => {
+      const renderCards = (items = []) => {
         if (!resultsEl) return;
         if (!items.length) {
           resultsEl.innerHTML = "";
           return;
         }
         resultsEl.innerHTML = items
-          .map(
-            (msg) => `
+          .map((item) => {
+            const statusMeta = getStatusMeta(item);
+            const servicios = Array.isArray(item?.servicios)
+              ? item.servicios.map((servicio) => escapeHtml(servicio)).join(", ")
+              : "";
+            const ventas = Array.isArray(item?.ventaIds)
+              ? item.ventaIds.map((ventaId) => `#${ventaId}`).join(", ")
+              : "";
+            const motivo = item.error
+              ? `<p><strong>Motivo:</strong> ${escapeHtml(getItemReason(item))}</p>`
+              : "";
+            return `
               <button
-                class="rec-card"
+                class="rec-card ${statusMeta.cardClass}"
                 type="button"
-                data-copy="${encodeURIComponent(msg.plain)}"
+                data-copy="${encodeURIComponent(item.plain || "")}"
               >
-                ${msg.html}
+                <div class="rec-card-head">
+                  <h4>${escapeHtml(item.cliente || "Cliente")}</h4>
+                  <span class="rec-badge ${statusMeta.badgeClass}">${statusMeta.label}</span>
+                </div>
+                <p><strong>Teléfono:</strong> ${escapeHtml(item.telefonoRaw || "-")}</p>
+                <p><strong>Servicios:</strong> ${servicios || "-"}</p>
+                <p><strong>Ventas:</strong> ${escapeHtml(ventas || "-")}</p>
+                ${motivo}
+                <pre>${escapeHtml(item.plain || "")}</pre>
               </button>
             `
-          )
+          })
           .join("");
         resultsEl.querySelectorAll(".rec-card").forEach((btn) => {
           btn.addEventListener("click", async () => {
@@ -252,234 +360,160 @@
         });
       };
 
-      const buildMessagesFromGrouped = (grouped) =>
-        Object.values(grouped || {}).map((g) => {
-          const bloques = Object.values(g.plataformas || {})
-            .map((plat) => {
-              const detalles = (plat.detalles || []).join("\n\n");
-              return `*${plat.nombre || "-"}*\n${detalles}`;
-            })
-            .join("\n\n");
-          const saludo = `*¡Hola ${g.cliente}! ❤️🫎*`;
-          const signupUrl = String(g.signupUrl || "").trim();
-          const renewUrl = signupUrl || "https://mooseplus.com";
-          const intro = `Renueva tus membresías por nuestra nueva pagina web:\n${renewUrl}`;
-          const plain = `${saludo}\n${intro}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-          const html = `<h4>${g.cliente || "Cliente"}</h4><p>Teléfono: ${g.telefono || "-"}</p><pre>${plain}</pre>`;
-          const ventaIds = Array.from(
-            new Set(
-              (g.ventaIds || [])
-                .map((id) => Number(id))
-                .filter((id) => Number.isFinite(id) && id > 0),
-            ),
-          );
+      const renderLog = (items = []) => {
+        if (!logEl || !logListEl) return;
+        const unsentItems = items.filter((item) => item?.status !== "sent");
+        if (!unsentItems.length) {
+          logEl.hidden = true;
+          logListEl.innerHTML = "";
+          return;
+        }
+
+        logListEl.innerHTML = unsentItems
+          .map((item) => {
+            const servicios = Array.isArray(item?.servicios)
+              ? item.servicios.map((servicio) => escapeHtml(servicio)).join(", ")
+              : "-";
+            const ventas = Array.isArray(item?.ventaIds)
+              ? item.ventaIds.map((ventaId) => `#${ventaId}`).join(", ")
+              : "-";
+            return `
+              <article class="rec-log-item">
+                <p><strong>Cliente:</strong> ${escapeHtml(item.cliente || "Cliente")}</p>
+                <p><strong>Servicios:</strong> ${servicios || "-"}</p>
+                <p><strong>Ventas:</strong> ${escapeHtml(ventas || "-")}</p>
+                <p><strong>Teléfono:</strong> ${escapeHtml(item.telefonoRaw || "-")}</p>
+                <p><strong>Motivo:</strong> ${escapeHtml(getItemReason(item))}</p>
+              </article>
+            `;
+          })
+          .join("");
+        logEl.hidden = false;
+      };
+
+      const applyGlobalPendingReason = (items = [], reason = "") =>
+        (items || []).map((item) => {
+          if (item?.status === "sent") return item;
+          if (
+            item?.status === "skipped_no_phone" ||
+            item?.status === "skipped_invalid_phone"
+          ) {
+            return {
+              ...item,
+              error: item?.error || getItemReason(item),
+            };
+          }
           return {
-            idUsuario: g.idUsuario || null,
-            cliente: g.cliente || "Cliente",
-            telefono: g.telefono || "",
-            html,
-            plain,
-            ventaIds,
+            ...item,
+            status: "pending",
+            error: String(reason || item?.error || "Pendiente de envío manual"),
           };
         });
 
-      const fetchMessages = async () => {
-        const fechaManana = getCaracasDateStr(1);
-        const { data: ventas, error: ventErr } = await supabase
-          .from("ventas")
-          .select(
-            "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado, reportado",
-          )
-          .lte("fecha_corte", fechaManana)
-          .or("reportado.eq.false,reportado.is.null");
-        if (ventErr) throw ventErr;
-
-          const isUnsentReminder = (value) =>
-            value === false || value === null || value === undefined;
-          const isOneDayBeforeCorte = (fechaCorte) =>
-            String(fechaCorte || "").slice(0, 10) === fechaManana;
-
-          const ventasFiltradas = (ventas || []).filter((v) => {
-            const fechaCorte = String(v?.fecha_corte || "").trim();
-            if (!fechaCorte) return false;
-            const pendiente = isUnsentReminder(v?.recordatorio_enviado);
-            const unDiaAntes = isOneDayBeforeCorte(fechaCorte);
-            // Regla: incluir pendientes y, además, siempre incluir las de mañana.
-            return pendiente || unDiaAntes;
-          });
-
-          const cuentasIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_cuenta).filter(Boolean)));
-          const precioIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_precio).filter(Boolean)));
-          const userIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_usuario).filter(Boolean)));
-          const perfilIds = Array.from(new Set((ventasFiltradas || []).map((v) => v.id_perfil).filter(Boolean)));
-
-          const [
-            { data: cuentas, error: cErr },
-            { data: precios, error: pErr },
-            { data: users, error: uErr },
-            { data: perfiles, error: perfErr },
-          ] = await Promise.all([
-            cuentasIds.length
-              ? supabase.from("cuentas").select("id_cuenta, correo, id_plataforma").in("id_cuenta", cuentasIds)
-              : Promise.resolve({ data: [], error: null }),
-            precioIds.length
-              ? supabase.from("precios").select("id_precio, id_plataforma").in("id_precio", precioIds)
-              : Promise.resolve({ data: [], error: null }),
-            userIds.length
-              ? supabase
-                  .from("usuarios")
-                  .select("id_usuario, nombre, apellido, telefono, fecha_registro")
-                  .in("id_usuario", userIds)
-              : Promise.resolve({ data: [], error: null }),
-            perfilIds.length
-              ? supabase.from("perfiles").select("id_perfil, n_perfil, perfil_hogar").in("id_perfil", perfilIds)
-              : Promise.resolve({ data: [], error: null }),
-          ]);
-          if (cErr) throw cErr;
-          if (pErr) throw pErr;
-          if (uErr) throw uErr;
-          if (perfErr) throw perfErr;
-
-          const platIds = Array.from(
-            new Set([
-              ...(cuentas || []).map((c) => c.id_plataforma).filter(Boolean),
-              ...(precios || []).map((p) => p.id_plataforma).filter(Boolean),
-            ])
-          );
-          const { data: plats, error: platErr } = platIds.length
-            ? await supabase
-                .from("plataformas")
-                .select("id_plataforma, nombre, correo_cliente")
-                .in("id_plataforma", platIds)
-            : { data: [], error: null };
-          if (platErr) throw platErr;
-
-          const mapCuenta = (cuentas || []).reduce((acc, c) => {
-            acc[c.id_cuenta] = c;
-            return acc;
-          }, {});
-          const mapPrecio = (precios || []).reduce((acc, p) => {
-            acc[p.id_precio] = p;
-            return acc;
-          }, {});
-          const mapPlat = (plats || []).reduce((acc, p) => {
-            acc[p.id_plataforma] = p;
-            return acc;
-          }, {});
-          const mapUser = (users || []).reduce((acc, u) => {
-            acc[u.id_usuario] = {
-              cliente:
-                [u.nombre, u.apellido].filter(Boolean).join(" ").trim() ||
-                `Usuario ${u.id_usuario}`,
-              telefono: String(u.telefono || "").trim(),
-              registrado: Boolean(u?.fecha_registro),
-            };
-            return acc;
-          }, {});
-          const unregisteredUserIds = Object.entries(mapUser)
-            .filter(([, info]) => info?.registrado !== true)
-            .map(([id]) => Number(id))
-            .filter((id) => Number.isFinite(id) && id > 0);
-          const signupLinkByUserId = {};
-          await Promise.all(
-            unregisteredUserIds.map(async (idUsuario) => {
-              try {
-                const result = await createUsuarioSignupLink(idUsuario);
-                const url = String(result?.url || "").trim();
-                if (url) signupLinkByUserId[idUsuario] = url;
-              } catch (err) {
-                console.error("recordatorios signup-link error", { idUsuario, err });
-              }
-            })
-          );
-          const mapPerf = (perfiles || []).reduce((acc, p) => {
-            acc[p.id_perfil] = { n: p.n_perfil, hogar: p.perfil_hogar === true };
-            return acc;
-          }, {});
-
-          // Construir mensajes agrupados por usuario y por plataforma
-          const grouped = (ventasFiltradas || []).reduce((acc, v) => {
-            const cuenta = mapCuenta[v.id_cuenta] || {};
-            const precio = mapPrecio[v.id_precio] || {};
-            const platId = cuenta.id_plataforma || precio.id_plataforma || null;
-            const platInfo = platId ? mapPlat[platId] || {} : {};
-            const platNombre = platId ? platInfo.nombre || `Plataforma ${platId}` : "-";
-            const platNombreUpper = String(platNombre || "-").toLocaleUpperCase("es-VE");
-            const userInfo = mapUser[v.id_usuario] || {};
-            const cliente = userInfo.cliente || "Cliente";
-            const telefono = userInfo.telefono || "";
-            const useCorreoCliente =
-              platInfo.correo_cliente === true ||
-              platInfo.correo_cliente === "true" ||
-              platInfo.correo_cliente === "1";
-            const correo = useCorreoCliente ? v.correo_miembro || "-" : cuenta.correo || "-";
-            const perfInfo = v.id_perfil ? mapPerf[v.id_perfil] : null;
-            const showPerfil = Number(platId) !== 9;
-            const perfilTxt = showPerfil && perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
-            const isNetflix = platId === 1;
-            const isPlan2Precio = v.id_precio === 4 || v.id_precio === 5;
-            const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfInfo?.hogar);
-            const hogarTxt = isNetflixPlan2 ? " (HOGAR ACTUALIZADO)" : "";
-            const key = v.id_usuario || "sin_usuario";
-            if (!acc[key]) {
-              const idUsuario = Number(v.id_usuario) || null;
-              acc[key] = {
-                idUsuario,
-                cliente,
-                telefono,
-                signupUrl: idUsuario ? String(signupLinkByUserId[idUsuario] || "").trim() : "",
-                plataformas: {},
-                ventaIds: [],
-              };
-            }
-            const platDisplayName = `${platNombreUpper}${hogarTxt}`;
-            const platformKey = `${String(platId || platNombre || "-")}::${hogarTxt ? "hogar" : "normal"}`;
-            if (!acc[key].plataformas[platformKey]) {
-              acc[key].plataformas[platformKey] = {
-                nombre: platDisplayName,
-                detalles: [],
-              };
-            }
-            if (v.id_venta) acc[key].ventaIds.push(v.id_venta);
-            const fechaPago = v.fecha_corte ? formatDDMMYYYY(v.fecha_corte) : "-";
-            acc[key].plataformas[platformKey].detalles.push(
-              `\`ID VENTA: #${v.id_venta}\`
-Correo: ${correo}
-${perfilTxt ? `${perfilTxt}\n` : ""}Fecha de pago: ${fechaPago}`
-            );
-          return acc;
-        }, {});
-
-        const messages = buildMessagesFromGrouped(grouped);
-        return { messages, grouped };
+      const renderGeneratedState = (items = [], sendableCount = null) => {
+        syncGeneratedState(items, sendableCount);
+        renderCards(generatedItems);
+        renderLog(generatedItems);
+        updateSendButtonState();
       };
 
       const loadRecordatorios = async () => {
-        setStatus("Generando recordatorios...");
+        setStatus("Generando recordatorios faltantes...");
         resultsEl.innerHTML = "";
+        renderLog([]);
+        syncGeneratedState([], 0);
+        updateSendButtonState();
         if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = true;
+        if (btnEnviarMensajes) btnEnviarMensajes.disabled = true;
         try {
-          const { messages } = await fetchMessages();
-          renderCards(messages);
-          if (!messages.length) {
-            setStatus("Sin resultados.");
-            return;
+          if (pendingPreviewEndpointAvailable) {
+            try {
+              const preview = await fetchJson("/api/whatsapp/recordatorios/pendientes");
+              const pendingItems = Array.isArray(preview?.items) ? preview.items : [];
+              renderGeneratedState(pendingItems, preview?.sendable);
+              if (!pendingItems.length) {
+                setStatus("No hay recordatorios faltantes por enviar.");
+                return;
+              }
+              if (Number(preview?.sendable || 0) > 0) {
+                setStatus(
+                  `Se generaron ${pendingItems.length} recordatorio(s). Presiona "Enviar mensajes" para abrir el bot en Hetzner y despachar los pendientes.`,
+                );
+              } else {
+                setStatus(
+                  "Se generaron recordatorios, pero ninguno es enviable por WhatsApp con los datos actuales.",
+                  true,
+                );
+              }
+              return;
+            } catch (previewErr) {
+              if (previewErr?.status === 404) {
+                pendingPreviewEndpointAvailable = false;
+                console.warn(
+                  "recordatorios pendientes preview endpoint not available, fallback to batch send",
+                  previewErr,
+                );
+              } else {
+                throw previewErr;
+              }
+            }
           }
-
-          setStatus(`Enviando ${messages.length} recordatorio(s) por WhatsApp...`);
-          const stats = await sendGeneratedMessages(messages);
-          setStatus(
-            `Proceso completado. Enviados: ${stats.sent}, sin teléfono: ${stats.skippedNoPhone}, fallidos: ${stats.failed}, ventas marcadas: ${stats.updatedVentas}.`,
+          throw new Error(
+            'El backend actual no expone /api/whatsapp/recordatorios/pendientes. Reinicia el servidor antes de generar.',
           );
         } catch (err) {
           console.error("recordatorios generar error", err);
-          setStatus(err?.message || "No se pudieron generar los recordatorios.");
+          setStatus(err?.message || "No se pudieron generar los recordatorios.", true);
         } finally {
           if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = false;
+          updateSendButtonState();
+        }
+      };
+
+      const sendGeneratedMessages = async () => {
+        const targetUserIds = getPendingTargetUserIds(generatedItems);
+        if (!targetUserIds.length) {
+          setStatus("No hay mensajes pendientes enviables.", true);
+          updateSendButtonState();
+          return;
+        }
+
+        if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = true;
+        updateSendButtonState({ sending: true });
+        setStatus("Iniciando bot de WhatsApp en Hetzner para enviar mensajes...");
+
+        try {
+          const result = await fetchJson("/api/whatsapp/recordatorios/enviar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              targetUserIds,
+              startClient: true,
+              shutdownClientAfter: true,
+            }),
+          });
+          const items = Array.isArray(result?.items) ? result.items : [];
+          renderGeneratedState(items);
+          setStatus(
+            `Proceso completado. Enviados: ${result.sent || 0}, sin teléfono: ${result.skippedNoPhone || 0}, teléfonos inválidos: ${result.skippedInvalidPhone || 0}, fallidos: ${result.failed || 0}, ventas marcadas: ${result.updatedVentas || 0}.`,
+            Number(result?.failed || 0) > 0,
+          );
+        } catch (err) {
+          console.error("recordatorios enviar error", err);
+          const bodyItems = Array.isArray(err?.body?.items) ? err.body.items : [];
+          const fallbackItems = bodyItems.length
+            ? bodyItems
+            : applyGlobalPendingReason(generatedItems, err?.message || "No se pudo enviar");
+          renderGeneratedState(fallbackItems);
+          setStatus(err?.message || "No se pudieron enviar los recordatorios.", true);
+        } finally {
+          if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = false;
+          updateSendButtonState();
         }
       };
 
       btnGenerarRecordatorios?.addEventListener("click", loadRecordatorios);
+      btnEnviarMensajes?.addEventListener("click", sendGeneratedMessages);
     </script>
   </body>
 </html>

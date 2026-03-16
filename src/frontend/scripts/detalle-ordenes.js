@@ -184,7 +184,7 @@ const getGiftCardPinDisplay = ({ item = null, platformId = null, giftCardLookups
   return "Pendiente";
 };
 
-const renderInfo = (orden, clienteNombre = "-", metodoPago = null) => {
+const renderInfo = (orden, clienteNombre = "-", metodoPago = null, { isSuperadmin = false } = {}) => {
   if (!infoGridEl) return;
   const fecha = formatDDMMYYYY(orden?.fecha) || orden?.fecha || "-";
   const hora = formatHora12(orden?.hora_orden);
@@ -192,10 +192,10 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null) => {
   const tasaDisplay = getDisplayTasaBs(orden);
   const rows = [
     { label: "N. orden", value: orden?.id_orden ?? "-" },
-    { label: "Cliente", value: clienteNombre || "-" },
+    ...(isSuperadmin ? [{ label: "Cliente", value: clienteNombre || "-" }] : []),
     { label: "Fecha", value: fecha },
     { label: "Hora", value: hora },
-    { label: "Total", value: formatMoney(orden?.total) },
+    { label: "Total", value: formatMoney(orden?.total), breakBefore: true },
     { label: "Monto (Bs)", value: formatBs(orden?.monto_bs) },
     { label: "Método de pago", value: buildMetodoPagoHtml(metodoPago) },
     { label: "Referencia", value: orden?.referencia || "-" },
@@ -205,6 +205,7 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null) => {
     ${rows
       .map(
         (row) => `
+        ${row.breakBefore ? '<div class="orden-info-break" aria-hidden="true"></div>' : ""}
         <div class="label">${row.label}</div>
         <div class="value">${row.value}</div>
       `
@@ -577,7 +578,9 @@ const init = async () => {
     if (clienteNombre === "-" && Number(orden?.id_usuario) === Number(currentUser?.id_usuario)) {
       clienteNombre = formatNombreApellido(currentUser);
     }
-    renderInfo(orden, clienteNombre, metodoPago);
+    renderInfo(orden, clienteNombre, metodoPago, {
+      isSuperadmin: isTrue(currentUser?.permiso_superadmin),
+    });
 
     let ventasOrdenRows = [];
     try {

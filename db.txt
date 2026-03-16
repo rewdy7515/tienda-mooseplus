@@ -112,6 +112,20 @@ CREATE TABLE public.eventos_notificacion_nuevo_servicio (
   actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT eventos_notificacion_nuevo_servicio_pkey PRIMARY KEY (id_evento)
 );
+CREATE TABLE public.eventos_trafico_web (
+  id_evento_trafico bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  fecha_hora timestamp with time zone NOT NULL DEFAULT now(),
+  tipo_evento text NOT NULL,
+  id_sesion uuid NOT NULL,
+  id_usuario bigint,
+  ruta text NOT NULL,
+  url_completa text,
+  referidor text,
+  agente_usuario text,
+  metadatos jsonb,
+  CONSTRAINT eventos_trafico_web_pkey PRIMARY KEY (id_evento_trafico),
+  CONSTRAINT eventos_trafico_web_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
+);
 CREATE TABLE public.frontend_error_logs (
   id_error bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),

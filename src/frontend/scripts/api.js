@@ -54,11 +54,14 @@ const API_BASE = (() => {
 
 let authRecoveryInProgress = false;
 let clientErrorReporterInit = false;
+let traficoWebTrackerInit = false;
 
 const CLIENT_ERROR_MAX_REPORTS_PER_PAGE = 40;
 const CLIENT_ERROR_DEDUP_WINDOW_MS = 15000;
 let clientErrorReportsSent = 0;
 const clientErrorLastSentByKey = new Map();
+const TRAFICO_WEB_SESSION_STORAGE_KEY = "trafico_web_sesion_v1";
+const TRAFICO_WEB_SESSION_IDLE_MS = 30 * 60 * 1000;
 
 const trimText = (value, max = 2000) => {
   const txt = String(value ?? "");
@@ -110,6 +113,129 @@ const postClientError = async (payload = {}) => {
   }
 };
 
+const buildUuidFallback = () =>
+  "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+
+const generateTrafficSessionId = () => {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch (_err) {
+    // noop
+  }
+  return buildUuidFallback();
+};
+
+const readTrafficSessionState = () => {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(TRAFICO_WEB_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch (_err) {
+    return null;
+  }
+};
+
+const writeTrafficSessionState = (state) => {
+  try {
+    if (typeof window === "undefined" || !state || typeof state !== "object") return;
+    window.localStorage.setItem(TRAFICO_WEB_SESSION_STORAGE_KEY, JSON.stringify(state));
+  } catch (_err) {
+    // noop
+  }
+};
+
+const getTrafficNavigationType = () => {
+  try {
+    const nav = performance?.getEntriesByType?.("navigation")?.[0];
+    return trimText(nav?.type || "", 40);
+  } catch (_err) {
+    return "";
+  }
+};
+
+const getOrCreateTrafficSession = () => {
+  const now = Date.now();
+  const current = readTrafficSessionState();
+  const currentId = trimText(current?.id_sesion || "", 120);
+  const lastSeenAt = Number(current?.ultima_actividad || 0);
+  const isExpired = !currentId || !lastSeenAt || now - lastSeenAt > TRAFICO_WEB_SESSION_IDLE_MS;
+  const nextState = {
+    id_sesion: isExpired ? generateTrafficSessionId() : currentId,
+    creada_en: isExpired ? now : Number(current?.creada_en || now),
+    ultima_actividad: now,
+  };
+  writeTrafficSessionState(nextState);
+  return {
+    idSesion: nextState.id_sesion,
+    esNuevaSesion: isExpired,
+  };
+};
+
+const touchTrafficSession = () => {
+  const current = readTrafficSessionState();
+  const idSesion = trimText(current?.id_sesion || "", 120);
+  if (!idSesion) return;
+  writeTrafficSessionState({
+    id_sesion: idSesion,
+    creada_en: Number(current?.creada_en || Date.now()),
+    ultima_actividad: Date.now(),
+  });
+};
+
+const postTrafficWebEvent = async (payload = {}) => {
+  try {
+    await fetch(`${API_BASE}/api/eventos-trafico-web`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      keepalive: true,
+      body: JSON.stringify(payload),
+    });
+  } catch (_err) {
+    // noop: nunca bloquear UX por fallas de analítica
+  }
+};
+
+const reportTrafficWebEvent = (tipoEvento, extraMetadata = null) => {
+  try {
+    if (typeof window === "undefined") return;
+    const { idSesion } = getOrCreateTrafficSession();
+    if (!idSesion) return;
+    const metadataBase = {
+      titulo: trimText(document?.title || "", 200),
+      hash: trimText(window.location.hash || "", 200),
+      busqueda: trimText(window.location.search || "", 500),
+      idioma: trimText(navigator.language || "", 40),
+      ancho_ventana: Number.isFinite(Number(window.innerWidth)) ? Number(window.innerWidth) : null,
+      alto_ventana: Number.isFinite(Number(window.innerHeight)) ? Number(window.innerHeight) : null,
+      tipo_navegacion: getTrafficNavigationType(),
+    };
+    const metadata =
+      extraMetadata && typeof extraMetadata === "object"
+        ? { ...metadataBase, ...extraMetadata }
+        : metadataBase;
+    postTrafficWebEvent({
+      tipo_evento: trimText(tipoEvento || "vista_pagina", 40),
+      id_sesion: trimText(idSesion, 120),
+      ruta: trimText(window.location.pathname || "/", 500),
+      url_completa: trimText(window.location.href || "", 2000),
+      referidor: trimText(document.referrer || "", 2000),
+      agente_usuario: trimText(navigator.userAgent || "", 1000),
+      metadatos: metadata,
+      fecha_hora: new Date().toISOString(),
+    });
+  } catch (_err) {
+    // noop
+  }
+};
+
 const reportClientError = (input = {}) => {
   try {
     if (typeof window === "undefined") return;
@@ -140,6 +266,31 @@ const reportClientError = (input = {}) => {
   } catch (_err) {
     // noop
   }
+};
+
+const initTrafficWebTracker = () => {
+  if (traficoWebTrackerInit || typeof window === "undefined") return;
+  traficoWebTrackerInit = true;
+
+  const { esNuevaSesion } = getOrCreateTrafficSession();
+  if (esNuevaSesion) {
+    reportTrafficWebEvent("inicio_sesion_web");
+  }
+  reportTrafficWebEvent("vista_pagina");
+
+  window.addEventListener(
+    "focus",
+    () => {
+      touchTrafficSession();
+    },
+    { passive: true },
+  );
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      touchTrafficSession();
+    }
+  });
 };
 
 const initClientErrorReporter = () => {
@@ -204,6 +355,7 @@ const initClientErrorReporter = () => {
 };
 
 initClientErrorReporter();
+initTrafficWebTracker();
 
 const isAuthFatalErrorMessage = (msg = "") => {
   const text = String(msg || "").toLowerCase();
@@ -587,6 +739,23 @@ export async function createUsuarioSignupLink(idUsuarioTarget) {
     return data;
   } catch (err) {
     console.error("createUsuarioSignupLink error", err);
+    return { error: err.message };
+  }
+}
+
+export async function fetchAuthVerifiedUsersStats() {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/stats/verified-users`, {
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo cargar la estadística de Auth." };
+    }
+    return data;
+  } catch (err) {
+    console.error("fetchAuthVerifiedUsersStats error", err);
     return { error: err.message };
   }
 }

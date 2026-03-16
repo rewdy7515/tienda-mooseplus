@@ -1388,7 +1388,11 @@
 
       const buildHomeBannerRoute = (suffix = "") => {
         const cleanSuffix = normalizeRouteSuffix(suffix);
-        return cleanSuffix ? `${HOME_BANNER_ROUTE_PREFIX}${cleanSuffix}` : HOME_BANNER_ROUTE_PREFIX;
+        if (!cleanSuffix) return `${HOME_BANNER_ROUTE_PREFIX}index.html`;
+        if (cleanSuffix.startsWith("#") || cleanSuffix.startsWith("?")) {
+          return `${HOME_BANNER_ROUTE_PREFIX}index.html${cleanSuffix}`;
+        }
+        return `${HOME_BANNER_ROUTE_PREFIX}${cleanSuffix}`;
       };
 
       const updateNewRoutePreview = () => {

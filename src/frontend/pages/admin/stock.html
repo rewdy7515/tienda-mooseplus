@@ -5,29 +5,295 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stock</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .stock-dashboard {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .stock-panel {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+      }
+      .stock-panel-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .stock-panel-header h3 {
+        margin: 0;
+      }
+      .stock-note {
+        margin: 4px 0 0;
+        color: #475569;
+        font-size: 14px;
+      }
+      .stock-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        margin-bottom: 14px;
+      }
+      .stock-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #334155;
+      }
+      .stock-legend-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+      }
+      .stock-legend-swatch.stock {
+        background: #16a34a;
+      }
+      .stock-legend-swatch.vencidos {
+        background: #f97316;
+      }
+      .stock-legend-swatch.promedio {
+        background: #2563eb;
+      }
+      .stock-chart-wrap {
+        overflow-x: auto;
+        padding-bottom: 4px;
+      }
+      .stock-chart {
+        min-width: 760px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 14px;
+        border-radius: 16px;
+        background:
+          repeating-linear-gradient(
+            to right,
+            rgba(148, 163, 184, 0.15) 0 1px,
+            transparent 1px 72px
+          ),
+          linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      }
+      .stock-chart-group {
+        display: grid;
+        grid-template-columns: minmax(170px, 220px) minmax(360px, 1fr);
+        gap: 16px;
+        align-items: center;
+        padding: 14px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(226, 232, 240, 0.9);
+      }
+      .stock-chart-bars {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .stock-chart-metric {
+        display: grid;
+        grid-template-columns: 82px minmax(180px, 1fr) 56px;
+        align-items: center;
+        gap: 10px;
+      }
+      .stock-chart-metric-label {
+        font-size: 12px;
+        line-height: 1.2;
+        color: #475569;
+        font-weight: 700;
+      }
+      .stock-chart-track {
+        height: 18px;
+        border-radius: 999px;
+        background: rgba(226, 232, 240, 0.95);
+        overflow: hidden;
+      }
+      .stock-chart-value {
+        font-size: 11px;
+        line-height: 1.1;
+        color: #0f172a;
+        font-weight: 700;
+        text-align: right;
+      }
+      .stock-chart-bar {
+        height: 100%;
+        min-width: 0;
+        border-radius: 999px;
+        box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
+      }
+      .stock-chart-bar.stock {
+        background: linear-gradient(180deg, #34d399 0%, #16a34a 100%);
+      }
+      .stock-chart-bar.vencidos {
+        background: linear-gradient(180deg, #fdba74 0%, #f97316 100%);
+      }
+      .stock-chart-bar.promedio {
+        background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+      }
+      .stock-chart-label {
+        width: 100%;
+        text-align: left;
+      }
+      .stock-chart-platform {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .stock-chart-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--plat-color, #94a3b8);
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+      }
+      .stock-chart-plan {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #64748b;
+      }
+      .stock-empty {
+        margin: 0;
+        color: #64748b;
+        font-size: 14px;
+      }
+      .stock-empty.hidden {
+        display: none;
+      }
+      .stock-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .stock-table th,
+      .stock-table td {
+        border: 1px solid #e5e7eb;
+        padding: 10px 12px;
+        text-align: left;
+      }
+      .stock-table th {
+        background: #0f172a;
+        color: #fff;
+        font-size: 13px;
+      }
+      .stock-table tbody tr:nth-child(odd) {
+        background: #f8fafc;
+      }
+      .stock-service-cell {
+        min-width: 220px;
+      }
+      .stock-service-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .stock-service-plan {
+        display: block;
+        margin-top: 3px;
+        font-size: 12px;
+        color: #64748b;
+      }
+      @media (max-width: 700px) {
+        .stock-panel {
+          padding: 14px;
+        }
+        .stock-panel-header {
+          flex-direction: column;
+        }
+        .stock-chart {
+          min-width: 0;
+          padding: 12px;
+        }
+        .stock-chart-group {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+        .stock-chart-metric {
+          grid-template-columns: 70px minmax(120px, 1fr) 48px;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
     <script src="../../scripts/header-loader.js"></script>
 
-    <main class="categorias-dinamicas">
-      <h2>Stock</h2>
-      <table class="stock-table">
-        <thead>
-          <tr>
-            <th>Plataforma</th>
-            <th>Perfiles libres</th>
-            <th>Cuentas libres</th>
-            <th>Vencidos por cortar</th>
-            <th>Reemplazos por cortar</th>
-          </tr>
-        </thead>
-        <tbody id="stock-body">
-          <tr>
-            <td colspan="5" class="status">Próximamente.</td>
-          </tr>
-        </tbody>
-      </table>
+    <main class="categorias-dinamicas stock-dashboard">
+      <section class="stock-panel">
+        <div class="stock-panel-header">
+          <div>
+            <h2>Stock</h2>
+            <p class="stock-note" id="stock-status">Cargando metricas de stock...</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="stock-panel">
+        <div class="stock-panel-header">
+          <div>
+            <h3>Stock vs. demanda</h3>
+            <p class="stock-note" id="stock-chart-note">
+              Barras por plataforma y tipo de plan operativo. El promedio diario usa ventas al cliente de los ultimos 30 dias.
+            </p>
+          </div>
+        </div>
+        <div class="stock-legend">
+          <span class="stock-legend-item">
+            <span class="stock-legend-swatch stock"></span>
+            Stock libre
+          </span>
+          <span class="stock-legend-item">
+            <span class="stock-legend-swatch vencidos"></span>
+            Espacios vencidos
+          </span>
+          <span class="stock-legend-item">
+            <span class="stock-legend-swatch promedio"></span>
+            Avg. diario 30d
+          </span>
+        </div>
+        <div class="stock-chart-wrap">
+          <div id="stock-chart" class="stock-chart"></div>
+        </div>
+        <p class="stock-empty hidden" id="stock-chart-empty">Sin datos para graficar.</p>
+      </section>
+
+      <section class="stock-panel">
+        <div class="stock-panel-header">
+          <div>
+            <h3>Detalle</h3>
+            <p class="stock-note">
+              Incluye reemplazos pendientes como referencia adicional, aunque no se grafican en las tres barras principales.
+            </p>
+          </div>
+        </div>
+        <div class="cuenta-table-wrap">
+          <table class="stock-table">
+            <thead>
+              <tr>
+                <th>Servicio</th>
+                <th>Stock libre</th>
+                <th>Espacios vencidos</th>
+                <th>Reemplazos pendientes</th>
+                <th>Avg. diario 30d</th>
+              </tr>
+            </thead>
+            <tbody id="stock-body">
+              <tr>
+                <td colspan="5" class="status">Cargando...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
 
     <script type="module">
@@ -38,11 +304,126 @@
 
       const usernameEl = document.querySelector(".username");
       const adminLink = document.querySelector(".admin-link");
-      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const stockLink = document.querySelector(".stock-link");
+      const statusEl = document.querySelector("#stock-status");
+      const chartNoteEl = document.querySelector("#stock-chart-note");
+      const chartEl = document.querySelector("#stock-chart");
+      const chartEmptyEl = document.querySelector("#stock-chart-empty");
       const tbody = document.querySelector("#stock-body");
-      const todayIso = () => new Date().toISOString().slice(0, 10);
 
-      const setRows = (rows) => {
+      const intFmt = new Intl.NumberFormat("es-VE");
+      const avgFmt = new Intl.NumberFormat("es-VE", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const PLAN_SORT_ORDER = {
+        Acceso: 1,
+        Perfil: 2,
+        Hogar: 3,
+        Miembro: 4,
+        Completa: 5,
+        "Gift Card": 6,
+      };
+
+      const setStatus = (message = "") => {
+        if (statusEl) statusEl.textContent = message;
+      };
+
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+
+      const toPositiveInt = (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return Math.trunc(parsed);
+      };
+
+      const getCaracasToday = () => {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(new Date());
+        const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+        return `${pick("year")}-${pick("month")}-${pick("day")}`;
+      };
+
+      const shiftIsoDate = (isoDate, deltaDays) => {
+        const match = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return isoDate;
+        const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+        date.setUTCDate(date.getUTCDate() + Number(deltaDays || 0));
+        return date.toISOString().slice(0, 10);
+      };
+
+      const resolvePlanLabel = ({
+        platformId = null,
+        platformInfo = {},
+        cuenta = {},
+        perfil = {},
+        historial = {},
+      } = {}) => {
+        const platId =
+          toPositiveInt(platformId) ||
+          toPositiveInt(cuenta?.id_plataforma) ||
+          toPositiveInt(historial?.id_plataforma) ||
+          null;
+        if (isTrue(platformInfo?.tarjeta_de_regalo) || toPositiveInt(historial?.id_tarjeta_de_regalo)) {
+          return "Gift Card";
+        }
+        const isNetflix = platId === 1;
+        const isHogar = isNetflix && (isTrue(perfil?.perfil_hogar) || isTrue(cuenta?.venta_miembro));
+        if (isHogar) return "Hogar";
+        if (isTrue(platformInfo?.por_acceso)) return "Acceso";
+        if (isTrue(cuenta?.venta_perfil)) return "Perfil";
+        if (isTrue(cuenta?.venta_miembro)) return "Miembro";
+        return "Completa";
+      };
+
+      const sortMetricRows = (rows = []) =>
+        [...rows].sort((a, b) => {
+          const platCmp = String(a?.nombre_plataforma || "").localeCompare(
+            String(b?.nombre_plataforma || ""),
+            "es",
+          );
+          if (platCmp !== 0) return platCmp;
+          const planA = PLAN_SORT_ORDER[a?.plan_label] || 99;
+          const planB = PLAN_SORT_ORDER[b?.plan_label] || 99;
+          if (planA !== planB) return planA - planB;
+          return String(a?.plan_label || "").localeCompare(String(b?.plan_label || ""), "es");
+        });
+
+      const ensureMetricEntry = (map, platformById, platformId, planLabel) => {
+        const platId = toPositiveInt(platformId);
+        if (!platId) return null;
+        const platformInfo = platformById.get(platId) || {};
+        const key = `${platId}::${planLabel}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            id_plataforma: platId,
+            nombre_plataforma:
+              String(platformInfo?.nombre || "").trim() || `Plataforma ${platId}`,
+            color_1: String(platformInfo?.color_1 || "").trim() || "#94a3b8",
+            plan_label: String(planLabel || "").trim() || "Completa",
+            stock: 0,
+            vencidos: 0,
+            reemplazos: 0,
+            ventas_30d: 0,
+            avg_diario: 0,
+          });
+        }
+        return map.get(key);
+      };
+
+      const renderTable = (rows = []) => {
         if (!tbody) return;
         if (!rows.length) {
           tbody.innerHTML = '<tr><td colspan="5" class="status">Sin datos.</td></tr>';
@@ -50,91 +431,323 @@
         }
         tbody.innerHTML = rows
           .map(
-            (r) => `
-          <tr>
-            <td>${r.nombre}</td>
-            <td>${r.perfiles_libres}</td>
-            <td>${r.cuentas_libres}</td>
-            <td>${r.vencidos_perfiles}</td>
-            <td>${r.reemplazos}</td>
-          </tr>`
+            (row) => `
+              <tr>
+                <td class="stock-service-cell">
+                  <span class="stock-service-title">
+                    <span class="stock-chart-dot" style="--plat-color:${escapeHtml(row.color_1)}"></span>
+                    ${escapeHtml(row.nombre_plataforma)}
+                  </span>
+                  <span class="stock-service-plan">${escapeHtml(row.plan_label)}</span>
+                </td>
+                <td>${intFmt.format(Number(row.stock || 0))}</td>
+                <td>${intFmt.format(Number(row.vencidos || 0))}</td>
+                <td>${intFmt.format(Number(row.reemplazos || 0))}</td>
+                <td>${avgFmt.format(Number(row.avg_diario || 0))}</td>
+              </tr>`,
           )
           .join("");
       };
 
+      const buildBarHtml = ({ value = 0, maxValue = 0, kind = "stock", label = "" } = {}) => {
+        const numeric = Number(value) || 0;
+        const safeMax = Number(maxValue) || 0;
+        const widthPct = numeric > 0 && safeMax > 0 ? Math.max((numeric / safeMax) * 100, 4) : 0;
+        return `
+          <div class="stock-chart-metric" title="${escapeHtml(String(numeric))}">
+            <span class="stock-chart-metric-label">${escapeHtml(label)}</span>
+            <div class="stock-chart-track">
+              <div class="stock-chart-bar ${escapeHtml(kind)}" style="width:${widthPct}%"></div>
+            </div>
+            <span class="stock-chart-value">${escapeHtml(avgFmt.format(numeric))}</span>
+          </div>
+        `;
+      };
+
+      const renderChart = (rows = []) => {
+        if (!chartEl || !chartEmptyEl) return;
+        if (!rows.length) {
+          chartEl.innerHTML = "";
+          chartEmptyEl.classList.remove("hidden");
+          return;
+        }
+        chartEmptyEl.classList.add("hidden");
+        const maxValue = Math.max(
+          1,
+          ...rows.flatMap((row) => [
+            Number(row.stock || 0),
+            Number(row.vencidos || 0),
+            Number(row.avg_diario || 0),
+          ]),
+        );
+        chartEl.innerHTML = rows
+          .map(
+            (row) => `
+              <div class="stock-chart-group">
+                <div class="stock-chart-label">
+                  <div class="stock-chart-platform">
+                    <span class="stock-chart-dot" style="--plat-color:${escapeHtml(row.color_1)}"></span>
+                    ${escapeHtml(row.nombre_plataforma)}
+                  </div>
+                  <div class="stock-chart-plan">${escapeHtml(row.plan_label)}</div>
+                </div>
+                <div class="stock-chart-bars">
+                  ${buildBarHtml({ value: row.stock, maxValue, kind: "stock", label: "Stock" })}
+                  ${buildBarHtml({ value: row.vencidos, maxValue, kind: "vencidos", label: "Vencidos" })}
+                  ${buildBarHtml({ value: row.avg_diario, maxValue, kind: "promedio", label: "Avg. diario" })}
+                </div>
+              </div>`,
+          )
+          .join("");
+      };
 
       async function loadData() {
+        const today = getCaracasToday();
+        const avgStart = shiftIsoDate(today, -29);
         try {
-          const [{ data: plataformas, error: platErr }, { data: cuentas, error: ctaErr }, { data: perfiles, error: perfErr }, { data: ventas, error: venErr }, { data: reemplazos, error: repErr }] = await Promise.all([
-            supabase.from("plataformas").select("id_plataforma, nombre").order("nombre"),
-            supabase.from("cuentas").select("id_cuenta, id_plataforma, venta_perfil, inactiva"),
+          setStatus("Cargando metricas de stock...");
+          const [
+            { data: plataformas, error: platErr },
+            { data: perfilesLibres, error: perfErr },
+            { data: cuentasLibres, error: cuentasErr },
+            { data: giftCardsLibres, error: giftErr },
+            { data: ventasVencidas, error: ventasErr },
+            { data: reemplazosPendientes, error: replErr },
+            { data: historialVentas, error: histErr },
+          ] = await Promise.all([
+            supabase
+              .from("plataformas")
+              .select("id_plataforma, nombre, color_1, por_acceso, tarjeta_de_regalo")
+              .order("nombre", { ascending: true }),
             supabase
               .from("perfiles")
-              .select("id_perfil, id_cuenta, ocupado, cuentas:cuentas(id_plataforma, venta_perfil, inactiva)")
-              .not("id_cuenta", "is", null),
+              .select(
+                "id_perfil, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro)",
+              )
+              .eq("ocupado", false)
+              .eq("cuentas.venta_perfil", true)
+              .not("id_cuenta", "is", null)
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
+            supabase
+              .from("cuentas")
+              .select("id_cuenta, id_plataforma, inactiva, ocupado, venta_perfil, venta_miembro")
+              .eq("ocupado", false)
+              .eq("venta_perfil", false)
+              .eq("inactiva", false),
+            supabase
+              .from("tarjetas_de_regalo")
+              .select("id_tarjeta_de_regalo, id_plataforma")
+              .eq("para_venta", true)
+              .eq("usado", false)
+              .not("id_plataforma", "is", null),
             supabase
               .from("ventas")
-              .select("id_perfil, fecha_corte")
-              .lte("fecha_corte", todayIso())
-              .not("id_perfil", "is", null),
-            supabase.from("historial_reemplazos").select("perfil_anterior"),
+              .select(
+                "id_venta, fecha_corte, cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, perfil_hogar)",
+              )
+              .lte("fecha_corte", today)
+              .eq("recordatorio_enviado", true)
+              .or("reportado.is.null,reportado.eq.false")
+              .or("suspendido.is.null,suspendido.eq.false")
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
+            supabase
+              .from("reemplazos")
+              .select(
+                "id_reemplazo, cuentas:cuentas!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, perfil_hogar)",
+              )
+              .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
+            supabase
+              .from("historial_ventas")
+              .select(
+                "id_historial_ventas, id_venta, id_plataforma, id_cuenta, id_tarjeta_de_regalo, fecha_pago, venta_cliente",
+              )
+              .eq("venta_cliente", true)
+              .not("fecha_pago", "is", null)
+              .gte("fecha_pago", avgStart)
+              .lte("fecha_pago", today),
           ]);
-          if (platErr) throw platErr;
-          if (ctaErr) throw ctaErr;
-          if (perfErr) throw perfErr;
-          if (venErr) throw venErr;
-          if (repErr) throw repErr;
 
-          const platMap = {};
-          (plataformas || []).forEach((p) => {
-            platMap[p.id_plataforma] = {
-              id_plataforma: p.id_plataforma,
-              nombre: p.nombre || "-",
-              perfiles_libres: 0,
-              cuentas_libres: 0,
-              vencidos_perfiles: 0,
-              reemplazos: 0,
-            };
+          if (platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr) {
+            throw platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr;
+          }
+
+          const platformById = new Map(
+            (plataformas || []).map((row) => [toPositiveInt(row?.id_plataforma), row]),
+          );
+          const metricsMap = new Map();
+
+          (perfilesLibres || []).forEach((perfilRow) => {
+            const cuenta = perfilRow?.cuentas || {};
+            const platformId = toPositiveInt(cuenta?.id_plataforma);
+            if (!platformId) return;
+            const platformInfo = platformById.get(platformId) || {};
+            const planLabel = resolvePlanLabel({
+              platformId,
+              platformInfo,
+              cuenta,
+              perfil: perfilRow,
+            });
+            const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
+            if (entry) entry.stock += 1;
           });
 
-          const perfilToPlat = {};
-          (perfiles || []).forEach((p) => {
-            const perfilId = Number(p.id_perfil);
-            const platId = p.cuentas?.id_plataforma;
-            const ventaPerfil = p.cuentas?.venta_perfil;
-            const inactiva = p.cuentas?.inactiva;
-            if (platId && platMap[platId] && !inactiva) {
-              perfilToPlat[perfilId] = { platId, ventaPerfil: !!ventaPerfil };
-              if (!p.ocupado) {
-                platMap[platId].perfiles_libres += 1;
-                if (ventaPerfil) {
-                  platMap[platId].cuentas_libres += 1;
-                }
-              }
-            }
+          (cuentasLibres || []).forEach((cuentaRow) => {
+            const platformId = toPositiveInt(cuentaRow?.id_plataforma);
+            if (!platformId) return;
+            const platformInfo = platformById.get(platformId) || {};
+            if (isTrue(platformInfo?.tarjeta_de_regalo)) return;
+            const planLabel = resolvePlanLabel({
+              platformId,
+              platformInfo,
+              cuenta: cuentaRow,
+            });
+            const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
+            if (entry) entry.stock += 1;
           });
 
-          (ventas || []).forEach((v) => {
-            const ref = perfilToPlat[Number(v.id_perfil)];
-            if (ref && platMap[ref.platId]) {
-              platMap[ref.platId].vencidos_perfiles += 1;
-            }
+          (giftCardsLibres || []).forEach((giftRow) => {
+            const platformId = toPositiveInt(giftRow?.id_plataforma);
+            if (!platformId) return;
+            const platformInfo = platformById.get(platformId) || {};
+            const planLabel = resolvePlanLabel({
+              platformId,
+              platformInfo,
+              historial: { id_tarjeta_de_regalo: giftRow?.id_tarjeta_de_regalo, id_plataforma: platformId },
+            });
+            const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
+            if (entry) entry.stock += 1;
           });
 
-          (reemplazos || []).forEach((r) => {
-            const idPerfil = Number(r.perfil_anterior);
-            const ref = perfilToPlat[idPerfil];
-            if (ref && platMap[ref.platId]) {
-              platMap[ref.platId].reemplazos += 1;
-            }
+          (ventasVencidas || []).forEach((ventaRow) => {
+            const cuenta = ventaRow?.cuentas || {};
+            const platformId = toPositiveInt(cuenta?.id_plataforma);
+            if (!platformId) return;
+            const platformInfo = platformById.get(platformId) || {};
+            const planLabel = resolvePlanLabel({
+              platformId,
+              platformInfo,
+              cuenta,
+              perfil: ventaRow?.perfiles || {},
+            });
+            const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
+            if (entry) entry.vencidos += 1;
           });
 
-          setRows(Object.values(platMap));
+          (reemplazosPendientes || []).forEach((reemplazoRow) => {
+            const cuenta = reemplazoRow?.cuentas || {};
+            const platformId = toPositiveInt(cuenta?.id_plataforma);
+            if (!platformId) return;
+            const platformInfo = platformById.get(platformId) || {};
+            const planLabel = resolvePlanLabel({
+              platformId,
+              platformInfo,
+              cuenta,
+              perfil: reemplazoRow?.perfiles || {},
+            });
+            const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
+            if (entry) entry.reemplazos += 1;
+          });
+
+          const historialRows = (historialVentas || []).filter((row) => isTrue(row?.venta_cliente));
+          const ventaIds = Array.from(
+            new Set(historialRows.map((row) => toPositiveInt(row?.id_venta)).filter(Boolean)),
+          );
+          const cuentaIds = Array.from(
+            new Set(historialRows.map((row) => toPositiveInt(row?.id_cuenta)).filter(Boolean)),
+          );
+
+          const [
+            { data: ventasLive, error: ventasLiveErr },
+            { data: cuentasHist, error: cuentasHistErr },
+          ] = await Promise.all([
+            ventaIds.length
+              ? supabase
+                  .from("ventas")
+                  .select(
+                    "id_venta, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, id_plataforma, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, perfil_hogar)",
+                  )
+                  .in("id_venta", ventaIds)
+              : Promise.resolve({ data: [], error: null }),
+            cuentaIds.length
+              ? supabase
+                  .from("cuentas")
+                  .select("id_cuenta, id_plataforma, venta_perfil, venta_miembro")
+                  .in("id_cuenta", cuentaIds)
+              : Promise.resolve({ data: [], error: null }),
+          ]);
+
+          if (ventasLiveErr || cuentasHistErr) {
+            throw ventasLiveErr || cuentasHistErr;
+          }
+
+          const liveVentaById = new Map(
+            (ventasLive || []).map((row) => [toPositiveInt(row?.id_venta), row]),
+          );
+          const cuentaHistById = new Map(
+            (cuentasHist || []).map((row) => [toPositiveInt(row?.id_cuenta), row]),
+          );
+
+          historialRows.forEach((histRow) => {
+            const histVentaId = toPositiveInt(histRow?.id_venta);
+            const liveVenta = histVentaId ? liveVentaById.get(histVentaId) || null : null;
+            const cuentaHist = toPositiveInt(histRow?.id_cuenta)
+              ? cuentaHistById.get(toPositiveInt(histRow?.id_cuenta)) || null
+              : null;
+            const platformId =
+              toPositiveInt(histRow?.id_plataforma) ||
+              toPositiveInt(liveVenta?.cuentas?.id_plataforma) ||
+              toPositiveInt(cuentaHist?.id_plataforma);
+            if (!platformId) return;
+            const platformInfo = platformById.get(platformId) || {};
+            const planLabel = resolvePlanLabel({
+              platformId,
+              platformInfo,
+              cuenta: liveVenta?.cuentas || cuentaHist || {},
+              perfil: liveVenta?.perfiles || {},
+              historial: histRow,
+            });
+            const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
+            if (entry) entry.ventas_30d += 1;
+          });
+
+          const rows = sortMetricRows(
+            Array.from(metricsMap.values())
+              .map((row) => ({
+                ...row,
+                avg_diario: Number((Number(row.ventas_30d || 0) / 30).toFixed(2)),
+              }))
+              .filter(
+                (row) =>
+                  Number(row.stock || 0) > 0 ||
+                  Number(row.vencidos || 0) > 0 ||
+                  Number(row.reemplazos || 0) > 0 ||
+                  Number(row.ventas_30d || 0) > 0,
+              ),
+          );
+
+          renderChart(rows);
+          renderTable(rows);
+
+          const totalStock = rows.reduce((sum, row) => sum + Number(row.stock || 0), 0);
+          const totalVencidos = rows.reduce((sum, row) => sum + Number(row.vencidos || 0), 0);
+          const totalReemplazos = rows.reduce((sum, row) => sum + Number(row.reemplazos || 0), 0);
+          chartNoteEl.textContent =
+            `Barras por plataforma y tipo de plan operativo. Avg. diario calculado sobre ${intFmt.format(
+              historialRows.length,
+            )} ventas al cliente registradas entre ${avgStart} y ${today}.`;
+          setStatus(
+            `${intFmt.format(totalStock)} espacios libres, ${intFmt.format(
+              totalVencidos,
+            )} vencidos y ${intFmt.format(totalReemplazos)} reemplazos pendientes.`,
+          );
         } catch (err) {
           console.error("stock load error", err);
-          setRows([]);
-          if (tbody) {
-            tbody.innerHTML = '<tr><td colspan="5" class="status">No se pudo cargar el stock.</td></tr>';
+          renderChart([]);
+          renderTable([]);
+          setStatus("No se pudo cargar el stock.");
+          if (chartNoteEl) {
+            chartNoteEl.textContent =
+              "No fue posible calcular la grafica con los datos actuales.";
           }
         }
       }
@@ -142,19 +755,29 @@
       async function init() {
         try {
           const user = await loadCurrentUser();
+          const isSuperadmin = isTrue(user?.permiso_superadmin);
+          if (!isSuperadmin) {
+            window.location.replace("../index.html");
+            return;
+          }
           if (user && usernameEl) {
             const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
             usernameEl.textContent = fullName || user.correo || "Usuario";
           }
-          const isAdmin = isTrue(user?.permiso_admin) || isTrue(user?.permiso_superadmin);
           if (adminLink) {
-            adminLink.classList.toggle("hidden", !isAdmin);
-            adminLink.style.display = isAdmin ? "block" : "none";
+            adminLink.classList.remove("hidden");
+            adminLink.style.display = "block";
+          }
+          if (stockLink) {
+            stockLink.classList.remove("hidden");
+            stockLink.style.display = "block";
           }
         } catch (err) {
           console.error("stock init error", err);
+          window.location.replace("../index.html");
+          return;
         }
-        loadData();
+        await loadData();
       }
 
       init();

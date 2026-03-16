@@ -185,6 +185,13 @@
       const TEST_USER_ID = 23;
       const isTrue = (v) =>
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const normalizeSearchText = (value = "") =>
+        String(value || "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/\s+/g, " ");
       const normalizePlatformName = (value = "") =>
         String(value || "").trim().toLowerCase();
       const normalizeHexColor = (value = "") => {
@@ -305,6 +312,8 @@
       const getPin = (v) => v?.perfiles?.pin || "";
       const getPlataforma = (v) => v?.cuentas?.plataformas?.nombre || "Plataforma";
       const getIdCuenta = (v) => v?.id_cuenta || v?.cuentas?.id_cuenta || null;
+      let usuariosCache = null;
+      let usuariosCachePromise = null;
 
       const loadPlatformColors = async () => {
         let platformColors = new Map();
@@ -339,18 +348,39 @@
         renderTable(data || [], platformColors);
       };
 
-      const searchUsuarios = async (termRaw = "") => {
-        const term = String(termRaw || "").trim().replaceAll(",", " ");
-        if (term.length < 2) return [];
-        const q = `%${term}%`;
-        const { data, error } = await supabase
+      const loadUsuariosCache = async () => {
+        if (usuariosCache) return usuariosCache;
+        if (usuariosCachePromise) return usuariosCachePromise;
+        usuariosCachePromise = supabase
           .from("usuarios")
           .select("id_usuario, nombre, apellido")
-          .or(`nombre.ilike.${q},apellido.ilike.${q}`)
           .order("nombre", { ascending: true })
-          .limit(20);
-        if (error) throw error;
-        return data || [];
+          .order("apellido", { ascending: true })
+          .then(({ data, error }) => {
+            if (error) throw error;
+            usuariosCache = data || [];
+            usuariosCachePromise = null;
+            return usuariosCache;
+          })
+          .catch((err) => {
+            usuariosCachePromise = null;
+            throw err;
+          });
+        return usuariosCachePromise;
+      };
+
+      const searchUsuarios = async (termRaw = "") => {
+        const term = normalizeSearchText(String(termRaw || "").replaceAll(",", " "));
+        if (term.length < 2) return [];
+        const rows = await loadUsuariosCache();
+        return (rows || [])
+          .filter((row) => {
+            const nombre = normalizeSearchText(row?.nombre || "");
+            const apellido = normalizeSearchText(row?.apellido || "");
+            const full = normalizeSearchText(`${row?.nombre || ""} ${row?.apellido || ""}`);
+            return nombre.includes(term) || apellido.includes(term) || full.includes(term);
+          })
+          .slice(0, 20);
       };
 
       const bindSuperadminSearch = ({ selfUser, platformColors }) => {

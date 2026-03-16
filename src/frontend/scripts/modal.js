@@ -36,6 +36,17 @@ const isTrueLike = (v) =>
 const isFalseLike = (v) =>
   v === false || v === 0 || v === "0" || String(v || "").toLowerCase() === "false";
 
+const normalizeGiftCardAmountKey = (value) => {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(",", ".");
+  if (!raw) return "";
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+  return amount.toFixed(2);
+};
+
 const getDiscountColumnsFromRows = (rows = []) => {
   const cols = new Set();
   (rows || []).forEach((row) => {
@@ -568,6 +579,13 @@ const renderPrecios = (plataformaId, flags) => {
       const planLower = (plan || "").toLowerCase();
       isPlan2 = hasSubCuenta || planLower.includes("hogar") || planLower.includes("extra");
       stockPlan = stockByPlatform[isPlan2 ? "1_plan2" : "1_plan1"] ?? stockPlan;
+    }
+    if (flags.tarjeta_de_regalo) {
+      const giftAmountKey = normalizeGiftCardAmountKey(items?.[0]?.valor_tarjeta_de_regalo);
+      if (giftAmountKey) {
+        const stockKey = `${plataformaId}_gift_${giftAmountKey}`;
+        stockPlan = Number(stockByPlatform[stockKey]) || 0;
+      }
     }
     const ms = currentPlatform?.mostrar_stock;
     const showStock = !(

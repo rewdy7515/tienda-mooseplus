@@ -122,6 +122,10 @@ const WHATSAPP_SEND_TIMEOUT_MS = Math.max(
   15000,
   Number(process.env.WHATSAPP_SEND_TIMEOUT_MS) || 45000,
 );
+const WHATSAPP_READY_TIMEOUT_MS = Math.max(
+  15000,
+  Number(process.env.WHATSAPP_READY_TIMEOUT_MS) || 120000,
+);
 const WHATSAPP_RESET_HOUR = 0;
 let lastAutoRecordatoriosRunDate = null;
 let autoRecordatoriosRetryPending = false;
@@ -177,6 +181,7 @@ const WEB_PUSH_QUEUE_MAX_RETRIES = Math.max(
   Math.min(10, Number(process.env.WEB_PUSH_QUEUE_MAX_RETRIES) || 3),
 );
 const HOME_BANNERS_TABLE = "banners";
+const WEB_TRAFFIC_EVENTS_TABLE = "eventos_trafico_web";
 let nuevoServicioNotifQueueInProgress = false;
 let nuevoServicioNotifQueueTableMissing = false;
 let nuevoServicioNotifQueueLastRunAt = null;
@@ -920,6 +925,84 @@ const shutdownWhatsappClient = async ({ reason = "unspecified" } = {}) => {
   await stopWhatsappClient();
 };
 
+const waitForWhatsappReady = async ({
+  timeoutMs = WHATSAPP_READY_TIMEOUT_MS,
+  reason = "unspecified",
+} = {}) => {
+  if (isWhatsappReady()) return true;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    let unsubscribeReady = () => {};
+    let unsubscribeDisconnected = () => {};
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      unsubscribeReady();
+      unsubscribeDisconnected();
+    };
+
+    const finishResolve = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(true);
+    };
+
+    const finishReject = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+
+    unsubscribeReady = onWhatsappReady(() => {
+      finishResolve();
+    });
+
+    unsubscribeDisconnected = onWhatsappDisconnected((disconnectReason) => {
+      const err = new Error(
+        disconnectReason
+          ? `WhatsApp se desconectó mientras iniciaba: ${disconnectReason}`
+          : "WhatsApp se desconectó mientras iniciaba",
+      );
+      err.code = "WHATSAPP_DISCONNECTED";
+      finishReject(err);
+    });
+
+    timer = setTimeout(() => {
+      const err = new Error(
+        `WhatsApp no quedó listo tras esperar ${Math.round(timeoutMs / 1000)}s`,
+      );
+      err.code = "WHATSAPP_NOT_READY";
+      finishReject(err);
+    }, timeoutMs);
+
+    if (isWhatsappReady()) finishResolve();
+    console.log(
+      `[WhatsApp] Esperando cliente listo (${reason}) hasta ${Math.round(timeoutMs / 1000)}s.`,
+    );
+  });
+};
+
+const ensureWhatsappClientReady = async ({
+  reason = "unspecified",
+  timeoutMs = WHATSAPP_READY_TIMEOUT_MS,
+} = {}) => {
+  if (!shouldStartWhatsapp) {
+    const err = new Error("WhatsApp deshabilitado");
+    err.code = "WHATSAPP_DISABLED";
+    throw err;
+  }
+  if (isWhatsappReady()) return true;
+
+  await ensureWhatsappClientStarted({ reason });
+  if (isWhatsappReady()) return true;
+
+  return waitForWhatsappReady({ timeoutMs, reason });
+};
+
 const buildWhatsappErrorLog = (err) => {
   const cause =
     err?.cause instanceof Error
@@ -1447,6 +1530,9 @@ const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => 
         return `*${plat.nombre || "-"}*\n${detalles}`;
       })
       .join("\n\n");
+    const servicios = Object.values(group.plataformas || {})
+      .map((plat) => String(plat?.nombre || "").trim())
+      .filter(Boolean);
     const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
     const signupUrl = String(group.signupUrl || "").trim();
     const renewUrl = signupUrl || buildPublicSiteUrl();
@@ -1458,7 +1544,36 @@ const buildWhatsappRecordatorioItems = async ({ targetUserIds = null } = {}) => 
       telefonoRaw: group.telefono,
       phone: normalizeWhatsappPhone(group.telefono),
       plain,
+      servicios,
       ventaIds: uniqPositiveIds(group.ventaIds),
+    };
+  });
+};
+
+const buildWhatsappRecordatorioPreviewItems = (
+  items = [],
+  { pendingReason = "Pendiente de envío manual" } = {},
+) => {
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const hasRawPhone = Boolean(String(item?.telefonoRaw || "").trim());
+    if (!hasRawPhone) {
+      return {
+        ...item,
+        status: "skipped_no_phone",
+        error: "Cliente sin teléfono registrado",
+      };
+    }
+    if (!item?.phone) {
+      return {
+        ...item,
+        status: "skipped_invalid_phone",
+        error: `Teléfono inválido: ${item?.telefonoRaw || "sin valor"}`,
+      };
+    }
+    return {
+      ...item,
+      status: "pending",
+      error: String(pendingReason || "Pendiente de envío manual"),
     };
   });
 };
@@ -1674,7 +1789,11 @@ const sendWhatsappRecordatorios = async ({ source = "manual", itemsOverride = nu
       const hasRawPhone = Boolean(String(item.telefonoRaw || "").trim());
       if (!hasRawPhone) {
         skippedNoPhone += 1;
-        processedItems.push({ ...item, status: "skipped_no_phone" });
+        processedItems.push({
+          ...item,
+          status: "skipped_no_phone",
+          error: "Cliente sin teléfono registrado",
+        });
         console.log(
           `[WhatsApp] Recordatorios ${source}: omitido_sin_telefono cliente="${item.cliente || "Cliente"}"`,
         );
@@ -1682,7 +1801,11 @@ const sendWhatsappRecordatorios = async ({ source = "manual", itemsOverride = nu
       }
       if (!item.phone) {
         skippedInvalidPhone += 1;
-        processedItems.push({ ...item, status: "skipped_invalid_phone" });
+        processedItems.push({
+          ...item,
+          status: "skipped_invalid_phone",
+          error: `Teléfono inválido: ${item.telefonoRaw || "sin valor"}`,
+        });
         console.log(
           `[WhatsApp] Recordatorios ${source}: omitido_telefono_invalido cliente="${item.cliente || "Cliente"}" telefono="${item.telefonoRaw || ""}"`,
         );
@@ -2782,6 +2905,31 @@ app.get("/api/whatsapp/recordatorios/auto-status", async (req, res) => {
   });
 });
 
+app.get("/api/whatsapp/recordatorios/pendientes", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const items = await buildWhatsappRecordatorioItems();
+    const previewItems = buildWhatsappRecordatorioPreviewItems(items);
+    return res.json({
+      ok: true,
+      total: items.length,
+      sendable: countWhatsappSendableRecordatorios(items),
+      items: previewItems,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[whatsapp/recordatorios/pendientes] error", err);
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudieron calcular los recordatorios pendientes" });
+  }
+});
+
 app.get("/api/whatsapp/recordatorios/pending-no-phone", async (req, res) => {
   try {
     const idUsuarioSesion = await getOrCreateUsuario(req);
@@ -2932,9 +3080,26 @@ app.post("/api/whatsapp/send-recordatorio", async (req, res) => {
 });
 
 app.post("/api/whatsapp/recordatorios/enviar", async (req, res) => {
+  let selectedItems = [];
+  let shutdownClientAfter = false;
   try {
     await requireAdminSession(req);
-    const result = await sendWhatsappRecordatorios({ source: "manual" });
+    const targetUserIds = uniqPositiveIds(req.body?.targetUserIds || []);
+    const startClient = req.body?.startClient === true;
+    shutdownClientAfter = req.body?.shutdownClientAfter === true;
+
+    selectedItems = targetUserIds.length
+      ? await buildWhatsappRecordatorioItems({ targetUserIds })
+      : await buildWhatsappRecordatorioItems();
+
+    if (startClient && selectedItems.length) {
+      await ensureWhatsappClientReady({ reason: "manual_recordatorios_send" });
+    }
+
+    const result = await sendWhatsappRecordatorios({
+      source: startClient ? "manual_managed_client" : "manual",
+      itemsOverride: selectedItems,
+    });
     const { dateStr } = getCaracasClock();
     ensureDailyRecordatoriosState(dateStr);
     if (didSendAllRecordatorios(result)) {
@@ -2951,13 +3116,28 @@ app.post("/api/whatsapp/recordatorios/enviar", async (req, res) => {
     if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
       return res.status(409).json({ error: "Ya hay un envío de recordatorios en progreso" });
     }
-    if (err?.code === "WHATSAPP_NOT_READY") {
-      return res.status(503).json({ error: "WhatsApp no listo" });
+    if (
+      err?.code === "WHATSAPP_NOT_READY" ||
+      err?.code === "WHATSAPP_DISABLED" ||
+      err?.code === "WHATSAPP_DISCONNECTED"
+    ) {
+      return res.status(503).json({
+        error: err?.message || "WhatsApp no listo",
+        total: selectedItems.length,
+        sendable: countWhatsappSendableRecordatorios(selectedItems),
+        items: buildWhatsappRecordatorioPreviewItems(selectedItems, {
+          pendingReason: err?.message || "WhatsApp no listo",
+        }),
+      });
     }
     console.error("[whatsapp/recordatorios/enviar] error", err);
     return res
       .status(500)
       .json({ error: err?.message || "No se pudieron enviar los recordatorios" });
+  } finally {
+    if (shutdownClientAfter) {
+      await shutdownWhatsappClient({ reason: "manual_recordatorios_send_completed" });
+    }
   }
 });
 
@@ -5756,6 +5936,40 @@ const requireSuperadminSession = async (req) => {
   return idUsuario;
 };
 
+const AUTH_ADMIN_USERS_PAGE_SIZE = 1000;
+
+const isAuthUserVerified = (authUser) => {
+  const emailConfirmedAt = String(authUser?.email_confirmed_at || "").trim();
+  const phoneConfirmedAt = String(authUser?.phone_confirmed_at || "").trim();
+  const confirmedAt = String(authUser?.confirmed_at || "").trim();
+  return !!(emailConfirmedAt || phoneConfirmedAt || confirmedAt);
+};
+
+const getAuthVerifiedUsersStats = async () => {
+  let page = 1;
+  let totalUsers = 0;
+  let verifiedUsers = 0;
+
+  while (true) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: AUTH_ADMIN_USERS_PAGE_SIZE,
+    });
+    if (error) throw error;
+    const users = Array.isArray(data?.users) ? data.users : [];
+    totalUsers += users.length;
+    verifiedUsers += users.filter((user) => isAuthUserVerified(user)).length;
+    if (users.length < AUTH_ADMIN_USERS_PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return {
+    totalUsers,
+    verifiedUsers,
+    unverifiedUsers: Math.max(0, totalUsers - verifiedUsers),
+  };
+};
+
 const getCurrentCarrito = async (idUsuario) => {
   const { data, error } = await runSupabaseQueryWithRetry(
     () =>
@@ -7256,6 +7470,28 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
   }
 });
 
+app.get("/api/auth/stats/verified-users", async (req, res) => {
+  try {
+    await requireSuperadminSession(req);
+    const stats = await getAuthVerifiedUsersStats();
+    return res.json({
+      ok: true,
+      total_users: stats.totalUsers,
+      verified_users: stats.verifiedUsers,
+      unverified_users: stats.unverifiedUsers,
+    });
+  } catch (err) {
+    console.error("[auth/stats/verified-users] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    return res.status(500).json({ error: "No se pudo obtener el conteo de usuarios verificados en Auth." });
+  }
+});
+
 // Redirección corta para links de registro: /s/:token -> /signup.html?t=token
 app.get("/s/:token", async (req, res) => {
   try {
@@ -7533,6 +7769,351 @@ app.post("/api/client-errors", jsonParser, async (req, res) => {
   } catch (err) {
     console.error("[client-errors] save error", err);
     return res.status(500).json({ ok: false, error: "No se pudo guardar el error de cliente." });
+  }
+});
+
+app.post("/api/eventos-trafico-web", jsonParser, async (req, res) => {
+  try {
+    const sessionUserId = parseSessionUserId(req);
+    const body = req?.body && typeof req.body === "object" ? req.body : {};
+    const allowedTiposEvento = new Set([
+      "inicio_sesion_web",
+      "vista_pagina",
+      "latido_sesion",
+    ]);
+    const idSesion = truncateText(body?.id_sesion || "", 120).trim().toLowerCase();
+    const tipoEvento = truncateText(body?.tipo_evento || "vista_pagina", 40).trim();
+    const ruta = truncateText(body?.ruta || "", 600).trim();
+    const safeMetadata =
+      body?.metadatos && typeof body.metadatos === "object" ? body.metadatos : null;
+
+    if (!idSesion || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idSesion)) {
+      return res.status(400).json({ ok: false, error: "id_sesion inválido." });
+    }
+    if (!allowedTiposEvento.has(tipoEvento)) {
+      return res.status(400).json({ ok: false, error: "tipo_evento inválido." });
+    }
+    if (!ruta) {
+      return res.status(400).json({ ok: false, error: "ruta es requerida." });
+    }
+
+    const payload = {
+      id_usuario: Number.isFinite(Number(sessionUserId)) ? Number(sessionUserId) : null,
+      tipo_evento: tipoEvento,
+      id_sesion: idSesion,
+      ruta,
+      url_completa: truncateText(body?.url_completa || "", 2000),
+      referidor: truncateText(body?.referidor || req.get("referer") || "", 2000),
+      agente_usuario: truncateText(body?.agente_usuario || req.get("user-agent") || "", 1200),
+      metadatos: safeMetadata,
+      fecha_hora: body?.fecha_hora || new Date().toISOString(),
+    };
+
+    const { error } = await supabaseAdmin.from(WEB_TRAFFIC_EVENTS_TABLE).insert(payload);
+    if (error) {
+      if (isMissingTableError(error, WEB_TRAFFIC_EVENTS_TABLE)) {
+        return res.status(503).json({
+          ok: false,
+          tableMissing: true,
+          error: "Tabla eventos_trafico_web no existe.",
+        });
+      }
+      throw error;
+    }
+
+    if (payload.id_usuario) {
+      const fechaConexion = todayInVenezuela();
+      const { error: userErr } = await supabaseAdmin
+        .from("usuarios")
+        .update({ ultima_conexion: fechaConexion })
+        .eq("id_usuario", payload.id_usuario);
+      if (userErr) {
+        console.error("[eventos-trafico-web] update ultima_conexion error", userErr);
+      }
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[eventos-trafico-web] save error", err);
+    return res.status(500).json({ ok: false, error: "No se pudo guardar el evento de tráfico." });
+  }
+});
+
+app.get("/api/dashboard/analitica-web", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+
+    const monthRegex = /^\d{4}-\d{2}$/;
+    const buildCaracasMonthKey = () => {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Caracas",
+        year: "numeric",
+        month: "2-digit",
+      }).formatToParts(new Date());
+      const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+      return `${pick("year")}-${pick("month")}`;
+    };
+    const monthValRaw = String(req.query?.month || "").trim();
+    const monthVal = monthRegex.test(monthValRaw) ? monthValRaw : buildCaracasMonthKey();
+    const monthToIndex = (value = "") => {
+      const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+      if (!match) return null;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+        return null;
+      }
+      return year * 12 + (month - 1);
+    };
+    const indexToMonthKey = (idx) => {
+      if (!Number.isInteger(idx)) return null;
+      const year = Math.floor(idx / 12);
+      const month = (idx % 12) + 1;
+      return `${year}-${String(month).padStart(2, "0")}`;
+    };
+    const buildMonthRange = (value = "") => {
+      const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+      if (!match) return null;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+        return null;
+      }
+      const lastDay = new Date(year, month, 0).getDate();
+      const monthTxt = String(month).padStart(2, "0");
+      return {
+        start: `${year}-${monthTxt}-01`,
+        end: `${year}-${monthTxt}-${String(lastDay).padStart(2, "0")}`,
+        nextStart:
+          month === 12
+            ? `${year + 1}-01-01`
+            : `${year}-${String(month + 1).padStart(2, "0")}-01`,
+      };
+    };
+    const previousMonthVal = indexToMonthKey((monthToIndex(monthVal) || 0) - 1);
+    const range = buildMonthRange(monthVal);
+    const prevRange = buildMonthRange(previousMonthVal);
+    if (!range || !prevRange) {
+      return res.status(400).json({ error: "Mes inválido." });
+    }
+
+    const toCaracasDate = (value) => {
+      if (!value) return "";
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(value));
+      } catch (_err) {
+        return "";
+      }
+    };
+    const toCaracasMonth = (value) => {
+      const dateKey = toCaracasDate(value);
+      return dateKey ? dateKey.slice(0, 7) : "";
+    };
+    const weekdayMap = {
+      Mon: "lunes",
+      Tue: "martes",
+      Wed: "miercoles",
+      Thu: "jueves",
+      Fri: "viernes",
+      Sat: "sabado",
+      Sun: "domingo",
+    };
+    const weekdayOrder = [
+      { key: "lunes", label: "Lun" },
+      { key: "martes", label: "Mar" },
+      { key: "miercoles", label: "Mie" },
+      { key: "jueves", label: "Jue" },
+      { key: "viernes", label: "Vie" },
+      { key: "sabado", label: "Sab" },
+      { key: "domingo", label: "Dom" },
+    ];
+    const toCaracasWeekdayKey = (value) => {
+      if (!value) return "";
+      try {
+        const key = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/Caracas",
+          weekday: "short",
+        }).format(new Date(value));
+        return weekdayMap[key] || "";
+      } catch (_err) {
+        return "";
+      }
+    };
+    const toCaracasHour = (value) => {
+      if (!value) return null;
+      try {
+        const hourTxt = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/Caracas",
+          hour: "2-digit",
+          hour12: false,
+        }).format(new Date(value));
+        const hour = Number(hourTxt);
+        return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
+      } catch (_err) {
+        return null;
+      }
+    };
+    const buildTrafficIdentity = (row = {}) => {
+      const userId = Number(row?.id_usuario);
+      if (Number.isFinite(userId) && userId > 0) return `u:${userId}`;
+      const sessionId = String(row?.id_sesion || "").trim().toLowerCase();
+      return sessionId ? `s:${sessionId}` : "";
+    };
+    const aggregateTrafficRows = (rows = []) => {
+      const usuariosUnicos = new Set();
+      const weekdaySets = new Map(weekdayOrder.map((row) => [row.key, new Set()]));
+      const hourSets = Array.from({ length: 24 }, () => new Set());
+
+      (rows || []).forEach((row) => {
+        const identity = buildTrafficIdentity(row);
+        if (!identity) return;
+        usuariosUnicos.add(identity);
+        const weekdayKey = toCaracasWeekdayKey(row?.fecha_hora);
+        if (weekdayKey && weekdaySets.has(weekdayKey)) {
+          weekdaySets.get(weekdayKey).add(identity);
+        }
+        const hour = toCaracasHour(row?.fecha_hora);
+        if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+          hourSets[hour].add(identity);
+        }
+      });
+
+      return {
+        usuarios_unicos: usuariosUnicos.size,
+        por_dia_semana: weekdayOrder.map((row) => ({
+          key: row.key,
+          label: row.label,
+          cantidad: weekdaySets.get(row.key)?.size || 0,
+        })),
+        por_hora: hourSets.map((set, hour) => ({
+          hora: hour,
+          label: `${String(hour).padStart(2, "0")}h`,
+          cantidad: set.size,
+        })),
+      };
+    };
+
+    const [usuariosResp, authResp, traficoActualResp, traficoPrevResp] = await Promise.all([
+      supabaseAdmin
+        .from("usuarios")
+        .select("id_usuario, id_auth, acceso_cliente")
+        .not("id_auth", "is", null),
+      supabaseAdmin
+        .schema("auth")
+        .from("users")
+        .select("id, email_confirmed_at")
+        .not("email_confirmed_at", "is", null),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_EVENTS_TABLE)
+        .select("fecha_hora, id_usuario, id_sesion")
+        .eq("tipo_evento", "vista_pagina")
+        .gte("fecha_hora", `${range.start}T00:00:00-04:00`)
+        .lt("fecha_hora", `${range.nextStart}T00:00:00-04:00`),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_EVENTS_TABLE)
+        .select("fecha_hora, id_usuario, id_sesion")
+        .eq("tipo_evento", "vista_pagina")
+        .gte("fecha_hora", `${prevRange.start}T00:00:00-04:00`)
+        .lt("fecha_hora", `${prevRange.nextStart}T00:00:00-04:00`),
+    ]);
+
+    if (usuariosResp.error) throw usuariosResp.error;
+    if (authResp.error) throw authResp.error;
+
+    let traficoActualRows = traficoActualResp.data || [];
+    let traficoPrevRows = traficoPrevResp.data || [];
+    if (traficoActualResp.error) {
+      if (!isMissingTableError(traficoActualResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
+        throw traficoActualResp.error;
+      }
+      traficoActualRows = [];
+    }
+    if (traficoPrevResp.error) {
+      if (!isMissingTableError(traficoPrevResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
+        throw traficoPrevResp.error;
+      }
+      traficoPrevRows = [];
+    }
+
+    const usuarioByAuthId = new Map(
+      (usuariosResp.data || [])
+        .map((row) => [String(row?.id_auth || "").trim().toLowerCase(), row])
+        .filter(([authId]) => !!authId),
+    );
+    const authConfirmedLinkedRows = (authResp.data || [])
+      .map((row) => {
+        const authId = String(row?.id || "").trim().toLowerCase();
+        const usuario = authId ? usuarioByAuthId.get(authId) : null;
+        if (!usuario) return null;
+        const fechaConfirmacion = toCaracasDate(row?.email_confirmed_at);
+        if (!fechaConfirmacion) return null;
+        return {
+          ...row,
+          usuario,
+          fecha_confirmacion: fechaConfirmacion,
+        };
+      })
+      .filter(Boolean);
+
+    const registrosPorMesMap = new Map();
+    authConfirmedLinkedRows.forEach((row) => {
+      const monthKey = toCaracasMonth(row?.email_confirmed_at);
+      if (!monthKey) return;
+      registrosPorMesMap.set(monthKey, (registrosPorMesMap.get(monthKey) || 0) + 1);
+    });
+    const registrosPorMes = Array.from(registrosPorMesMap.entries())
+      .map(([monthKey, cantidad]) => ({ monthKey, cantidad }))
+      .sort((a, b) => String(a.monthKey).localeCompare(String(b.monthKey)));
+
+    const countConfirmedUntil = (dateLimit, predicate = null) =>
+      authConfirmedLinkedRows.filter((row) => {
+        const matchesDate = String(row?.fecha_confirmacion || "").trim() <= String(dateLimit || "");
+        if (!matchesDate) return false;
+        if (typeof predicate !== "function") return true;
+        return predicate(row);
+      }).length;
+
+    const isClienteAuthRow = (row) => row?.usuario?.acceso_cliente === true;
+    const isVendedorAuthRow = (row) => row?.usuario?.acceso_cliente !== true;
+
+    const usuariosAuthConfirmados = countConfirmedUntil(range.end);
+    const usuariosAuthConfirmadosPrev = countConfirmedUntil(prevRange.end);
+    const clientesAuthConfirmados = countConfirmedUntil(range.end, isClienteAuthRow);
+    const clientesAuthConfirmadosPrev = countConfirmedUntil(prevRange.end, isClienteAuthRow);
+    const vendedoresAuthConfirmados = countConfirmedUntil(range.end, isVendedorAuthRow);
+    const vendedoresAuthConfirmadosPrev = countConfirmedUntil(prevRange.end, isVendedorAuthRow);
+
+    return res.json({
+      ok: true,
+      mes: monthVal,
+      auth: {
+        usuarios_auth_confirmados: usuariosAuthConfirmados,
+        usuarios_auth_confirmados_mes_anterior: usuariosAuthConfirmadosPrev,
+        clientes_auth_confirmados: clientesAuthConfirmados,
+        clientes_auth_confirmados_mes_anterior: clientesAuthConfirmadosPrev,
+        vendedores_auth_confirmados: vendedoresAuthConfirmados,
+        vendedores_auth_confirmados_mes_anterior: vendedoresAuthConfirmadosPrev,
+        registros_por_mes: registrosPorMes,
+      },
+      trafico: {
+        actual: aggregateTrafficRows(traficoActualRows),
+        anterior: aggregateTrafficRows(traficoPrevRows),
+      },
+    });
+  } catch (err) {
+    console.error("[dashboard/analitica-web] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    return res.status(500).json({ error: err?.message || "No se pudo cargar la analítica web." });
   }
 });
 

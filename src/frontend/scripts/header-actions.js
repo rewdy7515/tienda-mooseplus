@@ -817,6 +817,7 @@ if (!window.__headerActionsInit) {
         saldoEl.textContent = `Saldo: $${saldoNum.toFixed(2)}`;
       }
       const adminLink = document.querySelector(".admin-link");
+      const stockLink = document.querySelector(".stock-link");
       const historialLink = document.querySelector(".historial-link");
       const reportesLink = document.querySelector(".reportes-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
@@ -834,7 +835,14 @@ if (!window.__headerActionsInit) {
       const isUsuariosPath = window.location.pathname.includes(
         "/pages/admin/usuarios.html"
       );
+      const isStockAdminPath = window.location.pathname.includes(
+        "/pages/admin/stock.html"
+      );
       if (isUsuariosPath && !isSuper) {
+        window.location.href = `${pagesRoot}index.html`;
+        return;
+      }
+      if (isStockAdminPath && !isSuper) {
         window.location.href = `${pagesRoot}index.html`;
         return;
       }
@@ -846,6 +854,10 @@ if (!window.__headerActionsInit) {
       if (adminLink) {
         adminLink.classList.toggle("hidden", !isAdmin);
         adminLink.style.display = isAdmin ? "block" : "none";
+      }
+      if (stockLink) {
+        stockLink.classList.toggle("hidden", !isSuper);
+        stockLink.style.display = isSuper ? "block" : "none";
       }
       if (historialLink) {
         historialLink.classList.toggle("hidden", !isSuperHist);

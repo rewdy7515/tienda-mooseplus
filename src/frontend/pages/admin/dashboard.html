@@ -278,7 +278,7 @@
         border-radius: 12px;
         background:
           repeating-linear-gradient(
-            to right,
+            to top,
             rgba(148, 163, 184, 0.14) 0,
             rgba(148, 163, 184, 0.14) 1px,
             transparent 1px,
@@ -442,6 +442,21 @@
           <p class="dashboard-kpi-compare" id="cmp-ventas-activas">= Sin cambio vs mes anterior</p>
         </article>
         <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Usuarios web con auth</p>
+          <p class="dashboard-kpi-value" id="kpi-auth-web-total">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-auth-web-total">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Clientes web con auth</p>
+          <p class="dashboard-kpi-value" id="kpi-auth-web-clientes">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-auth-web-clientes">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
+          <p class="dashboard-kpi-label">Vendedores web con auth</p>
+          <p class="dashboard-kpi-value" id="kpi-auth-web-vendedores">0</p>
+          <p class="dashboard-kpi-compare" id="cmp-auth-web-vendedores">= Sin cambio vs mes anterior</p>
+        </article>
+        <article class="dashboard-kpi">
           <p class="dashboard-kpi-label">Renovaciones del mes</p>
           <p class="dashboard-kpi-value" id="kpi-renov-count">0</p>
           <p class="dashboard-kpi-compare" id="cmp-renov-count">= Sin cambio vs mes anterior</p>
@@ -484,6 +499,33 @@
           <h3>Resumen del mes</h3>
           <p class="dashboard-mini-note" id="summary-note">-</p>
           <p class="dashboard-mini-note dashboard-extra-disclaimer hidden" id="extra-note"></p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Registros web con auth</h3>
+          <p class="dashboard-mini-note" id="auth-web-note">-</p>
+          <div id="chart-auth-web-mensual" class="dashboard-vertical-chart"></div>
+          <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-auth-web-mensual">
+            Sin registros con auth para graficar.
+          </p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Tráfico web por día de la semana</h3>
+          <p class="dashboard-mini-note" id="trafico-semana-note">-</p>
+          <div id="chart-trafico-semana" class="dashboard-vertical-chart"></div>
+          <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-trafico-semana">
+            Sin tráfico web para este periodo.
+          </p>
+        </section>
+
+        <section class="dashboard-block">
+          <h3>Tráfico web por hora del día</h3>
+          <p class="dashboard-mini-note" id="trafico-hora-note">-</p>
+          <div id="chart-trafico-hora" class="dashboard-vertical-chart"></div>
+          <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-trafico-hora">
+            Sin tráfico web para este periodo.
+          </p>
         </section>
 
         <section class="dashboard-block">
@@ -581,7 +623,7 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import { API_BASE, clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
 
       requireSession();
 
@@ -603,6 +645,9 @@
       const kpiMovs = document.querySelector("#kpi-movs");
       const kpiClientesActivos = document.querySelector("#kpi-clientes-activos");
       const kpiVentasActivas = document.querySelector("#kpi-ventas-activas");
+      const kpiAuthWebTotal = document.querySelector("#kpi-auth-web-total");
+      const kpiAuthWebClientes = document.querySelector("#kpi-auth-web-clientes");
+      const kpiAuthWebVendedores = document.querySelector("#kpi-auth-web-vendedores");
       const kpiRenovCount = document.querySelector("#kpi-renov-count");
       const kpiNuevasCount = document.querySelector("#kpi-nuevas-count");
       const kpiRenovIng = document.querySelector("#kpi-renov-ing");
@@ -617,6 +662,9 @@
       const cmpMovs = document.querySelector("#cmp-movs");
       const cmpClientesActivos = document.querySelector("#cmp-clientes-activos");
       const cmpVentasActivas = document.querySelector("#cmp-ventas-activas");
+      const cmpAuthWebTotal = document.querySelector("#cmp-auth-web-total");
+      const cmpAuthWebClientes = document.querySelector("#cmp-auth-web-clientes");
+      const cmpAuthWebVendedores = document.querySelector("#cmp-auth-web-vendedores");
       const cmpRenovCount = document.querySelector("#cmp-renov-count");
       const cmpNuevasCount = document.querySelector("#cmp-nuevas-count");
       const cmpRenovIng = document.querySelector("#cmp-renov-ing");
@@ -640,6 +688,15 @@
       const ventasTrendChart = document.querySelector("#ventas-trend-chart");
       const ventasTrendSummary = document.querySelector("#ventas-trend-summary");
       const ventasTrendEmpty = document.querySelector("#ventas-trend-empty");
+      const authWebNoteEl = document.querySelector("#auth-web-note");
+      const authWebMonthlyChart = document.querySelector("#chart-auth-web-mensual");
+      const emptyAuthWebMonthlyChart = document.querySelector("#empty-chart-auth-web-mensual");
+      const traficoSemanaNoteEl = document.querySelector("#trafico-semana-note");
+      const traficoSemanaChart = document.querySelector("#chart-trafico-semana");
+      const emptyTraficoSemanaChart = document.querySelector("#empty-chart-trafico-semana");
+      const traficoHoraNoteEl = document.querySelector("#trafico-hora-note");
+      const traficoHoraChart = document.querySelector("#chart-trafico-hora");
+      const emptyTraficoHoraChart = document.querySelector("#empty-chart-trafico-hora");
       let trendSelectedDay = null;
       let trendSelectedSeries = "current";
       let trendHoverDay = null;
@@ -1108,6 +1165,38 @@
         el.textContent = `= Sin cambio ${suffix}`;
       };
 
+      const getEmptyAnaliticaWeb = () => ({
+        auth: {
+          usuarios_auth_confirmados: 0,
+          usuarios_auth_confirmados_mes_anterior: 0,
+          clientes_auth_confirmados: 0,
+          clientes_auth_confirmados_mes_anterior: 0,
+          vendedores_auth_confirmados: 0,
+          vendedores_auth_confirmados_mes_anterior: 0,
+          registros_por_mes: [],
+        },
+        trafico: {
+          actual: { usuarios_unicos: 0, por_dia_semana: [], por_hora: [] },
+          anterior: { usuarios_unicos: 0, por_dia_semana: [], por_hora: [] },
+        },
+      });
+
+      const fetchAnaliticaWeb = async (monthVal) => {
+        try {
+          const url = new URL(`${API_BASE}/api/dashboard/analitica-web`);
+          if (monthVal) url.searchParams.set("month", monthVal);
+          const res = await fetch(url.toString(), { credentials: "include" });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data?.error || "No se pudo cargar la analítica web.");
+          }
+          return data;
+        } catch (err) {
+          console.error("dashboard analitica web error", err);
+          return getEmptyAnaliticaWeb();
+        }
+      };
+
       const fillKpis = (stats, prevStats, compareSuffix = "vs mes anterior") => {
         if (kpiIngresos) kpiIngresos.textContent = formatMoney(stats.ingresosTotal);
         if (kpiGastos) kpiGastos.textContent = formatMoney(stats.gastosTotal);
@@ -1185,6 +1274,33 @@
           compareSuffix,
         );
         setCompare(cmpGift, "money", stats.gastoGiftTotal, prevStats.gastoGiftTotal, compareSuffix);
+      };
+
+      const fillWebKpis = (analiticaWeb) => {
+        const authTotalActual = Number(analiticaWeb?.auth?.usuarios_auth_confirmados) || 0;
+        const authTotalPrev = Number(analiticaWeb?.auth?.usuarios_auth_confirmados_mes_anterior) || 0;
+        const authActual = Number(analiticaWeb?.auth?.clientes_auth_confirmados) || 0;
+        const authPrev = Number(analiticaWeb?.auth?.clientes_auth_confirmados_mes_anterior) || 0;
+        const vendedoresActual = Number(analiticaWeb?.auth?.vendedores_auth_confirmados) || 0;
+        const vendedoresPrev = Number(analiticaWeb?.auth?.vendedores_auth_confirmados_mes_anterior) || 0;
+        if (kpiAuthWebTotal) {
+          kpiAuthWebTotal.textContent = intFmt.format(authTotalActual);
+        }
+        if (kpiAuthWebClientes) {
+          kpiAuthWebClientes.textContent = intFmt.format(authActual);
+        }
+        if (kpiAuthWebVendedores) {
+          kpiAuthWebVendedores.textContent = intFmt.format(vendedoresActual);
+        }
+        setCompare(cmpAuthWebTotal, "int", authTotalActual, authTotalPrev, "vs mes anterior");
+        setCompare(cmpAuthWebClientes, "int", authActual, authPrev, "vs mes anterior");
+        setCompare(
+          cmpAuthWebVendedores,
+          "int",
+          vendedoresActual,
+          vendedoresPrev,
+          "vs mes anterior",
+        );
       };
 
       const renderPlatforms = (rows) => {
@@ -1355,6 +1471,108 @@
           `;
           platformMonthlyChart.appendChild(bar);
         });
+      };
+      const renderSimpleVerticalChart = (
+        container,
+        emptyEl,
+        rows,
+        {
+          valueKey = "cantidad",
+          color = "#2563eb",
+          titleBuilder = null,
+        } = {},
+      ) => {
+        if (!container) return;
+        container.innerHTML = "";
+        const normalizedRows = Array.isArray(rows) ? rows : [];
+        const hasPositive = normalizedRows.some((row) => Number(row?.[valueKey]) > 0);
+        if (!normalizedRows.length || !hasPositive) {
+          container.classList.add("hidden");
+          emptyEl?.classList.remove("hidden");
+          return;
+        }
+        container.classList.remove("hidden");
+        emptyEl?.classList.add("hidden");
+        const maxValue = Math.max(...normalizedRows.map((row) => Number(row?.[valueKey]) || 0), 1);
+        normalizedRows.forEach((row) => {
+          const value = Number(row?.[valueKey]) || 0;
+          const heightPct = Math.max(value > 0 ? 8 : 0, (value / maxValue) * 100);
+          const label = String(row?.label || "").trim() || "-";
+          const bar = document.createElement("div");
+          bar.className = "dashboard-vertical-bar";
+          const title =
+            typeof titleBuilder === "function"
+              ? titleBuilder(row)
+              : `${label}: ${intFmt.format(value)}`;
+          bar.innerHTML = `
+            <div class="dashboard-vertical-bar-value">${intFmt.format(value)}</div>
+            <div class="dashboard-vertical-bar-fill-wrap">
+              <div
+                class="dashboard-vertical-bar-fill"
+                style="height:${heightPct}%; background:${escapeHtml(color)};"
+                title="${escapeHtml(title)}"
+              ></div>
+            </div>
+            <div class="dashboard-vertical-bar-label">${escapeHtml(label)}</div>
+          `;
+          container.appendChild(bar);
+        });
+      };
+      const renderAnaliticaWeb = (analiticaWeb, monthVal) => {
+        const authRows = Array.isArray(analiticaWeb?.auth?.registros_por_mes)
+          ? analiticaWeb.auth.registros_por_mes.map((row) => ({
+              monthKey: String(row?.monthKey || "").trim(),
+              label: formatMonthLabel(row?.monthKey || ""),
+              cantidad: Number(row?.cantidad) || 0,
+            }))
+          : [];
+        renderSimpleVerticalChart(authWebMonthlyChart, emptyAuthWebMonthlyChart, authRows, {
+          color: "#0f766e",
+          titleBuilder: (row) => `${row.label}: ${intFmt.format(row.cantidad)} registros`,
+        });
+        if (authWebNoteEl) {
+          const totalUsuarios = Number(analiticaWeb?.auth?.usuarios_auth_confirmados) || 0;
+          const total = Number(analiticaWeb?.auth?.clientes_auth_confirmados) || 0;
+          const totalVendedores = Number(analiticaWeb?.auth?.vendedores_auth_confirmados) || 0;
+          const prev = Number(analiticaWeb?.auth?.clientes_auth_confirmados_mes_anterior) || 0;
+          const prevTotalUsuarios =
+            Number(analiticaWeb?.auth?.usuarios_auth_confirmados_mes_anterior) || 0;
+          const prevVendedores =
+            Number(analiticaWeb?.auth?.vendedores_auth_confirmados_mes_anterior) || 0;
+          authWebNoteEl.textContent =
+            `Registrados con auth confirmado hasta ${formatMonthLabel(monthVal)}: ${intFmt.format(totalUsuarios)} usuarios, ${intFmt.format(total)} clientes y ${intFmt.format(totalVendedores)} vendedores (mes anterior: ${intFmt.format(prevTotalUsuarios)}, ${intFmt.format(prev)} y ${intFmt.format(prevVendedores)}).`;
+        }
+
+        const traficoActual = analiticaWeb?.trafico?.actual || {};
+        const traficoPrev = analiticaWeb?.trafico?.anterior || {};
+        const semanaRows = Array.isArray(traficoActual?.por_dia_semana)
+          ? traficoActual.por_dia_semana.map((row) => ({
+              label: String(row?.label || "").trim() || "-",
+              cantidad: Number(row?.cantidad) || 0,
+            }))
+          : [];
+        const horaRows = Array.isArray(traficoActual?.por_hora)
+          ? traficoActual.por_hora.map((row) => ({
+              label: String(row?.label || "").trim() || "-",
+              cantidad: Number(row?.cantidad) || 0,
+            }))
+          : [];
+        renderSimpleVerticalChart(traficoSemanaChart, emptyTraficoSemanaChart, semanaRows, {
+          color: "#2563eb",
+          titleBuilder: (row) => `${row.label}: ${intFmt.format(row.cantidad)} usuarios únicos`,
+        });
+        renderSimpleVerticalChart(traficoHoraChart, emptyTraficoHoraChart, horaRows, {
+          color: "#7c3aed",
+          titleBuilder: (row) => `${row.label}: ${intFmt.format(row.cantidad)} usuarios únicos`,
+        });
+        if (traficoSemanaNoteEl) {
+          traficoSemanaNoteEl.textContent =
+            `Usuarios únicos con vistas en ${formatMonthLabel(monthVal)}: ${intFmt.format(Number(traficoActual?.usuarios_unicos) || 0)} (mes anterior: ${intFmt.format(Number(traficoPrev?.usuarios_unicos) || 0)}).`;
+        }
+        if (traficoHoraNoteEl) {
+          traficoHoraNoteEl.textContent =
+            `Distribución por hora basada en usuarios únicos con al menos una vista de página durante ${formatMonthLabel(monthVal)}.`;
+        }
       };
       const renderVentasTrendChart = (stats, prevStats, range) => {
         if (!ventasTrendChart) return;
@@ -1864,6 +2082,7 @@
         prevTrendStats,
         activeByPlatformRows,
         platformMonthlyData,
+        analiticaWeb,
         range,
         prevRange,
         compareSuffix,
@@ -1874,6 +2093,7 @@
         trendLastPrevStats = prevTrendStats || null;
         trendLastRange = range || null;
         fillKpis(stats, prevStats, compareSuffix);
+        fillWebKpis(analiticaWeb);
         renderPlatforms(stats.platformRows);
         renderProviders(stats.providerRows);
         renderActiveByPlatform(activeByPlatformRows || []);
@@ -1881,6 +2101,7 @@
         renderPlatformMonthlyChart(platformMonthlyData || [], selectedPlatformMonthlyKey);
         renderVentasTrendChart(trendStats, prevTrendStats, range);
         renderDaily(stats.dailyRows);
+        renderAnaliticaWeb(analiticaWeb, monthKeyFromDate(range?.start) || "");
 
         if (summaryNoteEl) {
           const cutNote = isProgressCut ? " · Corte parcial según fecha actual de Caracas" : "";
@@ -1958,6 +2179,7 @@
             currentActive,
             previousActive,
             monthlyPlatformData,
+            analiticaWebData,
           ] = await Promise.all([
             fetchMonthData(range),
             prevRange ? fetchMonthData(prevRange) : Promise.resolve({ historial: [], gifts: [] }),
@@ -1967,6 +2189,7 @@
             fetchActiveCounts(range.end),
             fetchActiveCounts(prevRange?.end || range.end),
             fetchPlatformSalesMonthly(),
+            fetchAnaliticaWeb(monthVal),
           ]);
           const [activeByPlatformRows] = await Promise.all([
             fetchActiveByPlatform(range.end),
@@ -1995,6 +2218,7 @@
             prevTrendStats,
             activeByPlatformRows,
             platformSalesMonthlyRows,
+            analiticaWebData || getEmptyAnaliticaWeb(),
             range,
             prevRange || range,
             compareCtx.compareSuffix,
