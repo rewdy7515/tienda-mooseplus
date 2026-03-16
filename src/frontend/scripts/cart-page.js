@@ -111,6 +111,7 @@ const updateUseSaldoButton = () => {
       ? "Aplicar saldo al total"
       : "No tienes saldo disponible";
   }
+  updatePayButtonLabel();
 };
 
 const setRefreshLoading = (btn, loading) => {
@@ -306,6 +307,22 @@ const placePayButton = () => {
   if (btnPay.parentElement !== payRow) {
     payRow.appendChild(btnPay);
   }
+  updatePayButtonLabel();
+};
+
+const shouldUseConfirmarPedidoLabel = () => {
+  if (!cartUseSaldo) return false;
+  const totalPedido = Number(cartMontoUsd);
+  const saldoDisponible = Number(userSaldo);
+  if (!Number.isFinite(totalPedido) || totalPedido <= 0) return false;
+  if (!Number.isFinite(saldoDisponible) || saldoDisponible <= 0) return false;
+  const saldoAplicado = round2(Math.min(saldoDisponible, totalPedido));
+  return Math.abs(saldoAplicado - round2(totalPedido)) < 0.01;
+};
+
+const updatePayButtonLabel = () => {
+  if (!btnPay) return;
+  btnPay.textContent = shouldUseConfirmarPedidoLabel() ? "Confirmar pedido" : "Ir a pagar";
 };
 
 const updateRefreshButtonState = () => {
@@ -530,6 +547,7 @@ const updateCartSummaryUI = () => {
   }
   const totalEl = itemsEl.querySelector('[data-summary="total"]');
   if (totalEl) totalEl.textContent = `$${Number(totalMostrar).toFixed(2)}`;
+  updatePayButtonLabel();
 };
 
 const updateCartRowUI = (idx) => {
