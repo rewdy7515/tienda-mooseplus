@@ -2,10 +2,22 @@ import { fetchCart, loadCatalog, ensureServerSession } from "./api.js";
 import { initCart } from "./cart.js";
 import { requireSession } from "./session.js";
 
+const shouldSkipCartWidgetInit = () => {
+  try {
+    const pathname = String(window.location.pathname || "").toLowerCase();
+    return pathname.endsWith("/entregar_servicios.html") || pathname === "/entregar_servicios.html";
+  } catch (_err) {
+    return false;
+  }
+};
+
 if (!window.__cartWidgetInit) {
   window.__cartWidgetInit = true;
   (async () => {
     try {
+      if (shouldSkipCartWidgetInit()) {
+        return;
+      }
       if (!requireSession()) {
         return;
       }
