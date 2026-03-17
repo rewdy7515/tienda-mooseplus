@@ -1,7 +1,6 @@
 import {
   fetchCart,
   loadCatalog,
-  fetchP2PRate,
   sendCartDelta,
   clearServerSession,
   loadCurrentUser,
@@ -41,7 +40,6 @@ let cartItems = [];
 let precios = [];
 let plataformas = [];
 let descuentos = [];
-let tasaBs = null;
 let currentUser = null;
 let userSaldo = 0;
 let cartMontoUsd = null;
@@ -981,10 +979,9 @@ async function init() {
     }
 
     const cachedCart = getCachedCart();
-    const [cartData, catalog, tasaResp] = await Promise.all([
+    const [cartData, catalog] = await Promise.all([
       fetchCart(),
       loadCatalog(),
-      fetchP2PRate(),
     ]);
     dbCartSnapshot = buildCartSnapshot(cartData?.items || []);
     dbUseSaldo = isTrue(cartData?.usa_saldo);
@@ -1004,7 +1001,6 @@ async function init() {
     cartDescuento = Number.isFinite(Number(cartData?.descuento))
       ? Number(cartData.descuento)
       : null;
-    tasaBs = Number.isFinite(tasaResp) ? tasaResp : null;
     setCachedCart(cartData);
     const esCliente =
       isTrue(sessionRoles?.acceso_cliente) ||

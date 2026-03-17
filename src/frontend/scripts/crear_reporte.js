@@ -63,6 +63,7 @@ let selectedCuentaId = null;
 let selectedPerfilId = null;
 let selectedPlataformaId = null;
 let cuentasPorPlataforma = new Map();
+let plataformasMeta = new Map();
 let tiposReporteCatalog = [];
 let correosSugerenciasVisibles = [];
 const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
@@ -95,6 +96,15 @@ const asInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+const getPlataformaMeta = (plataformaId = selectedPlataformaId) => {
+  const key = String(plataformaId || "").trim();
+  if (!key) return null;
+  return plataformasMeta.get(key) || null;
+};
+
+const isPlataformaPorAcceso = (plataformaId = selectedPlataformaId) =>
+  isTrue(getPlataformaMeta(plataformaId)?.por_acceso);
 
 async function isAutoReemplazoCuentaInactivaEnabled() {
   try {
@@ -664,7 +674,7 @@ async function cargarPlataformas() {
   const { data, error } = await supabase
     .from("ventas")
     .select(
-      "id_cuenta, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, id_plataforma, plataformas(nombre)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, plataformas(nombre))"
+      "id_cuenta, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, id_plataforma, plataformas(nombre, por_acceso)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, plataformas(nombre, por_acceso))"
     )
     .eq("id_usuario", userId);
   if (error) {
@@ -672,6 +682,7 @@ async function cargarPlataformas() {
     return;
   }
   const unique = new Map();
+  plataformasMeta = new Map();
   (data || []).forEach((row) => {
     const ctaMain = row.cuentas || null;
     const ctaMiembro = row.cuentas_miembro || null;
@@ -679,8 +690,14 @@ async function cargarPlataformas() {
     opciones.forEach((cta) => {
       const platId = cta?.id_plataforma;
       const nombre = cta?.plataformas?.nombre;
+      const porAcceso = cta?.plataformas?.por_acceso;
       if (platId && nombre && !unique.has(platId)) {
         unique.set(platId, nombre);
+      }
+      if (platId && !plataformasMeta.has(String(platId))) {
+        plataformasMeta.set(String(platId), {
+          por_acceso: porAcceso,
+        });
       }
     });
   });
@@ -796,7 +813,12 @@ async function aplicarPrefillQuery() {
     }
     renderCorreoSelectOptions(prefillPlataforma, { selectedCuentaId: prefillCuentaNum });
     await cargarPerfilesPorCorreo(prefillCuenta);
-    if (prefillPerfil && selectPerfil && selectPerfil.querySelector(`option[value="${prefillPerfil}"]`)) {
+    if (
+      !isPlataformaPorAcceso(prefillPlataforma) &&
+      prefillPerfil &&
+      selectPerfil &&
+      selectPerfil.querySelector(`option[value="${prefillPerfil}"]`)
+    ) {
       selectPerfil.value = prefillPerfil;
       selectedPerfilId = prefillPerfil;
       perfilWrapper?.classList.remove("hidden");
@@ -927,6 +949,10 @@ async function cargarPerfilesPorCorreo(cuentaId) {
   resetPerfilSelectionUI();
   const cuentaNum = Number(cuentaId);
   selectedCuentaId = Number.isFinite(cuentaNum) ? cuentaNum : cuentaId;
+
+  if (isPlataformaPorAcceso()) {
+    return;
+  }
 
   const userId = requireSession();
   // Busca ventas del usuario con ese id_cuenta e id_perfil asignado

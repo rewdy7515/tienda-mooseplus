@@ -1,4 +1,4 @@
-import { supabase, startSession, fetchCart } from "./api.js";
+import { supabase, startSession, fetchCart, fetchCurrentUserServer } from "./api.js";
 import { setSessionUserId, setCachedCart, setSessionRoles, attachLogoHome } from "./session.js";
 import { loadPaginaBranding } from "./branding.js";
 import { initAuthCaptcha } from "./auth-captcha.js";
@@ -350,25 +350,22 @@ async function handleLogin(event) {
       setStatus("No se pudo identificar tu usuario. Intenta de nuevo.", true);
       return;
     }
+    setSessionUserId(idUsuarioServer);
 
     // 3) Cargar usuario final desde tabla `usuarios`
-    const { data: user, error } = await traceLoginStep(
+    const user = await traceLoginStep(
       "usuarios.selectAfterLogin",
       () =>
-        supabase
-          .from("usuarios")
-          .select("id_usuario, acceso_cliente, permiso_admin, permiso_superadmin")
-          .eq("id_usuario", idUsuarioServer)
-          .maybeSingle(),
+        Promise.resolve(
+          serverSession?.user && typeof serverSession.user === "object"
+            ? serverSession.user
+            : fetchCurrentUserServer({ expectedId: idUsuarioServer }),
+        ),
       {
         slowMs: 10000,
         meta: { idUsuarioServer },
       },
     );
-
-    if (error) {
-      throw error;
-    }
 
     // Si no existe en tabla usuarios, avisar y cortar
     if (!user) {
@@ -377,7 +374,6 @@ async function handleLogin(event) {
     }
 
     // 4) Setear sesión local con id_usuario de la tabla
-    setSessionUserId(user.id_usuario);
     setSessionRoles({
       acceso_cliente: user.acceso_cliente,
       permiso_admin: user.permiso_admin,

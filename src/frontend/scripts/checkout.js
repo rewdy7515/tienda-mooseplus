@@ -290,13 +290,20 @@ const scheduleMontoRefresh = (totalUsdVal) => {
   montoRefreshTimer = setTimeout(async () => {
     try {
       const cartData = await fetchCart();
-      const refreshedRate = await refreshRateBs();
+      const refreshedRate = Number.isFinite(Number(cartData?.tasa_bs))
+        ? Number(cartData.tasa_bs)
+        : await refreshRateBs();
       if (Number.isFinite(refreshedRate)) {
         tasaBs = refreshedRate;
       } else {
         scheduleMontoRefresh(totalUsdVal);
         return;
       }
+      fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
+        ? Number(cartData.monto_bs)
+        : fixedMontoBs;
+      fixedFecha = cartData?.fecha ?? fixedFecha;
+      fixedHora = cartData?.hora ?? fixedHora;
       await syncCartMontosIfNeeded(
         cartData,
         totalUsdVal,
@@ -355,7 +362,14 @@ const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
     fixedHora = nowVz.hora;
     try {
       const resp = await updateCartMontos(totalUsdVal, tasaVal);
-      if (resp?.error) console.warn("checkout cart monto update error", resp.error);
+      if (resp?.error) {
+        console.warn("checkout cart monto update error", resp.error);
+      } else {
+        tasaBs = Number.isFinite(Number(resp?.tasa_bs)) ? Number(resp.tasa_bs) : tasaBs;
+        fixedMontoBs = Number.isFinite(Number(resp?.monto_bs)) ? Number(resp.monto_bs) : fixedMontoBs;
+        fixedFecha = resp?.fecha ?? fixedFecha;
+        fixedHora = resp?.hora ?? fixedHora;
+      }
     } catch (err) {
       console.warn("checkout cart monto update error", err);
     }
@@ -375,7 +389,14 @@ const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
     fixedHora = nowVz.hora;
     try {
       const resp = await updateCartMontos(totalUsdVal, tasaVal);
-      if (resp?.error) console.warn("checkout cart monto update error", resp.error);
+      if (resp?.error) {
+        console.warn("checkout cart monto update error", resp.error);
+      } else {
+        tasaBs = Number.isFinite(Number(resp?.tasa_bs)) ? Number(resp.tasa_bs) : tasaBs;
+        fixedMontoBs = Number.isFinite(Number(resp?.monto_bs)) ? Number(resp.monto_bs) : fixedMontoBs;
+        fixedFecha = resp?.fecha ?? fixedFecha;
+        fixedHora = resp?.hora ?? fixedHora;
+      }
     } catch (err) {
       console.warn("checkout cart monto update error", err);
     }
@@ -1097,6 +1118,9 @@ async function init() {
           : Number.isFinite(montoUsdRaw)
           ? Number(montoUsdRaw)
           : 0;
+      tasaBs = Number.isFinite(Number(cartData?.tasa_bs))
+        ? Number(cartData.tasa_bs)
+        : tasaBs;
       precioTierLabel = "";
       fixedMontoUsd = Number.isFinite(montoUsdRaw)
         ? Number(montoUsdRaw)

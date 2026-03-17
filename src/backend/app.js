@@ -4253,7 +4253,20 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
   const { accesoCliente, esMayorista, pickPrecio } = await getPrecioPicker(idUsuarioVentas);
   const isCliente = !esMayorista;
   const totalClienteParsed = parseOptionalCheckoutNumber(totalCliente);
-  const tasaBsParsed = parseOptionalCheckoutNumber(tasa_bs);
+  let tasaBsParsed = parseOptionalCheckoutNumber(tasa_bs);
+  if (!Number.isFinite(tasaBsParsed)) {
+    const { data: carritoRateRow, error: carritoRateErr } = await supabaseAdmin
+      .from("carritos")
+      .select("tasa_bs")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (carritoRateErr) throw carritoRateErr;
+    tasaBsParsed = parseOptionalCheckoutNumber(carritoRateRow?.tasa_bs);
+  }
+  if (!Number.isFinite(tasaBsParsed)) {
+    const rateSnapshot = await getOfficialP2PRateSnapshot();
+    tasaBsParsed = parseOptionalCheckoutNumber(rateSnapshot?.rate);
+  }
   const { data: items, error: itemErr } = await supabaseAdmin
     .from("carrito_items")
     .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
@@ -4262,7 +4275,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
 
   if (!items?.length) {
     const total = totalClienteParsed ?? 0;
-    const tasaBs = tasaBsParsed ?? 400;
+    const tasaBs = Number.isFinite(tasaBsParsed) ? tasaBsParsed : null;
     return {
       items: [],
       priceMap: {},
@@ -4336,7 +4349,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, 
     );
   }, 0);
   const total = totalClienteParsed ?? totalCalc;
-  const tasaBs = tasaBsParsed ?? 400;
+  const tasaBs = Number.isFinite(tasaBsParsed) ? tasaBsParsed : null;
 
   return {
     items: items || [],
@@ -6001,6 +6014,139 @@ const resolveMontoFinal = ({ montoUsd, usaSaldo, saldoUsuario }) => {
   return Math.max(0, roundMoney(montoBase - saldoAplicable));
 };
 
+const areCloseNumbers = (left, right, epsilon = 0.01) => {
+  const a = Number(left);
+  const b = Number(right);
+  if (!Number.isFinite(a) && !Number.isFinite(b)) return true;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) <= epsilon;
+};
+
+const parseCaracasDateTimeValue = (fechaStr, horaStr) => {
+  const fecha = String(fechaStr || "").trim().match(/\d{4}-\d{2}-\d{2}/)?.[0] || "";
+  const hora = String(horaStr || "").trim().match(/\d{2}:\d{2}:\d{2}/)?.[0] || "";
+  if (!fecha || !hora) return null;
+  const dt = new Date(`${fecha}T${hora}-04:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const isStoredRateWithinCurrentSlot = (fechaStr, horaStr, slotWindow = null) => {
+  if (!slotWindow?.start || !slotWindow?.end) return false;
+  const storedAt = parseCaracasDateTimeValue(fechaStr, horaStr);
+  if (!storedAt) return false;
+  return storedAt.getTime() >= slotWindow.start.getTime() && storedAt.getTime() < slotWindow.end.getTime();
+};
+
+const syncCarritoOfficialRate = async ({
+  carritoId,
+  idUsuario = null,
+  carritoInfo = null,
+  saldoUsuario = null,
+  force = false,
+} = {}) => {
+  const carritoNum = Number(carritoId);
+  if (!Number.isFinite(carritoNum) || carritoNum <= 0) {
+    return {
+      tasaBs: null,
+      montoBs: null,
+      montoFinal: null,
+      snapshot: null,
+      updated: false,
+    };
+  }
+
+  let currentCarrito = carritoInfo;
+  if (!currentCarrito) {
+    const { data, error } = await supabaseAdmin
+      .from("carritos")
+      .select("monto_usd, monto_bs, tasa_bs, usa_saldo, monto_final, fecha, hora")
+      .eq("id_carrito", carritoNum)
+      .maybeSingle();
+    if (error) throw error;
+    currentCarrito = data || null;
+  }
+  if (!currentCarrito) {
+    return {
+      tasaBs: null,
+      montoBs: null,
+      montoFinal: null,
+      snapshot: null,
+      updated: false,
+    };
+  }
+
+  let saldoResolved = toFiniteMoney(saldoUsuario);
+  if (isTrue(currentCarrito?.usa_saldo) && !Number.isFinite(saldoResolved)) {
+    const usuarioNum = Number(idUsuario);
+    if (Number.isFinite(usuarioNum) && usuarioNum > 0) {
+      const { data: usuarioRow, error: usuarioErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("saldo")
+        .eq("id_usuario", usuarioNum)
+        .maybeSingle();
+      if (usuarioErr) throw usuarioErr;
+      saldoResolved = toFiniteMoney(usuarioRow?.saldo);
+    }
+  }
+
+  const montoFinal = resolveMontoFinal({
+    montoUsd: currentCarrito?.monto_usd,
+    usaSaldo: currentCarrito?.usa_saldo,
+    saldoUsuario: saldoResolved,
+  });
+  const snapshot = await getOfficialP2PRateSnapshot();
+  const tasaBs = parseOptionalCheckoutNumber(snapshot?.rate);
+  const montoBs =
+    Number.isFinite(montoFinal) && Number.isFinite(tasaBs)
+      ? roundMoney(montoFinal * tasaBs)
+      : null;
+  const slotWindow = getCurrentTasaSlotWindow();
+  const storedTasaBs = parseOptionalCheckoutNumber(currentCarrito?.tasa_bs);
+  const storedMontoBs = parseOptionalCheckoutNumber(currentCarrito?.monto_bs);
+  const storedMontoFinal = parseOptionalCheckoutNumber(currentCarrito?.monto_final);
+  const slotCurrent = isStoredRateWithinCurrentSlot(
+    currentCarrito?.fecha,
+    currentCarrito?.hora,
+    slotWindow,
+  );
+
+  const needsUpdate =
+    force ||
+    !slotCurrent ||
+    !areCloseNumbers(storedTasaBs, tasaBs, 0.000001) ||
+    !areCloseNumbers(storedMontoBs, montoBs, 0.01) ||
+    !areCloseNumbers(storedMontoFinal, montoFinal, 0.01);
+  let fechaResolved = currentCarrito?.fecha ?? null;
+  let horaResolved = currentCarrito?.hora ?? null;
+
+  if (needsUpdate) {
+    const caracasNow = getCaracasDateTimeNow();
+    fechaResolved = caracasNow.fecha;
+    horaResolved = caracasNow.hora;
+    const { error: updateErr } = await supabaseAdmin
+      .from("carritos")
+      .update({
+        tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+        monto_bs: Number.isFinite(montoBs) ? montoBs : null,
+        monto_final: Number.isFinite(montoFinal) ? montoFinal : null,
+        fecha: fechaResolved,
+        hora: horaResolved,
+      })
+      .eq("id_carrito", carritoNum);
+    if (updateErr) throw updateErr;
+  }
+
+  return {
+    tasaBs: Number.isFinite(tasaBs) ? tasaBs : null,
+    montoBs: Number.isFinite(montoBs) ? montoBs : null,
+    montoFinal: Number.isFinite(montoFinal) ? montoFinal : null,
+    snapshot,
+    fecha: fechaResolved,
+    hora: horaResolved,
+    updated: needsUpdate,
+  };
+};
+
 const getOrCreateCarrito = async (idUsuario) => {
   const { data, error } = await runSupabaseQueryWithRetry(
     () =>
@@ -6030,11 +6176,16 @@ const getOrCreateCarrito = async (idUsuario) => {
   return inserted.id_carrito;
 };
 
-const BINANCE_CACHE_MS = 2 * 60 * 1000;
+const BINANCE_RAW_CACHE_MS = 2 * 60 * 1000;
+const TASA_OFICIAL_WINDOW_MS = 2 * 60 * 60 * 1000;
+const TASA_OFICIAL_SLOT_HOURS = 2;
 const TASA_CONFIG_CACHE_MS = 60 * 1000;
 const DEFAULT_TASA_MARKUP = 1.06;
-let cachedP2PRate = { value: null, ts: 0 };
+const TASA_OFICIAL_STORAGE_FIELDS =
+  "markup, tasa_binance, tasa_oficial, markup_aplicado, tasa_generada_en, vigente_desde, vigente_hasta";
+let cachedBinanceP2PRawRate = { value: null, ts: 0 };
 let cachedTasaMarkup = { value: DEFAULT_TASA_MARKUP, ts: 0 };
+let cachedOfficialP2PRate = { slotKey: "", snapshot: null, ts: 0 };
 
 const isMissingTasaConfigTableError = (err) => {
   const msg = String(err?.message || err?.details || err?.hint || "").toLowerCase();
@@ -6045,6 +6196,115 @@ const normalizeTasaMarkupValue = (value, fallback = DEFAULT_TASA_MARKUP) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5) return fallback;
   return parsed;
+};
+
+const roundRateValue = (value, precision = 6) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const factor = 10 ** precision;
+  return Math.round((parsed + Number.EPSILON) * factor) / factor;
+};
+
+const pad2 = (value) => String(value).padStart(2, "0");
+
+const buildCaracasDateTime = (dateStr, hour = 0, minute = 0, second = 0) => {
+  const normalizedDate = String(dateStr || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) return null;
+  const hh = Math.max(0, Math.min(23, Number(hour) || 0));
+  const mm = Math.max(0, Math.min(59, Number(minute) || 0));
+  const ss = Math.max(0, Math.min(59, Number(second) || 0));
+  const dt = new Date(`${normalizedDate}T${pad2(hh)}:${pad2(mm)}:${pad2(ss)}-04:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const getCaracasDateTimeNow = () => {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (type, fallback = "00") => parts.find((part) => part.type === type)?.value || fallback;
+  const rawHour = Number(get("hour", "0"));
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const fecha = `${get("year", "0000")}-${get("month")}-${get("day")}`;
+  const hora = `${pad2(hour)}:${get("minute")}:${get("second")}`;
+  const date = buildCaracasDateTime(fecha, hour, Number(get("minute", "0")), Number(get("second", "0")));
+  return { fecha, hora, date };
+};
+
+const getCurrentTasaSlotWindow = () => {
+  const { dateStr, hour, minute } = getCaracasClock();
+  const safeHour = Math.max(0, Number(hour) || 0);
+  const safeMinute = Math.max(0, Number(minute) || 0);
+  const slotStartHour = Math.floor((safeHour * 60 + safeMinute) / (TASA_OFICIAL_SLOT_HOURS * 60))
+    * TASA_OFICIAL_SLOT_HOURS;
+  const start = buildCaracasDateTime(dateStr, slotStartHour, 0, 0);
+  if (!start) return null;
+  const end = new Date(start.getTime() + TASA_OFICIAL_WINDOW_MS);
+  return {
+    key: `${dateStr}:${pad2(slotStartHour)}`,
+    start,
+    end,
+  };
+};
+
+const isMissingTasaOfficialStorageError = (err) => {
+  const msg = String(err?.message || err?.details || err?.hint || "").toLowerCase();
+  return (
+    err?.code === "42P01" ||
+    err?.code === "42703" ||
+    (msg.includes("tasa_config") && msg.includes("does not exist")) ||
+    msg.includes("tasa_oficial") ||
+    msg.includes("tasa_binance") ||
+    msg.includes("markup_aplicado") ||
+    msg.includes("vigente_desde") ||
+    msg.includes("vigente_hasta") ||
+    msg.includes("tasa_generada_en")
+  );
+};
+
+const buildOfficialRateSnapshot = (row = {}, fallbackMarkup = DEFAULT_TASA_MARKUP) => ({
+  rate: Number.isFinite(Number(row?.tasa_oficial)) ? roundMoney(Number(row.tasa_oficial)) : null,
+  rawRate: Number.isFinite(Number(row?.tasa_binance)) ? roundRateValue(Number(row.tasa_binance)) : null,
+  markup: normalizeTasaMarkupValue(row?.markup_aplicado ?? row?.markup, fallbackMarkup),
+  generatedAt: row?.tasa_generada_en || null,
+  validFrom: row?.vigente_desde || null,
+  validUntil: row?.vigente_hasta || null,
+  stale: Boolean(row?.stale),
+});
+
+const isOfficialRateSnapshotCurrent = (snapshot = {}, slotWindow = null) => {
+  if (!slotWindow || !Number.isFinite(Number(snapshot?.rate))) return false;
+  const validFrom = new Date(snapshot?.validFrom || "");
+  const validUntil = new Date(snapshot?.validUntil || "");
+  if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) return false;
+  return (
+    validFrom.getTime() === slotWindow.start.getTime() &&
+    validUntil.getTime() === slotWindow.end.getTime()
+  );
+};
+
+const getCachedOfficialRateSnapshot = (slotKey = "") => {
+  if (!slotKey) return null;
+  if (!cachedOfficialP2PRate?.snapshot) return null;
+  if (cachedOfficialP2PRate.slotKey !== slotKey) return null;
+  return cachedOfficialP2PRate.snapshot;
+};
+
+const setCachedOfficialRateSnapshot = (slotKey = "", snapshot = null) => {
+  cachedOfficialP2PRate = {
+    slotKey: slotKey || "",
+    snapshot: snapshot || null,
+    ts: Date.now(),
+  };
+  return snapshot;
 };
 
 const getGlobalTasaMarkup = async ({ force = false } = {}) => {
@@ -6102,10 +6362,10 @@ const setGlobalTasaMarkup = async ({ markup, updatedBy = null }) => {
   return saved;
 };
 
-const fetchP2PRate = async (asset = "USDT", fiat = "VES") => {
+const fetchBinanceP2PRawRate = async (asset = "USDT", fiat = "VES") => {
   const now = Date.now();
-  if (cachedP2PRate.value && now - cachedP2PRate.ts < BINANCE_CACHE_MS) {
-    return cachedP2PRate.value;
+  if (cachedBinanceP2PRawRate.value && now - cachedBinanceP2PRawRate.ts < BINANCE_RAW_CACHE_MS) {
+    return cachedBinanceP2PRawRate.value;
   }
 
   const body = {
@@ -6136,19 +6396,116 @@ const fetchP2PRate = async (asset = "USDT", fiat = "VES") => {
   const top = precios.slice(0, 5);
   const rate =
     top.reduce((acc, val) => acc + val, 0) / top.length;
-  cachedP2PRate = { value: rate, ts: now };
+  cachedBinanceP2PRawRate = { value: rate, ts: now };
   return rate;
+};
+
+const getOfficialP2PRateSnapshotFallback = async ({
+  force = false,
+  markup = DEFAULT_TASA_MARKUP,
+  slotWindow = null,
+} = {}) => {
+  const resolvedSlot = slotWindow || getCurrentTasaSlotWindow();
+  const slotKey = resolvedSlot?.key || "fallback";
+  const cached = !force ? getCachedOfficialRateSnapshot(slotKey) : null;
+  if (cached) return cached;
+
+  const rawRate = await fetchBinanceP2PRawRate();
+  const normalizedMarkup = normalizeTasaMarkupValue(markup, DEFAULT_TASA_MARKUP);
+  const snapshot = {
+    rate: roundMoney(rawRate * normalizedMarkup),
+    rawRate: roundRateValue(rawRate),
+    markup: normalizedMarkup,
+    generatedAt: new Date().toISOString(),
+    validFrom: resolvedSlot?.start?.toISOString() || null,
+    validUntil: resolvedSlot?.end?.toISOString() || null,
+    stale: false,
+  };
+  return setCachedOfficialRateSnapshot(slotKey, snapshot);
+};
+
+const getOfficialP2PRateSnapshot = async ({ force = false } = {}) => {
+  const slotWindow = getCurrentTasaSlotWindow();
+  const slotKey = slotWindow?.key || "official";
+  const cached = !force ? getCachedOfficialRateSnapshot(slotKey) : null;
+  if (cached) return cached;
+
+  const currentMarkup = await getGlobalTasaMarkup({ force });
+  let storedSnapshot = null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("tasa_config")
+      .select(TASA_OFICIAL_STORAGE_FIELDS)
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) throw error;
+    storedSnapshot = buildOfficialRateSnapshot(data || {}, currentMarkup);
+    if (!force && isOfficialRateSnapshotCurrent(storedSnapshot, slotWindow)) {
+      return setCachedOfficialRateSnapshot(slotKey, storedSnapshot);
+    }
+  } catch (err) {
+    if (isMissingTasaOfficialStorageError(err)) {
+      return getOfficialP2PRateSnapshotFallback({
+        force,
+        markup: currentMarkup,
+        slotWindow,
+      });
+    }
+    throw err;
+  }
+
+  try {
+    const rawRate = await fetchBinanceP2PRawRate();
+    const rate = roundMoney(rawRate * currentMarkup);
+    const payload = {
+      id: 1,
+      markup: currentMarkup,
+      markup_aplicado: currentMarkup,
+      tasa_binance: roundRateValue(rawRate),
+      tasa_oficial: rate,
+      tasa_generada_en: new Date().toISOString(),
+      vigente_desde: slotWindow?.start?.toISOString() || null,
+      vigente_hasta: slotWindow?.end?.toISOString() || null,
+    };
+    const { data: saved, error: saveErr } = await supabaseAdmin
+      .from("tasa_config")
+      .upsert(payload, { onConflict: "id" })
+      .select(TASA_OFICIAL_STORAGE_FIELDS)
+      .single();
+    if (saveErr) throw saveErr;
+    const snapshot = buildOfficialRateSnapshot(saved || payload, currentMarkup);
+    return setCachedOfficialRateSnapshot(slotKey, snapshot);
+  } catch (err) {
+    if (isMissingTasaOfficialStorageError(err)) {
+      return getOfficialP2PRateSnapshotFallback({
+        force,
+        markup: currentMarkup,
+        slotWindow,
+      });
+    }
+    if (storedSnapshot?.rate) {
+      return setCachedOfficialRateSnapshot(slotKey, {
+        ...storedSnapshot,
+        stale: true,
+      });
+    }
+    throw err;
+  }
 };
 
 // Tasa Binance P2P USDT/VES (promedio top ofertas BUY) con markup global aplicado.
 app.get("/api/p2p/rate", async (_req, res) => {
   try {
-    const [rawRate, markup] = await Promise.all([
-      fetchP2PRate(),
-      getGlobalTasaMarkup(),
-    ]);
-    const rate = roundMoney(rawRate * markup);
-    res.json({ rate, raw_rate: rawRate, markup });
+    const snapshot = await getOfficialP2PRateSnapshot();
+    res.json({
+      rate: snapshot?.rate ?? null,
+      raw_rate: snapshot?.rawRate ?? null,
+      markup: snapshot?.markup ?? null,
+      generated_at: snapshot?.generatedAt ?? null,
+      valid_from: snapshot?.validFrom ?? null,
+      valid_until: snapshot?.validUntil ?? null,
+      stale: snapshot?.stale === true,
+    });
   } catch (err) {
     console.error("[p2p rate] error", err);
     res.status(502).json({ error: "No se pudo obtener la tasa P2P" });
@@ -6409,6 +6766,12 @@ app.get("/api/cart", async (_req, res) => {
       usaSaldo: carritoInfo?.usa_saldo,
       saldoUsuario: usuarioInfo?.saldo,
     });
+    const carritoRateState = await syncCarritoOfficialRate({
+      carritoId,
+      idUsuario,
+      carritoInfo,
+      saldoUsuario: usuarioInfo?.saldo,
+    });
 
     const { data: items, error: itemErr } = await runSupabaseQueryWithRetry(
       () =>
@@ -6485,13 +6848,16 @@ app.get("/api/cart", async (_req, res) => {
       id_carrito: carritoId,
       items: enriched,
       monto_usd: carritoInfo?.monto_usd ?? null,
-      monto_bs: carritoInfo?.monto_bs ?? null,
-      tasa_bs: carritoInfo?.tasa_bs ?? null,
+      monto_bs:
+        carritoRateState?.montoBs ?? carritoInfo?.monto_bs ?? null,
+      tasa_bs:
+        carritoRateState?.tasaBs ?? carritoInfo?.tasa_bs ?? null,
       descuento: carritoInfo?.descuento ?? null,
-      monto_final: montoFinalResolved,
+      monto_final:
+        carritoRateState?.montoFinal ?? montoFinalResolved,
       usa_saldo: carritoInfo?.usa_saldo ?? null,
-      hora: carritoInfo?.hora ?? null,
-      fecha: carritoInfo?.fecha ?? null,
+      hora: carritoRateState?.hora ?? carritoInfo?.hora ?? null,
+      fecha: carritoRateState?.fecha ?? carritoInfo?.fecha ?? null,
     });
   } catch (err) {
     console.error("[cart:get] error", err);
@@ -6510,10 +6876,9 @@ app.post("/api/cart/montos", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
-    const tasa_bs = req.body?.tasa_bs === null ? null : Number(req.body?.tasa_bs);
     const { data: carritoInfo, error: carritoErr } = await supabaseAdmin
       .from("carritos")
-      .select("monto_usd, usa_saldo")
+      .select("monto_usd, monto_bs, tasa_bs, usa_saldo, monto_final, fecha, hora")
       .eq("id_carrito", carritoId)
       .maybeSingle();
     if (carritoErr) throw carritoErr;
@@ -6523,32 +6888,22 @@ app.post("/api/cart/montos", async (req, res) => {
       .eq("id_usuario", idUsuario)
       .maybeSingle();
     if (usuarioErr) throw usuarioErr;
-    const montoFinal = resolveMontoFinal({
-      montoUsd: carritoInfo?.monto_usd,
-      usaSaldo: carritoInfo?.usa_saldo,
+    const carritoRateState = await syncCarritoOfficialRate({
+      carritoId,
+      idUsuario,
+      carritoInfo,
       saldoUsuario: usuarioInfo?.saldo,
+      force: true,
     });
-    const caracasNow = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
-    );
-    const pad2 = (val) => String(val).padStart(2, "0");
-    const fecha = `${caracasNow.getFullYear()}-${pad2(caracasNow.getMonth() + 1)}-${pad2(
-      caracasNow.getDate()
-    )}`;
-    const hora = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
-      caracasNow.getSeconds()
-    )}`;
-    const { error: updErr } = await supabaseAdmin
-      .from("carritos")
-      .update({
-        tasa_bs: Number.isFinite(tasa_bs) ? tasa_bs : null,
-        monto_final: montoFinal,
-        hora,
-        fecha,
-      })
-      .eq("id_carrito", carritoId);
-    if (updErr) throw updErr;
-    return res.json({ ok: true, id_carrito: carritoId });
+    return res.json({
+      ok: true,
+      id_carrito: carritoId,
+      tasa_bs: carritoRateState?.tasaBs ?? null,
+      monto_bs: carritoRateState?.montoBs ?? null,
+      monto_final: carritoRateState?.montoFinal ?? null,
+      fecha: carritoRateState?.fecha ?? null,
+      hora: carritoRateState?.hora ?? null,
+    });
   } catch (err) {
     console.error("[cart:montos] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -6589,7 +6944,27 @@ app.post("/api/cart/flags", async (req, res) => {
       .update({ usa_saldo, monto_final: montoFinal })
       .eq("id_carrito", carritoId);
     if (updErr) throw updErr;
-    return res.json({ ok: true, id_carrito: carritoId, usa_saldo, monto_final: montoFinal });
+    const carritoRateState = await syncCarritoOfficialRate({
+      carritoId,
+      idUsuario,
+      carritoInfo: {
+        ...carritoInfo,
+        usa_saldo,
+        monto_final: montoFinal,
+      },
+      saldoUsuario: usuarioInfo?.saldo,
+      force: true,
+    });
+    return res.json({
+      ok: true,
+      id_carrito: carritoId,
+      usa_saldo,
+      monto_final: carritoRateState?.montoFinal ?? montoFinal,
+      monto_bs: carritoRateState?.montoBs ?? null,
+      tasa_bs: carritoRateState?.tasaBs ?? null,
+      fecha: carritoRateState?.fecha ?? null,
+      hora: carritoRateState?.hora ?? null,
+    });
   } catch (err) {
     console.error("[cart:flags] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -6607,12 +6982,16 @@ app.post("/api/checkout/draft", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "No hay carrito activo" });
     }
+    const carritoRateState = await syncCarritoOfficialRate({
+      carritoId,
+      idUsuario,
+    });
 
     const context = await buildCheckoutContext({
       idUsuarioVentas: idUsuario,
       carritoId,
       totalCliente: null,
-      tasa_bs: null,
+      tasa_bs: carritoRateState?.tasaBs ?? null,
     });
     const {
       items,
@@ -6649,8 +7028,8 @@ app.post("/api/checkout/draft", async (req, res) => {
     if (carritoErr) throw carritoErr;
 
     const total = parseOptionalCheckoutNumber(carritoData?.monto_usd);
-    const tasaBs = parseOptionalCheckoutNumber(carritoData?.tasa_bs);
-    const montoBsRaw = parseOptionalCheckoutNumber(carritoData?.monto_bs);
+    const tasaBs = parseOptionalCheckoutNumber(carritoRateState?.tasaBs ?? carritoData?.tasa_bs);
+    const montoBsRaw = parseOptionalCheckoutNumber(carritoRateState?.montoBs ?? carritoData?.monto_bs);
     const montoBs = Number.isFinite(montoBsRaw)
       ? montoBsRaw
       : Number.isFinite(total) && Number.isFinite(tasaBs)
@@ -6750,12 +7129,16 @@ app.post("/api/checkout/summary", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "No hay carrito activo" });
     }
+    const carritoRateState = await syncCarritoOfficialRate({
+      carritoId,
+      idUsuario: idUsuarioSesion,
+    });
 
     const context = await buildCheckoutContext({
       idUsuarioVentas,
       carritoId,
       totalCliente: null,
-      tasa_bs: null,
+      tasa_bs: carritoRateState?.tasaBs ?? null,
     });
     const {
       items,
@@ -6782,7 +7165,7 @@ app.post("/api/checkout/summary", async (req, res) => {
       .maybeSingle();
     if (carritoErr) throw carritoErr;
 
-    const tasaBs = parseOptionalCheckoutNumber(carritoData?.tasa_bs);
+    const tasaBs = parseOptionalCheckoutNumber(carritoRateState?.tasaBs ?? carritoData?.tasa_bs);
     const total = roundCheckoutMoney(parseOptionalCheckoutNumber(totalByAccess) ?? 0);
     const montoBs = Number.isFinite(tasaBs) ? roundCheckoutMoney(total * tasaBs) : null;
 
@@ -7687,6 +8070,21 @@ app.post("/api/signup-link/complete", async (req, res) => {
   }
 });
 
+const SESSION_USER_SELECT_FIELDS =
+  "id_usuario, nombre, apellido, correo, telefono, foto_perfil, fondo_perfil, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo, recordatorio_dias_antes, tutorial_completado";
+
+const fetchSessionUserProfile = async (idUsuario) => {
+  const normalizedId = toPositiveInt(idUsuario);
+  if (!normalizedId) return null;
+  const { data, error } = await supabaseAdmin
+    .from("usuarios")
+    .select(SESSION_USER_SELECT_FIELDS)
+    .eq("id_usuario", normalizedId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+};
+
 // Sesión: setea cookie httpOnly con el id de usuario autenticado en Supabase Auth.
 app.post("/api/session", async (req, res) => {
   const requestMeta = {
@@ -7700,6 +8098,7 @@ app.post("/api/session", async (req, res) => {
   try {
     const token = getBearerTokenFromRequest(req);
     const idUsuario = await resolveUsuarioFromAuthToken(token);
+    const user = await fetchSessionUserProfile(idUsuario);
     const cookieValue = signSessionCookieValue(idUsuario);
     if (!cookieValue) {
       console.warn("[session] invalid cookie configuration", {
@@ -7712,8 +8111,9 @@ app.post("/api/session", async (req, res) => {
     console.info("[session] success", {
       ...requestMeta,
       id_usuario: idUsuario,
+      has_user: Boolean(user),
     });
-    return res.json({ ok: true, id_usuario: idUsuario });
+    return res.json({ ok: true, id_usuario: idUsuario, user });
   } catch (err) {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       console.warn("[session] auth required", requestMeta);
@@ -7741,6 +8141,28 @@ app.post("/api/session", async (req, res) => {
       stack: err?.stack || "",
     });
     return res.status(500).json({ error: "No se pudo establecer la sesión." });
+  }
+});
+
+app.get("/api/session/user", async (req, res) => {
+  try {
+    const idUsuario = requireSessionUserId(req);
+    const user = await fetchSessionUserProfile(idUsuario);
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+    return res.json({ ok: true, user });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[session/user] error", {
+      name: err?.name || "",
+      code: err?.code || "",
+      message: err?.message || String(err || ""),
+      stack: err?.stack || "",
+    });
+    return res.status(500).json({ error: "No se pudo cargar el usuario de sesión." });
   }
 });
 
@@ -9518,6 +9940,10 @@ app.post("/api/checkout", async (req, res) => {
         : idUsuarioSesion;
     const carritoId = await getCurrentCarrito(idUsuarioSesion);
     if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
+    const carritoRateState = await syncCarritoOfficialRate({
+      carritoId,
+      idUsuario: idUsuarioSesion,
+    });
     console.log("[checkout] session", {
       idUsuarioSesion,
       sessionUserId,
@@ -9536,7 +9962,7 @@ app.post("/api/checkout", async (req, res) => {
       idUsuarioVentas,
       carritoId,
       totalCliente,
-      tasa_bs,
+      tasa_bs: carritoRateState?.tasaBs ?? tasa_bs,
     });
     const {
       items,

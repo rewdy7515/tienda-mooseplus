@@ -1812,6 +1812,45 @@ export async function ensureServerSession() {
   return result;
 }
 
+export async function fetchCurrentUserServer(options = {}) {
+  const startedAt = getDebugNow();
+  logApiDebug("fetchCurrentUserServer:start", {
+    expectedId: Number(options?.expectedId) || null,
+  });
+  try {
+    const res = await fetchWithRetry(
+      `${API_BASE}/api/session/user`,
+      {
+        credentials: "include",
+      },
+      { attempts: 2, delayMs: 300, label: "fetchCurrentUserServer" },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      warnApiDebug("fetchCurrentUserServer:response", {
+        ms: getElapsedMs(startedAt),
+        status: res.status,
+        body: trimText(text, 300),
+      });
+      return null;
+    }
+    const payload = await res.json().catch(() => ({}));
+    const user = payload?.user && typeof payload.user === "object" ? payload.user : null;
+    logApiDebug("fetchCurrentUserServer:done", {
+      ms: getElapsedMs(startedAt),
+      found: Boolean(user),
+      id_usuario: Number(user?.id_usuario) || null,
+    });
+    return user;
+  } catch (err) {
+    console.error(`${API_DEBUG_PREFIX} fetchCurrentUserServer:error`, {
+      ms: getElapsedMs(startedAt),
+      ...summarizeError(err),
+    });
+    return null;
+  }
+}
+
 export async function loadCurrentUser() {
   const startedAt = getDebugNow();
   const idUsuario = requireSession();
@@ -1822,35 +1861,8 @@ export async function loadCurrentUser() {
     warnApiDebug("loadCurrentUser:missingSession", {});
     return null;
   }
-  const { data, error } = await runSupabaseQueryWithRetry(
-    () =>
-      supabase
-        .from("usuarios")
-        .select(
-          "id_usuario, nombre, apellido, correo, telefono, foto_perfil, fondo_perfil, permiso_admin, permiso_superadmin, acceso_cliente, notificacion_inventario, saldo, recordatorio_dias_antes, tutorial_completado"
-        )
-        .eq("id_usuario", idUsuario)
-        .maybeSingle(),
-    { attempts: 3, label: "loadCurrentUser" },
-  );
-  if (error) {
-    if (isTransientNetworkError(error)) {
-      console.warn("loadCurrentUser transient error", error);
-      warnApiDebug("loadCurrentUser:transientError", {
-        ms: getElapsedMs(startedAt),
-        idUsuario,
-        ...summarizeError(error),
-      });
-      return null;
-    }
-    console.error("loadCurrentUser error", error);
-    console.error(`${API_DEBUG_PREFIX} loadCurrentUser:error`, {
-      ms: getElapsedMs(startedAt),
-      idUsuario,
-      ...summarizeError(error),
-    });
-    return null;
-  }
+  const data = await fetchCurrentUserServer({ expectedId: idUsuario });
+  if (!data) return null;
   logApiDebug("loadCurrentUser:done", {
     ms: getElapsedMs(startedAt),
     idUsuario,

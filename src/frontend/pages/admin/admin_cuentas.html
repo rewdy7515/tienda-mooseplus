@@ -1044,6 +1044,44 @@
         }
         return { label: "Activo", className: "activo" };
       };
+      const isVentaReemplazoBloqueado = ({ suspendido, fecha_corte } = {}) => {
+        if (isTrue(suspendido)) return true;
+        const fechaCorte = String(fecha_corte || "").trim();
+        if (!fechaCorte) return false;
+        return isOnOrBeforeToday(fechaCorte);
+      };
+      const getReemplazarButtonState = (venta = {}, extraDisabled = false) => {
+        const disabledByEstado = isVentaReemplazoBloqueado(venta);
+        const disabled = !!extraDisabled || disabledByEstado;
+        return {
+          className: disabled ? " btn-disabled" : "",
+          disabledAttr: disabled ? ' disabled aria-disabled="true"' : "",
+          titleAttr: disabledByEstado
+            ? ' title="No disponible para ventas vencidas o suspendidas."'
+            : "",
+        };
+      };
+      const syncReemplazarButtonState = (btn, venta = null, extraDisabled = false) => {
+        if (!btn) return;
+        const sourceVenta =
+          venta && typeof venta === "object"
+            ? venta
+            : {
+                suspendido: btn.dataset.suspendido,
+                fecha_corte: btn.dataset.fecha || "",
+              };
+        const disabledByEstado = isVentaReemplazoBloqueado(sourceVenta);
+        const disabled = !!extraDisabled || disabledByEstado;
+        btn.disabled = disabled;
+        btn.classList.toggle("btn-disabled", disabled);
+        if (disabled) btn.setAttribute("aria-disabled", "true");
+        else btn.removeAttribute("aria-disabled");
+        if (disabledByEstado) {
+          btn.title = "No disponible para ventas vencidas o suspendidas.";
+        } else {
+          btn.removeAttribute("title");
+        }
+      };
       const getEstadoCuenta = (cuenta) => {
         if (!cuenta) return { label: "-", className: "" };
         if (cuenta.inactiva === true) {
@@ -2153,6 +2191,13 @@
         const perfilCellFinal = finalShowPerfil ? `<td>${perfilLabel}</td>` : "";
         const cuentaRelacionadaId = ventaData.id_cuenta || "";
         const clienteNombreEncoded = encodeURIComponent(usuarioNombre || "");
+        const replState = getReemplazarButtonState(
+          {
+            fecha_corte,
+            suspendido: ventaData.suspendido === true,
+          },
+          !cuentaRelacionadaId,
+        );
         const rows = `
           <tr>
             <td>${usuarioNombre || "Vacío"}</td>
@@ -2162,14 +2207,16 @@
             <td class="action-cell">
               <button
                 type="button"
-                class="btn-primary btn-reemplazar-row"
+                class="btn-primary btn-reemplazar-row${replState.className}"
                 data-cuenta="${cuentaRelacionadaId}"
                 data-perfil="${id_perfil || ""}"
                 data-idventa="${id_venta || ""}"
+                data-fecha="${fecha_corte || ""}"
+                data-suspendido="${ventaData.suspendido === true ? "true" : "false"}"
                 data-venta-perfil="${venta_perfil ? "true" : "false"}"
                 data-venta-miembro="${venta_miembro ? "true" : "false"}"
                 data-cliente="${clienteNombreEncoded}"
-                ${cuentaRelacionadaId ? "" : "disabled"}
+                ${replState.disabledAttr}${replState.titleAttr}
               >Reemplazar</button>
               <button
                 type="button"
