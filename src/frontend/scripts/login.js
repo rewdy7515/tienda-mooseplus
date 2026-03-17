@@ -317,6 +317,8 @@ async function handleLogin(event) {
     logLoginDebug("auth.signInWithPassword:success", {
       authUserId: authData?.user?.id || "",
       emailConfirmed: Boolean(authData?.user?.email_confirmed_at),
+      hasSession: Boolean(authData?.session),
+      accessTokenLength: String(authData?.session?.access_token || "").length,
     });
 
     if (!authData?.user?.email_confirmed_at) {
@@ -329,8 +331,13 @@ async function handleLogin(event) {
     //    Aquí se vincula/crea el registro en `usuarios` si aún no existía.
     const serverSession = await traceLoginStep(
       "backend.startSession",
-      () => startSession(),
-      { slowMs: 12000 },
+      () =>
+        startSession({
+          accessToken: authData?.session?.access_token || "",
+          source: "login.signInWithPassword",
+          timeoutMs: 4000,
+        }),
+      { slowMs: 8000 },
     );
     if (serverSession?.error) {
       warnLoginDebug("backend.startSession:failed", serverSession);

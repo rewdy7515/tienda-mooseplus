@@ -63,6 +63,10 @@ const clientErrorLastSentByKey = new Map();
 const TRAFICO_WEB_SESSION_STORAGE_KEY = "trafico_web_sesion_v1";
 const TRAFICO_WEB_SESSION_IDLE_MS = 30 * 60 * 1000;
 const API_DEBUG_PREFIX = "[api-debug]";
+const AUTH_ACCESS_TOKEN_BRIDGE_KEY = "auth_access_token_bridge_v1";
+const AUTH_ACCESS_TOKEN_BRIDGE_TTL_MS = 5 * 60 * 1000;
+let cachedAuthAccessToken = "";
+let authStateBridgeInit = false;
 
 const trimText = (value, max = 2000) => {
   const txt = String(value ?? "");
@@ -89,6 +93,107 @@ const logApiDebug = (step, details = {}) => {
 
 const warnApiDebug = (step, details = {}) => {
   console.warn(`${API_DEBUG_PREFIX} ${step}`, details);
+};
+
+const normalizeAccessToken = (value = "") => {
+  const token = String(value || "").trim();
+  return token || "";
+};
+
+const writeAccessTokenBridge = (token = "", source = "") => {
+  const normalizedToken = normalizeAccessToken(token);
+  if (typeof window === "undefined") return;
+  try {
+    if (!normalizedToken) {
+      window.sessionStorage.removeItem(AUTH_ACCESS_TOKEN_BRIDGE_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(
+      AUTH_ACCESS_TOKEN_BRIDGE_KEY,
+      JSON.stringify({
+        token: normalizedToken,
+        source: trimText(source, 80),
+        stored_at: Date.now(),
+      }),
+    );
+  } catch (_err) {
+    // noop
+  }
+};
+
+const readAccessTokenBridge = () => {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = window.sessionStorage.getItem(AUTH_ACCESS_TOKEN_BRIDGE_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw);
+    const token = normalizeAccessToken(parsed?.token);
+    const storedAt = Number(parsed?.stored_at || 0);
+    if (!token || !storedAt || Date.now() - storedAt > AUTH_ACCESS_TOKEN_BRIDGE_TTL_MS) {
+      window.sessionStorage.removeItem(AUTH_ACCESS_TOKEN_BRIDGE_KEY);
+      return "";
+    }
+    return token;
+  } catch (_err) {
+    return "";
+  }
+};
+
+const rememberAccessToken = (token = "", source = "") => {
+  const normalizedToken = normalizeAccessToken(token);
+  if (!normalizedToken) return "";
+  cachedAuthAccessToken = normalizedToken;
+  writeAccessTokenBridge(normalizedToken, source);
+  logApiDebug("accessToken.remember", {
+    source: trimText(source, 80),
+    tokenLength: normalizedToken.length,
+  });
+  return normalizedToken;
+};
+
+const clearRememberedAccessToken = (source = "") => {
+  cachedAuthAccessToken = "";
+  writeAccessTokenBridge("", source);
+  logApiDebug("accessToken.clear", {
+    source: trimText(source, 80),
+  });
+};
+
+const getRememberedAccessToken = () => {
+  const cached = normalizeAccessToken(cachedAuthAccessToken);
+  if (cached) return cached;
+  const bridged = readAccessTokenBridge();
+  if (bridged) {
+    cachedAuthAccessToken = bridged;
+    logApiDebug("accessToken.restoreFromBridge", {
+      tokenLength: bridged.length,
+    });
+    return bridged;
+  }
+  return "";
+};
+
+const initAuthStateBridge = () => {
+  if (authStateBridgeInit) return;
+  authStateBridgeInit = true;
+  try {
+    supabase.auth.onAuthStateChange((event, session) => {
+      const accessToken = normalizeAccessToken(session?.access_token);
+      if (accessToken) {
+        rememberAccessToken(accessToken, `authState:${event}`);
+      } else {
+        clearRememberedAccessToken(`authState:${event}`);
+      }
+      logApiDebug("authStateChange", {
+        event,
+        hasSession: Boolean(session),
+        hasAccessToken: Boolean(accessToken),
+        authUserId: session?.user?.id || "",
+      });
+    });
+  } catch (err) {
+    console.error(`${API_DEBUG_PREFIX} authStateBridge:error`, summarizeError(err));
+  }
 };
 
 const safeSerialize = (value, maxLen = 4000) => {
@@ -379,6 +484,7 @@ const initClientErrorReporter = () => {
 
 initClientErrorReporter();
 initTrafficWebTracker();
+initAuthStateBridge();
 
 const isAuthFatalErrorMessage = (msg = "") => {
   const text = String(msg || "").toLowerCase();
@@ -1519,29 +1625,66 @@ export async function updateTestingFlag(value) {
 }
 
 export async function startSession(_idUsuario) {
+  const options =
+    _idUsuario && typeof _idUsuario === "object" && !Array.isArray(_idUsuario) ? _idUsuario : {};
   const startedAt = getDebugNow();
   logApiDebug("startSession:start", {
     apiBase: API_BASE,
     path: typeof window !== "undefined" ? window.location.pathname : "",
   });
   try {
-    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-    if (sessionErr) {
-      console.error("startSession getSession error", sessionErr);
-      console.error(`${API_DEBUG_PREFIX} startSession:getSession:error`, {
-        ms: getElapsedMs(startedAt),
-        ...summarizeError(sessionErr),
-      });
-      return { error: "No se pudo leer la sesión de auth" };
+    let accessToken = rememberAccessToken(
+      options?.accessToken || options?.access_token || "",
+      options?.source || "startSession:provided",
+    );
+
+    if (!accessToken) {
+      accessToken = getRememberedAccessToken();
+      if (accessToken) {
+        logApiDebug("startSession:usingRememberedAccessToken", {
+          ms: getElapsedMs(startedAt),
+          tokenLength: accessToken.length,
+        });
+      }
     }
-    const accessToken = String(sessionData?.session?.access_token || "").trim();
-    logApiDebug("startSession:getSession:done", {
-      ms: getElapsedMs(startedAt),
-      hasSession: Boolean(sessionData?.session),
-      hasAccessToken: Boolean(accessToken),
-      authUserId: sessionData?.session?.user?.id || "",
-      authEmail: trimText(sessionData?.session?.user?.email || "", 120),
-    });
+
+    if (!accessToken) {
+      const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 6000);
+      let timeoutId = null;
+      const sessionResult = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise((_, reject) => {
+          timeoutId = window.setTimeout(() => {
+            const timeoutErr = new Error("Supabase auth.getSession timeout");
+            timeoutErr.code = "AUTH_GET_SESSION_TIMEOUT";
+            reject(timeoutErr);
+          }, timeoutMs);
+        }),
+      ]).finally(() => {
+        if (timeoutId) window.clearTimeout(timeoutId);
+      });
+      const { data: sessionData, error: sessionErr } = sessionResult;
+      if (sessionErr) {
+        console.error("startSession getSession error", sessionErr);
+        console.error(`${API_DEBUG_PREFIX} startSession:getSession:error`, {
+          ms: getElapsedMs(startedAt),
+          ...summarizeError(sessionErr),
+        });
+        return { error: "No se pudo leer la sesión de auth" };
+      }
+      accessToken = rememberAccessToken(
+        sessionData?.session?.access_token || "",
+        "startSession:getSession",
+      );
+      logApiDebug("startSession:getSession:done", {
+        ms: getElapsedMs(startedAt),
+        hasSession: Boolean(sessionData?.session),
+        hasAccessToken: Boolean(accessToken),
+        authUserId: sessionData?.session?.user?.id || "",
+        authEmail: trimText(sessionData?.session?.user?.email || "", 120),
+      });
+    }
+
     if (!accessToken) {
       warnApiDebug("startSession:missingAccessToken", {
         ms: getElapsedMs(startedAt),
@@ -1598,6 +1741,7 @@ export async function startSession(_idUsuario) {
 
 export async function clearServerSession() {
   try {
+    clearRememberedAccessToken("clearServerSession");
     await fetch(`${API_BASE}/api/session`, {
       method: "DELETE",
       credentials: "include",

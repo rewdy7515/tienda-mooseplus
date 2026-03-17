@@ -2060,7 +2060,7 @@ async function init() {
     }
 
     try {
-      const { data, error } = await supabase.auth.getSession();
+      const { data, error } = await withTimeout(supabase.auth.getSession(), 5000);
       if (error) {
         console.warn("[auth] getSession error", error);
       }
