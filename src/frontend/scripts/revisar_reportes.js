@@ -1102,24 +1102,24 @@ async function reemplazarServicio(options = {}) {
     notify("Selecciona un reporte.");
     return { ok: false, reason: "no_row" };
   }
-  const currentRow = targetRow;
-  const closedReportId = Number(currentRow?.id_reporte);
+  const selectedRow = targetRow;
+  const closedReportId = Number(selectedRow?.id_reporte);
 
   try {
     const idUsuarioSesion = requireSession();
     await ensureServerSession();
 
     const plataformaId =
-      currentRow.id_plataforma ??
-      currentRow.cuentas?.id_plataforma ??
-      currentRow.plataformas?.id_plataforma;
-    const cuentaId = currentRow.id_cuenta;
-    const rowPerfil = currentRow.id_perfil
+      selectedRow.id_plataforma ??
+      selectedRow.cuentas?.id_plataforma ??
+      selectedRow.plataformas?.id_plataforma;
+    const cuentaId = selectedRow.id_cuenta;
+    const rowPerfil = selectedRow.id_perfil
       ? {
-          id_perfil: currentRow.id_perfil,
-          n_raw: currentRow.perfiles?.n_perfil ?? null,
-          perfil: currentRow.perfiles?.n_perfil ? `M${currentRow.perfiles.n_perfil}` : "",
-          hogar: currentRow.perfiles?.perfil_hogar === true,
+          id_perfil: selectedRow.id_perfil,
+          n_raw: selectedRow.perfiles?.n_perfil ?? null,
+          perfil: selectedRow.perfiles?.n_perfil ? `M${selectedRow.perfiles.n_perfil}` : "",
+          hogar: selectedRow.perfiles?.perfil_hogar === true,
           fecha_corte: null,
         }
       : null;
@@ -1136,8 +1136,8 @@ async function reemplazarServicio(options = {}) {
         .eq("id_cuenta", cuentaId)
         .order("id_venta", { ascending: false })
         .limit(1);
-      if (withUserFilter && currentRow?.id_usuario) {
-        query = query.eq("id_usuario", currentRow.id_usuario);
+      if (withUserFilter && selectedRow?.id_usuario) {
+        query = query.eq("id_usuario", selectedRow.id_usuario);
       }
       if (rowPerfil?.id_perfil) {
         query = query.eq("id_perfil", rowPerfil.id_perfil);
@@ -1161,7 +1161,9 @@ async function reemplazarServicio(options = {}) {
         .eq("id_cuenta", cuentaId)
         .order("id_venta", { ascending: false })
         .limit(1);
-      if (currentRow?.id_usuario) fallbackAny = fallbackAny.eq("id_usuario", currentRow.id_usuario);
+      if (selectedRow?.id_usuario) {
+        fallbackAny = fallbackAny.eq("id_usuario", selectedRow.id_usuario);
+      }
       const { data, error } = await fallbackAny;
       ventasData = data || [];
       ventaErr = error;
@@ -1183,8 +1185,8 @@ async function reemplazarServicio(options = {}) {
     const ventaInfo = ventasData[0];
     const ventaId = ventaInfo.id_venta;
 
-    const ventaPerfil = isTrue(currentRow.cuentas?.venta_perfil);
-    const ventaMiembro = isTrue(currentRow.cuentas?.venta_miembro);
+    const ventaPerfil = isTrue(selectedRow.cuentas?.venta_perfil);
+    const ventaMiembro = isTrue(selectedRow.cuentas?.venta_miembro);
     const perfilHogar = rowPerfil?.hogar === true;
 
     const loadReemplazosBloqueados = async () => {
@@ -1320,7 +1322,7 @@ async function reemplazarServicio(options = {}) {
     if (updVentaErr) throw updVentaErr;
 
     try {
-      await clearVentaReportadoFlag(currentRow, ventaInfo);
+      await clearVentaReportadoFlag(selectedRow, ventaInfo);
     } catch (reportadoErr) {
       console.error("limpiar ventas.reportado en reemplazo error", reportadoErr);
     }
@@ -1386,12 +1388,12 @@ async function reemplazarServicio(options = {}) {
         solucionado: true,
         solucionado_por: idUsuarioSesion,
       })
-      .eq("id_reporte", currentRow.id_reporte);
+      .eq("id_reporte", selectedRow.id_reporte);
     if (repErr) throw repErr;
 
     let diasSumados = 0;
     try {
-      const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow, ventaInfo);
+      const fechaRes = await applyDiasExtraToVentaFechaCorte(selectedRow, ventaInfo);
       diasSumados = Number(fechaRes?.dias || 0);
     } catch (diasErr) {
       console.error("sumar dias fecha_corte en reemplazo error", diasErr);
@@ -1403,13 +1405,13 @@ async function reemplazarServicio(options = {}) {
       });
       if (userIds.length) {
         await notifyReemplazoReporte({
-          row: { ...currentRow, id_usuario: userIds[0] },
+          row: { ...selectedRow, id_usuario: userIds[0] },
           plataforma: formatPlataformaReemplazo({
-            plataforma: currentRow.plataformas?.nombre || "",
+            plataforma: selectedRow.plataformas?.nombre || "",
             idPrecio: ventaInfo?.id_precio ?? null,
             perfilHogar: rowPerfil?.hogar === true,
           }),
-          correoViejo: currentRow.cuentas?.correo || "",
+          correoViejo: selectedRow.cuentas?.correo || "",
           correoNuevo: dataDestino.correo || "",
           dias: diasSumados,
         });
@@ -1419,7 +1421,7 @@ async function reemplazarServicio(options = {}) {
     }
 
     try {
-      await notifyReporteCerrado(currentRow);
+      await notifyReporteCerrado(selectedRow);
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }
