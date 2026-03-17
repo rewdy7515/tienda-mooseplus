@@ -319,7 +319,7 @@ const buildGiftCardSaleCopyText = ({
     );
   }
   lines.push(`(Región: ${regionTxt})`);
-  lines.push("_Pagina Web: mooseplus.com_");
+  lines.push("_Pagina Web: www.mooseplus.com_");
   lines.push("");
   lines.push(`\`${valueTxt}\``);
   lines.push(`PIN: ${pinTxt}`);
@@ -7730,7 +7730,7 @@ const truncateText = (value, max = 2000) => {
 
 app.post("/api/client-errors", jsonParser, async (req, res) => {
   try {
-    const sessionUserId = parseSessionUserId(req);
+    const sessionUserId = toPositiveInt(parseSessionUserId(req));
     const body = req?.body && typeof req.body === "object" ? req.body : {};
     const asInt = (value) => {
       const num = Number(value);
@@ -7740,7 +7740,7 @@ app.post("/api/client-errors", jsonParser, async (req, res) => {
       body?.metadata && typeof body.metadata === "object" ? body.metadata : null;
 
     const payload = {
-      id_usuario: Number.isFinite(Number(sessionUserId)) ? Number(sessionUserId) : null,
+      id_usuario: sessionUserId,
       level: truncateText(body?.level || "error", 20),
       kind: truncateText(body?.kind || "runtime", 50),
       message: truncateText(body?.message || "Frontend error", 4000),
@@ -7774,7 +7774,7 @@ app.post("/api/client-errors", jsonParser, async (req, res) => {
 
 app.post("/api/eventos-trafico-web", jsonParser, async (req, res) => {
   try {
-    const sessionUserId = parseSessionUserId(req);
+    const sessionUserId = toPositiveInt(parseSessionUserId(req));
     const body = req?.body && typeof req.body === "object" ? req.body : {};
     const allowedTiposEvento = new Set([
       "inicio_sesion_web",
@@ -7798,7 +7798,7 @@ app.post("/api/eventos-trafico-web", jsonParser, async (req, res) => {
     }
 
     const payload = {
-      id_usuario: Number.isFinite(Number(sessionUserId)) ? Number(sessionUserId) : null,
+      id_usuario: sessionUserId,
       tipo_evento: tipoEvento,
       id_sesion: idSesion,
       ruta,
