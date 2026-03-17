@@ -7689,31 +7689,57 @@ app.post("/api/signup-link/complete", async (req, res) => {
 
 // Sesión: setea cookie httpOnly con el id de usuario autenticado en Supabase Auth.
 app.post("/api/session", async (req, res) => {
+  const requestMeta = {
+    host: String(req.get("host") || "").slice(0, 160),
+    origin: String(req.get("origin") || "").slice(0, 200),
+    referer: String(req.get("referer") || "").slice(0, 240),
+    userAgent: String(req.get("user-agent") || "").slice(0, 240),
+    hasBearerToken: Boolean(getBearerTokenFromRequest(req)),
+  };
+  console.info("[session] start", requestMeta);
   try {
     const token = getBearerTokenFromRequest(req);
     const idUsuario = await resolveUsuarioFromAuthToken(token);
     const cookieValue = signSessionCookieValue(idUsuario);
     if (!cookieValue) {
+      console.warn("[session] invalid cookie configuration", {
+        ...requestMeta,
+        id_usuario: idUsuario,
+      });
       return res.status(500).json({ error: "Configuración de sesión inválida." });
     }
     res.cookie(SESSION_COOKIE_NAME, cookieValue, SESSION_COOKIE_OPTIONS);
+    console.info("[session] success", {
+      ...requestMeta,
+      id_usuario: idUsuario,
+    });
     return res.json({ ok: true, id_usuario: idUsuario });
   } catch (err) {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      console.warn("[session] auth required", requestMeta);
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
     if (err?.code === "USER_NOT_LINKED") {
+      console.warn("[session] user not linked", requestMeta);
       return res.status(403).json({ error: "Usuario de auth no vinculado en usuarios." });
     }
     if (err?.code === "USER_EMAIL_DUPLICATED") {
+      console.warn("[session] duplicated email", requestMeta);
       return res.status(409).json({ error: "Correo duplicado en usuarios. Contacta soporte." });
     }
     if (err?.code === "USER_AUTH_DUPLICATED") {
+      console.warn("[session] duplicated auth user", requestMeta);
       return res
         .status(409)
         .json({ error: "La cuenta auth está vinculada a más de un usuario. Contacta soporte." });
     }
-    console.error("[session] error", err);
+    console.error("[session] error", {
+      ...requestMeta,
+      name: err?.name || "",
+      code: err?.code || "",
+      message: err?.message || String(err || ""),
+      stack: err?.stack || "",
+    });
     return res.status(500).json({ error: "No se pudo establecer la sesión." });
   }
 });

@@ -62,10 +62,33 @@ let clientErrorReportsSent = 0;
 const clientErrorLastSentByKey = new Map();
 const TRAFICO_WEB_SESSION_STORAGE_KEY = "trafico_web_sesion_v1";
 const TRAFICO_WEB_SESSION_IDLE_MS = 30 * 60 * 1000;
+const API_DEBUG_PREFIX = "[api-debug]";
 
 const trimText = (value, max = 2000) => {
   const txt = String(value ?? "");
   return txt.length > max ? `${txt.slice(0, max)}…` : txt;
+};
+
+const getDebugNow = () =>
+  typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+
+const getElapsedMs = (startedAt) => Math.round(getDebugNow() - startedAt);
+
+const summarizeError = (err) => ({
+  name: err?.name || null,
+  message: err?.message || String(err || ""),
+  code: err?.code || null,
+  status: Number.isFinite(Number(err?.status)) ? Number(err.status) : null,
+});
+
+const logApiDebug = (step, details = {}) => {
+  console.info(`${API_DEBUG_PREFIX} ${step}`, details);
+};
+
+const warnApiDebug = (step, details = {}) => {
+  console.warn(`${API_DEBUG_PREFIX} ${step}`, details);
 };
 
 const safeSerialize = (value, maxLen = 4000) => {
@@ -580,6 +603,8 @@ const isTransientCartBackendError = (status, bodyText = "") => {
 };
 
 export async function loadCatalog() {
+  const startedAt = getDebugNow();
+  logApiDebug("loadCatalog:start", {});
   const normalizePlataformaRow = (row = {}) => {
     const idDescMesBase = row.id_descuento_mes ?? 1;
     const idDescCantidadBase = row.id_descuento_cantidad ?? 2;
@@ -632,13 +657,31 @@ export async function loadCatalog() {
   ]);
 
   if (errCat || errPlat || errPre || errDesc) {
+    console.error(`${API_DEBUG_PREFIX} loadCatalog:error`, {
+      ms: getElapsedMs(startedAt),
+      categorias: errCat?.message || null,
+      plataformas: errPlat?.message || null,
+      precios: errPre?.message || null,
+      descuentos: errDesc?.message || null,
+    });
     throw new Error(errCat?.message || errPlat?.message || errPre?.message || errDesc?.message);
   }
 
+  logApiDebug("loadCatalog:done", {
+    ms: getElapsedMs(startedAt),
+    categorias: Array.isArray(categorias) ? categorias.length : 0,
+    plataformas: Array.isArray(plataformas) ? plataformas.length : 0,
+    precios: Array.isArray(precios) ? precios.length : 0,
+    descuentos: Array.isArray(descuentos) ? descuentos.length : 0,
+  });
   return { categorias, plataformas, precios, descuentos };
 }
 
 export async function fetchHomeBanners(options = {}) {
+  const startedAt = getDebugNow();
+  logApiDebug("fetchHomeBanners:start", {
+    includeInactive: options?.includeInactive === true,
+  });
   try {
     const url = new URL(`${API_BASE}/api/home-banners`);
     if (options?.includeInactive === true) {
@@ -649,15 +692,29 @@ export async function fetchHomeBanners(options = {}) {
     });
     if (!res.ok) {
       const text = await res.text();
+      warnApiDebug("fetchHomeBanners:response", {
+        ms: getElapsedMs(startedAt),
+        status: res.status,
+        body: trimText(text, 300),
+      });
       return { error: text || "No se pudieron cargar banners", items: [] };
     }
     const data = await res.json().catch(() => ({}));
+    logApiDebug("fetchHomeBanners:done", {
+      ms: getElapsedMs(startedAt),
+      items: Array.isArray(data?.items) ? data.items.length : 0,
+      tableMissing: data?.tableMissing === true,
+    });
     return {
       items: Array.isArray(data?.items) ? data.items : [],
       tableMissing: data?.tableMissing === true,
     };
   } catch (err) {
     console.error("No se pudieron cargar los banners del home:", err);
+    console.error(`${API_DEBUG_PREFIX} fetchHomeBanners:error`, {
+      ms: getElapsedMs(startedAt),
+      ...summarizeError(err),
+    });
     return { error: err.message, items: [] };
   }
 }
@@ -866,6 +923,10 @@ export async function createCart() {
 }
 
 export async function fetchCart() {
+  const startedAt = getDebugNow();
+  logApiDebug("fetchCart:start", {
+    sessionUserId: requireSession(),
+  });
   await ensureServerSession();
   try {
     const id = requireSession();
@@ -902,13 +963,26 @@ export async function fetchCart() {
 
     if (!res || !res.ok || !data) {
       console.error("cart get response", res?.status, String(lastErrText || "").slice(0, 800));
+      warnApiDebug("fetchCart:response", {
+        ms: getElapsedMs(startedAt),
+        status: res?.status || 0,
+        body: trimText(lastErrText, 300),
+      });
       return { items: [] };
     }
 
+    logApiDebug("fetchCart:done", {
+      ms: getElapsedMs(startedAt),
+      items: Array.isArray(data?.items) ? data.items.length : 0,
+    });
     return data;
   } catch (err) {
     console.error("No se pudo obtener el carrito:", err, {
       apiBase: API_BASE,
+    });
+    console.error(`${API_DEBUG_PREFIX} fetchCart:error`, {
+      ms: getElapsedMs(startedAt),
+      ...summarizeError(err),
     });
     return { items: [] };
   }
@@ -1335,6 +1409,8 @@ export async function fetchPendingReminderNoPhoneClients() {
 }
 
 export async function fetchP2PRate() {
+  const startedAt = getDebugNow();
+  logApiDebug("fetchP2PRate:start", {});
   try {
     const res = await fetch(`${API_BASE}/api/p2p/rate`, {
       credentials: "include",
@@ -1342,12 +1418,25 @@ export async function fetchP2PRate() {
     if (!res.ok) {
       const text = await res.text();
       console.error("p2p rate response", res.status, text);
+      warnApiDebug("fetchP2PRate:response", {
+        ms: getElapsedMs(startedAt),
+        status: res.status,
+        body: trimText(text, 300),
+      });
       return null;
     }
     const data = await res.json();
+    logApiDebug("fetchP2PRate:done", {
+      ms: getElapsedMs(startedAt),
+      rate: Number.isFinite(data?.rate) ? data.rate : null,
+    });
     return Number.isFinite(data?.rate) ? data.rate : null;
   } catch (err) {
     console.error("No se pudo obtener la tasa P2P:", err);
+    console.error(`${API_DEBUG_PREFIX} fetchP2PRate:error`, {
+      ms: getElapsedMs(startedAt),
+      ...summarizeError(err),
+    });
     return null;
   }
 }
@@ -1430,17 +1519,37 @@ export async function updateTestingFlag(value) {
 }
 
 export async function startSession(_idUsuario) {
+  const startedAt = getDebugNow();
+  logApiDebug("startSession:start", {
+    apiBase: API_BASE,
+    path: typeof window !== "undefined" ? window.location.pathname : "",
+  });
   try {
     const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
     if (sessionErr) {
       console.error("startSession getSession error", sessionErr);
+      console.error(`${API_DEBUG_PREFIX} startSession:getSession:error`, {
+        ms: getElapsedMs(startedAt),
+        ...summarizeError(sessionErr),
+      });
       return { error: "No se pudo leer la sesión de auth" };
     }
     const accessToken = String(sessionData?.session?.access_token || "").trim();
+    logApiDebug("startSession:getSession:done", {
+      ms: getElapsedMs(startedAt),
+      hasSession: Boolean(sessionData?.session),
+      hasAccessToken: Boolean(accessToken),
+      authUserId: sessionData?.session?.user?.id || "",
+      authEmail: trimText(sessionData?.session?.user?.email || "", 120),
+    });
     if (!accessToken) {
+      warnApiDebug("startSession:missingAccessToken", {
+        ms: getElapsedMs(startedAt),
+      });
       return { error: "Sesión de auth no disponible" };
     }
 
+    const requestStartedAt = getDebugNow();
     const res = await fetchWithRetry(
       `${API_BASE}/api/session`,
       {
@@ -1457,11 +1566,27 @@ export async function startSession(_idUsuario) {
     if (!res.ok) {
       const text = await res.text();
       console.error("startSession response", res.status, text);
+      warnApiDebug("startSession:response", {
+        ms: getElapsedMs(requestStartedAt),
+        totalMs: getElapsedMs(startedAt),
+        status: res.status,
+        body: trimText(text, 300),
+      });
       return { error: text || "No se pudo establecer la sesión" };
     }
-    return res.json();
+    const payload = await res.json();
+    logApiDebug("startSession:done", {
+      ms: getElapsedMs(startedAt),
+      requestMs: getElapsedMs(requestStartedAt),
+      id_usuario: Number(payload?.id_usuario) || null,
+    });
+    return payload;
   } catch (err) {
     console.error("startSession error", err);
+    console.error(`${API_DEBUG_PREFIX} startSession:error`, {
+      ms: getElapsedMs(startedAt),
+      ...summarizeError(err),
+    });
     return {
       error: getFriendlyApiErrorMessage(
         err,
@@ -1512,7 +1637,11 @@ async function handleFatalAuthSessionError(reason = "") {
 }
 
 export async function ensureServerSession() {
+  const startedAt = getDebugNow();
   const id = requireSession();
+  logApiDebug("ensureServerSession:start", {
+    sessionUserId: id,
+  });
   if (!id) {
     if (!isAnonymousAllowedPath()) {
       await handleFatalAuthSessionError("session_user_id ausente");
@@ -1521,17 +1650,32 @@ export async function ensureServerSession() {
   }
   const result = await startSession(id);
   if (result?.error) {
+    warnApiDebug("ensureServerSession:failed", {
+      ms: getElapsedMs(startedAt),
+      sessionUserId: id,
+      error: result.error,
+    });
     if (isAuthFatalErrorMessage(result.error)) {
       await handleFatalAuthSessionError(result.error);
     }
     throw new Error(result.error);
   }
+  logApiDebug("ensureServerSession:done", {
+    ms: getElapsedMs(startedAt),
+    sessionUserId: id,
+    id_usuario: Number(result?.id_usuario) || null,
+  });
   return result;
 }
 
 export async function loadCurrentUser() {
+  const startedAt = getDebugNow();
   const idUsuario = requireSession();
+  logApiDebug("loadCurrentUser:start", {
+    idUsuario,
+  });
   if (!idUsuario) {
+    warnApiDebug("loadCurrentUser:missingSession", {});
     return null;
   }
   const { data, error } = await runSupabaseQueryWithRetry(
@@ -1548,11 +1692,26 @@ export async function loadCurrentUser() {
   if (error) {
     if (isTransientNetworkError(error)) {
       console.warn("loadCurrentUser transient error", error);
+      warnApiDebug("loadCurrentUser:transientError", {
+        ms: getElapsedMs(startedAt),
+        idUsuario,
+        ...summarizeError(error),
+      });
       return null;
     }
     console.error("loadCurrentUser error", error);
+    console.error(`${API_DEBUG_PREFIX} loadCurrentUser:error`, {
+      ms: getElapsedMs(startedAt),
+      idUsuario,
+      ...summarizeError(error),
+    });
     return null;
   }
+  logApiDebug("loadCurrentUser:done", {
+    ms: getElapsedMs(startedAt),
+    idUsuario,
+    found: Boolean(data),
+  });
   return data;
 }
 

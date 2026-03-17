@@ -16,6 +16,66 @@ const submitBtn = document.querySelector(".auth-submit");
 let forgotLoading = false;
 let captchaController = null;
 let captchaInitPromise = null;
+const LOGIN_DEBUG_PREFIX = "[login-debug]";
+
+const getDebugNow = () =>
+  typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+
+const getElapsedMs = (startedAt) => Math.round(getDebugNow() - startedAt);
+
+const maskEmail = (value = "") => {
+  const email = String(value || "").trim().toLowerCase();
+  const [localPart, domain] = email.split("@");
+  if (!localPart || !domain) return email;
+  if (localPart.length <= 2) return `${localPart[0] || "*"}***@${domain}`;
+  return `${localPart.slice(0, 2)}***@${domain}`;
+};
+
+const summarizeError = (err) => ({
+  name: err?.name || "",
+  status: Number(err?.status) || 0,
+  code: err?.code || "",
+  message: err?.message || "",
+});
+
+const logLoginDebug = (step, details = {}) => {
+  console.info(`${LOGIN_DEBUG_PREFIX} ${step}`, details);
+};
+
+const warnLoginDebug = (step, details = {}) => {
+  console.warn(`${LOGIN_DEBUG_PREFIX} ${step}`, details);
+};
+
+const traceLoginStep = async (step, work, { slowMs = 8000, meta = null } = {}) => {
+  const startedAt = getDebugNow();
+  const details = typeof meta === "function" ? meta() : meta || {};
+  logLoginDebug(`${step}:start`, details);
+  const slowTimer = window.setTimeout(() => {
+    warnLoginDebug(`${step}:slow`, {
+      ms: getElapsedMs(startedAt),
+      ...details,
+    });
+  }, slowMs);
+  try {
+    const result = await work();
+    logLoginDebug(`${step}:done`, {
+      ms: getElapsedMs(startedAt),
+      ...details,
+    });
+    return result;
+  } catch (err) {
+    console.error(`${LOGIN_DEBUG_PREFIX} ${step}:error`, {
+      ms: getElapsedMs(startedAt),
+      ...details,
+      ...summarizeError(err),
+    });
+    throw err;
+  } finally {
+    window.clearTimeout(slowTimer);
+  }
+};
 
 function isCaptchaAuthFailure(errorLike) {
   const message = String(errorLike?.message || "").toLowerCase();
@@ -85,12 +145,14 @@ function setStatus(message, isError = false) {
   statusMessage.textContent = message;
   statusMessage.classList.toggle("is-error", isError);
   statusMessage.classList.toggle("is-success", !isError);
+  logLoginDebug("ui.status", { message, isError });
 }
 
 function setLoading(isLoading) {
   if (!submitBtn) return;
   submitBtn.disabled = isLoading;
   submitBtn.textContent = isLoading ? "Iniciando..." : "Iniciar sesión";
+  logLoginDebug("ui.loading", { isLoading });
 }
 
 function maybeShowEmailConfirmedMessage() {
@@ -161,6 +223,12 @@ async function handleLogin(event) {
 
   const email = emailInput.value.trim().toLowerCase();
   const password = passwordInput.value;
+  logLoginDebug("submit", {
+    email: maskEmail(email),
+    host: window.location.host,
+    path: window.location.pathname,
+    online: navigator.onLine,
+  });
 
   if (!email || !emailInput.checkValidity()) {
     emailError.textContent = "Ingresa un correo válido.";
@@ -174,19 +242,35 @@ async function handleLogin(event) {
     return;
   }
 
-  const captchaToken = await requireCaptchaToken();
+  const captchaToken = await traceLoginStep(
+    "captcha.ensureToken",
+    () => requireCaptchaToken(),
+    { slowMs: 10000 },
+  );
   if (!captchaToken) return;
+  logLoginDebug("captcha.ensureToken:ready", {
+    tokenLength: String(captchaToken || "").length,
+  });
 
   setLoading(true);
 
   try {
     // 1) Iniciar sesión en Supabase Auth
-    const { data: authData, error: authErr } = await signInWithPasswordSafe({
-      email,
-      password,
-      captchaToken,
-    });
+    const { data: authData, error: authErr } = await traceLoginStep(
+      "auth.signInWithPassword",
+      () =>
+        signInWithPasswordSafe({
+          email,
+          password,
+          captchaToken,
+        }),
+      {
+        slowMs: 12000,
+        meta: { email: maskEmail(email) },
+      },
+    );
     if (authErr) {
+      warnLoginDebug("auth.signInWithPassword:failed", summarizeError(authErr));
       const msg = (authErr.message || "").toLowerCase();
       if (isAuthSchemaFailure(authErr)) {
         setStatus("Error temporal del servidor de autenticación. Intenta de nuevo en unos minutos.", true);
@@ -230,6 +314,10 @@ async function handleLogin(event) {
       setStatus("No se pudo iniciar sesión. Intenta de nuevo.", true);
       return;
     }
+    logLoginDebug("auth.signInWithPassword:success", {
+      authUserId: authData?.user?.id || "",
+      emailConfirmed: Boolean(authData?.user?.email_confirmed_at),
+    });
 
     if (!authData?.user?.email_confirmed_at) {
       await supabase.auth.signOut().catch(() => {});
@@ -239,23 +327,37 @@ async function handleLogin(event) {
 
     // 2) Establecer cookie de sesión backend con token real de Supabase Auth.
     //    Aquí se vincula/crea el registro en `usuarios` si aún no existía.
-    const serverSession = await startSession();
+    const serverSession = await traceLoginStep(
+      "backend.startSession",
+      () => startSession(),
+      { slowMs: 12000 },
+    );
     if (serverSession?.error) {
+      warnLoginDebug("backend.startSession:failed", serverSession);
       setStatus("No se pudo establecer la sesión segura. Intenta de nuevo.", true);
       return;
     }
     const idUsuarioServer = Number(serverSession?.id_usuario) || 0;
+    logLoginDebug("backend.startSession:success", { idUsuarioServer });
     if (!idUsuarioServer) {
       setStatus("No se pudo identificar tu usuario. Intenta de nuevo.", true);
       return;
     }
 
     // 3) Cargar usuario final desde tabla `usuarios`
-    const { data: user, error } = await supabase
-      .from("usuarios")
-      .select("id_usuario, acceso_cliente, permiso_admin, permiso_superadmin")
-      .eq("id_usuario", idUsuarioServer)
-      .maybeSingle();
+    const { data: user, error } = await traceLoginStep(
+      "usuarios.selectAfterLogin",
+      () =>
+        supabase
+          .from("usuarios")
+          .select("id_usuario, acceso_cliente, permiso_admin, permiso_superadmin")
+          .eq("id_usuario", idUsuarioServer)
+          .maybeSingle(),
+      {
+        slowMs: 10000,
+        meta: { idUsuarioServer },
+      },
+    );
 
     if (error) {
       throw error;
@@ -274,13 +376,30 @@ async function handleLogin(event) {
       permiso_admin: user.permiso_admin,
       permiso_superadmin: user.permiso_superadmin,
     });
+    logLoginDebug("usuarios.selectAfterLogin:success", {
+      id_usuario: user.id_usuario,
+      acceso_cliente: user.acceso_cliente,
+      permiso_admin: user.permiso_admin,
+      permiso_superadmin: user.permiso_superadmin,
+    });
 
     try {
-      const cartData = await fetchCart();
+      const cartData = await traceLoginStep(
+        "cart.prefetch",
+        () => fetchCart(),
+        {
+          slowMs: 10000,
+          meta: { idUsuarioServer },
+        },
+      );
       setCachedCart(cartData);
+      logLoginDebug("cart.prefetch:success", {
+        items: Array.isArray(cartData?.items) ? cartData.items.length : null,
+      });
     } catch (err) {
       console.warn("No se pudo precargar carrito", err);
     }
+    logLoginDebug("redirect:index", { delayMs: 400 });
     setTimeout(() => {
       window.location.href = "index.html";
     }, 400);
@@ -314,12 +433,28 @@ function initSignupRedirect() {
 }
 
 function init() {
+  logLoginDebug("init", {
+    host: window.location.host,
+    path: window.location.pathname,
+    online: navigator.onLine,
+    existingLocalSessionId: window.localStorage.getItem("sessionUserId") || "",
+  });
   maybeShowEmailConfirmedMessage();
-  captchaInitPromise = initAuthCaptcha({
-    containerId: "login-captcha",
-    errorId: "login-captcha-error",
-  }).then((ctrl) => {
+  captchaInitPromise = traceLoginStep(
+    "captcha.init",
+    () =>
+      initAuthCaptcha({
+        containerId: "login-captcha",
+        errorId: "login-captcha-error",
+      }),
+    { slowMs: 12000 },
+  ).then((ctrl) => {
     captchaController = ctrl;
+    logLoginDebug("captcha.init:ready", {
+      enabled: Boolean(ctrl?.enabled),
+      ready: Boolean(ctrl?.ready),
+      provider: ctrl?.provider || "",
+    });
     return ctrl;
   });
   initToggle();
