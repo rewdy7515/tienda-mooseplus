@@ -170,8 +170,23 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .madre-link-input-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        width: min(420px, 100%);
+      }
       .madre-link .input-inline {
         max-width: 420px;
+      }
+      .madre-link-status {
+        display: none;
+        color: #16a34a;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .madre-link-status.show {
+        display: block;
       }
       .madre-save-btn {
         background: #111827;
@@ -661,14 +676,17 @@
                     <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
                     <div class="madre-link">
                       <strong>Link:</strong>
-                      <input
-                        type="text"
-                        class="input-inline"
-                        value="${madre.link_codigo || ""}"
-                        data-madre="${madre.id_cuenta || ""}"
-                        data-field="link_codigo"
-                        data-original="${madre.link_codigo || ""}"
-                      />
+                      <div class="madre-link-input-wrap">
+                        <input
+                          type="text"
+                          class="input-inline"
+                          value="${madre.link_codigo || ""}"
+                          data-madre="${madre.id_cuenta || ""}"
+                          data-field="link_codigo"
+                          data-original="${madre.link_codigo || ""}"
+                        />
+                        <span class="madre-link-status" aria-live="polite"></span>
+                      </div>
                       <button class="madre-save-btn" data-madre="${madre.id_cuenta || ""}" aria-label="Guardar link">
                         💾
                       </button>
@@ -873,7 +891,12 @@
           if (!madreId) return;
           const wrapper = madreSaveBtn.closest(".madre-link");
           const input = wrapper?.querySelector('input[data-field="link_codigo"]');
+          const statusEl = wrapper?.querySelector(".madre-link-status");
           if (!input) return;
+          if (statusEl) {
+            statusEl.textContent = "";
+            statusEl.classList.remove("show");
+          }
           madreSaveBtn.disabled = true;
           try {
             const { error } = await supabase
@@ -882,8 +905,16 @@
               .eq("id_cuenta", madreId);
             if (error) throw error;
             input.dataset.original = input.value || "";
+            if (statusEl) {
+              statusEl.textContent = "Link guardado";
+              statusEl.classList.add("show");
+            }
           } catch (err) {
             console.error("madre link save error", err);
+            if (statusEl) {
+              statusEl.textContent = "";
+              statusEl.classList.remove("show");
+            }
             alert("No se pudo guardar el link.");
           } finally {
             madreSaveBtn.disabled = false;
@@ -1183,6 +1214,17 @@
       });
 
       tablasEl?.addEventListener("input", (e) => {
+        const linkInput = e.target.closest('input[data-field="link_codigo"]');
+        if (linkInput) {
+          const wrapper = linkInput.closest(".madre-link");
+          const statusEl = wrapper?.querySelector(".madre-link-status");
+          if (statusEl) {
+            statusEl.textContent = "";
+            statusEl.classList.remove("show");
+          }
+          return;
+        }
+
         const pinInput = e.target.closest('input[data-field="pin"]');
         if (!pinInput) return;
         const max = Number(pinInput.dataset.maxpin);
