@@ -6,46 +6,153 @@
     <title>Crear reporte</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
+      :root {
+        --report-bg-top: #f5f8fc;
+        --report-bg-bottom: #eef3f9;
+        --report-surface: #ffffff;
+        --report-surface-soft: #f8fbff;
+        --report-surface-muted: #f4f7fb;
+        --report-border: #dbe4ef;
+        --report-border-strong: #c6d3e1;
+        --report-text: #0f172a;
+        --report-text-soft: #475569;
+        --report-text-muted: #64748b;
+        --report-accent: #0f766e;
+        --report-accent-strong: #0f172a;
+        --report-focus: rgba(15, 118, 110, 0.18);
+        --report-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+        --report-shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.06);
+      }
       .report-create-page {
         max-width: 980px;
         margin: 0 auto;
-        padding: 16px 14px 28px;
+        padding: 24px 14px 38px;
+        position: relative;
+        isolation: isolate;
+      }
+      .report-create-page::before,
+      .report-create-page::after {
+        content: "";
+        position: absolute;
+        inset: auto;
+        border-radius: 999px;
+        pointer-events: none;
+        z-index: -1;
+        filter: blur(6px);
+      }
+      .report-create-page::before {
+        top: 18px;
+        right: 12px;
+        width: 220px;
+        height: 220px;
+        background: radial-gradient(circle, rgba(15, 118, 110, 0.12) 0%, rgba(15, 118, 110, 0) 72%);
+      }
+      .report-create-page::after {
+        left: -18px;
+        bottom: 10px;
+        width: 180px;
+        height: 180px;
+        background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0) 74%);
       }
       .report-create-header {
-        margin-bottom: 14px;
-        padding: 14px;
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        background: linear-gradient(135deg, #f7fafc 0%, #eef3f8 100%);
+        margin-bottom: 16px;
+        padding: 22px 22px 20px;
+        border: 1px solid var(--report-border);
+        border-radius: 24px;
+        background:
+          linear-gradient(135deg, rgba(15, 118, 110, 0.08) 0%, rgba(255, 255, 255, 0) 38%),
+          linear-gradient(160deg, var(--report-bg-top) 0%, var(--report-bg-bottom) 100%);
+        box-shadow: var(--report-shadow);
+        overflow: hidden;
+        position: relative;
+      }
+      .report-create-header::after {
+        content: "";
+        position: absolute;
+        top: -56px;
+        right: -30px;
+        width: 180px;
+        height: 180px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(15, 23, 42, 0.12) 0%, rgba(15, 23, 42, 0) 72%);
+      }
+      .report-create-eyebrow {
+        margin: 0 0 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 11px;
+        border-radius: 999px;
+        border: 1px solid rgba(15, 118, 110, 0.16);
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--report-accent);
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
       .report-create-header h2 {
         margin: 0;
-        font-size: 1.35rem;
-        color: #0f172a;
+        font-size: clamp(1.55rem, 2.8vw, 2rem);
+        color: var(--report-text);
+        line-height: 1.1;
       }
-      .report-create-header p {
-        margin: 8px 0 0;
-        color: #334155;
-        font-size: 0.94rem;
+      .report-create-intro {
+        margin: 10px 0 0;
+        max-width: 60ch;
+        color: var(--report-text-soft);
+        font-size: 0.98rem;
+        line-height: 1.58;
       }
       #reporte-form {
         display: grid;
-        gap: 12px;
+        gap: 16px;
+        width: 100%;
+        max-width: 100%;
+      }
+      #reporte-form > * {
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .report-step {
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        padding: 14px;
-        background: #ffffff;
+        border: 1px solid var(--report-border);
+        border-radius: 24px;
+        padding: 20px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 251, 255, 0.95) 100%);
+        box-shadow: var(--report-shadow-soft);
+        position: relative;
+        overflow: hidden;
+      }
+      .report-step::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 18px;
+        bottom: 18px;
+        width: 4px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, var(--report-accent) 0%, #38bdf8 100%);
       }
       .report-step-body {
         display: grid;
-        gap: 12px;
+        gap: 14px;
       }
       .report-grid-2 {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 12px;
+        gap: 14px;
+        align-items: start;
+      }
+      #motivo-imagen-grid {
+        grid-template-columns: 1fr;
+      }
+      .report-grid-2.is-single {
+        grid-template-columns: 1fr;
+      }
+      .report-step-body > *,
+      .report-grid-2 > * {
+        min-width: 0;
       }
       .field-group {
         display: grid;
@@ -56,67 +163,121 @@
         grid-column: 1 / -1;
       }
       .field-card {
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 10px;
-        background: #fafafa;
+        border: 1px solid var(--report-border);
+        border-radius: 20px;
+        padding: 15px;
+        background:
+          linear-gradient(180deg, #ffffff 0%, var(--report-surface-soft) 100%);
+        min-width: 0;
+        box-sizing: border-box;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        transition:
+          border-color 0.18s ease,
+          box-shadow 0.18s ease,
+          transform 0.18s ease;
+      }
+      .field-card:focus-within {
+        border-color: rgba(15, 118, 110, 0.42);
+        box-shadow:
+          0 0 0 4px var(--report-focus),
+          inset 0 1px 0 rgba(255, 255, 255, 0.85);
       }
       .report-step-title {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        margin: 0 0 10px;
-        font-size: 1rem;
-        color: #0f172a;
+        gap: 10px;
+        margin: 0;
+        font-size: 1.08rem;
+        color: var(--report-text);
+        line-height: 1.2;
       }
       .report-step-index {
-        min-width: 24px;
-        height: 24px;
+        min-width: 30px;
+        height: 30px;
         border-radius: 999px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: #111827;
+        background: linear-gradient(135deg, var(--report-accent-strong) 0%, #1e293b 100%);
         color: #fff;
-        font-size: 0.78rem;
+        font-size: 0.82rem;
         font-weight: 800;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.2);
+      }
+      .report-step-copy {
+        margin: 8px 0 0;
+        color: var(--report-text-soft);
+        font-size: 0.95rem;
+        line-height: 1.55;
+        max-width: 62ch;
       }
       .report-help {
         margin: 6px 0 0;
-        color: #475569;
+        color: var(--report-text-soft);
         font-size: 0.9rem;
+        line-height: 1.48;
       }
       #reporte-form .form-label {
-        margin-top: 6px;
+        margin-top: 2px;
+        color: var(--report-text);
+        font-size: 0.93rem;
+        font-weight: 800;
       }
+      #reporte-form .form-input,
       #reporte-form .form-select {
-        border: 1px solid #d1d5db;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        min-height: 48px;
+        padding: 12px 14px;
+        border: 1px solid var(--report-border-strong);
+        border-radius: 14px;
         background: #fff;
-        color: #111827;
+        color: var(--report-text);
+        font-size: 0.95rem;
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03);
+        transition:
+          border-color 0.18s ease,
+          box-shadow 0.18s ease,
+          background-color 0.18s ease;
       }
+      #reporte-form .form-input::placeholder {
+        color: #94a3b8;
+      }
+      #reporte-form textarea.form-input {
+        resize: vertical;
+        min-height: 120px;
+        line-height: 1.5;
+      }
+      #reporte-form .form-input:focus,
       #reporte-form .form-select:focus {
-        border-color: #111;
-        box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.14);
+        outline: none;
+        border-color: var(--report-accent);
+        box-shadow: 0 0 0 4px var(--report-focus);
       }
       #reporte-form .form-select:disabled {
-        background: #f3f4f6;
-        color: #6b7280;
+        background: #f5f7fb;
+        color: var(--report-text-muted);
         cursor: not-allowed;
       }
       #reporte-form .form-select option {
         background: #fff;
-        color: #111827;
+        color: var(--report-text);
       }
       #reporte-form .form-select option[value=""] {
-        color: #6b7280;
+        color: var(--report-text-muted);
       }
       .correo-sugerencias {
-        margin-top: 6px;
-        border: 1px solid #d1d5db;
-        border-radius: 10px;
+        margin-top: 8px;
+        border: 1px solid var(--report-border-strong);
+        border-radius: 16px;
         background: #fff;
-        max-height: 220px;
+        max-height: 240px;
         overflow-y: auto;
+        width: 100%;
+        box-sizing: border-box;
+        box-shadow: 0 18px 35px rgba(15, 23, 42, 0.12);
       }
       .correo-sugerencias.hidden {
         display: none;
@@ -124,66 +285,183 @@
       .correo-sugerencia-item {
         width: 100%;
         border: 0;
-        border-bottom: 1px solid #eef2f7;
+        border-bottom: 1px solid #ecf1f7;
         background: #fff;
         text-align: left;
-        padding: 9px 10px;
+        padding: 12px 14px;
         cursor: pointer;
+        color: var(--report-text);
+        font-size: 0.94rem;
+        transition:
+          background-color 0.16s ease,
+          color 0.16s ease;
       }
       .correo-sugerencia-item:last-child {
         border-bottom: 0;
       }
       .correo-sugerencia-item:hover,
       .correo-sugerencia-item:focus-visible {
-        background: #f3f4f6;
-      }
-      #select-correo-cuenta.form-select {
-        margin-top: 8px;
+        background: #f0fdf9;
+        color: var(--report-accent-strong);
       }
       .correo-aviso {
-        margin-top: 6px;
+        margin-top: 8px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid #fecaca;
+        background: #fff5f5;
         color: #b91c1c;
-        font-size: 0.92rem;
-        font-weight: 600;
+        font-size: 0.91rem;
+        font-weight: 700;
+        line-height: 1.45;
       }
       .correo-aviso.hidden {
         display: none;
       }
+      #reporte-form .dropzone {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        min-height: 188px;
+        display: grid;
+        align-content: center;
+        justify-items: center;
+        gap: 12px;
+        border: 1.5px dashed #b6c2d0;
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 247, 251, 0.95) 100%);
+        text-align: center;
+      }
+      #reporte-form .dropzone p {
+        margin: 0;
+        color: var(--report-text-soft);
+        font-size: 0.95rem;
+        font-weight: 700;
+      }
+      #reporte-form .btn-outline {
+        border: 1px solid var(--report-border-strong);
+        background: #ffffff;
+        color: var(--report-text);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+        transition:
+          transform 0.16s ease,
+          box-shadow 0.16s ease,
+          border-color 0.16s ease,
+          background-color 0.16s ease;
+      }
+      #reporte-form .btn-outline:hover {
+        transform: translateY(-1px);
+        border-color: rgba(15, 118, 110, 0.3);
+        background: #f8fbff;
+        box-shadow: 0 12px 22px rgba(15, 23, 42, 0.08);
+      }
+      #reporte-form .file-preview {
+        margin-top: 2px;
+        max-width: min(280px, 100%);
+        max-height: 240px;
+        width: 100%;
+      }
+      #reporte-form .file-preview img {
+        width: 100%;
+        max-width: 100%;
+        object-fit: contain;
+        border-radius: 14px;
+        border: 1px solid var(--report-border);
+        box-shadow: 0 14px 26px rgba(15, 23, 42, 0.1);
+      }
+      #reporte-form .checkbox-line .form-label {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0;
+        line-height: 1.35;
+        font-weight: 700;
+      }
+      #reporte-form .checkbox-line input {
+        margin: 2px 0 0;
+        flex: 0 0 auto;
+        accent-color: var(--report-accent);
+      }
       .report-actions {
         display: flex;
         justify-content: flex-end;
-        margin-top: 4px;
+        margin-top: 2px;
       }
       .report-actions .btn-primary {
-        min-width: 200px;
+        min-width: 220px;
+        min-height: 48px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #0f172a 0%, #1f2937 100%);
+        box-shadow: 0 16px 28px rgba(15, 23, 42, 0.16);
+        transition:
+          transform 0.16s ease,
+          box-shadow 0.16s ease,
+          opacity 0.16s ease;
+      }
+      .report-actions .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 30px rgba(15, 23, 42, 0.2);
       }
       @media (max-width: 720px) {
         .report-grid-2 {
           grid-template-columns: 1fr;
         }
         .report-create-page {
-          padding: 12px 10px 20px;
+          padding: 14px 10px 24px;
+          max-width: 100%;
         }
         .report-create-header {
-          padding: 12px;
-          border-radius: 12px;
+          padding: 16px 15px;
+          border-radius: 20px;
         }
         .report-create-header h2 {
-          font-size: 1.18rem;
+          font-size: 1.32rem;
+        }
+        .report-create-intro {
+          font-size: 0.93rem;
+          line-height: 1.5;
         }
         .report-step {
-          padding: 10px;
-          border-radius: 12px;
+          padding: 16px 14px;
+          border-radius: 20px;
         }
         .field-card {
-          padding: 8px;
-          border-radius: 10px;
+          padding: 12px;
+          border-radius: 18px;
+        }
+        #reporte-form .form-input,
+        #reporte-form .form-select,
+        #reporte-form .dropzone {
+          max-width: 100%;
+          width: 100%;
+        }
+        .correo-sugerencias {
+          max-height: 180px;
         }
         .report-step-title {
-          font-size: 0.96rem;
+          font-size: 1rem;
+          line-height: 1.25;
+        }
+        .report-step-index {
+          min-width: 28px;
+          height: 28px;
+          font-size: 0.8rem;
+        }
+        .report-step-copy {
+          font-size: 0.91rem;
+          line-height: 1.48;
         }
         .report-help {
           font-size: 0.87rem;
+        }
+        #reporte-form .dropzone {
+          min-height: 168px;
+          padding: 18px 14px;
+        }
+        #reporte-form .checkbox-line .form-label {
+          font-size: 0.93rem;
         }
         .report-actions .btn-primary {
           width: 100%;
@@ -198,8 +476,12 @@
 
     <main class="categorias-dinamicas report-create-page">
       <section class="report-create-header">
+        <p class="report-create-eyebrow">Centro de soporte</p>
         <h2>Crear reporte</h2>
-        <p>Completa los pasos en orden para reportar tu servicio rápidamente.</p>
+        <p class="report-create-intro">
+          Completa los pasos en orden para identificar tu servicio, explicar el problema
+          y enviar evidencia clara al equipo de revisión.
+        </p>
       </section>
       <form id="reporte-form" class="reporte-form">
         <section class="report-step">
@@ -207,6 +489,10 @@
             <span class="report-step-index">1</span>
             Seleccionar plataforma
           </h3>
+          <p class="report-step-copy">
+            Elige la plataforma exacta del servicio que quieres reportar para mostrar
+            solo las cuentas relacionadas.
+          </p>
           <div class="report-step-body">
             <div class="field-group">
               <label class="form-label" for="select-plataforma">Plataforma <span class="required">*</span></label>
@@ -223,7 +509,11 @@
             <span class="report-step-index">2</span>
             Seleccionar correo y perfil
           </h3>
-          <div class="report-step-body report-grid-2">
+          <p class="report-step-copy">
+            Busca el correo de la cuenta afectada. Si tu servicio tiene perfiles,
+            aquí también podrás elegir el perfil correcto.
+          </p>
+          <div id="correo-perfil-grid" class="report-step-body report-grid-2 is-single">
             <div class="field-group field-card">
               <label class="form-label" for="input-correo-cuenta">Correo de la cuenta <span class="required">*</span></label>
               <input
@@ -234,9 +524,7 @@
                 autocomplete="off"
                 required
               />
-              <select id="select-correo-cuenta" class="form-select" disabled>
-                <option value="">Selecciona un correo disponible</option>
-              </select>
+              <p class="report-help">Escribe parte del correo y selecciona la coincidencia correcta.</p>
               <p id="correo-aviso" class="correo-aviso hidden"></p>
               <div id="correo-sugerencias" class="correo-sugerencias hidden"></div>
             </div>
@@ -246,6 +534,7 @@
               <select id="select-perfil" class="form-select">
                 <option value="">Seleccione perfil</option>
               </select>
+              <p class="report-help">Selecciona el perfil afectado si la cuenta tiene más de uno.</p>
             </div>
           </div>
         </section>
@@ -255,12 +544,17 @@
             <span class="report-step-index">3</span>
             Seleccionar motivo e imagen
           </h3>
-          <div class="report-step-body report-grid-2">
+          <p class="report-step-copy">
+            Describe el inconveniente con precisión y agrega una imagen si te ayuda a mostrar
+            el problema más rápido.
+          </p>
+          <div id="motivo-imagen-grid" class="report-step-body report-grid-2">
             <div class="field-group field-card">
               <label class="form-label" for="select-motivo">Motivo <span class="required">*</span></label>
               <select id="select-motivo" class="form-select" required>
                 <option value="">Seleccione motivo</option>
               </select>
+              <p class="report-help">Selecciona el tipo de falla para enviarlo al flujo correcto.</p>
 
               <div id="motivo-otro-wrapper" class="hidden">
                 <label class="form-label" for="input-motivo-otro">Describe el problema <span class="required">*</span></label>

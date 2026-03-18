@@ -1820,15 +1820,22 @@ const sendWhatsappRecordatorios = async ({ source = "manual", itemsOverride = nu
           `[WhatsApp] Recordatorios ${source}: ${progressTag} enviando cliente="${item.cliente || "Cliente"}" phone="${item.phone}"`,
         );
         await withTimeout(
-          client.sendMessage(chatId, item.plain, { linkPreview: false }),
+          client.sendMessage(chatId, item.plain, {
+            linkPreview: false,
+            waitUntilMsgSent: true,
+          }),
           WHATSAPP_SEND_TIMEOUT_MS,
           `Timeout enviando WhatsApp a ${item.phone}`,
         );
         const ventaIdsItem = uniqPositiveIds(item.ventaIds || []);
         if (ventaIdsItem.length) {
+          const fechaRecordatorioEnviado = new Date().toISOString();
           const { error: updateErr } = await supabaseAdmin
             .from("ventas")
-            .update({ recordatorio_enviado: true })
+            .update({
+              recordatorio_enviado: true,
+              fecha_recordatorio_enviado: fechaRecordatorioEnviado,
+            })
             .in("id_venta", ventaIdsItem);
           if (updateErr) throw updateErr;
           ventaIdsItem.forEach((id) => updatedVentaIds.add(id));
@@ -3054,12 +3061,19 @@ app.post("/api/whatsapp/send-recordatorio", async (req, res) => {
     }
 
     const client = getWhatsappClient();
-    await client.sendMessage(`${phone}@c.us`, String(message), { linkPreview: false });
+    await client.sendMessage(`${phone}@c.us`, String(message), {
+      linkPreview: false,
+      waitUntilMsgSent: true,
+    });
 
     if (ventaIds.length) {
+      const fechaRecordatorioEnviado = new Date().toISOString();
       const { error: updateErr } = await supabaseAdmin
         .from("ventas")
-        .update({ recordatorio_enviado: true })
+        .update({
+          recordatorio_enviado: true,
+          fecha_recordatorio_enviado: fechaRecordatorioEnviado,
+        })
         .in("id_venta", ventaIds);
       if (updateErr) throw updateErr;
     }
