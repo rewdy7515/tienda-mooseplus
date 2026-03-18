@@ -95,20 +95,6 @@ const getTotalUsdMostrado = (baseUsd, metodoId) => {
   return round2(montoBase);
 };
 
-const getDisplayTasaBs = (orden) => {
-  const tasaBase = Number(orden?.tasa_bs);
-  if (!Number.isFinite(tasaBase)) return Number.NaN;
-  const totalBase = Number(orden?.total);
-  const metodoId = Number(orden?.id_metodo_de_pago);
-  if (!Number.isFinite(totalBase) || totalBase <= 0) {
-    return tasaBase;
-  }
-  const totalMostrado = getTotalUsdMostrado(totalBase, metodoId);
-  if (!Number.isFinite(totalMostrado) || totalMostrado <= 0) {
-    return tasaBase;
-  }
-  return round2(tasaBase * (totalMostrado / totalBase));
-};
 
 const formatNombreApellido = (user) => {
   const nombre = String(user?.nombre || "").trim();
@@ -189,7 +175,6 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null, { isSuperadmi
   const fecha = formatDDMMYYYY(orden?.fecha) || orden?.fecha || "-";
   const hora = formatHora12(orden?.hora_orden);
   const estado = buildEstadoMeta(orden);
-  const tasaDisplay = getDisplayTasaBs(orden);
   const rows = [
     { label: "N. orden", value: orden?.id_orden ?? "-" },
     ...(isSuperadmin ? [{ label: "Cliente", value: clienteNombre || "-" }] : []),

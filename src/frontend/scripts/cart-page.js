@@ -43,6 +43,7 @@ let descuentos = [];
 let currentUser = null;
 let userSaldo = 0;
 let cartMontoUsd = null;
+let cartMontoBs = null;
 let cartMontoFinal = null;
 let cartDescuento = null;
 let cartNeedsSync = false;
@@ -58,6 +59,38 @@ const adminLink = document.querySelector(".admin-link");
 const isTrue = (v) =>
   v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const formatBsAmount = (amount) =>
+  Number.isFinite(Number(amount)) ? `Bs. ${Number(amount).toFixed(2)}` : "Bs. -";
+
+const positionRatePopover = (btn, popover) => {
+  if (!btn || !popover) return;
+  const gap = 10;
+  const btnRect = btn.getBoundingClientRect();
+  const prevVisibility = popover.style.visibility;
+  const prevDisplay = popover.style.display;
+  popover.style.visibility = "hidden";
+  popover.style.display = "block";
+  const popRect = popover.getBoundingClientRect();
+  const viewportPadding = 8;
+  const centeredLeft = btnRect.left + btnRect.width / 2;
+  const halfWidth = popRect.width / 2;
+  const minLeft = viewportPadding + halfWidth;
+  const maxLeft = Math.max(minLeft, window.innerWidth - viewportPadding - halfWidth);
+  const clampedLeft = Math.min(maxLeft, Math.max(minLeft, centeredLeft));
+
+  let top = btnRect.top - gap;
+  let transform = "translate(-50%, -100%)";
+  if (top - popRect.height < viewportPadding) {
+    top = btnRect.bottom + gap;
+    transform = "translate(-50%, 0)";
+  }
+
+  popover.style.left = `${clampedLeft}px`;
+  popover.style.top = `${Math.max(viewportPadding, top)}px`;
+  popover.style.transform = transform;
+  popover.style.visibility = prevVisibility || "visible";
+  popover.style.display = prevDisplay || "block";
+};
 
 const getDiscountColumnsFromRows = (rows = []) => {
   const cols = new Set();
@@ -354,6 +387,9 @@ const syncCartWithServer = async ({ refreshBtn = null, alertOnError = false } = 
     cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
       ? Number(freshCart.monto_usd)
       : cartMontoUsd;
+    cartMontoBs = Number.isFinite(Number(freshCart?.monto_bs))
+      ? Number(freshCart.monto_bs)
+      : cartMontoBs;
     cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
       ? Number(freshCart.monto_final)
       : cartMontoFinal;
@@ -532,6 +568,7 @@ const updateCartSummaryUI = () => {
   const totalMostrar = round2(
     round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
   );
+  const totalBsMostrar = Number.isFinite(Number(cartMontoBs)) ? Number(cartMontoBs) : null;
 
   const subtotalEl = itemsEl.querySelector('[data-summary="subtotal"]');
   if (subtotalEl) subtotalEl.textContent = `$${subtotalMostrar.toFixed(2)}`;
@@ -545,6 +582,8 @@ const updateCartSummaryUI = () => {
   }
   const totalEl = itemsEl.querySelector('[data-summary="total"]');
   if (totalEl) totalEl.textContent = `$${Number(totalMostrar).toFixed(2)}`;
+  const totalBsEl = itemsEl.querySelector('[data-summary="total-bs"]');
+  if (totalBsEl) totalBsEl.textContent = formatBsAmount(totalBsMostrar);
   updatePayButtonLabel();
 };
 
@@ -782,6 +821,7 @@ const renderCart = () => {
   const totalMostrar = round2(
     round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
   );
+  const totalBsMostrar = Number.isFinite(Number(cartMontoBs)) ? Number(cartMontoBs) : null;
   if (Number.isFinite(Number(cartDescuento))) {
     const diff = Math.abs(Number(cartDescuento) - totalDescuento);
     if (diff >= 0.01) {
@@ -844,6 +884,32 @@ const renderCart = () => {
               <td class="cart-cell-center">Total</td>
               <td class="cart-cell-center"><span data-summary="total">$${totalMostrar.toFixed(2)}</span></td>
             </tr>
+            <tr class="cart-total-row cart-total-bs">
+              <td class="cart-cell-center cart-total-bs-cell">
+                <div class="cart-total-bs-wrap">
+                  <button
+                    type="button"
+                    class="cart-total-help-btn"
+                    data-cart-action="toggle-rate-info"
+                    aria-label="Mostrar referencia de la tasa"
+                    aria-expanded="false"
+                  >
+                    ?
+                  </button>
+                  <span>Total Bs.</span>
+                  <div class="cart-total-help-popover hidden" data-summary="rate-info">
+                    <p><strong>Referencia de la tasa</strong>: binance</p>
+                    <p>
+                      Nuestra tasa de referencia está basada en Binance, ya que como proveedores
+                      también pagamos las membresías a esa tasa. Esto nos permite mantener y
+                      asegurar la continuidad de nuestro servicio.
+                    </p>
+                    <p>Gracias por su comprensión</p>
+                  </div>
+                </div>
+              </td>
+              <td class="cart-cell-center"><span data-summary="total-bs">${formatBsAmount(totalBsMostrar)}</span></td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -862,6 +928,23 @@ const handleCartClick = async (e) => {
       return;
     }
     if (action === "toggle-saldo") {
+      return;
+    }
+    if (action === "toggle-rate-info") {
+      const wrap = cartActionBtn.closest(".cart-total-bs-wrap");
+      const popover = wrap?.querySelector('[data-summary="rate-info"]');
+      if (popover) {
+        const isHidden = popover.classList.contains("hidden");
+        if (isHidden) {
+          popover.classList.remove("hidden");
+          positionRatePopover(cartActionBtn, popover);
+          requestAnimationFrame(() => positionRatePopover(cartActionBtn, popover));
+          cartActionBtn.setAttribute("aria-expanded", "true");
+        } else {
+          popover.classList.add("hidden");
+          cartActionBtn.setAttribute("aria-expanded", "false");
+        }
+      }
       return;
     }
     if (action === "refresh") {
@@ -935,6 +1018,29 @@ removeModalBackdropEl?.addEventListener("click", closeRemoveModal);
 removeModalCloseEl?.addEventListener("click", closeRemoveModal);
 removeModalCancelEl?.addEventListener("click", closeRemoveModal);
 removeModalConfirmEl?.addEventListener("click", confirmRemoveModal);
+window.addEventListener("click", (ev) => {
+  const btn = ev.target.closest?.('[data-cart-action="toggle-rate-info"]');
+  const popover = document.querySelector('[data-summary="rate-info"]');
+  if (btn || !popover || popover.classList.contains("hidden")) return;
+  if (popover.contains(ev.target)) return;
+  popover.classList.add("hidden");
+  const toggleBtn = document.querySelector('[data-cart-action="toggle-rate-info"]');
+  toggleBtn?.setAttribute("aria-expanded", "false");
+});
+window.addEventListener("resize", () => {
+  const popover = document.querySelector('[data-summary="rate-info"]');
+  const btn = document.querySelector('[data-cart-action="toggle-rate-info"]');
+  if (popover && btn && !popover.classList.contains("hidden")) {
+    positionRatePopover(btn, popover);
+  }
+});
+window.addEventListener("scroll", () => {
+  const popover = document.querySelector('[data-summary="rate-info"]');
+  const btn = document.querySelector('[data-cart-action="toggle-rate-info"]');
+  if (popover && btn && !popover.classList.contains("hidden")) {
+    positionRatePopover(btn, popover);
+  }
+}, true);
 window.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
   if (removeModalEl?.classList.contains("hidden")) return;
@@ -994,6 +1100,9 @@ async function init() {
     updateUseSaldoButton();
     cartMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
       ? Number(cartData.monto_usd)
+      : null;
+    cartMontoBs = Number.isFinite(Number(cartData?.monto_bs))
+      ? Number(cartData.monto_bs)
       : null;
     cartMontoFinal = Number.isFinite(Number(cartData?.monto_final))
       ? Number(cartData.monto_final)
@@ -1113,6 +1222,9 @@ btnPay?.addEventListener("click", () => {
       cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
         ? Number(freshCart.monto_usd)
         : cartMontoUsd;
+      cartMontoBs = Number.isFinite(Number(freshCart?.monto_bs))
+        ? Number(freshCart.monto_bs)
+        : cartMontoBs;
       cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
         ? Number(freshCart.monto_final)
         : cartMontoFinal;
@@ -1148,7 +1260,6 @@ btnPay?.addEventListener("click", () => {
         referencia: "SALDO",
         comprobantes: [],
         total: cartMontoUsd,
-        tasa_bs: null,
       };
       const resp = await submitCheckout(payload);
       if (resp?.error) {

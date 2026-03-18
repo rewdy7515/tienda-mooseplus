@@ -964,10 +964,10 @@
             acceso_cliente: summary?.acceso_cliente,
             es_mayorista: summary?.es_mayorista === true,
             tipo_precio: summary?.tipo_precio === "mayor" ? "mayor" : "detal",
-            tasa_bs:
-              Number.isFinite(Number(summary?.tasa_bs)) && Number(summary?.tasa_bs) > 0
-                ? Number(summary.tasa_bs)
-                : 400,
+            tasa_actual:
+              Number.isFinite(Number(summary?.tasa_actual)) && Number(summary?.tasa_actual) > 0
+                ? Number(summary.tasa_actual)
+                : null,
             items,
             total_usd: roundMoney(summary?.total_usd || 0),
           };
@@ -1015,7 +1015,7 @@
             referencia,
             comprobantes: [],
             total: checkoutSummaryState.total_usd,
-            tasa_bs: checkoutSummaryState.tasa_bs,
+            tasa_actual: checkoutSummaryState.tasa_actual,
             id_usuario_override: idCliente,
             bypass_verificacion: isSuperAdmin === true,
             custom_item_amounts: checkoutSummaryState.items.map((item) => ({

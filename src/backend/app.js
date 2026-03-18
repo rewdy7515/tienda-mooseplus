@@ -2077,15 +2077,13 @@ const extractRefCandidates = (text) => {
   return matches.map((m) => String(m).trim()).filter(Boolean);
 };
 
-const computeOrderMontoBs = (orden = {}) => {
+const computeOrderMontoBs = async (orden = {}) => {
   const direct = normalizeMontoBs(orden?.monto_bs);
   if (Number.isFinite(direct)) return direct;
   const total = Number(orden?.total);
-  const tasa = Number(orden?.tasa_bs);
-  if (Number.isFinite(total) && Number.isFinite(tasa)) {
-    return Math.round(total * tasa * 100) / 100;
-  }
-  return null;
+  if (!Number.isFinite(total)) return null;
+  const tasa = await getStrictStoredTasaActual();
+  return Math.round(total * tasa * 100) / 100;
 };
 
 const matchPagoMovilToOrder = async (orden = {}) => {
@@ -2100,7 +2098,7 @@ const matchPagoMovilToOrder = async (orden = {}) => {
   }
 
   const refLast4 = refDigits.slice(-4);
-  const montoOrdenBs = computeOrderMontoBs(orden);
+  const montoOrdenBs = await computeOrderMontoBs(orden);
   if (!Number.isFinite(montoOrdenBs)) {
     return { matched: false, reason: "monto_orden_invalido" };
   }
@@ -2223,15 +2221,19 @@ const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
     .limit(400);
   if (ordErr) throw ordErr;
 
-  const matchedOrder = (pendingOrders || []).find((orden) => {
+  let matchedOrder = null;
+  for (const orden of pendingOrders || []) {
     const refDigits = normalizeReferenceDigits(orden?.referencia);
-    if (refDigits.length < 4) return false;
+    if (refDigits.length < 4) continue;
     const refLast4 = refDigits.slice(-4);
-    if (!refLast4Set.has(refLast4)) return false;
-    const montoOrdenBs = computeOrderMontoBs(orden);
-    if (!Number.isFinite(montoOrdenBs)) return false;
-    return Math.abs(montoOrdenBs - pagoMonto) <= 0.01;
-  });
+    if (!refLast4Set.has(refLast4)) continue;
+    const montoOrdenBs = await computeOrderMontoBs(orden);
+    if (!Number.isFinite(montoOrdenBs)) continue;
+    if (Math.abs(montoOrdenBs - pagoMonto) <= 0.01) {
+      matchedOrder = orden;
+      break;
+    }
+  }
 
   if (!matchedOrder?.id_orden) {
     return { matched: false, reason: "no_order_match" };
@@ -4030,6 +4032,22 @@ const parseOptionalCheckoutNumber = (value) => {
   return Number.isFinite(normalized) ? normalized : null;
 };
 
+const getStrictStoredTasaActual = async () => {
+  const { data, error } = await supabaseAdmin
+    .from("tasa_config")
+    .select("tasa_actual")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  const tasaActual = parseOptionalCheckoutNumber(data?.tasa_actual);
+  if (!Number.isFinite(tasaActual) || tasaActual <= 0) {
+    const err = new Error("tasa_config.tasa_actual no disponible");
+    err.code = "TASA_ACTUAL_REQUIRED";
+    throw err;
+  }
+  return tasaActual;
+};
+
 const isCheckoutExplicitFalse = (value) =>
   value === false || value === 0 || value === "0" || value === "false" || value === "f";
 
@@ -4263,24 +4281,11 @@ const normalizeCheckoutCustomItemAmounts = (input = []) => {
   }, new Map());
 };
 
-const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente, tasa_bs }) => {
+const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }) => {
   const { accesoCliente, esMayorista, pickPrecio } = await getPrecioPicker(idUsuarioVentas);
   const isCliente = !esMayorista;
   const totalClienteParsed = parseOptionalCheckoutNumber(totalCliente);
-  let tasaBsParsed = parseOptionalCheckoutNumber(tasa_bs);
-  if (!Number.isFinite(tasaBsParsed)) {
-    const { data: carritoRateRow, error: carritoRateErr } = await supabaseAdmin
-      .from("carritos")
-      .select("tasa_bs")
-      .eq("id_carrito", carritoId)
-      .maybeSingle();
-    if (carritoRateErr) throw carritoRateErr;
-    tasaBsParsed = parseOptionalCheckoutNumber(carritoRateRow?.tasa_bs);
-  }
-  if (!Number.isFinite(tasaBsParsed)) {
-    const rateSnapshot = await getOfficialP2PRateSnapshot();
-    tasaBsParsed = parseOptionalCheckoutNumber(rateSnapshot?.rate);
-  }
+  const tasaBsParsed = await getStrictStoredTasaActual();
   const { data: items, error: itemErr } = await supabaseAdmin
     .from("carrito_items")
     .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
@@ -6108,8 +6113,8 @@ const syncCarritoOfficialRate = async ({
     usaSaldo: currentCarrito?.usa_saldo,
     saldoUsuario: saldoResolved,
   });
-  const snapshot = await getOfficialP2PRateSnapshot();
-  const tasaBs = parseOptionalCheckoutNumber(snapshot?.rate);
+  const tasaBs = await getStrictStoredTasaActual();
+  const snapshot = { rate: tasaBs };
   const montoBs =
     Number.isFinite(montoFinal) && Number.isFinite(tasaBs)
       ? roundMoney(montoFinal * tasaBs)
@@ -6196,10 +6201,13 @@ const TASA_OFICIAL_SLOT_HOURS = 2;
 const TASA_CONFIG_CACHE_MS = 60 * 1000;
 const DEFAULT_TASA_MARKUP = 1.06;
 const TASA_OFICIAL_STORAGE_FIELDS =
-  "markup, tasa_binance, tasa_oficial, markup_aplicado, tasa_generada_en, vigente_desde, vigente_hasta";
+  "markup, actualizado_en, actualizado_por, tasa_actual";
 let cachedBinanceP2PRawRate = { value: null, ts: 0 };
 let cachedTasaMarkup = { value: DEFAULT_TASA_MARKUP, ts: 0 };
 let cachedOfficialP2PRate = { slotKey: "", snapshot: null, ts: 0 };
+const TASA_REFRESH_BUFFER_MS = 600;
+let tasaRefreshSchedulerStarted = false;
+let tasaRefreshTimeoutId = null;
 
 const isMissingTasaConfigTableError = (err) => {
   const msg = String(err?.message || err?.details || err?.hint || "").toLowerCase();
@@ -6269,12 +6277,22 @@ const getCurrentTasaSlotWindow = () => {
   };
 };
 
+const getNextTasaRefreshDelayMs = () => {
+  const slotWindow = getCurrentTasaSlotWindow();
+  const nextAt = slotWindow?.end?.getTime();
+  if (!Number.isFinite(nextAt)) {
+    return TASA_OFICIAL_WINDOW_MS;
+  }
+  return Math.max(1000, nextAt - Date.now() + TASA_REFRESH_BUFFER_MS);
+};
+
 const isMissingTasaOfficialStorageError = (err) => {
   const msg = String(err?.message || err?.details || err?.hint || "").toLowerCase();
   return (
     err?.code === "42P01" ||
     err?.code === "42703" ||
     (msg.includes("tasa_config") && msg.includes("does not exist")) ||
+    msg.includes("tasa_actual") ||
     msg.includes("tasa_oficial") ||
     msg.includes("tasa_binance") ||
     msg.includes("markup_aplicado") ||
@@ -6285,12 +6303,14 @@ const isMissingTasaOfficialStorageError = (err) => {
 };
 
 const buildOfficialRateSnapshot = (row = {}, fallbackMarkup = DEFAULT_TASA_MARKUP) => ({
-  rate: Number.isFinite(Number(row?.tasa_oficial)) ? roundMoney(Number(row.tasa_oficial)) : null,
-  rawRate: Number.isFinite(Number(row?.tasa_binance)) ? roundRateValue(Number(row.tasa_binance)) : null,
-  markup: normalizeTasaMarkupValue(row?.markup_aplicado ?? row?.markup, fallbackMarkup),
-  generatedAt: row?.tasa_generada_en || null,
-  validFrom: row?.vigente_desde || null,
-  validUntil: row?.vigente_hasta || null,
+  rate: Number.isFinite(Number(row?.tasa_actual))
+    ? roundMoney(Number(row.tasa_actual))
+    : null,
+  rawRate: null,
+  markup: normalizeTasaMarkupValue(row?.markup, fallbackMarkup),
+  generatedAt: row?.actualizado_en || null,
+  validFrom: null,
+  validUntil: null,
   stale: Boolean(row?.stale),
 });
 
@@ -6298,10 +6318,17 @@ const isOfficialRateSnapshotCurrent = (snapshot = {}, slotWindow = null) => {
   if (!slotWindow || !Number.isFinite(Number(snapshot?.rate))) return false;
   const validFrom = new Date(snapshot?.validFrom || "");
   const validUntil = new Date(snapshot?.validUntil || "");
-  if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) return false;
+  if (!Number.isNaN(validFrom.getTime()) && !Number.isNaN(validUntil.getTime())) {
+    return (
+      validFrom.getTime() === slotWindow.start.getTime() &&
+      validUntil.getTime() === slotWindow.end.getTime()
+    );
+  }
+  const generatedAt = new Date(snapshot?.generatedAt || "");
+  if (Number.isNaN(generatedAt.getTime())) return false;
   return (
-    validFrom.getTime() === slotWindow.start.getTime() &&
-    validUntil.getTime() === slotWindow.end.getTime()
+    generatedAt.getTime() >= slotWindow.start.getTime() &&
+    generatedAt.getTime() < slotWindow.end.getTime()
   );
 };
 
@@ -6373,6 +6400,7 @@ const setGlobalTasaMarkup = async ({ markup, updatedBy = null }) => {
   }
   const saved = normalizeTasaMarkupValue(data?.markup, nextMarkup);
   cachedTasaMarkup = { value: saved, ts: Date.now() };
+  cachedOfficialP2PRate = { slotKey: "", snapshot: null, ts: 0 };
   return saved;
 };
 
@@ -6428,14 +6456,24 @@ const getOfficialP2PRateSnapshotFallback = async ({
   const normalizedMarkup = normalizeTasaMarkupValue(markup, DEFAULT_TASA_MARKUP);
   const snapshot = {
     rate: roundMoney(rawRate * normalizedMarkup),
-    rawRate: roundRateValue(rawRate),
+    rawRate: null,
     markup: normalizedMarkup,
     generatedAt: new Date().toISOString(),
-    validFrom: resolvedSlot?.start?.toISOString() || null,
-    validUntil: resolvedSlot?.end?.toISOString() || null,
+    validFrom: null,
+    validUntil: null,
     stale: false,
   };
   return setCachedOfficialRateSnapshot(slotKey, snapshot);
+};
+
+const getStoredOfficialP2PRateSnapshot = async (fallbackMarkup = DEFAULT_TASA_MARKUP) => {
+  const { data, error } = await supabaseAdmin
+    .from("tasa_config")
+    .select(TASA_OFICIAL_STORAGE_FIELDS)
+    .eq("id", 1)
+    .maybeSingle();
+  if (error) throw error;
+  return buildOfficialRateSnapshot(data || {}, fallbackMarkup);
 };
 
 const getOfficialP2PRateSnapshot = async ({ force = false } = {}) => {
@@ -6447,13 +6485,7 @@ const getOfficialP2PRateSnapshot = async ({ force = false } = {}) => {
   const currentMarkup = await getGlobalTasaMarkup({ force });
   let storedSnapshot = null;
   try {
-    const { data, error } = await supabaseAdmin
-      .from("tasa_config")
-      .select(TASA_OFICIAL_STORAGE_FIELDS)
-      .eq("id", 1)
-      .maybeSingle();
-    if (error) throw error;
-    storedSnapshot = buildOfficialRateSnapshot(data || {}, currentMarkup);
+    storedSnapshot = await getStoredOfficialP2PRateSnapshot(currentMarkup);
     if (!force && isOfficialRateSnapshotCurrent(storedSnapshot, slotWindow)) {
       return setCachedOfficialRateSnapshot(slotKey, storedSnapshot);
     }
@@ -6474,12 +6506,9 @@ const getOfficialP2PRateSnapshot = async ({ force = false } = {}) => {
     const payload = {
       id: 1,
       markup: currentMarkup,
-      markup_aplicado: currentMarkup,
-      tasa_binance: roundRateValue(rawRate),
-      tasa_oficial: rate,
-      tasa_generada_en: new Date().toISOString(),
-      vigente_desde: slotWindow?.start?.toISOString() || null,
-      vigente_hasta: slotWindow?.end?.toISOString() || null,
+      tasa_actual: rate,
+      actualizado_en: new Date().toISOString(),
+      actualizado_por: null,
     };
     const { data: saved, error: saveErr } = await supabaseAdmin
       .from("tasa_config")
@@ -6507,12 +6536,49 @@ const getOfficialP2PRateSnapshot = async ({ force = false } = {}) => {
   }
 };
 
+const refreshCurrentTasaActual = async ({ reason = "scheduler", force = false } = {}) => {
+  try {
+    const snapshot = await getOfficialP2PRateSnapshot({ force });
+    console.log(
+      `[Tasa] ${reason}: tasa_actual=${snapshot?.rate ?? "n/a"} vigente_desde=${snapshot?.validFrom || "n/a"} vigente_hasta=${snapshot?.validUntil || "n/a"}`,
+    );
+  } catch (err) {
+    console.error(`[Tasa] ${reason} error`, err);
+  }
+};
+
+const startTasaActualScheduler = () => {
+  if (tasaRefreshSchedulerStarted) return;
+  tasaRefreshSchedulerStarted = true;
+
+  const scheduleNext = () => {
+    if (!tasaRefreshSchedulerStarted) return;
+    if (tasaRefreshTimeoutId) {
+      clearTimeout(tasaRefreshTimeoutId);
+      tasaRefreshTimeoutId = null;
+    }
+    const waitMs = getNextTasaRefreshDelayMs();
+    tasaRefreshTimeoutId = setTimeout(async () => {
+      try {
+        await refreshCurrentTasaActual({ reason: "slot" });
+      } finally {
+        scheduleNext();
+      }
+    }, waitMs);
+  };
+
+  console.log(`[Tasa] Scheduler activo; revisa tasa_config.tasa_actual por slots de 2 horas.`);
+  refreshCurrentTasaActual({ reason: "init" });
+  scheduleNext();
+};
+
 // Tasa Binance P2P USDT/VES (promedio top ofertas BUY) con markup global aplicado.
 app.get("/api/p2p/rate", async (_req, res) => {
   try {
-    const snapshot = await getOfficialP2PRateSnapshot();
+    const snapshot = await getStoredOfficialP2PRateSnapshot();
     res.json({
       rate: snapshot?.rate ?? null,
+      tasa_actual: snapshot?.rate ?? null,
       raw_rate: snapshot?.rawRate ?? null,
       markup: snapshot?.markup ?? null,
       generated_at: snapshot?.generatedAt ?? null,
@@ -6544,6 +6610,7 @@ app.put("/api/p2p/markup", async (req, res) => {
       return res.status(400).json({ error: "markup inválido. Debe ser >= 1 y <= 5" });
     }
     const savedMarkup = await setGlobalTasaMarkup({ markup, updatedBy: idUsuario });
+    await refreshCurrentTasaActual({ reason: "markup_update", force: true });
     return res.json({ ok: true, markup: savedMarkup });
   } catch (err) {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -6864,8 +6931,7 @@ app.get("/api/cart", async (_req, res) => {
       monto_usd: carritoInfo?.monto_usd ?? null,
       monto_bs:
         carritoRateState?.montoBs ?? carritoInfo?.monto_bs ?? null,
-      tasa_bs:
-        carritoRateState?.tasaBs ?? carritoInfo?.tasa_bs ?? null,
+      tasa_bs: carritoRateState?.tasaBs ?? null,
       descuento: carritoInfo?.descuento ?? null,
       monto_final:
         carritoRateState?.montoFinal ?? montoFinalResolved,
@@ -7005,7 +7071,6 @@ app.post("/api/checkout/draft", async (req, res) => {
       idUsuarioVentas: idUsuario,
       carritoId,
       totalCliente: null,
-      tasa_bs: carritoRateState?.tasaBs ?? null,
     });
     const {
       items,
@@ -7042,7 +7107,7 @@ app.post("/api/checkout/draft", async (req, res) => {
     if (carritoErr) throw carritoErr;
 
     const total = parseOptionalCheckoutNumber(carritoData?.monto_usd);
-    const tasaBs = parseOptionalCheckoutNumber(carritoRateState?.tasaBs ?? carritoData?.tasa_bs);
+    const tasaBs = parseOptionalCheckoutNumber(carritoRateState?.tasaBs);
     const montoBsRaw = parseOptionalCheckoutNumber(carritoRateState?.montoBs ?? carritoData?.monto_bs);
     const montoBs = Number.isFinite(montoBsRaw)
       ? montoBsRaw
@@ -7152,7 +7217,6 @@ app.post("/api/checkout/summary", async (req, res) => {
       idUsuarioVentas,
       carritoId,
       totalCliente: null,
-      tasa_bs: carritoRateState?.tasaBs ?? null,
     });
     const {
       items,
@@ -7172,14 +7236,7 @@ app.post("/api/checkout/summary", async (req, res) => {
       return res.status(400).json({ error: "El carrito está vacío" });
     }
 
-    const { data: carritoData, error: carritoErr } = await supabaseAdmin
-      .from("carritos")
-      .select("tasa_bs")
-      .eq("id_carrito", carritoId)
-      .maybeSingle();
-    if (carritoErr) throw carritoErr;
-
-    const tasaBs = parseOptionalCheckoutNumber(carritoRateState?.tasaBs ?? carritoData?.tasa_bs);
+    const tasaBs = parseOptionalCheckoutNumber(carritoRateState?.tasaBs);
     const total = roundCheckoutMoney(parseOptionalCheckoutNumber(totalByAccess) ?? 0);
     const montoBs = Number.isFinite(tasaBs) ? roundCheckoutMoney(total * tasaBs) : null;
 
@@ -7222,6 +7279,7 @@ app.post("/api/checkout/summary", async (req, res) => {
         descuento_usd: row.descuento_usd,
         monto_bs: row.monto_bs,
       })),
+      tasa_actual: Number.isFinite(tasaBs) ? tasaBs : null,
     });
   } catch (err) {
     console.error("[checkout:summary] error", err);
@@ -9976,7 +10034,6 @@ app.post("/api/checkout", async (req, res) => {
       idUsuarioVentas,
       carritoId,
       totalCliente,
-      tasa_bs: carritoRateState?.tasaBs ?? tasa_bs,
     });
     const {
       items,
@@ -10452,7 +10509,6 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       idUsuarioVentas,
       carritoId: orden.id_carrito,
       totalCliente: orden.total,
-      tasa_bs: orden.tasa_bs,
     });
     const montoBaseCobrado = await resolveMontoBaseCarrito({
       carritoId: orden.id_carrito,
@@ -10586,6 +10642,8 @@ app.get("/api/ventas/entregadas", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+startTasaActualScheduler();
 
 if (require.main === module) {
   app.listen(port, () => {

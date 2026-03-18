@@ -488,6 +488,7 @@ CREATE TABLE public.tasa_config (
   markup double precision NOT NULL DEFAULT 1.06,
   actualizado_en timestamp with time zone NOT NULL DEFAULT now(),
   actualizado_por bigint,
+  tasa_actual double precision,
   CONSTRAINT tasa_config_pkey PRIMARY KEY (id),
   CONSTRAINT tasa_config_actualizado_por_fkey FOREIGN KEY (actualizado_por) REFERENCES public.usuarios(id_usuario)
 );
@@ -553,6 +554,7 @@ CREATE TABLE public.ventas (
   nombre_cliente text,
   recordatorio_enviado boolean,
   cuenta_pagada_admin boolean,
+  fecha_recordatorio_enviado date,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
   CONSTRAINT ventas_id_perfil_fkey FOREIGN KEY (id_perfil) REFERENCES public.perfiles(id_perfil),

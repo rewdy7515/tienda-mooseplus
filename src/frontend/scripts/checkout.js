@@ -290,9 +290,7 @@ const scheduleMontoRefresh = (totalUsdVal) => {
   montoRefreshTimer = setTimeout(async () => {
     try {
       const cartData = await fetchCart();
-      const refreshedRate = Number.isFinite(Number(cartData?.tasa_bs))
-        ? Number(cartData.tasa_bs)
-        : await refreshRateBs();
+      const refreshedRate = await refreshRateBs();
       if (Number.isFinite(refreshedRate)) {
         tasaBs = refreshedRate;
       } else {
@@ -365,7 +363,7 @@ const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
       if (resp?.error) {
         console.warn("checkout cart monto update error", resp.error);
       } else {
-        tasaBs = Number.isFinite(Number(resp?.tasa_bs)) ? Number(resp.tasa_bs) : tasaBs;
+
         fixedMontoBs = Number.isFinite(Number(resp?.monto_bs)) ? Number(resp.monto_bs) : fixedMontoBs;
         fixedFecha = resp?.fecha ?? fixedFecha;
         fixedHora = resp?.hora ?? fixedHora;
@@ -392,7 +390,7 @@ const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
       if (resp?.error) {
         console.warn("checkout cart monto update error", resp.error);
       } else {
-        tasaBs = Number.isFinite(Number(resp?.tasa_bs)) ? Number(resp.tasa_bs) : tasaBs;
+
         fixedMontoBs = Number.isFinite(Number(resp?.monto_bs)) ? Number(resp.monto_bs) : fixedMontoBs;
         fixedFecha = resp?.fecha ?? fixedFecha;
         fixedHora = resp?.hora ?? fixedHora;
@@ -886,7 +884,6 @@ const verifyPagoMovil = async () => {
   const refLast4 = refDigits.slice(-4);
   let montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
   let cartMontoBs = null;
-  let cartTasaBs = null;
   try {
     const cartData = await fetchCart();
     cartId = cartData.id_carrito || cartId;
@@ -897,15 +894,10 @@ const verifyPagoMovil = async () => {
       montoBs = fixedMontoBs;
       cartMontoBs = fixedMontoBs;
     }
-    if (Number.isFinite(cartData?.tasa_bs)) {
-      cartTasaBs = Number(cartData.tasa_bs);
-    } else if (Number.isFinite(tasaBs)) {
-      cartTasaBs = tasaBs;
-    }
   } catch (err) {
     console.warn("[pago movil] cart monto fetch error", err);
   }
-  if (!Number.isFinite(cartMontoBs) || !Number.isFinite(cartTasaBs)) {
+  if (!Number.isFinite(cartMontoBs) || !Number.isFinite(tasaBs)) {
     alert("No se pudo obtener el monto o la tasa del carrito.");
     return { ok: false };
   }
@@ -988,11 +980,11 @@ const verifyPagoMovil = async () => {
   }
 
   let saldoUsd = null;
-  if (Number.isFinite(cartTasaBs) && cartTasaBs) {
+  if (Number.isFinite(tasaBs) && tasaBs) {
     if (diff > 0) {
-      saldoUsd = Number(((pagoMonto - cartMontoBs) / cartTasaBs).toFixed(2));
+      saldoUsd = Number(((pagoMonto - cartMontoBs) / tasaBs).toFixed(2));
     } else {
-      saldoUsd = Number((pagoMonto / cartTasaBs).toFixed(2));
+      saldoUsd = Number((pagoMonto / tasaBs).toFixed(2));
     }
   }
   if (Number.isFinite(saldoUsd) && sessionUserId) {
@@ -1075,7 +1067,7 @@ async function init() {
     if (saldoFrom && Number.isFinite(saldoOrderId)) {
       const { data: ordenData, error: ordenErr } = await supabase
         .from("ordenes")
-        .select("id_orden, id_carrito, total, tasa_bs, monto_bs, hora_orden, fecha, en_espera")
+        .select("id_orden, id_carrito, total, monto_bs, hora_orden, fecha, en_espera")
         .eq("id_orden", saldoOrderId)
         .maybeSingle();
       if (!ordenErr && ordenData && !ordenData.id_carrito) {
@@ -1084,9 +1076,7 @@ async function init() {
         if (ordenData?.id_orden) {
           setCheckoutOrderId(ordenData.id_orden, { updateUrl: false });
         }
-        if (Number.isFinite(Number(ordenData.tasa_bs))) {
-          tasaBs = Number(ordenData.tasa_bs);
-        }
+
         totalUsd = Number.isFinite(Number(ordenData.total)) ? Number(ordenData.total) : 0;
         precioTierLabel = "";
         fixedMontoUsd = totalUsd;
@@ -1118,9 +1108,7 @@ async function init() {
           : Number.isFinite(montoUsdRaw)
           ? Number(montoUsdRaw)
           : 0;
-      tasaBs = Number.isFinite(Number(cartData?.tasa_bs))
-        ? Number(cartData.tasa_bs)
-        : tasaBs;
+
       precioTierLabel = "";
       fixedMontoUsd = Number.isFinite(montoUsdRaw)
         ? Number(montoUsdRaw)
@@ -1302,9 +1290,7 @@ btnSendPayment?.addEventListener("click", async () => {
         fixedMontoBs = Number.isFinite(Number(saldoOrder?.monto_bs))
           ? Number(saldoOrder.monto_bs)
           : fixedMontoBs;
-        tasaBs = Number.isFinite(Number(saldoOrder?.tasa_bs))
-          ? Number(saldoOrder.tasa_bs)
-          : tasaBs;
+
         renderTotal();
       }
     } catch (err) {
@@ -1379,7 +1365,7 @@ btnSendPayment?.addEventListener("click", async () => {
           referencia: referenciaValue,
           comprobante: comprobantes,
           total: totalUsd,
-          tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+          tasa_actual: Number.isFinite(tasaBs) ? tasaBs : null,
           monto_bs: montoBs,
           monto_transferido: montoTransferidoValue,
           marcado_pago: true,
@@ -1408,7 +1394,7 @@ btnSendPayment?.addEventListener("click", async () => {
       referencia: referenciaValue,
       comprobantes,
       total: totalUsd,
-      tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
+      tasa_actual: Number.isFinite(tasaBs) ? tasaBs : null,
       monto_transferido: montoTransferidoValue,
       marcado_pago: true,
     };

@@ -80,7 +80,6 @@ saldoCheckoutBtn?.addEventListener("click", async () => {
       .insert({
         id_usuario: userId,
         total,
-        tasa_bs: tasaBs,
         monto_bs: montoBs,
         en_espera: true,
         id_carrito: null,

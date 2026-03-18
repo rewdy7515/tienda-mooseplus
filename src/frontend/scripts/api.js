@@ -1208,14 +1208,14 @@ export async function procesarOrden(id_orden, options = {}) {
   }
 }
 
-export async function updateCartMontos(monto_usd, tasa_bs) {
+export async function updateCartMontos(monto_usd) {
   await ensureServerSession();
   try {
     const res = await fetch(`${API_BASE}/api/cart/montos`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ monto_usd, tasa_bs }),
+      body: JSON.stringify({ monto_usd }),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -1520,6 +1520,7 @@ export async function fetchP2PRate() {
   try {
     const res = await fetch(`${API_BASE}/api/p2p/rate`, {
       credentials: "include",
+      cache: "no-store",
     });
     if (!res.ok) {
       const text = await res.text();
@@ -1532,11 +1533,16 @@ export async function fetchP2PRate() {
       return null;
     }
     const data = await res.json();
+    const rateValue = Number.isFinite(Number(data?.tasa_actual))
+      ? Number(data.tasa_actual)
+      : Number.isFinite(Number(data?.rate))
+        ? Number(data.rate)
+        : null;
     logApiDebug("fetchP2PRate:done", {
       ms: getElapsedMs(startedAt),
-      rate: Number.isFinite(data?.rate) ? data.rate : null,
+      rate: rateValue,
     });
-    return Number.isFinite(data?.rate) ? data.rate : null;
+    return rateValue;
   } catch (err) {
     console.error("No se pudo obtener la tasa P2P:", err);
     console.error(`${API_DEBUG_PREFIX} fetchP2PRate:error`, {

@@ -1,5 +1,5 @@
 import { requireSession, attachLogout, attachLogoHome } from "./session.js";
-import { clearServerSession, supabase, loadCurrentUser, procesarOrden } from "./api.js";
+import { clearServerSession, supabase, loadCurrentUser, procesarOrden, fetchP2PRate } from "./api.js";
 
 requireSession();
 attachLogoHome();
@@ -32,7 +32,7 @@ let processingOrder = false;
 let orderProcessed = false;
 let verifyRunning = false;
 let cartMontoBs = null;
-let cartTasaBs = null;
+let currentRateBs = null;
 const VERIFY_WINDOW_MS = 3 * 60 * 1000;
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 
@@ -79,6 +79,14 @@ const getCaracasParts = () => {
     caracasNow.getSeconds()
   )}`;
   return { fecha, hora };
+};
+
+const refreshCurrentRate = async () => {
+  const rate = await fetchP2PRate();
+  if (Number.isFinite(rate)) {
+    currentRateBs = rate;
+  }
+  return currentRateBs;
 };
 
 const updateCountdown = () => {
@@ -135,7 +143,7 @@ const renderMonto = () => {
     montoBs = cartMontoBs;
   } else {
     const totalUsd = Number(orden.total);
-    const tasaBs = Number(orden.tasa_bs);
+    const tasaBs = Number.isFinite(currentRateBs) ? currentRateBs : null;
     if (Number.isFinite(totalUsd) && Number.isFinite(tasaBs)) {
       montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
     }
@@ -208,10 +216,10 @@ const verifyPago = async () => {
     return;
   }
   const last4 = refDigits.slice(-4);
-  const tasaBs = Number(orden.tasa_bs);
   const totalUsd = Number(orden.total);
+  const tasaBs = await refreshCurrentRate();
   if (!Number.isFinite(tasaBs) || !Number.isFinite(totalUsd)) {
-    setStatus("No se pudo obtener la tasa o el total.");
+    setStatus("No se pudo obtener la tasa actual o el total.");
     return;
   }
 
@@ -220,7 +228,7 @@ const verifyPago = async () => {
     ? ordenMontoBsRaw
     : Math.round(totalUsd * tasaBs * 100) / 100;
   const montoBaseBs = Number.isFinite(montoBsOrden) ? montoBsOrden : null;
-  const tasaBase = Number.isFinite(tasaBs) ? tasaBs : cartTasaBs;
+  const tasaBase = tasaBs;
 
   const resp = await supabase
     .from("pagomoviles")
@@ -497,7 +505,7 @@ async function init() {
     const { data, error } = await supabase
       .from("ordenes")
       .select(
-        "id_orden, id_carrito, id_usuario, referencia, total, tasa_bs, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo"
+        "id_orden, id_carrito, id_usuario, referencia, total, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo"
       )
       .eq("id_orden", idOrden)
       .single();
@@ -506,16 +514,15 @@ async function init() {
     if (orden?.id_carrito) {
       const { data: cartData, error: cartErr } = await supabase
         .from("carritos")
-        .select("monto_bs, tasa_bs")
+        .select("monto_bs")
         .eq("id_carrito", orden.id_carrito)
         .single();
       if (!cartErr) {
         const mb = Number(cartData?.monto_bs);
-        const tb = Number(cartData?.tasa_bs);
         cartMontoBs = Number.isFinite(mb) ? mb : null;
-        cartTasaBs = Number.isFinite(tb) ? tb : null;
       }
     }
+    await refreshCurrentRate();
     renderRef();
     renderOrden();
     renderMonto();

@@ -995,8 +995,7 @@ if (!window.__headerActionsInit) {
           referencia: "SALDO",
           comprobantes: [],
           total: montoUsd,
-          tasa_bs: null,
-        };
+          };
         const resp = await submitCheckout(payload);
         if (resp?.error) {
           alert(`Error al procesar: ${resp.error}`);

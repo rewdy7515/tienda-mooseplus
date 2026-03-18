@@ -413,12 +413,7 @@
         const pagoEnBolivares = isTrue(metodoInfo?.bolivares);
         if (pagoEnBolivares) {
           const montoBsDirecto = Number(orden?.monto_bs);
-          const montoBsFallback =
-            Number.isFinite(Number(orden?.total)) && Number.isFinite(Number(orden?.tasa_bs))
-              ? round2(Number(orden.total) * Number(orden.tasa_bs))
-              : null;
-          const montoBs = Number.isFinite(montoBsDirecto) ? montoBsDirecto : montoBsFallback;
-          const montoBsTxt = formatMonto(montoBs);
+          const montoBsTxt = formatMonto(montoBsDirecto);
           return montoBsTxt !== "-" ? `Bs. ${montoBsTxt}` : "-";
         }
 
