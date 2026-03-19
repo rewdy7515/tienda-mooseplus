@@ -138,6 +138,36 @@
       .status {
         margin-top: 8px;
       }
+      .wa-qr-panel {
+        margin-top: 14px;
+        padding: 14px;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #f8fafc;
+      }
+      .wa-qr-panel h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .wa-qr-panel p {
+        margin: 0 0 10px;
+        font-size: 13px;
+        color: #374151;
+      }
+      .wa-qr-box {
+        min-height: 220px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .wa-qr-box canvas {
+        max-width: 100%;
+        height: auto;
+      }
     </style>
   </head>
   <body>
@@ -156,6 +186,11 @@
           </button>
         </div>
         <div id="rec-status" class="status"></div>
+        <section id="wa-qr-panel" class="wa-qr-panel" hidden>
+          <h3>Escanea el QR de WhatsApp</h3>
+          <p id="wa-qr-hint">Esperando QR del servidor...</p>
+          <div id="wa-qr-box" class="wa-qr-box"></div>
+        </section>
         <div id="rec-results" class="rec-results"></div>
         <section id="rec-log" class="rec-log" hidden>
           <h3>Servicios no enviados</h3>
@@ -178,9 +213,14 @@
       const resultsEl = document.querySelector("#rec-results");
       const logEl = document.querySelector("#rec-log");
       const logListEl = document.querySelector("#rec-log-list");
+      const whatsappQrPanelEl = document.querySelector("#wa-qr-panel");
+      const whatsappQrHintEl = document.querySelector("#wa-qr-hint");
+      const whatsappQrBoxEl = document.querySelector("#wa-qr-box");
       let pendingPreviewEndpointAvailable = true;
       let generatedItems = [];
       let generatedSendableCount = 0;
+      let qrRendererPromise = null;
+      let whatsappQrPollTimer = null;
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
@@ -222,6 +262,93 @@
           throw err;
         }
         return body || {};
+      };
+
+      const stopWhatsappQrPolling = () => {
+        if (whatsappQrPollTimer) {
+          clearInterval(whatsappQrPollTimer);
+          whatsappQrPollTimer = null;
+        }
+      };
+
+      const hideWhatsappQrPanel = () => {
+        stopWhatsappQrPolling();
+        if (whatsappQrPanelEl) whatsappQrPanelEl.hidden = true;
+        if (whatsappQrHintEl) whatsappQrHintEl.textContent = "";
+        if (whatsappQrBoxEl) whatsappQrBoxEl.innerHTML = "";
+      };
+
+      const ensureQrRenderer = async () => {
+        if (!qrRendererPromise) {
+          qrRendererPromise = import("https://esm.sh/qrcode@1.5.4?bundle&sourcemap=0");
+        }
+        const moduleRef = await qrRendererPromise;
+        const toCanvasFn = moduleRef?.toCanvas || moduleRef?.default?.toCanvas;
+        if (typeof toCanvasFn !== "function") {
+          throw new Error("No se pudo cargar el generador de QR.");
+        }
+        return toCanvasFn;
+      };
+
+      const renderWhatsappQr = async (qrRaw = "") => {
+        if (!whatsappQrPanelEl || !whatsappQrHintEl || !whatsappQrBoxEl) return;
+        whatsappQrPanelEl.hidden = false;
+        whatsappQrHintEl.textContent =
+          "Escanea este QR con el WhatsApp del servidor para habilitar el envío.";
+        whatsappQrBoxEl.innerHTML = "";
+        const qrValue = String(qrRaw || "").trim();
+        if (!qrValue) {
+          whatsappQrHintEl.textContent = "Esperando generación del QR en el servidor...";
+          return;
+        }
+        try {
+          const toCanvas = await ensureQrRenderer();
+          const canvas = document.createElement("canvas");
+          await toCanvas(canvas, qrValue, {
+            width: 260,
+            margin: 1,
+            color: {
+              dark: "#111827",
+              light: "#ffffff",
+            },
+          });
+          whatsappQrBoxEl.appendChild(canvas);
+        } catch (_qrRenderErr) {
+          const pre = document.createElement("pre");
+          pre.style.margin = "0";
+          pre.style.whiteSpace = "pre-wrap";
+          pre.style.wordBreak = "break-all";
+          pre.style.fontSize = "11px";
+          pre.textContent = qrValue;
+          whatsappQrHintEl.textContent =
+            "No se pudo renderizar la imagen del QR en este navegador. Usa el código manual:";
+          whatsappQrBoxEl.appendChild(pre);
+        }
+      };
+
+      const ensureWhatsappQrPolling = () => {
+        if (whatsappQrPollTimer) return;
+        whatsappQrPollTimer = setInterval(() => {
+          fetchAndRenderWhatsappQr({ autoStart: false }).catch(() => {});
+        }, 5000);
+      };
+
+      const fetchAndRenderWhatsappQr = async ({ autoStart = true } = {}) => {
+        const data = await fetchJson(`/api/whatsapp/qr?start=${autoStart ? "true" : "false"}`);
+        if (data?.ready) {
+          hideWhatsappQrPanel();
+          setStatus("WhatsApp listo. Puedes enviar mensajes.");
+          return true;
+        }
+        const hasQr = Boolean(String(data?.qrRaw || "").trim());
+        const isBooting = data?.booting === true;
+        if (!autoStart && !hasQr && !isBooting) {
+          hideWhatsappQrPanel();
+          return false;
+        }
+        await renderWhatsappQr(data?.qrRaw || "");
+        ensureWhatsappQrPolling();
+        return false;
       };
 
       const escapeHtml = (value) =>
@@ -419,6 +546,7 @@
 
       const loadRecordatorios = async () => {
         setStatus("Generando recordatorios faltantes...");
+        hideWhatsappQrPanel();
         resultsEl.innerHTML = "";
         renderLog([]);
         syncGeneratedState([], 0);
@@ -471,6 +599,7 @@
       };
 
       const sendGeneratedMessages = async () => {
+        hideWhatsappQrPanel();
         const targetUserIds = getPendingTargetUserIds(generatedItems);
         if (!targetUserIds.length) {
           setStatus("No hay mensajes pendientes enviables.", true);
@@ -480,9 +609,19 @@
 
         if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = true;
         updateSendButtonState({ sending: true });
-        setStatus("Iniciando bot de WhatsApp en Hetzner para enviar mensajes...");
+        setStatus("Verificando sesión de WhatsApp en Hetzner...");
 
         try {
+          const whatsappReady = await fetchAndRenderWhatsappQr({ autoStart: true });
+          if (!whatsappReady) {
+            setStatus(
+              "WhatsApp no tiene sesión iniciada. Escanea el QR y luego presiona \"Enviar mensajes\" nuevamente.",
+              true,
+            );
+            return;
+          }
+
+          setStatus("WhatsApp listo. Enviando mensajes...");
           const result = await fetchJson("/api/whatsapp/recordatorios/enviar", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -494,12 +633,29 @@
           });
           const items = Array.isArray(result?.items) ? result.items : [];
           renderGeneratedState(items);
+          const secondCutoffSent = Number(result?.cutoffToday?.sent || 0);
+          const secondCutoffTotal = Number(result?.cutoffToday?.total || 0);
+          const secondCutoffText =
+            secondCutoffTotal > 0
+              ? ` Segundo recordatorio día de corte: ${secondCutoffSent}/${secondCutoffTotal}.`
+              : "";
           setStatus(
-            `Proceso completado. Enviados: ${result.sent || 0}, sin teléfono: ${result.skippedNoPhone || 0}, teléfonos inválidos: ${result.skippedInvalidPhone || 0}, fallidos: ${result.failed || 0}, ventas marcadas: ${result.updatedVentas || 0}.`,
+            `Proceso completado. Enviados: ${result.sent || 0}, sin teléfono: ${result.skippedNoPhone || 0}, teléfonos inválidos: ${result.skippedInvalidPhone || 0}, fallidos: ${result.failed || 0}, ventas marcadas: ${result.updatedVentas || 0}.${secondCutoffText}`,
             Number(result?.failed || 0) > 0,
           );
         } catch (err) {
           console.error("recordatorios enviar error", err);
+          const errText = String(err?.message || err?.body?.error || "").toLowerCase();
+          const isWhatsappNotReady =
+            Number(err?.status || 0) === 503 &&
+            (errText.includes("whatsapp") || errText.includes("qr"));
+          if (isWhatsappNotReady) {
+            try {
+              await fetchAndRenderWhatsappQr({ autoStart: true });
+            } catch (qrErr) {
+              console.error("whatsapp qr fetch error", qrErr);
+            }
+          }
           const bodyItems = Array.isArray(err?.body?.items) ? err.body.items : [];
           const fallbackItems = bodyItems.length
             ? bodyItems
@@ -514,6 +670,8 @@
 
       btnGenerarRecordatorios?.addEventListener("click", loadRecordatorios);
       btnEnviarMensajes?.addEventListener("click", sendGeneratedMessages);
+
+      fetchAndRenderWhatsappQr({ autoStart: false }).catch(() => {});
     </script>
   </body>
 </html>

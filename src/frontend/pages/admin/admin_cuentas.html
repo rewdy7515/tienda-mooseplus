@@ -2864,6 +2864,7 @@
             ? getPlatFlags(rows[0]?.platFlags || {}, { fallbackAll: true })
             : groupVal?.flags || getPlatFlags({}, { fallbackAll: true });
           const showPerfil = flags.showPerfil ?? true;
+          const showPin = flags.showPin ?? false;
           const showClave = flags.showClave ?? true;
           const perfilHeader = getPerfilHeaderLabel(flags);
           const clienteSeleccionadoEncoded = encodeURIComponent(
@@ -2884,6 +2885,7 @@
                 ? getPerfilCellLabel(flags, r.n_perfil, r.perfil_hogar)
                 : "";
               const perfilCell = showPerfil ? `<td>${perfilLabel}</td>` : "";
+              const pinCell = showPin ? `<td>${r.pin || ""}</td>` : "";
               const claveCell = showClave ? `<td>${r.clave || ""}</td>` : "";
               const estadoInfo = getEstadoVenta({
                 fecha_corte: r.fecha_corte,
@@ -2898,6 +2900,7 @@
                 </td>
                 ${claveCell}
                 ${perfilCell}
+                ${pinCell}
                 <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
                 <td class="estado-cell ${estadoInfo.className}">${estadoInfo.label}</td>
                 <td>${renderPrecioVentaCell(r.id_venta, r.id_precio)}</td>
@@ -2950,6 +2953,7 @@
                       <th>Correo</th>
                       ${showClave ? "<th>Clave</th>" : ""}
                       ${showPerfil ? `<th>${perfilHeader}</th>` : ""}
+                      ${showPin ? "<th>PIN</th>" : ""}
                       <th>Fecha de Corte</th>
                       <th>Estado</th>
                       <th>ID Precio</th>

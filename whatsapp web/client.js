@@ -1,11 +1,44 @@
+const os = require("os");
+const path = require("path");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 
 let clientInstance = null;
 let hasInitialized = false;
 let initializePromise = null;
+let latestQrRaw = "";
+let latestQrAscii = "";
+let latestQrUpdatedAt = null;
 const readyListeners = new Set();
 const disconnectedListeners = new Set();
+const DEFAULT_RUNTIME_ROOT = path.join(os.homedir(), ".mooseplus-runtime", "whatsapp");
+
+const resolveWhatsappRuntimeRoot = () => {
+  const customRoot = String(process.env.WHATSAPP_RUNTIME_DIR || "").trim();
+  return customRoot ? path.resolve(customRoot) : DEFAULT_RUNTIME_ROOT;
+};
+
+const WHATSAPP_RUNTIME_ROOT = resolveWhatsappRuntimeRoot();
+const WHATSAPP_AUTH_PATH = path.join(WHATSAPP_RUNTIME_ROOT, "auth");
+const WHATSAPP_CACHE_PATH = path.join(WHATSAPP_RUNTIME_ROOT, "cache");
+
+const clearWhatsappQrState = () => {
+  latestQrRaw = "";
+  latestQrAscii = "";
+  latestQrUpdatedAt = null;
+};
+
+const setWhatsappQrState = (rawQr = "", asciiQr = "") => {
+  latestQrRaw = String(rawQr || "");
+  latestQrAscii = String(asciiQr || "");
+  latestQrUpdatedAt = new Date().toISOString();
+};
+
+const getWhatsappQrState = () => ({
+  raw: latestQrRaw || null,
+  ascii: latestQrAscii || null,
+  updatedAt: latestQrUpdatedAt || null,
+});
 
 const notifyReadyListeners = () => {
   readyListeners.forEach((listener) => {
@@ -33,8 +66,12 @@ const getWhatsappClient = () => {
   clientInstance = new Client({
     authStrategy: new LocalAuth({
       clientId: "mooseplus-admin",
-      dataPath: ".wwebjs_auth",
+      dataPath: WHATSAPP_AUTH_PATH,
     }),
+    webVersionCache: {
+      type: "local",
+      path: WHATSAPP_CACHE_PATH,
+    },
     puppeteer: {
       args:
         process.platform === "linux" && typeof process.getuid === "function" && process.getuid() === 0
@@ -44,16 +81,23 @@ const getWhatsappClient = () => {
   });
 
   clientInstance.on("qr", (qr) => {
-    qrcode.generate(qr, { small: true });
+    qrcode.generate(qr, { small: true }, (asciiQr) => {
+      setWhatsappQrState(qr, asciiQr);
+    });
+    if (!latestQrRaw) {
+      setWhatsappQrState(qr, "");
+    }
     console.log("[WhatsApp] Escanea el QR para iniciar sesion.");
   });
 
   clientInstance.on("authenticated", () => {
     console.log("[WhatsApp] Sesion autenticada.");
+    clearWhatsappQrState();
   });
 
   clientInstance.on("ready", () => {
     console.log("[WhatsApp] Cliente listo.");
+    clearWhatsappQrState();
     notifyReadyListeners();
   });
 
@@ -64,6 +108,7 @@ const getWhatsappClient = () => {
   clientInstance.on("disconnected", (reason) => {
     console.warn("[WhatsApp] Cliente desconectado:", reason);
     hasInitialized = false;
+    clearWhatsappQrState();
     notifyDisconnectedListeners(reason);
   });
 
@@ -99,6 +144,7 @@ const stopWhatsappClient = async () => {
   hasInitialized = false;
   initializePromise = null;
   clientInstance = null;
+  clearWhatsappQrState();
   if (!client) return;
   try {
     await client.destroy();
@@ -124,6 +170,7 @@ module.exports = {
   startWhatsappClient,
   stopWhatsappClient,
   isWhatsappReady,
+  getWhatsappQrState,
   onWhatsappReady,
   onWhatsappDisconnected,
 };

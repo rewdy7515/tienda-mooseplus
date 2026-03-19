@@ -1343,6 +1343,9 @@ const syncHomeBannersViewportSize = () => {
 const attachMobilePullToRefresh = () => {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (document.body?.dataset.mobilePullRefreshBound === "1") return;
+  const host = String(window.location?.hostname || "").toLowerCase();
+  const isProductionHost = host === "mooseplus.com" || host === "www.mooseplus.com";
+  if (!isProductionHost) return;
 
   const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches === true;
   const smallScreen = window.matchMedia?.("(max-width: 900px)")?.matches === true;

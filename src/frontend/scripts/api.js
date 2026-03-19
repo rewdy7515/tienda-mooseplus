@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0?no-check&sourcemap=0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0?bundle&no-check&sourcemap=0";
 import { clearSession, requireSession } from "./session.js";
 
 const supabase = createClient(
@@ -675,7 +675,7 @@ const fetchWithRetry = async (url, options = {}, retryOptions = {}) => {
       lastErr = err;
       const shouldRetry = attempt < attempts && isTransientNetworkError(err);
       if (!shouldRetry) throw err;
-      console.warn(`[${label}] transient network error, reintentando...`, {
+      warnApiDebug(`${label}:transientNetworkRetry`, {
         attempt,
         message: String(err?.message || err || "").slice(0, 220),
       });
@@ -698,7 +698,7 @@ const runSupabaseQueryWithRetry = async (queryFactory, retryOptions = {}) => {
     const shouldRetry =
       !!result?.error && attempt < attempts && isTransientNetworkError(result.error);
     if (!shouldRetry) return result;
-    console.warn(`[${label}] transient supabase error, reintentando...`, {
+    warnApiDebug(`${label}:transientSupabaseRetry`, {
       attempt,
       message: String(result?.error?.message || result?.error || "").slice(0, 220),
     });
@@ -1065,10 +1065,11 @@ export async function fetchCart() {
         isTransientCartBackendError(res.status, lastErrText);
       if (!shouldRetry) break;
 
-      console.warn(
-        "[fetchCart] transient backend error, reintentando...",
-        { attempt, status: res.status, body: String(lastErrText || "").slice(0, 220) },
-      );
+      warnApiDebug("fetchCart:transientBackendRetry", {
+        attempt,
+        status: res.status,
+        body: String(lastErrText || "").slice(0, 220),
+      });
       await wait(250 * attempt);
     }
 
