@@ -87,13 +87,9 @@ const summarizeError = (err) => ({
   status: Number.isFinite(Number(err?.status)) ? Number(err.status) : null,
 });
 
-const logApiDebug = (step, details = {}) => {
-  console.info(`${API_DEBUG_PREFIX} ${step}`, details);
-};
+const logApiDebug = (_step, _details = {}) => {};
 
-const warnApiDebug = (step, details = {}) => {
-  console.warn(`${API_DEBUG_PREFIX} ${step}`, details);
-};
+const warnApiDebug = (_step, _details = {}) => {};
 
 const normalizeAccessToken = (value = "") => {
   const token = String(value || "").trim();
@@ -288,6 +284,12 @@ const getTrafficNavigationType = () => {
   }
 };
 
+const canTrackProductionTraffic = () => {
+  if (typeof window === "undefined") return false;
+  const host = String(window.location.hostname || "").trim().toLowerCase();
+  return host === "www.mooseplus.com";
+};
+
 const getOrCreateTrafficSession = () => {
   const now = Date.now();
   const current = readTrafficSessionState();
@@ -334,6 +336,9 @@ const postTrafficWebEvent = async (payload = {}) => {
 const reportTrafficWebEvent = (tipoEvento, extraMetadata = null) => {
   try {
     if (typeof window === "undefined") return;
+    if (!canTrackProductionTraffic()) return;
+    const sessionUserId = Number(requireSession());
+    if (!Number.isFinite(sessionUserId) || sessionUserId <= 0) return;
     const { idSesion } = getOrCreateTrafficSession();
     if (!idSesion) return;
     const metadataBase = {
@@ -1380,7 +1385,6 @@ export async function fetchInventario() {
 export async function fetchVentasOrden(idOrden) {
   await ensureServerSession();
   try {
-    console.log("fetchVentasOrden request", { idOrden });
     const res = await fetch(
       `${API_BASE}/api/ventas/orden?id_orden=${encodeURIComponent(idOrden)}`,
       {
@@ -1405,7 +1409,6 @@ export async function fetchVentasOrden(idOrden) {
       return { error: message || "No se pudo cargar ventas por orden", status: res.status };
     }
     const json = await res.json();
-    console.log("fetchVentasOrden result", { idOrden, ventas: json?.ventas?.length || 0 });
     return json;
   } catch (err) {
     console.error("fetchVentasOrden error", err);

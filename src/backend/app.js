@@ -4806,7 +4806,8 @@ const processOrderFromItems = async ({
       Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
     const ventaAnt = ventaMap[it.id_venta] || {};
     const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
-    const renovarPendiente = isSuspendidaAnt;
+    const entregaInmediataRenov = isTrue(platformInfo?.entrega_inmediata);
+    const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
     if (renovarPendiente) renovacionesPendientesCount += 1;
     const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
     const isCuentaCompletaRenov =
@@ -5977,10 +5978,9 @@ const isAuthUserVerified = (authUser) => {
   return !!(emailConfirmedAt || phoneConfirmedAt || confirmedAt);
 };
 
-const getAuthVerifiedUsersStats = async () => {
+const listAllAuthUsers = async () => {
   let page = 1;
-  let totalUsers = 0;
-  let verifiedUsers = 0;
+  const allUsers = [];
 
   while (true) {
     const { data, error } = await supabaseAdmin.auth.admin.listUsers({
@@ -5989,11 +5989,18 @@ const getAuthVerifiedUsersStats = async () => {
     });
     if (error) throw error;
     const users = Array.isArray(data?.users) ? data.users : [];
-    totalUsers += users.length;
-    verifiedUsers += users.filter((user) => isAuthUserVerified(user)).length;
+    allUsers.push(...users);
     if (users.length < AUTH_ADMIN_USERS_PAGE_SIZE) break;
     page += 1;
   }
+
+  return allUsers;
+};
+
+const getAuthVerifiedUsersStats = async () => {
+  const users = await listAllAuthUsers();
+  const totalUsers = users.length;
+  const verifiedUsers = users.filter((user) => isAuthUserVerified(user)).length;
 
   return {
     totalUsers,
@@ -8248,6 +8255,17 @@ const truncateText = (value, max = 2000) => {
   return txt.length > max ? `${txt.slice(0, max)}…` : txt;
 };
 
+const isAllowedTrafficUrl = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(raw);
+    return String(parsed.hostname || "").trim().toLowerCase() === "www.mooseplus.com";
+  } catch (_err) {
+    return false;
+  }
+};
+
 app.post("/api/client-errors", jsonParser, async (req, res) => {
   try {
     const sessionUserId = toPositiveInt(parseSessionUserId(req));
@@ -8315,6 +8333,12 @@ app.post("/api/eventos-trafico-web", jsonParser, async (req, res) => {
     }
     if (!ruta) {
       return res.status(400).json({ ok: false, error: "ruta es requerida." });
+    }
+    if (!Number.isFinite(sessionUserId) || sessionUserId <= 0) {
+      return res.json({ ok: true, ignored: true, reason: "invalid_user" });
+    }
+    if (!isAllowedTrafficUrl(body?.url_completa)) {
+      return res.json({ ok: true, ignored: true, reason: "host_not_allowed" });
     }
 
     const payload = {
@@ -8478,72 +8502,37 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         return null;
       }
     };
-    const buildTrafficIdentity = (row = {}) => {
-      const userId = Number(row?.id_usuario);
-      if (Number.isFinite(userId) && userId > 0) return `u:${userId}`;
-      const sessionId = String(row?.id_sesion || "").trim().toLowerCase();
-      return sessionId ? `s:${sessionId}` : "";
-    };
-    const aggregateTrafficRows = (rows = []) => {
-      const usuariosUnicos = new Set();
-      const weekdaySets = new Map(weekdayOrder.map((row) => [row.key, new Set()]));
-      const hourSets = Array.from({ length: 24 }, () => new Set());
-
-      (rows || []).forEach((row) => {
-        const identity = buildTrafficIdentity(row);
-        if (!identity) return;
-        usuariosUnicos.add(identity);
-        const weekdayKey = toCaracasWeekdayKey(row?.fecha_hora);
-        if (weekdayKey && weekdaySets.has(weekdayKey)) {
-          weekdaySets.get(weekdayKey).add(identity);
-        }
-        const hour = toCaracasHour(row?.fecha_hora);
-        if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
-          hourSets[hour].add(identity);
-        }
+    const roundTrafficAverage = (value) =>
+      Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+    const buildMonthDateKeys = (monthRange) => {
+      const match = String(monthRange?.start || "").match(/^(\d{4})-(\d{2})-01$/);
+      if (!match) return [];
+      const year = match[1];
+      const monthTxt = match[2];
+      const daysInMonth = Number(String(monthRange?.end || "").slice(-2)) || 0;
+      return Array.from({ length: Math.max(0, daysInMonth) }, (_, idx) => {
+        const day = String(idx + 1).padStart(2, "0");
+        return `${year}-${monthTxt}-${day}`;
       });
-
-      return {
-        usuarios_unicos: usuariosUnicos.size,
-        por_dia_semana: weekdayOrder.map((row) => ({
-          key: row.key,
-          label: row.label,
-          cantidad: weekdaySets.get(row.key)?.size || 0,
-        })),
-        por_hora: hourSets.map((set, hour) => ({
-          hora: hour,
-          label: `${String(hour).padStart(2, "0")}h`,
-          cantidad: set.size,
-        })),
-      };
     };
-
-    const [usuariosResp, authResp, traficoActualResp, traficoPrevResp] = await Promise.all([
+    const [usuariosResp, authUsers, traficoActualResp, traficoPrevResp] = await Promise.all([
       supabaseAdmin
         .from("usuarios")
-        .select("id_usuario, id_auth, acceso_cliente")
-        .not("id_auth", "is", null),
-      supabaseAdmin
-        .schema("auth")
-        .from("users")
-        .select("id, email_confirmed_at")
-        .not("email_confirmed_at", "is", null),
+        .select("id_usuario, id_auth, acceso_cliente"),
+      listAllAuthUsers(),
       supabaseAdmin
         .from(WEB_TRAFFIC_EVENTS_TABLE)
-        .select("fecha_hora, id_usuario, id_sesion")
-        .eq("tipo_evento", "vista_pagina")
+        .select("fecha_hora, id_usuario, id_sesion, url_completa, tipo_evento")
         .gte("fecha_hora", `${range.start}T00:00:00-04:00`)
         .lt("fecha_hora", `${range.nextStart}T00:00:00-04:00`),
       supabaseAdmin
         .from(WEB_TRAFFIC_EVENTS_TABLE)
-        .select("fecha_hora, id_usuario, id_sesion")
-        .eq("tipo_evento", "vista_pagina")
+        .select("fecha_hora, id_usuario, id_sesion, url_completa, tipo_evento")
         .gte("fecha_hora", `${prevRange.start}T00:00:00-04:00`)
         .lt("fecha_hora", `${prevRange.nextStart}T00:00:00-04:00`),
     ]);
 
     if (usuariosResp.error) throw usuariosResp.error;
-    if (authResp.error) throw authResp.error;
 
     let traficoActualRows = traficoActualResp.data || [];
     let traficoPrevRows = traficoPrevResp.data || [];
@@ -8560,17 +8549,101 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       traficoPrevRows = [];
     }
 
+    const countedTrafficEventTypes = new Set(["vista_pagina", "inicio_sesion_web"]);
+    const hasValidTrafficUser = (row = {}) => {
+      const idUsuario = Number(row?.id_usuario);
+      return Number.isFinite(idUsuario) && idUsuario > 0;
+    };
+    const aggregateTrafficRows = (rows = [], monthRange = null) => {
+      const monthDateKeys = buildMonthDateKeys(monthRange);
+      const monthDateKeySet = new Set(monthDateKeys);
+      const daysInMonth = monthDateKeys.length;
+      const uniqueUsers = new Set();
+      const dailyUsersByDate = new Map(monthDateKeys.map((dateKey) => [dateKey, new Set()]));
+      const hourlyUsersByDate = Array.from({ length: 24 }, () =>
+        new Map(monthDateKeys.map((dateKey) => [dateKey, new Set()])),
+      );
+      const weekdayDateKeys = weekdayOrder.map(() => []);
+
+      monthDateKeys.forEach((dateKey) => {
+        const weekdayKey = toCaracasWeekdayKey(`${dateKey}T12:00:00-04:00`);
+        const weekdayIdx = weekdayOrder.findIndex((item) => item.key === weekdayKey);
+        if (weekdayIdx >= 0) {
+          weekdayDateKeys[weekdayIdx].push(dateKey);
+        }
+      });
+
+      (rows || []).forEach((row) => {
+        if (!hasValidTrafficUser(row) || !isAllowedTrafficUrl(row?.url_completa)) return;
+        const tipoEvento = String(row?.tipo_evento || "").trim().toLowerCase();
+        if (tipoEvento && !countedTrafficEventTypes.has(tipoEvento)) return;
+        const userId = String(Math.trunc(Number(row?.id_usuario)));
+        if (!userId) return;
+        const dateKey = toCaracasDate(row?.fecha_hora);
+        if (!dateKey || !monthDateKeySet.has(dateKey)) return;
+        uniqueUsers.add(userId);
+        dailyUsersByDate.get(dateKey)?.add(userId);
+        const hour = toCaracasHour(row?.fecha_hora);
+        if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+          hourlyUsersByDate[hour]?.get(dateKey)?.add(userId);
+        }
+      });
+
+      const totalDailyUniqueUsers = monthDateKeys.reduce(
+        (acc, dateKey) => acc + (dailyUsersByDate.get(dateKey)?.size || 0),
+        0,
+      );
+      const averageDailyUniqueUsers =
+        daysInMonth > 0 ? totalDailyUniqueUsers / daysInMonth : 0;
+
+      return {
+        usuarios_unicos: uniqueUsers.size,
+        clientes_unicos: uniqueUsers.size,
+        promedio_diario_clientes_unicos: roundTrafficAverage(averageDailyUniqueUsers),
+        dias_en_mes: daysInMonth,
+        por_dia_semana: weekdayOrder.map((row, idx) => ({
+          key: row.key,
+          label: row.label,
+          cantidad: roundTrafficAverage(
+            weekdayDateKeys[idx]?.length
+              ? weekdayDateKeys[idx].reduce(
+                  (acc, dateKey) => acc + (dailyUsersByDate.get(dateKey)?.size || 0),
+                  0,
+                ) / weekdayDateKeys[idx].length
+              : 0,
+          ),
+          dias: weekdayDateKeys[idx]?.length || 0,
+        })),
+        por_hora: hourlyUsersByDate.map((usersByDate, hour) => ({
+          hora: hour,
+          label: `${String(hour).padStart(2, "0")}h`,
+          cantidad: roundTrafficAverage(
+            daysInMonth > 0
+              ? monthDateKeys.reduce(
+                  (acc, dateKey) => acc + (usersByDate.get(dateKey)?.size || 0),
+                  0,
+                ) / daysInMonth
+              : 0,
+          ),
+          dias: daysInMonth,
+        })),
+      };
+    };
+
     const usuarioByAuthId = new Map(
       (usuariosResp.data || [])
         .map((row) => [String(row?.id_auth || "").trim().toLowerCase(), row])
         .filter(([authId]) => !!authId),
     );
-    const authConfirmedLinkedRows = (authResp.data || [])
+    const authConfirmedLinkedRows = (authUsers || [])
       .map((row) => {
         const authId = String(row?.id || "").trim().toLowerCase();
         const usuario = authId ? usuarioByAuthId.get(authId) : null;
         if (!usuario) return null;
-        const fechaConfirmacion = toCaracasDate(row?.email_confirmed_at);
+        if (!isAuthUserVerified(row)) return null;
+        const fechaConfirmacion = toCaracasDate(
+          row?.email_confirmed_at || row?.phone_confirmed_at || row?.confirmed_at,
+        );
         if (!fechaConfirmacion) return null;
         return {
           ...row,
@@ -8582,7 +8655,9 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
 
     const registrosPorMesMap = new Map();
     authConfirmedLinkedRows.forEach((row) => {
-      const monthKey = toCaracasMonth(row?.email_confirmed_at);
+      const monthKey = toCaracasMonth(
+        row?.email_confirmed_at || row?.phone_confirmed_at || row?.confirmed_at,
+      );
       if (!monthKey) return;
       registrosPorMesMap.set(monthKey, (registrosPorMesMap.get(monthKey) || 0) + 1);
     });
@@ -8621,8 +8696,8 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         registros_por_mes: registrosPorMes,
       },
       trafico: {
-        actual: aggregateTrafficRows(traficoActualRows),
-        anterior: aggregateTrafficRows(traficoPrevRows),
+        actual: aggregateTrafficRows(traficoActualRows, range),
+        anterior: aggregateTrafficRows(traficoPrevRows, prevRange),
       },
     });
   } catch (err) {
