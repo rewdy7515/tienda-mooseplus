@@ -221,6 +221,7 @@
       let generatedSendableCount = 0;
       let qrRendererPromise = null;
       let whatsappQrPollTimer = null;
+      let whatsappQrFlowRequested = false;
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
@@ -271,8 +272,9 @@
         }
       };
 
-      const hideWhatsappQrPanel = () => {
+      const hideWhatsappQrPanel = ({ resetFlow = true } = {}) => {
         stopWhatsappQrPolling();
+        if (resetFlow) whatsappQrFlowRequested = false;
         if (whatsappQrPanelEl) whatsappQrPanelEl.hidden = true;
         if (whatsappQrHintEl) whatsappQrHintEl.textContent = "";
         if (whatsappQrBoxEl) whatsappQrBoxEl.innerHTML = "";
@@ -329,22 +331,23 @@
       const ensureWhatsappQrPolling = () => {
         if (whatsappQrPollTimer) return;
         whatsappQrPollTimer = setInterval(() => {
-          fetchAndRenderWhatsappQr({ autoStart: false }).catch(() => {});
+          fetchAndRenderWhatsappQr({ autoStart: whatsappQrFlowRequested }).catch(() => {});
         }, 5000);
       };
 
       const fetchAndRenderWhatsappQr = async ({ autoStart = true } = {}) => {
+        if (autoStart) whatsappQrFlowRequested = true;
         const data = await fetchJson(`/api/whatsapp/qr?start=${autoStart ? "true" : "false"}`);
         if (data?.ready) {
-          hideWhatsappQrPanel();
+          hideWhatsappQrPanel({ resetFlow: true });
           setStatus("WhatsApp listo. Puedes enviar mensajes.");
           return true;
         }
         const hasQr = Boolean(String(data?.qrRaw || "").trim());
         const isActive = data?.active === true;
         const isBooting = data?.booting === true;
-        if (!autoStart && !hasQr && !isBooting && !isActive) {
-          hideWhatsappQrPanel();
+        if (!autoStart && !whatsappQrFlowRequested && !hasQr && !isBooting && !isActive) {
+          hideWhatsappQrPanel({ resetFlow: false });
           return false;
         }
         await renderWhatsappQr(data?.qrRaw || "");
@@ -672,7 +675,7 @@
       btnGenerarRecordatorios?.addEventListener("click", loadRecordatorios);
       btnEnviarMensajes?.addEventListener("click", sendGeneratedMessages);
 
-      fetchAndRenderWhatsappQr({ autoStart: false }).catch(() => {});
+      fetchAndRenderWhatsappQr({ autoStart: true }).catch(() => {});
     </script>
   </body>
 </html>

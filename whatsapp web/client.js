@@ -467,6 +467,8 @@ const isWhatsappClientActive = () => {
 };
 
 const stopWhatsappClient = async () => {
+  // Importante: no usar logout() aquí para conservar LocalAuth en disco.
+  // destroy() solo apaga el navegador/proceso del bot.
   await resetWhatsappClientState({
     destroyClient: true,
     reason: "stop",
