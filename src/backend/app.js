@@ -186,6 +186,16 @@ const WEB_PUSH_QUEUE_MAX_RETRIES = Math.max(
   1,
   Math.min(10, Number(process.env.WEB_PUSH_QUEUE_MAX_RETRIES) || 3),
 );
+const AUTO_GIFTCARD_PENDING_DELIVERY_ENABLED =
+  process.env.AUTO_GIFTCARD_PENDING_DELIVERY !== "false" && process.env.VERCEL !== "1";
+const AUTO_GIFTCARD_PENDING_DELIVERY_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.AUTO_GIFTCARD_PENDING_DELIVERY_INTERVAL_MS) || 15000,
+);
+const AUTO_GIFTCARD_PENDING_DELIVERY_BATCH = Math.max(
+  1,
+  Math.min(500, Number(process.env.AUTO_GIFTCARD_PENDING_DELIVERY_BATCH) || 120),
+);
 const HOME_BANNERS_TABLE = "banners";
 const WEB_TRAFFIC_EVENTS_TABLE = "eventos_trafico_web";
 let nuevoServicioNotifQueueInProgress = false;
@@ -213,6 +223,9 @@ let webPushQueueLastResult = {
   removedSubscriptions: 0,
 };
 let webPushQueueLastError = null;
+let autoGiftCardPendingDeliveryInProgress = false;
+let autoGiftCardPendingDeliveryInitialized = false;
+let autoGiftCardPendingDeliveryCursor = 0;
 
 if (WEB_PUSH_IS_CONFIGURED) {
   try {
@@ -330,6 +343,408 @@ const buildGiftCardSaleCopyText = ({
   lines.push(`\`${valueTxt}\``);
   lines.push(`PIN: ${pinTxt}`);
   return lines.join("\n");
+};
+
+const giftCardDeliveryError = (code, message) => {
+  const err = new Error(message || code);
+  err.code = code;
+  return err;
+};
+
+const syncOrderPendingStateById = async (idOrden) => {
+  const ordenId = toPositiveInt(idOrden);
+  if (!ordenId) return;
+
+  const { data: pendingRows, error: pendingErr } = await supabaseAdmin
+    .from("ventas")
+    .select("id_venta")
+    .eq("id_orden", ordenId)
+    .eq("pendiente", true);
+  if (pendingErr) throw pendingErr;
+
+  const { error: updOrdenErr } = await supabaseAdmin
+    .from("ordenes")
+    .update({ en_espera: (pendingRows || []).length > 0 })
+    .eq("id_orden", ordenId);
+  if (updOrdenErr) throw updOrdenErr;
+};
+
+const fetchGiftCardPriceIdsByPlatformAndAmount = async ({
+  idPlataforma,
+  monto,
+} = {}) => {
+  const platId = toPositiveInt(idPlataforma);
+  const montoNorm = normalizeGiftCardFaceValue(monto);
+  if (!platId || !Number.isFinite(montoNorm) || montoNorm <= 0) return [];
+
+  const { data: priceRows, error: priceErr } = await supabaseAdmin
+    .from("precios")
+    .select("id_precio, valor_tarjeta_de_regalo")
+    .eq("id_plataforma", platId)
+    .not("valor_tarjeta_de_regalo", "is", null);
+  if (priceErr) throw priceErr;
+
+  return uniqPositiveIds(
+    (priceRows || [])
+      .filter((row) => normalizeGiftCardFaceValue(row?.valor_tarjeta_de_regalo) === montoNorm)
+      .map((row) => row?.id_precio),
+  );
+};
+
+const findNextPendingGiftCardVentaIdByPriceIds = async (priceIds = []) => {
+  const ids = uniqPositiveIds(priceIds);
+  if (!ids.length) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("ventas")
+    .select("id_venta")
+    .eq("pendiente", true)
+    .is("id_tarjeta_de_regalo", null)
+    .in("id_precio", ids)
+    .order("id_venta", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return toPositiveInt(data?.id_venta);
+};
+
+const deliverPendingGiftCardVenta = async ({
+  idVenta,
+  idTarjetaDeRegalo = null,
+  adminInvolucradoId = null,
+  source = "manual",
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta);
+  if (!ventaId) {
+    throw giftCardDeliveryError("INVALID_ID_VENTA", "id_venta inválido");
+  }
+
+  const { data: venta, error: ventaErr } = await supabaseAdmin
+    .from("ventas")
+    .select(
+      `
+      id_venta,
+      id_usuario,
+      id_orden,
+      id_precio,
+      id_tarjeta_de_regalo,
+      pendiente,
+      precios:precios(id_precio, id_plataforma, plan, valor_tarjeta_de_regalo, region, moneda),
+      tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(
+        id_tarjeta_de_regalo,
+        pin,
+        vendido_a,
+        monto,
+        usado,
+        para_venta
+      )
+    `,
+    )
+    .eq("id_venta", ventaId)
+    .maybeSingle();
+  if (ventaErr) throw ventaErr;
+  if (!venta) {
+    throw giftCardDeliveryError("GIFT_CARD_SALE_NOT_FOUND", "Venta no encontrada");
+  }
+  if (!isTrue(venta?.pendiente)) {
+    throw giftCardDeliveryError("GIFT_CARD_SALE_NOT_PENDING", "La venta ya no está pendiente.");
+  }
+
+  const idUsuarioVenta = toPositiveInt(venta?.id_usuario);
+  const idOrden = toPositiveInt(venta?.id_orden);
+  const idPlataforma = toPositiveInt(venta?.precios?.id_plataforma);
+  if (!idUsuarioVenta || !idPlataforma) {
+    throw giftCardDeliveryError(
+      "GIFT_CARD_SALE_INVALID_CONTEXT",
+      "La venta no tiene plataforma o usuario válidos.",
+    );
+  }
+
+  const { data: plataformaRow, error: plataformaErr } = await supabaseAdmin
+    .from("plataformas")
+    .select("id_plataforma, nombre, tarjeta_de_regalo")
+    .eq("id_plataforma", idPlataforma)
+    .maybeSingle();
+  if (plataformaErr) throw plataformaErr;
+  if (!isTrue(plataformaRow?.tarjeta_de_regalo)) {
+    throw giftCardDeliveryError(
+      "GIFT_CARD_SALE_NOT_GIFTCARD",
+      "La venta indicada no es una gift card.",
+    );
+  }
+
+  const expectedMonto = normalizeGiftCardFaceValue(venta?.precios?.valor_tarjeta_de_regalo);
+  let giftCardCandidate = null;
+
+  const requestedCardId = toPositiveInt(idTarjetaDeRegalo);
+  if (requestedCardId) {
+    const { data: row, error: rowErr } = await supabaseAdmin
+      .from("tarjetas_de_regalo")
+      .select("id_tarjeta_de_regalo, id_plataforma, pin, monto, para_venta, usado")
+      .eq("id_tarjeta_de_regalo", requestedCardId)
+      .maybeSingle();
+    if (rowErr) throw rowErr;
+    if (!row) {
+      throw giftCardDeliveryError("GIFT_CARD_NOT_FOUND", "La gift card seleccionada no existe.");
+    }
+    if (toPositiveInt(row?.id_plataforma) !== idPlataforma) {
+      throw giftCardDeliveryError(
+        "GIFT_CARD_PLATFORM_MISMATCH",
+        "La gift card no coincide con la plataforma de la venta.",
+      );
+    }
+    if (!isTrue(row?.para_venta)) {
+      throw giftCardDeliveryError(
+        "GIFT_CARD_NOT_FOR_SALE",
+        "La gift card indicada no está disponible para venta.",
+      );
+    }
+    if (isTrue(row?.usado)) {
+      throw giftCardDeliveryError("GIFT_CARD_ALREADY_USED", "La gift card indicada ya fue usada.");
+    }
+    const rowMonto = normalizeGiftCardFaceValue(row?.monto);
+    if (
+      Number.isFinite(expectedMonto) &&
+      expectedMonto > 0 &&
+      (!Number.isFinite(rowMonto) || rowMonto !== expectedMonto)
+    ) {
+      throw giftCardDeliveryError(
+        "GIFT_CARD_AMOUNT_MISMATCH",
+        "La gift card no coincide con el monto de la venta.",
+      );
+    }
+    giftCardCandidate = row;
+  } else {
+    const [giftCardRow] = await fetchAvailableGiftCardStock({
+      idPlataforma,
+      valorTarjetaDeRegalo: expectedMonto,
+      limit: 1,
+    });
+    if (!giftCardRow?.id_tarjeta_de_regalo) {
+      throw giftCardDeliveryError("GIFT_CARD_STOCK_EMPTY", "No hay stock disponible para esta gift card.");
+    }
+    giftCardCandidate = giftCardRow;
+  }
+
+  const selectedCardId = toPositiveInt(giftCardCandidate?.id_tarjeta_de_regalo);
+  if (!selectedCardId) {
+    throw giftCardDeliveryError("GIFT_CARD_NOT_FOUND", "No se pudo resolver la gift card para la entrega.");
+  }
+
+  const fechaUso = todayInVenezuela();
+  const { data: updatedGiftRow, error: updGiftErr } = await supabaseAdmin
+    .from("tarjetas_de_regalo")
+    .update({
+      usado: true,
+      vendido_a: idUsuarioVenta,
+      fecha_uso: fechaUso,
+      admin_involucrado: toPositiveInt(adminInvolucradoId) || null,
+      id_orden: idOrden || null,
+    })
+    .eq("id_tarjeta_de_regalo", selectedCardId)
+    .eq("id_plataforma", idPlataforma)
+    .eq("para_venta", true)
+    .eq("usado", false)
+    .select("id_tarjeta_de_regalo, pin")
+    .maybeSingle();
+  if (updGiftErr) throw updGiftErr;
+  if (!updatedGiftRow?.id_tarjeta_de_regalo) {
+    throw giftCardDeliveryError(
+      "GIFT_CARD_STOCK_UPDATE_CONFLICT",
+      "La gift card ya no está disponible para entrega.",
+    );
+  }
+
+  const pinGiftCard = String(updatedGiftRow?.pin || giftCardCandidate?.pin || "").trim();
+
+  const { error: histUpdErr } = await supabaseAdmin
+    .from("historial_ventas")
+    .update({ id_tarjeta_de_regalo: selectedCardId })
+    .eq("id_venta", ventaId);
+  if (histUpdErr && !isMissingHistorialGiftCardColumnError(histUpdErr)) throw histUpdErr;
+
+  const plataformaNombre = String(plataformaRow?.nombre || "").trim() || `Plataforma ${idPlataforma}`;
+  const giftRegion = String(venta?.precios?.region || "").trim();
+  const giftValue = String(venta?.precios?.valor_tarjeta_de_regalo || "").trim();
+  const giftCurrency = String(venta?.precios?.moneda || "").trim();
+
+  const notifPayload = buildNotificationPayload(
+    "nuevo_servicio",
+    {
+      items: [
+        {
+          plataforma: plataformaNombre,
+          idVenta: ventaId,
+          region: giftRegion,
+          valorTarjeta: giftValue,
+          moneda: giftCurrency,
+          pin: pinGiftCard || "Pendiente",
+        },
+      ],
+    },
+    { idCuenta: null },
+  );
+  const { error: notifErr } = await supabaseAdmin.from("notificaciones").insert({
+    ...notifPayload,
+    id_usuario: idUsuarioVenta,
+    id_orden: idOrden || null,
+  });
+  if (notifErr) throw notifErr;
+
+  const { error: deleteVentaErr } = await supabaseAdmin
+    .from("ventas")
+    .delete()
+    .eq("id_venta", ventaId);
+  if (deleteVentaErr) throw deleteVentaErr;
+
+  await syncOrderPendingStateById(idOrden);
+
+  const copyText = buildGiftCardSaleCopyText({
+    plataformaNombre,
+    idVenta: ventaId,
+    region: giftRegion,
+    valorTarjeta: giftValue,
+    moneda: giftCurrency,
+    pin: pinGiftCard || "Pendiente",
+  });
+
+  return {
+    ok: true,
+    id_venta: ventaId,
+    id_orden: idOrden || null,
+    id_tarjeta_de_regalo: selectedCardId,
+    plataforma: plataformaNombre,
+    pin: pinGiftCard || "Pendiente",
+    copy_text: copyText,
+    source,
+  };
+};
+
+const initAutoGiftCardPendingDeliveryCursor = async () => {
+  if (autoGiftCardPendingDeliveryInitialized) return;
+  const { data: lastCardRow, error: lastCardErr } = await supabaseAdmin
+    .from("tarjetas_de_regalo")
+    .select("id_tarjeta_de_regalo")
+    .order("id_tarjeta_de_regalo", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastCardErr) throw lastCardErr;
+  autoGiftCardPendingDeliveryCursor = toPositiveInt(lastCardRow?.id_tarjeta_de_regalo) || 0;
+  autoGiftCardPendingDeliveryInitialized = true;
+  console.log(
+    `[GiftCards] Auto-entrega inicializada. Cursor de inserciones en #${autoGiftCardPendingDeliveryCursor}.`,
+  );
+};
+
+const processAutoGiftCardPendingDeliveries = async () => {
+  if (!AUTO_GIFTCARD_PENDING_DELIVERY_ENABLED) return null;
+  if (autoGiftCardPendingDeliveryInProgress) return { skipped: true, reason: "in_progress" };
+  autoGiftCardPendingDeliveryInProgress = true;
+
+  try {
+    await initAutoGiftCardPendingDeliveryCursor();
+    const cursorBase = toPositiveInt(autoGiftCardPendingDeliveryCursor) || 0;
+    const { data: insertedRows, error: insertedErr } = await supabaseAdmin
+      .from("tarjetas_de_regalo")
+      .select("id_tarjeta_de_regalo, id_plataforma, monto, para_venta, usado")
+      .gt("id_tarjeta_de_regalo", cursorBase)
+      .order("id_tarjeta_de_regalo", { ascending: true })
+      .limit(AUTO_GIFTCARD_PENDING_DELIVERY_BATCH);
+    if (insertedErr) throw insertedErr;
+
+    const rows = Array.isArray(insertedRows) ? insertedRows : [];
+    if (!rows.length) {
+      return {
+        scanned: 0,
+        delivered: 0,
+        matched: 0,
+        skippedNoMatch: 0,
+        failed: 0,
+        cursor: cursorBase,
+      };
+    }
+
+    const priceIdsByKey = new Map();
+    let maxSeenId = cursorBase;
+    const summary = {
+      scanned: rows.length,
+      delivered: 0,
+      matched: 0,
+      skippedNoMatch: 0,
+      failed: 0,
+    };
+
+    for (const stockRow of rows) {
+      const stockId = toPositiveInt(stockRow?.id_tarjeta_de_regalo);
+      if (stockId && stockId > maxSeenId) maxSeenId = stockId;
+
+      const platId = toPositiveInt(stockRow?.id_plataforma);
+      const stockMonto = normalizeGiftCardFaceValue(stockRow?.monto);
+      if (
+        !stockId ||
+        !platId ||
+        !Number.isFinite(stockMonto) ||
+        stockMonto <= 0 ||
+        !isTrue(stockRow?.para_venta) ||
+        isTrue(stockRow?.usado)
+      ) {
+        summary.skippedNoMatch += 1;
+        continue;
+      }
+
+      const key = `${platId}::${stockMonto.toFixed(2)}`;
+      let matchingPriceIds = priceIdsByKey.get(key);
+      if (!matchingPriceIds) {
+        matchingPriceIds = await fetchGiftCardPriceIdsByPlatformAndAmount({
+          idPlataforma: platId,
+          monto: stockMonto,
+        });
+        priceIdsByKey.set(key, matchingPriceIds);
+      }
+      if (!matchingPriceIds.length) {
+        summary.skippedNoMatch += 1;
+        continue;
+      }
+
+      const pendingVentaId = await findNextPendingGiftCardVentaIdByPriceIds(matchingPriceIds);
+      if (!pendingVentaId) {
+        summary.skippedNoMatch += 1;
+        continue;
+      }
+      summary.matched += 1;
+
+      try {
+        await deliverPendingGiftCardVenta({
+          idVenta: pendingVentaId,
+          idTarjetaDeRegalo: stockId,
+          adminInvolucradoId: null,
+          source: "auto_stock_insert",
+        });
+        summary.delivered += 1;
+      } catch (itemErr) {
+        summary.failed += 1;
+        console.error("[GiftCards] Auto-entrega item error", {
+          stockId,
+          pendingVentaId,
+          message: itemErr?.message || String(itemErr || ""),
+          code: itemErr?.code || "",
+        });
+      }
+    }
+
+    autoGiftCardPendingDeliveryCursor = Math.max(cursorBase, maxSeenId);
+    if (summary.delivered > 0 || summary.failed > 0 || summary.matched > 0) {
+      console.log(
+        `[GiftCards] Auto-entrega por inserciones: scanned=${summary.scanned}, matched=${summary.matched}, delivered=${summary.delivered}, failed=${summary.failed}, skipped=${summary.skippedNoMatch}, cursor=${autoGiftCardPendingDeliveryCursor}`,
+      );
+    }
+    return {
+      ...summary,
+      cursor: autoGiftCardPendingDeliveryCursor,
+    };
+  } finally {
+    autoGiftCardPendingDeliveryInProgress = false;
+  }
 };
 
 const attachGiftCardPriceInfo = async (rows = []) => {
@@ -1712,12 +2127,16 @@ const buildWhatsappRecordatorioItems = async ({
           : "-";
     const fechaPagoHeader = `\`Fecha de pago: ${fechaPagoMensaje}\``;
 
-    if (renewalCartUrl) {
+    if (effectiveMode === "cutoff_today") {
+      if (renewalCartUrl) {
+        plain = `🚨 *HOY* vencen tus membresías\nAñade tus renovaciones al carrito automaticamente:\n${renewalCartUrl}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+      } else {
+        plain = `🚨 *HOY* vencen tus membresías, puedes *renovar* por nuestra nueva pagina web:\n${buildPublicSiteUrl()}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+      }
+    } else if (renewalCartUrl) {
       const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
       const intro = `Añade tus renovaciones al carrito automaticamente:\n${renewalCartUrl}`;
       plain = `${saludo}\n${intro}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-    } else if (effectiveMode === "cutoff_today") {
-      plain = `🚨 *HOY* vencen tus membresías, puedes *renovar* por nuestra nueva pagina web:\n${buildPublicSiteUrl()}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     } else {
       const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
       const signupUrl = String(group.signupUrl || "").trim();
@@ -2368,6 +2787,22 @@ if (WEB_PUSH_QUEUE_WORKER_ENABLED) {
   } else {
     console.warn("[WebPush] Worker desactivado: faltan WEB_PUSH_VAPID_PUBLIC_KEY/PRIVATE_KEY.");
   }
+}
+
+if (AUTO_GIFTCARD_PENDING_DELIVERY_ENABLED) {
+  console.log(
+    `[GiftCards] Auto-entrega de ventas pendientes por inserciones activa (cada ${Math.round(
+      AUTO_GIFTCARD_PENDING_DELIVERY_INTERVAL_MS / 1000,
+    )}s).`,
+  );
+  setInterval(() => {
+    processAutoGiftCardPendingDeliveries().catch((err) => {
+      console.error("[GiftCards] Worker auto-entrega error", err);
+    });
+  }, AUTO_GIFTCARD_PENDING_DELIVERY_INTERVAL_MS);
+  processAutoGiftCardPendingDeliveries().catch((err) => {
+    console.error("[GiftCards] Worker auto-entrega init error", err);
+  });
 }
 
 const normalizeMontoBs = (value) => {
@@ -9588,154 +10023,12 @@ app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
     if (!idVenta) {
       return res.status(400).json({ error: "id_venta inválido" });
     }
-
-    const { data: venta, error: ventaErr } = await supabaseAdmin
-      .from("ventas")
-      .select(
-        `
-        id_venta,
-        id_usuario,
-        id_orden,
-        id_precio,
-        id_tarjeta_de_regalo,
-        pendiente,
-        precios:precios(id_precio, id_plataforma, plan, valor_tarjeta_de_regalo, region, moneda),
-        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(
-          id_tarjeta_de_regalo,
-          pin,
-          vendido_a
-        )
-      `,
-      )
-      .eq("id_venta", idVenta)
-      .maybeSingle();
-    if (ventaErr) throw ventaErr;
-    if (!venta) {
-      return res.status(404).json({ error: "Venta no encontrada" });
-    }
-    if (!isTrue(venta?.pendiente)) {
-      return res.status(409).json({ error: "La venta ya no está pendiente." });
-    }
-
-    const idUsuarioVenta = toPositiveInt(venta?.id_usuario);
-    const idOrden = toPositiveInt(venta?.id_orden);
-    const idPlataforma = toPositiveInt(venta?.precios?.id_plataforma);
-    if (!idUsuarioVenta || !idPlataforma) {
-      return res.status(400).json({ error: "La venta no tiene plataforma o usuario válidos." });
-    }
-
-    const { data: plataformaRow, error: plataformaErr } = await supabaseAdmin
-      .from("plataformas")
-      .select("id_plataforma, nombre, tarjeta_de_regalo")
-      .eq("id_plataforma", idPlataforma)
-      .maybeSingle();
-    if (plataformaErr) throw plataformaErr;
-    if (!isTrue(plataformaRow?.tarjeta_de_regalo)) {
-      return res.status(400).json({ error: "La venta indicada no es una gift card." });
-    }
-
-    let idTarjetaDeRegalo = toPositiveInt(venta?.id_tarjeta_de_regalo);
-    let pinGiftCard = String(venta?.tarjetas_de_regalo?.pin || "").trim();
-
-    if (!idTarjetaDeRegalo) {
-      const [giftCardRow] = await fetchAvailableGiftCardStock({
-        idPlataforma,
-        valorTarjetaDeRegalo: venta?.precios?.valor_tarjeta_de_regalo,
-        limit: 1,
-      });
-      if (!giftCardRow?.id_tarjeta_de_regalo) {
-        return res.status(409).json({ error: "No hay stock disponible para esta gift card." });
-      }
-      idTarjetaDeRegalo = toPositiveInt(giftCardRow.id_tarjeta_de_regalo);
-      pinGiftCard = String(giftCardRow.pin || "").trim();
-    }
-
-    const fechaUso = todayInVenezuela();
-    const { error: updGiftErr } = await supabaseAdmin
-      .from("tarjetas_de_regalo")
-      .update({
-        usado: true,
-        vendido_a: idUsuarioVenta,
-        fecha_uso: fechaUso,
-        admin_involucrado: toPositiveInt(adminId) || null,
-        id_orden: idOrden || null,
-      })
-      .eq("id_tarjeta_de_regalo", idTarjetaDeRegalo)
-      .eq("id_plataforma", idPlataforma)
-      .eq("para_venta", true);
-    if (updGiftErr) throw updGiftErr;
-
-    const { error: histUpdErr } = await supabaseAdmin
-      .from("historial_ventas")
-      .update({ id_tarjeta_de_regalo: idTarjetaDeRegalo })
-      .eq("id_venta", idVenta);
-    if (histUpdErr && !isMissingHistorialGiftCardColumnError(histUpdErr)) throw histUpdErr;
-
-    const plataformaNombre = String(plataformaRow?.nombre || "").trim() || `Plataforma ${idPlataforma}`;
-    const giftRegion = String(venta?.precios?.region || "").trim();
-    const giftValue = String(venta?.precios?.valor_tarjeta_de_regalo || "").trim();
-    const giftCurrency = String(venta?.precios?.moneda || "").trim();
-    const notifPayload = buildNotificationPayload(
-      "nuevo_servicio",
-      {
-        items: [
-          {
-            plataforma: plataformaNombre,
-            idVenta,
-            region: giftRegion,
-            valorTarjeta: giftValue,
-            moneda: giftCurrency,
-            pin: pinGiftCard || "Pendiente",
-          },
-        ],
-      },
-      { idCuenta: null },
-    );
-    const { error: notifErr } = await supabaseAdmin.from("notificaciones").insert({
-      ...notifPayload,
-      id_usuario: idUsuarioVenta,
-      id_orden: idOrden || null,
-    });
-    if (notifErr) throw notifErr;
-
-    const { error: deleteVentaErr } = await supabaseAdmin
-      .from("ventas")
-      .delete()
-      .eq("id_venta", idVenta);
-    if (deleteVentaErr) throw deleteVentaErr;
-
-    if (idOrden) {
-      const { data: pendingRows, error: pendingErr } = await supabaseAdmin
-        .from("ventas")
-        .select("id_venta")
-        .eq("id_orden", idOrden)
-        .eq("pendiente", true);
-      if (pendingErr) throw pendingErr;
-      const { error: updOrdenErr } = await supabaseAdmin
-        .from("ordenes")
-        .update({ en_espera: (pendingRows || []).length > 0 })
-        .eq("id_orden", idOrden);
-      if (updOrdenErr) throw updOrdenErr;
-    }
-
-    const copyText = buildGiftCardSaleCopyText({
-      plataformaNombre,
+    const result = await deliverPendingGiftCardVenta({
       idVenta,
-      region: giftRegion,
-      valorTarjeta: giftValue,
-      moneda: giftCurrency,
-      pin: pinGiftCard || "Pendiente",
+      adminInvolucradoId: adminId,
+      source: "manual_admin",
     });
-
-    return res.json({
-      ok: true,
-      id_venta: idVenta,
-      id_orden: idOrden || null,
-      id_tarjeta_de_regalo: idTarjetaDeRegalo,
-      plataforma: plataformaNombre,
-      pin: pinGiftCard || "Pendiente",
-      copy_text: copyText,
-    });
+    return res.json(result);
   } catch (err) {
     console.error("[admin/ventas/entregar-giftcard] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -9743,6 +10036,30 @@ app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
     }
     if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
       return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    if (err?.code === "GIFT_CARD_SALE_NOT_FOUND") {
+      return res.status(404).json({ error: err.message });
+    }
+    if (err?.code === "GIFT_CARD_NOT_FOUND") {
+      return res.status(404).json({ error: err.message });
+    }
+    if (
+      err?.code === "GIFT_CARD_SALE_NOT_PENDING" ||
+      err?.code === "GIFT_CARD_STOCK_EMPTY" ||
+      err?.code === "GIFT_CARD_NOT_FOR_SALE" ||
+      err?.code === "GIFT_CARD_ALREADY_USED" ||
+      err?.code === "GIFT_CARD_PLATFORM_MISMATCH" ||
+      err?.code === "GIFT_CARD_AMOUNT_MISMATCH" ||
+      err?.code === "GIFT_CARD_STOCK_UPDATE_CONFLICT"
+    ) {
+      return res.status(409).json({ error: err.message });
+    }
+    if (
+      err?.code === "INVALID_ID_VENTA" ||
+      err?.code === "GIFT_CARD_SALE_NOT_GIFTCARD" ||
+      err?.code === "GIFT_CARD_SALE_INVALID_CONTEXT"
+    ) {
+      return res.status(400).json({ error: err.message });
     }
     return res.status(500).json({ error: err.message });
   }

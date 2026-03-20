@@ -551,6 +551,7 @@
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
             const showTipo = String(payload.id_plataforma || "") === "9";
+            const showValor = payload.tarjeta_de_regalo === true;
             const platformHref = toExternalHref(payload.link_pagina);
             const platformName = escapeHtml(payload.nombre || "Plataforma");
             const platformTitleStyle = payload.color_1 ? ` style="color:${payload.color_1};"` : "";
@@ -619,6 +620,9 @@
                              </div>
                            </td>`
                       : `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>`;
+                    const valorGiftCardCell = showValor
+                      ? `<td>${escapeHtml(String(r.valor_tarjeta_de_regalo ?? "-"))}</td>`
+                      : "";
                     return `
                   <tr>
                     <td>#${String(r.id_venta).padStart(4, "0")}</td>
@@ -627,11 +631,12 @@
                       isEntregaInmediata
                         ? `<td>${r.fecha_pago || "-"}</td>`
                         : `<td>${r.servicio || "-"}</td>
+                           ${valorGiftCardCell}
                            ${tipoCell}
                            ${correoCell}
                            ${showClave ? claveCell : ""}`
                     }
-                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}` : ""}
+                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${valorGiftCardCell}${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td>
                       ${
@@ -672,12 +677,14 @@
                                  <th>Cliente</th>
                                  <th>Fecha de pago</th>
                                  <th>Servicio solicitado</th>
+                                 ${showValor ? "<th>Valor</th>" : ""}
                                  ${showTipo ? "<th>Tipo</th>" : ""}
                                  <th>Fecha de pedido</th>
                                  <th>Acción</th>`
                               : `<th>ID venta</th>
                                  <th>Cliente</th>
                                  <th>Servicio solicitado</th>
+                                 ${showValor ? "<th>Valor</th>" : ""}
                                  ${showTipo ? "<th>Tipo</th>" : ""}
                                  <th>Correo</th>
                                  ${showClave ? "<th>Clave</th>" : ""}
@@ -768,7 +775,7 @@
             const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -786,7 +793,7 @@
           if (precioIds.length) {
             const { data: precios, error: pErr } = await supabase
               .from("precios")
-              .select("id_precio, id_plataforma, plan, completa")
+              .select("id_precio, id_plataforma, plan, completa, valor_tarjeta_de_regalo")
               .in("id_precio", precioIds);
             if (pErr) throw pErr;
             precioMap = (precios || []).reduce((acc, p) => {
@@ -903,6 +910,7 @@
               precio_completa: isTrue(precio?.completa),
               fecha_pago: v.fecha_pago || "-",
               servicio,
+              valor_tarjeta_de_regalo: precio.valor_tarjeta_de_regalo ?? null,
               cuenta_nueva: v.cuenta_nueva,
               correo: v.correo_miembro || "-",
               clave: v.clave_miembro || "-",
