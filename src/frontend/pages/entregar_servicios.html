@@ -325,6 +325,21 @@
         return String(value).trim();
       };
 
+      const resolveVentaCorreo = (venta, plat = {}) => {
+        const platId = venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma;
+        const cuentaCliente = venta?.cuentas_miembro || null;
+        const requiresClientCorreo = isTrue(plat?.correo_cliente);
+        const isPendienteVenta = !!venta?.pendiente;
+        if (isPendienteVenta) return venta?.correo_miembro || "";
+        if (requiresClientCorreo) {
+          return venta?.correo_miembro || cuentaCliente?.correo || "";
+        }
+        if (Number(platId) === 12) {
+          return venta?.correo_miembro || cuentaCliente?.correo || "";
+        }
+        return venta?.cuentas?.correo || "";
+      };
+
       const resolveVentaPin = (ventaRow = {}) => {
         const pinTarjeta = normalizeCopyValue(ventaRow?.pin_tarjeta);
         if (pinTarjeta) return pinTarjeta;
@@ -737,13 +752,7 @@
               : "";
             const cuentaCliente = v.cuentas_miembro || null;
             const requiresClientCorreo = isTrue(plat.correo_cliente);
-            const correoCuenta = isPendienteVenta
-              ? v.correo_miembro || ""
-              : requiresClientCorreo
-              ? v.correo_miembro || cuentaCliente?.correo || ""
-              : Number(platId) === 12
-              ? v.correo_miembro || ""
-              : v.cuentas?.correo || "";
+            const correoCuenta = resolveVentaCorreo(v, plat);
             const claveCuenta = isPendienteVenta
               ? v.clave_miembro || ""
               : requiresClientCorreo
@@ -807,13 +816,7 @@
               : "";
             const cuentaCliente = v.cuentas_miembro || null;
             const requiresClientCorreo = isTrue(plat.correo_cliente);
-            const correoCuenta = isPendienteVenta
-              ? v.correo_miembro || ""
-              : requiresClientCorreo
-              ? v.correo_miembro || cuentaCliente?.correo || ""
-              : Number(platId) === 12
-              ? v.correo_miembro || ""
-              : v.cuentas?.correo || "";
+            const correoCuenta = resolveVentaCorreo(v, plat);
             const claveCuenta = isPendienteVenta
               ? v.clave_miembro || ""
               : requiresClientCorreo
@@ -858,19 +861,26 @@
                 .in("id_venta", idsVentas)
                 .eq("renovacion", true);
               if (hErr) throw hErr;
-              renovacionesRows = (hist || [])
+              const histUniqueByVenta = new Map();
+              (hist || [])
+                .slice()
+                .sort(
+                  (a, b) =>
+                    (Number(b?.id_historial_ventas) || 0) - (Number(a?.id_historial_ventas) || 0),
+                )
+                .forEach((row) => {
+                  const ventaId = toPositiveId(row?.id_venta);
+                  if (!ventaId || histUniqueByVenta.has(ventaId)) return;
+                  histUniqueByVenta.set(ventaId, row);
+                });
+              renovacionesRows = Array.from(histUniqueByVenta.values())
                 .map((h) => {
                   const venta = ventasMap[h.id_venta] || {};
                   const platId = h.id_plataforma || venta.cuentas?.id_plataforma || venta.precios?.id_plataforma;
                   if (!platId) return null;
                   const plat = platMap[platId] || {};
                   const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
-                  const isVentaMiembro = isTrue(venta?.cuentas?.venta_miembro);
-                  const correoCuenta = isVentaMiembro
-                    ? venta.correo_miembro || ""
-                    : Number(platId) === 12
-                      ? venta.correo_miembro || ""
-                      : venta.cuentas?.correo || "";
+                  const correoCuenta = resolveVentaCorreo(venta, plat);
                   return {
                     id_venta: h.id_venta,
                     correo: correoCuenta,
