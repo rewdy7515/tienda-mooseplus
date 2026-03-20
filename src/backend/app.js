@@ -1430,10 +1430,11 @@ const loadWhatsappRecordatorioVentas = async ({
         supabaseAdmin
           .from("ventas")
           .select(
-            "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_enviado, fecha_recordatorio_corte_enviado",
+            "id_usuario, id_cuenta, id_precio, id_venta, id_perfil, fecha_corte, correo_miembro, recordatorio_corte_enviado",
           )
           .in("id_usuario", userIds)
           .eq("fecha_corte", todayCaracas)
+          .or("recordatorio_corte_enviado.eq.false,recordatorio_corte_enviado.is.null")
           .order("id_venta", { ascending: true })
           .range(from, to),
       { label: "recordatorios:ventas:cutoff_today" },
@@ -1442,10 +1443,7 @@ const loadWhatsappRecordatorioVentas = async ({
     return ventas.filter((venta) => {
       const fechaCorte = String(venta?.fecha_corte || "").trim().slice(0, 10);
       if (!fechaCorte || fechaCorte !== todayCaracas) return false;
-      const alreadySentDate = String(venta?.fecha_recordatorio_corte_enviado || "")
-        .trim()
-        .slice(0, 10);
-      return alreadySentDate !== todayCaracas;
+      return !isTrue(venta?.recordatorio_corte_enviado);
     });
   }
 
@@ -1875,7 +1873,7 @@ const sendWhatsappRecordatorioBatch = async ({
         const fechaCaracas = getCaracasDateStr(0);
         const updates =
           effectiveMode === "cutoff_today"
-            ? { fecha_recordatorio_corte_enviado: fechaCaracas }
+            ? { recordatorio_corte_enviado: true }
             : {
                 recordatorio_enviado: true,
                 fecha_recordatorio_enviado: fechaCaracas,
@@ -1970,7 +1968,7 @@ const attemptWhatsappRecordatoriosForUserOnPhoneUpdate = async (
       mode: "cutoff_today",
     });
   } catch (err) {
-    if (!isMissingColumnError(err, "fecha_recordatorio_corte_enviado")) throw err;
+    if (!isMissingColumnError(err, "recordatorio_corte_enviado")) throw err;
   }
   const candidateItems = [...userItems, ...userCutoffTodayItems];
   if (!candidateItems.length) {
@@ -2038,7 +2036,7 @@ const attemptWhatsappRecordatoriosForUsersOnPhoneUpdate = async (
       mode: "cutoff_today",
     });
   } catch (err) {
-    if (!isMissingColumnError(err, "fecha_recordatorio_corte_enviado")) throw err;
+    if (!isMissingColumnError(err, "recordatorio_corte_enviado")) throw err;
   }
   const candidateItems = [...items, ...cutoffTodayItems];
   if (!candidateItems.length) {
@@ -2106,16 +2104,16 @@ const sendWhatsappRecordatorios = async ({
           mode: "cutoff_today",
         });
       } catch (err) {
-        if (!isMissingColumnError(err, "fecha_recordatorio_corte_enviado")) {
+        if (!isMissingColumnError(err, "recordatorio_corte_enviado")) {
           throw err;
         }
         cutoffTodayResult = {
           ...buildEmptyWhatsappRecordatorioSendResult(source, "cutoff_today"),
           error:
-            "Falta la columna ventas.fecha_recordatorio_corte_enviado para habilitar el segundo recordatorio del día de corte.",
+            "Falta la columna ventas.recordatorio_corte_enviado para habilitar el segundo recordatorio del día de corte.",
         };
         console.warn(
-          "[WhatsApp] Segundo recordatorio del día de corte deshabilitado: falta columna ventas.fecha_recordatorio_corte_enviado.",
+          "[WhatsApp] Segundo recordatorio del día de corte deshabilitado: falta columna ventas.recordatorio_corte_enviado.",
         );
       }
     }
@@ -3244,7 +3242,25 @@ app.get("/api/whatsapp/recordatorios/auto-status", async (req, res) => {
 app.get("/api/whatsapp/recordatorios/pendientes", async (req, res) => {
   try {
     await requireAdminSession(req);
-    const items = await buildWhatsappRecordatorioItems();
+    const includeCutoffToday =
+      String(req.query?.includeCutoffToday || "")
+        .trim()
+        .toLowerCase() === "true";
+
+    const pendingItems = await buildWhatsappRecordatorioItems();
+    let cutoffTodayItems = [];
+    if (includeCutoffToday) {
+      try {
+        cutoffTodayItems = await buildWhatsappRecordatorioItems({
+          mode: "cutoff_today",
+        });
+      } catch (err) {
+        if (!isMissingColumnError(err, "recordatorio_corte_enviado")) throw err;
+        cutoffTodayItems = [];
+      }
+    }
+
+    const items = [...pendingItems, ...cutoffTodayItems];
     const previewItems = buildWhatsappRecordatorioPreviewItems(items);
     return res.json({
       ok: true,
@@ -5160,6 +5176,7 @@ const processOrderFromItems = async ({
       id_orden: ordenId,
       renovacion: true,
       recordatorio_enviado: false,
+      recordatorio_corte_enviado: false,
       pendiente: renovarPendiente,
       suspendido: false,
     };
@@ -5689,6 +5706,7 @@ const processOrderFromItems = async ({
       fecha_pago: isoHoy,
       renovacion: false,
       recordatorio_enviado: false,
+      recordatorio_corte_enviado: false,
       completa: isCompleta && isCorreoCliente ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? false : null,
     };

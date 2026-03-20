@@ -580,7 +580,9 @@
         try {
           if (pendingPreviewEndpointAvailable) {
             try {
-              const preview = await fetchJson("/api/whatsapp/recordatorios/pendientes");
+              const preview = await fetchJson(
+                "/api/whatsapp/recordatorios/pendientes?includeCutoffToday=true",
+              );
               const pendingItems = Array.isArray(preview?.items) ? preview.items : [];
               renderGeneratedState(pendingItems, preview?.sendable);
               if (!pendingItems.length) {
