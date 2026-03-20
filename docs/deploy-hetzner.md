@@ -76,7 +76,22 @@ Si sí vas a usar WhatsApp Web, puedes fijar una ruta persistente opcional:
 ```env
 ENABLE_WHATSAPP=true
 WHATSAPP_RUNTIME_DIR=/var/www/tienda-mooseplus-main/.mooseplus-runtime/whatsapp
+WHATSAPP_BROWSER_CACHE_DIR=/var/www/tienda-mooseplus-main/.puppeteer-cache
 ```
+
+`WHATSAPP_BROWSER_CACHE_DIR` evita depender de un `HOME` inválido o de un cache heredado por PM2/sistema.
+
+Si ya tienes Chrome/Chromium instalado en el servidor, también puedes fijar el binario:
+
+```env
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+```
+
+Si no defines `PUPPETEER_EXECUTABLE_PATH`, el bot intentará:
+
+1. usar Chrome del sistema
+2. usar uno ya descargado en el cache del proyecto
+3. descargar automáticamente la versión que Puppeteer necesita
 
 ## 5. Instalar dependencias del proyecto
 
