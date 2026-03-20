@@ -1,4 +1,5 @@
 import {
+  applyRenewalReminderToken,
   fetchCart,
   loadCatalog,
   sendCartDelta,
@@ -36,6 +37,11 @@ const removeModalBackdropEl = removeModalEl?.querySelector(".modal-backdrop");
 const removeModalCloseEl = document.querySelector("#cart-remove-modal-close");
 const removeModalCancelEl = document.querySelector("#cart-remove-cancel");
 const removeModalConfirmEl = document.querySelector("#cart-remove-confirm");
+const renewalModalEl = document.querySelector("#cart-renewal-modal");
+const renewalModalBackdropEl = renewalModalEl?.querySelector('[data-renewal-close="1"]');
+const renewalModalCloseEl = document.querySelector("#cart-renewal-modal-close");
+const renewalModalContinueEl = document.querySelector("#cart-renewal-continue");
+const renewalModalAcceptEl = document.querySelector("#cart-renewal-accept");
 let cartItems = [];
 let precios = [];
 let plataformas = [];
@@ -287,11 +293,17 @@ const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg;
 };
 
+const syncBodyModalState = () => {
+  const removeOpen = Boolean(removeModalEl && !removeModalEl.classList.contains("hidden"));
+  const renewalOpen = Boolean(renewalModalEl && !renewalModalEl.classList.contains("hidden"));
+  document.body.classList.toggle("modal-open", removeOpen || renewalOpen);
+};
+
 const closeRemoveModal = () => {
   pendingRemoveIndex = null;
   removeModalEl?.classList.add("hidden");
   removeModalEl?.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("modal-open");
+  syncBodyModalState();
 };
 
 const openRemoveModal = (idx) => {
@@ -299,7 +311,33 @@ const openRemoveModal = (idx) => {
   pendingRemoveIndex = idx;
   removeModalEl?.classList.remove("hidden");
   removeModalEl?.setAttribute("aria-hidden", "false");
-  document.body.classList.add("modal-open");
+  syncBodyModalState();
+};
+
+const closeRenewalModal = () => {
+  renewalModalEl?.classList.add("hidden");
+  renewalModalEl?.setAttribute("aria-hidden", "true");
+  syncBodyModalState();
+};
+
+const openRenewalModal = () => {
+  renewalModalEl?.classList.remove("hidden");
+  renewalModalEl?.setAttribute("aria-hidden", "false");
+  syncBodyModalState();
+};
+
+const getRenewalReminderTokenFromUrl = () => {
+  const params = new URLSearchParams(window.location.search || "");
+  return String(params.get("rr") || "").trim();
+};
+
+const clearRenewalReminderTokenFromUrl = () => {
+  const params = new URLSearchParams(window.location.search || "");
+  const hadToken = params.has("rr");
+  if (!hadToken) return;
+  params.delete("rr");
+  const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash || ""}`;
+  window.history.replaceState({}, "", next);
 };
 
 const confirmRemoveModal = () => {
@@ -1018,6 +1056,12 @@ removeModalBackdropEl?.addEventListener("click", closeRemoveModal);
 removeModalCloseEl?.addEventListener("click", closeRemoveModal);
 removeModalCancelEl?.addEventListener("click", closeRemoveModal);
 removeModalConfirmEl?.addEventListener("click", confirmRemoveModal);
+renewalModalBackdropEl?.addEventListener("click", closeRenewalModal);
+renewalModalCloseEl?.addEventListener("click", closeRenewalModal);
+renewalModalAcceptEl?.addEventListener("click", closeRenewalModal);
+renewalModalContinueEl?.addEventListener("click", () => {
+  window.location.href = "index.html";
+});
 window.addEventListener("click", (ev) => {
   const btn = ev.target.closest?.('[data-cart-action="toggle-rate-info"]');
   const popover = document.querySelector('[data-summary="rate-info"]');
@@ -1043,8 +1087,15 @@ window.addEventListener("scroll", () => {
 }, true);
 window.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
-  if (removeModalEl?.classList.contains("hidden")) return;
-  closeRemoveModal();
+  const removeOpen = Boolean(removeModalEl && !removeModalEl.classList.contains("hidden"));
+  if (removeOpen) {
+    closeRemoveModal();
+    return;
+  }
+  const renewalOpen = Boolean(renewalModalEl && !renewalModalEl.classList.contains("hidden"));
+  if (renewalOpen) {
+    closeRenewalModal();
+  }
 });
 
 async function init() {
@@ -1057,6 +1108,20 @@ async function init() {
   try {
     await syncAuthSession();
     await ensureServerSession();
+    const renewalToken = getRenewalReminderTokenFromUrl();
+    let shouldShowRenewalModal = false;
+    let keepStatusMessage = false;
+    if (renewalToken) {
+      setStatus("Añadiendo renovaciones al carrito...");
+      const applyResp = await applyRenewalReminderToken(renewalToken);
+      clearRenewalReminderTokenFromUrl();
+      if (applyResp?.error) {
+        keepStatusMessage = true;
+        setStatus(applyResp.error);
+      } else {
+        shouldShowRenewalModal = true;
+      }
+    }
     currentUser = await loadCurrentUser();
     if (usernameEl && currentUser) {
       const fullName = [currentUser.nombre, currentUser.apellido]
@@ -1129,7 +1194,12 @@ async function init() {
     discountColumnById = buildDiscountColumnByIdMap(descuentos, discountColumns);
     cartItems = cartData.items || [];
     renderCart();
-    setStatus("");
+    if (shouldShowRenewalModal) {
+      openRenewalModal();
+    }
+    if (!keepStatusMessage) {
+      setStatus("");
+    }
     itemsEl?.addEventListener("click", handleCartClick);
     itemsEl?.addEventListener("change", handleCartChange);
   } catch (err) {

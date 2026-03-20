@@ -993,6 +993,28 @@ export async function completeSignupWithRegistrationToken(payload = {}) {
   }
 }
 
+export async function applyRenewalReminderToken(token) {
+  await ensureServerSession();
+  try {
+    const value = String(token || "").trim();
+    if (!value) return { error: "Token requerido." };
+    const res = await fetch(`${API_BASE}/api/cart/renewal-link/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ token: value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudieron agregar las renovaciones al carrito." };
+    }
+    return data;
+  } catch (err) {
+    console.error("applyRenewalReminderToken error", err);
+    return { error: err.message };
+  }
+}
+
 // Enviar delta de cantidad (+ agrega / - resta). Si la cantidad resultante es <= 0 se borra el item, y si no quedan items se elimina el carrito.
 export async function sendCartDelta(idPrecio, delta, meses, extra = {}) {
   await ensureServerSession();

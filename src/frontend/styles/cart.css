@@ -263,12 +263,42 @@ body.cart-drawer-open {
   gap: 10px;
 }
 
+#cart-renewal-modal .cart-renewal-modal-card {
+  max-width: 460px;
+  width: min(92vw, 460px);
+}
+
+#cart-renewal-modal .cart-renewal-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cart-renewal-modal-message {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.cart-renewal-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 @media (max-width: 540px) {
   .cart-remove-modal-actions {
     width: 100%;
   }
   .cart-remove-modal-actions .btn-outline,
   .cart-remove-modal-actions .btn-primary {
+    flex: 1;
+  }
+  .cart-renewal-modal-actions {
+    width: 100%;
+  }
+  .cart-renewal-modal-actions .btn-outline,
+  .cart-renewal-modal-actions .btn-primary {
     flex: 1;
   }
 }

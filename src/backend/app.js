@@ -1639,9 +1639,11 @@ const buildWhatsappRecordatorioItems = async ({
         idUsuario: userId,
         cliente: userInfo.cliente || `Usuario ${userId}`,
         telefono: userInfo.telefono || "",
+        registrado: isRegistered,
         signupUrl,
         plataformas: {},
         ventaIds: [],
+        fechasPago: [],
       };
     }
 
@@ -1655,13 +1657,12 @@ const buildWhatsappRecordatorioItems = async ({
     }
 
     if (venta.id_venta) acc[userId].ventaIds.push(venta.id_venta);
+    if (venta.fecha_corte) acc[userId].fechasPago.push(venta.fecha_corte);
 
-    const fechaPago = venta.fecha_corte ? formatDDMMYYYY(venta.fecha_corte) : "-";
     const detalle = [
       `\`ID VENTA: #${venta.id_venta}\``,
       `Correo: ${correo}`,
       perfilTxt || null,
-      `Fecha de pago: ${fechaPago}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -1681,14 +1682,48 @@ const buildWhatsappRecordatorioItems = async ({
       .filter(Boolean);
 
     let plain = "";
-    if (effectiveMode === "cutoff_today") {
-      plain = `🚨 *HOY* vencen tus membresías, puedes *renovar* por nuestra nueva pagina web:\n${buildPublicSiteUrl()}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+    const ventaIds = uniqPositiveIds(group.ventaIds || []).sort((a, b) => a - b);
+    let renewalCartUrl = "";
+    if (group.registrado === true && ventaIds.length) {
+      try {
+        renewalCartUrl = buildRenewalCartUrl({
+          idUsuario: group.idUsuario,
+          ventaIds,
+        });
+      } catch (err) {
+        console.error("[recordatorios] renewal cart url build error", {
+          userId: group.idUsuario,
+          err,
+        });
+      }
+    }
+    const fechasPagoUnicas = Array.from(
+      new Set(
+        (Array.isArray(group.fechasPago) ? group.fechasPago : [])
+          .map((fecha) => (fecha ? formatDDMMYYYY(fecha) : ""))
+          .filter(Boolean),
+      ),
+    );
+    const fechaPagoMensaje =
+      fechasPagoUnicas.length === 1
+        ? fechasPagoUnicas[0]
+        : fechasPagoUnicas.length > 1
+          ? fechasPagoUnicas.join(" / ")
+          : "-";
+    const fechaPagoHeader = `\`Fecha de pago: ${fechaPagoMensaje}\``;
+
+    if (renewalCartUrl) {
+      const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
+      const intro = `Añade tus renovaciones al carrito automaticamente:\n${renewalCartUrl}`;
+      plain = `${saludo}\n${intro}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+    } else if (effectiveMode === "cutoff_today") {
+      plain = `🚨 *HOY* vencen tus membresías, puedes *renovar* por nuestra nueva pagina web:\n${buildPublicSiteUrl()}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     } else {
       const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
       const signupUrl = String(group.signupUrl || "").trim();
       const renewUrl = signupUrl || buildPublicSiteUrl();
       const intro = `Renueva tus membresías por nuestra nueva pagina web:\n${renewUrl}`;
-      plain = `${saludo}\n${intro}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
+      plain = `${saludo}\n${intro}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     }
 
     return {
@@ -3668,6 +3703,10 @@ const SIGNUP_TOKEN_TTL_SEC = Math.max(
   300,
   Number(process.env.SIGNUP_TOKEN_TTL_SEC) || 24 * 60 * 60,
 );
+const RENEWAL_CART_TOKEN_TTL_SEC = Math.max(
+  300,
+  Number(process.env.RENEWAL_CART_TOKEN_TTL_SEC) || 7 * 24 * 60 * 60,
+);
 const SIGNUP_TOKEN_SECRET = String(
   process.env.SIGNUP_TOKEN_SECRET ||
     process.env.REGISTRATION_LINK_SECRET ||
@@ -3829,6 +3868,72 @@ const buildSignupRegistrationUrl = (idUsuario) => {
   const signupUrl = new URL("/signup", PUBLIC_SITE_URL);
   signupUrl.searchParams.set("t", token);
   return signupUrl.toString();
+};
+
+const buildRenewalCartToken = ({ idUsuario, ventaIds = [] } = {}) => {
+  const uid = toPositiveInt(idUsuario);
+  if (!uid) throw tokenError("INVALID_UID", "id_usuario inválido.");
+  const ventas = uniqPositiveIds(ventaIds).sort((a, b) => a - b);
+  if (!ventas.length) throw tokenError("TOKEN_INVALID", "Token inválido.");
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = nowSec + RENEWAL_CART_TOKEN_TTL_SEC;
+  const uidPart = uid.toString(36);
+  const expPart = exp.toString(36);
+  const ventasPart = ventas.map((id) => id.toString(36)).join(".");
+  const payloadPart = `${uidPart}.${expPart}.${ventasPart}`;
+  const signaturePart = signSignupTokenCompact(payloadPart);
+  return `${payloadPart}.${signaturePart}`;
+};
+
+const verifyRenewalCartToken = (tokenValue, options = {}) => {
+  const token = String(tokenValue || "").trim();
+  if (!token) throw tokenError("TOKEN_REQUIRED", "Token requerido.");
+  const parts = token.split(".");
+  if (parts.length < 4) throw tokenError("TOKEN_INVALID", "Token inválido.");
+
+  const signaturePart = parts.pop();
+  const [uidPart, expPart, ...ventaParts] = parts;
+  if (!uidPart || !expPart || !ventaParts.length || !signaturePart) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  const base36Regex = /^[0-9a-z]+$/i;
+  if (
+    !base36Regex.test(uidPart) ||
+    !base36Regex.test(expPart) ||
+    ventaParts.some((part) => !base36Regex.test(String(part || "")))
+  ) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  const payloadPart = `${uidPart}.${expPart}.${ventaParts.join(".")}`;
+  if (!isValidSignupCompactSignature(payloadPart, signaturePart)) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  const uid = toPositiveInt(Number.parseInt(uidPart, 36));
+  const exp = Number.parseInt(expPart, 36);
+  const ventaIds = uniqPositiveIds(ventaParts.map((part) => Number.parseInt(part, 36))).sort(
+    (a, b) => a - b,
+  );
+  if (!uid || !Number.isFinite(exp) || !ventaIds.length) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const allowExpired = options?.allowExpired === true;
+  if (!allowExpired && exp <= nowSec) {
+    throw tokenError("TOKEN_EXPIRED", "El link de renovaciones ya venció.");
+  }
+
+  return { uid, exp, ventaIds };
+};
+
+const buildRenewalCartUrl = ({ idUsuario, ventaIds = [] } = {}) => {
+  const token = buildRenewalCartToken({ idUsuario, ventaIds });
+  const renewUrl = new URL(`/r/${token}`, PUBLIC_SITE_URL);
+  return renewUrl.toString();
 };
 
 const verifySignupRegistrationToken = (tokenValue, options = {}) => {
@@ -7163,6 +7268,150 @@ app.post("/api/cart/item", async (req, res) => {
   }
 });
 
+app.post("/api/cart/renewal-link/apply", async (req, res) => {
+  try {
+    const token = String(req.body?.token || req.query?.token || "").trim();
+    const payload = verifyRenewalCartToken(token);
+    const sessionUserId = await getSessionUsuario(req);
+    if (Number(sessionUserId) !== Number(payload.uid)) {
+      return res.status(403).json({ error: "El link no corresponde al usuario de la sesión actual." });
+    }
+
+    const ventaIds = uniqPositiveIds(payload.ventaIds || []).sort((a, b) => a - b);
+    if (!ventaIds.length) {
+      return res.status(400).json({ error: "Link sin ventas para procesar." });
+    }
+
+    const { data: ventasRows, error: ventasErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil")
+      .eq("id_usuario", payload.uid)
+      .in("id_venta", ventaIds);
+    if (ventasErr) throw ventasErr;
+
+    const ventas = Array.isArray(ventasRows) ? ventasRows : [];
+    const ventasById = ventas.reduce((acc, venta) => {
+      const ventaId = toPositiveInt(venta?.id_venta);
+      if (!ventaId) return acc;
+      acc[ventaId] = venta;
+      return acc;
+    }, {});
+
+    const carritoId = await getOrCreateCarrito(payload.uid);
+    const existingVentaIds = uniqPositiveIds(
+      ventas.map((venta) => venta?.id_venta),
+    );
+    const existingRows = existingVentaIds.length
+      ? await supabaseAdmin
+          .from("carrito_items")
+          .select("id_item, id_venta, id_precio, cantidad, meses, renovacion, id_cuenta, id_perfil")
+          .eq("id_carrito", carritoId)
+          .eq("renovacion", true)
+          .in("id_venta", existingVentaIds)
+      : { data: [], error: null };
+    if (existingRows.error) throw existingRows.error;
+
+    const existingByVenta = (existingRows.data || []).reduce((acc, row) => {
+      const ventaId = toPositiveInt(row?.id_venta);
+      if (!ventaId) return acc;
+      acc[ventaId] = row;
+      return acc;
+    }, {});
+
+    const normalizeNullableId = (value) => toPositiveInt(value) || null;
+    const toInsert = [];
+    let added = 0;
+    let alreadyInCart = 0;
+    let updated = 0;
+    let missing = 0;
+
+    for (const ventaId of ventaIds) {
+      const venta = ventasById[ventaId];
+      if (!venta) {
+        missing += 1;
+        continue;
+      }
+      const precioId = toPositiveInt(venta?.id_precio);
+      if (!precioId) {
+        missing += 1;
+        continue;
+      }
+      const cuentaId = normalizeNullableId(venta?.id_cuenta) || normalizeNullableId(venta?.id_cuenta_miembro);
+      const perfilId = normalizeNullableId(venta?.id_perfil);
+      const existing = existingByVenta[ventaId] || null;
+
+      if (existing) {
+        alreadyInCart += 1;
+        const patch = {};
+        const existingCantidad = Number(existing?.cantidad);
+        const existingMeses = Number(existing?.meses);
+        if (!Number.isFinite(existingCantidad) || existingCantidad <= 0) patch.cantidad = 1;
+        if (!Number.isFinite(existingMeses) || existingMeses <= 0) patch.meses = 1;
+        if (existing?.renovacion !== true) patch.renovacion = true;
+        if (toPositiveInt(existing?.id_precio) !== precioId) patch.id_precio = precioId;
+        if (normalizeNullableId(existing?.id_cuenta) !== cuentaId) patch.id_cuenta = cuentaId;
+        if (normalizeNullableId(existing?.id_perfil) !== perfilId) patch.id_perfil = perfilId;
+        if (Object.keys(patch).length) {
+          const itemId = toPositiveInt(existing?.id_item);
+          if (itemId) {
+            const { error: updErr } = await supabaseAdmin
+              .from("carrito_items")
+              .update(patch)
+              .eq("id_item", itemId);
+            if (updErr) throw updErr;
+            updated += 1;
+          }
+        }
+        continue;
+      }
+
+      toInsert.push({
+        id_carrito: carritoId,
+        id_precio: precioId,
+        cantidad: 1,
+        meses: 1,
+        renovacion: true,
+        id_venta: ventaId,
+        id_cuenta: cuentaId,
+        id_perfil: perfilId,
+      });
+    }
+
+    if (toInsert.length) {
+      const { error: insertErr } = await supabaseAdmin
+        .from("carrito_items")
+        .insert(toInsert);
+      if (insertErr) throw insertErr;
+      added = toInsert.length;
+    }
+
+    return res.json({
+      ok: true,
+      id_carrito: carritoId,
+      total_requested: ventaIds.length,
+      total_found: ventas.length,
+      added,
+      already_in_cart: alreadyInCart,
+      updated,
+      missing,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (
+      err?.code === "TOKEN_INVALID" ||
+      err?.code === "TOKEN_REQUIRED" ||
+      err?.code === "TOKEN_EXPIRED" ||
+      err?.code === "SIGNUP_TOKEN_SECRET_MISSING"
+    ) {
+      return res.status(signupTokenErrorStatus(err.code)).json({ error: err.message });
+    }
+    console.error("[cart/renewal-link/apply] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudieron agregar las renovaciones al carrito." });
+  }
+});
+
 // Crear (o devolver) carrito del usuario activo
 app.post("/api/cart", async (_req, res) => {
   try {
@@ -8322,6 +8571,20 @@ app.get("/s/:token", async (req, res) => {
     return res.redirect(302, signupUrl.toString());
   } catch (_err) {
     return res.redirect(302, new URL("/signup.html", PUBLIC_SITE_URL).toString());
+  }
+});
+
+// Redirección corta para links de renovaciones: /r/:token -> /cart.html?rr=token
+app.get("/r/:token", async (req, res) => {
+  try {
+    const token = String(req.params?.token || "").trim();
+    const cartUrl = new URL("/cart.html", PUBLIC_SITE_URL);
+    if (token) {
+      cartUrl.searchParams.set("rr", token);
+    }
+    return res.redirect(302, cartUrl.toString());
+  } catch (_err) {
+    return res.redirect(302, new URL("/cart.html", PUBLIC_SITE_URL).toString());
   }
 });
 
