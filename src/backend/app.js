@@ -3932,7 +3932,8 @@ const verifyRenewalCartToken = (tokenValue, options = {}) => {
 
 const buildRenewalCartUrl = ({ idUsuario, ventaIds = [] } = {}) => {
   const token = buildRenewalCartToken({ idUsuario, ventaIds });
-  const renewUrl = new URL(`/r/${token}`, PUBLIC_SITE_URL);
+  const renewUrl = new URL("/cart.html", PUBLIC_SITE_URL);
+  renewUrl.searchParams.set("rr", token);
   return renewUrl.toString();
 };
 
