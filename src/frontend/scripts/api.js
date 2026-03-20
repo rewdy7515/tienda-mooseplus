@@ -1518,6 +1518,35 @@ export async function fetchPendingReminderNoPhoneClients() {
   }
 }
 
+export async function fetchWhatsappQrStatus({ autoStart = false } = {}) {
+  await ensureServerSession();
+  try {
+    const query = new URLSearchParams({
+      start: autoStart ? "true" : "false",
+    });
+    const res = await fetch(`${API_BASE}/api/whatsapp/qr?${query.toString()}`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return {
+        error: message || "No se pudo consultar el estado de WhatsApp",
+        status: res.status,
+      };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("fetchWhatsappQrStatus error", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchP2PRate() {
   const startedAt = getDebugNow();
   logApiDebug("fetchP2PRate:start", {});

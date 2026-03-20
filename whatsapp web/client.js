@@ -139,6 +139,10 @@ const isWhatsappReady = () => {
   return Boolean(clientInstance?.info?.wid?._serialized);
 };
 
+const isWhatsappClientActive = () => {
+  return Boolean(isWhatsappReady() || hasInitialized || initializePromise);
+};
+
 const stopWhatsappClient = async () => {
   const client = clientInstance;
   hasInitialized = false;
@@ -170,6 +174,7 @@ module.exports = {
   startWhatsappClient,
   stopWhatsappClient,
   isWhatsappReady,
+  isWhatsappClientActive,
   getWhatsappQrState,
   onWhatsappReady,
   onWhatsappDisconnected,

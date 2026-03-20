@@ -16,6 +16,7 @@ const {
   stopWhatsappClient,
   getWhatsappClient,
   isWhatsappReady,
+  isWhatsappClientActive,
   getWhatsappQrState,
   onWhatsappReady,
   onWhatsappDisconnected,
@@ -2121,20 +2122,15 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
   ensureDailyRecordatoriosState(dateStr);
   if (hour < targetHour) return;
   if (lastAutoRecordatoriosRunDate === dateStr) return;
-  if (!isWhatsappReady()) {
-    await ensureWhatsappClientStarted({ reason: "auto_schedule" });
-    if (!isWhatsappReady()) return;
-  }
-  const pendingItems = await buildWhatsappRecordatorioItems();
-  autoRecordatoriosRunInProgress = true;
-
   const attemptedAt = new Date().toISOString();
+  autoRecordatoriosRunInProgress = true;
+  autoRecordatoriosRetryPending = false;
   lastAutoRecordatoriosState = {
     date: dateStr,
     status: "running",
     attemptedAt,
     completedAt: null,
-    total: pendingItems.length,
+    total: 0,
     sent: 0,
     failed: 0,
     skippedNoPhone: 0,
@@ -2149,6 +2145,16 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
   };
 
   try {
+    if (!isWhatsappReady()) {
+      await ensureWhatsappClientReady({ reason: "auto_schedule" });
+    }
+
+    const pendingItems = await buildWhatsappRecordatorioItems();
+    lastAutoRecordatoriosState = {
+      ...lastAutoRecordatoriosState,
+      total: pendingItems.length,
+    };
+
     const result = await sendWhatsappRecordatorios({
       source: "auto",
       itemsOverride: pendingItems,
@@ -2186,7 +2192,7 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
       );
       return;
     }
-    if (err?.code === "WHATSAPP_NOT_READY") {
+    if (err?.code === "WHATSAPP_NOT_READY" || err?.code === "WHATSAPP_DISCONNECTED") {
       autoRecordatoriosRetryPending = true;
       lastAutoRecordatoriosState = {
         date: dateStr,
@@ -2204,10 +2210,10 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
         sameDayCutoffFailed: 0,
         updatedVentasCorteHoy: 0,
         recordatoriosEnviados,
-        error: "WhatsApp no listo",
+        error: err?.message || "WhatsApp no listo",
       };
       console.warn(
-        `[WhatsApp] Recordatorios auto ${dateStr}: cliente no listo, se reintentará en la próxima verificación hasta conectar sesión.`,
+        `[WhatsApp] Recordatorios auto ${dateStr}: cliente no listo o desconectado, se reintentará en la próxima verificación hasta conectar sesión.`,
       );
       return;
     }
@@ -3130,6 +3136,7 @@ app.get("/api/whatsapp/status", (req, res) => {
   const ready = isWhatsappReady();
   res.json({
     ready,
+    active: isWhatsappClientActive(),
     booting: whatsappBootInProgress,
     qrRaw: ready ? null : qrState?.raw || null,
     qrUpdatedAt: qrState?.updatedAt || null,
@@ -3151,6 +3158,7 @@ app.get("/api/whatsapp/qr", async (req, res) => {
     return res.json({
       ok: true,
       ready,
+      active: isWhatsappClientActive(),
       booting: whatsappBootInProgress,
       qrRaw: ready ? null : qrState?.raw || null,
       qrUpdatedAt: qrState?.updatedAt || null,

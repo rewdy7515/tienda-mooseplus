@@ -341,8 +341,9 @@
           return true;
         }
         const hasQr = Boolean(String(data?.qrRaw || "").trim());
+        const isActive = data?.active === true;
         const isBooting = data?.booting === true;
-        if (!autoStart && !hasQr && !isBooting) {
+        if (!autoStart && !hasQr && !isBooting && !isActive) {
           hideWhatsappQrPanel();
           return false;
         }

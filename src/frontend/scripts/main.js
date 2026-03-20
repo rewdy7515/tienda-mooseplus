@@ -7,6 +7,7 @@ import {
   supabase,
   fetchEntregadas,
   fetchPendingReminderNoPhoneClients,
+  fetchWhatsappQrStatus,
   fetchTestingFlag,
   updateTestingFlag,
   fetchP2PRate,
@@ -65,6 +66,9 @@ const tasaPanelEl = document.querySelector("#tasa-panel");
 const tasaActualEl = document.querySelector("#tasa-actual");
 const tasaMarkupWrapEl = document.querySelector("#tasa-markup-wrap");
 const tasaMarkupInputEl = document.querySelector("#tasa-markup-input");
+const whatsappQrWarningWrap = document.querySelector("#whatsapp-qr-warning-wrap");
+const whatsappQrWarningMessageEl = document.querySelector("#whatsapp-qr-warning-message");
+const whatsappQrWarningBtn = document.querySelector("#whatsapp-qr-warning-btn");
 const pageLoaderLogoEl = document.querySelector(".page-loader__logo");
 const homeBannersWrap = document.querySelector("#home-banners");
 const homeBannersViewport = document.querySelector(".home-banners-viewport");
@@ -130,6 +134,9 @@ const normalizeGiftCardAmountKey = (value) => {
 recordatoriosPendientesBtn?.addEventListener("click", () => {
   window.location.href = "admin/recordatorios.html";
 });
+whatsappQrWarningBtn?.addEventListener("click", () => {
+  window.location.href = "admin/recordatorios.html";
+});
 const loaderAvatarLayerEl = document.querySelector(".page-loader__avatar-layer");
 const loaderAvatarBgEl = document.querySelector("#page-loader-avatar-bg");
 const loaderAvatarEl = document.querySelector("#page-loader-avatar");
@@ -182,6 +189,7 @@ let tasaRefreshTimer = null;
 let tasaAutoRefreshEnabled = false;
 let pushPermissionPromptBusy = false;
 let currentPushPromptUserId = null;
+let whatsappQrWarningPollTimer = null;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -259,6 +267,65 @@ const clearPushPermissionPromptDismissal = (userId = currentPushPromptUserId) =>
   } catch (_err) {
     // noop
   }
+};
+
+const hideWhatsappQrWarning = () => {
+  if (!whatsappQrWarningWrap) return;
+  whatsappQrWarningWrap.classList.add("hidden");
+  if (whatsappQrWarningMessageEl) {
+    whatsappQrWarningMessageEl.textContent =
+      "El bot del servidor necesita que escanees el QR para reactivar los recordatorios automáticos.";
+  }
+};
+
+const stopWhatsappQrWarningPolling = () => {
+  if (!whatsappQrWarningPollTimer) return;
+  clearInterval(whatsappQrWarningPollTimer);
+  whatsappQrWarningPollTimer = null;
+};
+
+const renderWhatsappQrWarning = (payload = null) => {
+  if (!whatsappQrWarningWrap || !whatsappQrWarningMessageEl) return;
+  const ready = payload?.ready === true;
+  const hasQr = Boolean(String(payload?.qrRaw || "").trim());
+  if (ready || !hasQr) {
+    hideWhatsappQrWarning();
+    return;
+  }
+  const updatedAt = String(payload?.qrUpdatedAt || "").trim();
+  whatsappQrWarningMessageEl.textContent = updatedAt
+    ? `El bot del servidor necesita que escanees el QR para reactivar los recordatorios automáticos. QR generado: ${updatedAt}.`
+    : "El bot del servidor necesita que escanees el QR para reactivar los recordatorios automáticos.";
+  whatsappQrWarningWrap.classList.remove("hidden");
+};
+
+const loadWhatsappQrWarning = async ({ isSuperadmin = false } = {}) => {
+  if (!isSuperadmin) {
+    stopWhatsappQrWarningPolling();
+    hideWhatsappQrWarning();
+    return;
+  }
+  try {
+    const resp = await fetchWhatsappQrStatus({ autoStart: false });
+    if (resp?.error) throw new Error(resp.error);
+    renderWhatsappQrWarning(resp);
+  } catch (err) {
+    console.error("whatsapp qr warning load error", err);
+    hideWhatsappQrWarning();
+  }
+};
+
+const startWhatsappQrWarningPolling = ({ isSuperadmin = false } = {}) => {
+  stopWhatsappQrWarningPolling();
+  if (!isSuperadmin) {
+    hideWhatsappQrWarning();
+    return;
+  }
+  whatsappQrWarningPollTimer = window.setInterval(() => {
+    loadWhatsappQrWarning({ isSuperadmin: true }).catch((err) => {
+      console.error("whatsapp qr warning poll error", err);
+    });
+  }, 60 * 1000);
 };
 
 const hidePushPermissionPrompt = () => {
@@ -2115,6 +2182,8 @@ async function init() {
       }
     }
     renderTasaMarkupInput({ isSuper });
+    await loadWhatsappQrWarning({ isSuperadmin: isSuper });
+    startWhatsappQrWarningPolling({ isSuperadmin: isSuper });
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);
       adminLink.style.display = isAdmin ? "block" : "none";
