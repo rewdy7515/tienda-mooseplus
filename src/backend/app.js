@@ -1016,6 +1016,33 @@ const ensureWhatsappClientReady = async ({
   return waitForWhatsappReady({ timeoutMs, reason });
 };
 
+const sleepMs = (ms = 0) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
+
+const waitForWhatsappQrOrReady = async ({
+  timeoutMs = 9000,
+  pollMs = 350,
+} = {}) => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const ready = isWhatsappReady();
+    const qrState = getWhatsappQrState();
+    if (ready || String(qrState?.raw || "").trim()) {
+      return { ready, qrState };
+    }
+    if (!isWhatsappClientActive() && !whatsappBootInProgress) {
+      break;
+    }
+    await sleepMs(pollMs);
+  }
+  return {
+    ready: isWhatsappReady(),
+    qrState: getWhatsappQrState(),
+  };
+};
+
 const buildWhatsappErrorLog = (err) => {
   const cause =
     err?.cause instanceof Error
@@ -3153,8 +3180,14 @@ app.get("/api/whatsapp/qr", async (req, res) => {
         allowWhenDisabled: true,
       });
     }
-    const qrState = getWhatsappQrState();
-    const ready = isWhatsappReady();
+    let qrState = getWhatsappQrState();
+    let ready = isWhatsappReady();
+    const hasQr = Boolean(String(qrState?.raw || "").trim());
+    if (!ready && !hasQr && (whatsappBootInProgress || isWhatsappClientActive() || autoStart)) {
+      const waitedState = await waitForWhatsappQrOrReady();
+      qrState = waitedState.qrState;
+      ready = waitedState.ready;
+    }
     return res.json({
       ok: true,
       ready,
