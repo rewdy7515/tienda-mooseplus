@@ -1,5 +1,6 @@
 const os = require("os");
 const path = require("path");
+const fs = require("fs/promises");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 
@@ -21,6 +22,12 @@ const resolveWhatsappRuntimeRoot = () => {
 const WHATSAPP_RUNTIME_ROOT = resolveWhatsappRuntimeRoot();
 const WHATSAPP_AUTH_PATH = path.join(WHATSAPP_RUNTIME_ROOT, "auth");
 const WHATSAPP_CACHE_PATH = path.join(WHATSAPP_RUNTIME_ROOT, "cache");
+
+const ensureWhatsappRuntimeDirs = async () => {
+  await fs.mkdir(WHATSAPP_RUNTIME_ROOT, { recursive: true });
+  await fs.mkdir(WHATSAPP_AUTH_PATH, { recursive: true });
+  await fs.mkdir(WHATSAPP_CACHE_PATH, { recursive: true });
+};
 
 const clearWhatsappQrState = () => {
   latestQrRaw = "";
@@ -118,6 +125,7 @@ const getWhatsappClient = () => {
 const startWhatsappClient = async () => {
   if (initializePromise) return initializePromise;
 
+  await ensureWhatsappRuntimeDirs();
   const client = getWhatsappClient();
   if (hasInitialized) return client;
 
