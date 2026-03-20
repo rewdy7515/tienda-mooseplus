@@ -199,7 +199,7 @@
       </div>
     </main>
     <script type="module">
-      import { API_BASE } from "../../scripts/api.js";
+      import { API_BASE, ensureServerSession } from "../../scripts/api.js";
       import { requireSession, attachLogoHome } from "../../scripts/session.js";
 
       requireSession();
@@ -222,6 +222,19 @@
       let qrRendererPromise = null;
       let whatsappQrPollTimer = null;
       let whatsappQrFlowRequested = false;
+      let ensureServerSessionPromise = null;
+
+      const ensureBackendSession = async ({ force = false } = {}) => {
+        if (!force && ensureServerSessionPromise) {
+          return ensureServerSessionPromise;
+        }
+        ensureServerSessionPromise = ensureServerSession()
+          .catch((err) => {
+            ensureServerSessionPromise = null;
+            throw err;
+          });
+        return ensureServerSessionPromise;
+      };
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
@@ -243,13 +256,20 @@
       };
 
       const fetchJson = async (url, options = {}) => {
+        await ensureBackendSession();
         const targetUrl = /^https?:\/\//i.test(String(url || ""))
           ? String(url)
           : `${API_BASE}${String(url || "").startsWith("/") ? "" : "/"}${String(url || "")}`;
-        const resp = await fetch(targetUrl, {
-          credentials: "include",
-          ...options,
-        });
+        const fetchWithSession = () =>
+          fetch(targetUrl, {
+            credentials: "include",
+            ...options,
+          });
+        let resp = await fetchWithSession();
+        if (resp.status === 401) {
+          await ensureBackendSession({ force: true });
+          resp = await fetchWithSession();
+        }
         let body = null;
         try {
           body = await resp.json();
