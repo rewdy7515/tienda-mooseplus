@@ -9,7 +9,9 @@
     "node_modules",
     ".wwebjs_auth/**",
     ".wwebjs_cache/**",
+    ".mooseplus-runtime/**",
     "tienda-mooseplus-main/.wwebjs_auth/**",
-    "tienda-mooseplus-main/.wwebjs_cache/**"
+    "tienda-mooseplus-main/.wwebjs_cache/**",
+    "tienda-mooseplus-main/.mooseplus-runtime/**"
   ]
 }

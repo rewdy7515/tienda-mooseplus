@@ -71,6 +71,13 @@ Si no vas a usar WhatsApp Web en el servidor, deja:
 ENABLE_WHATSAPP=false
 ```
 
+Si sí vas a usar WhatsApp Web, puedes fijar una ruta persistente opcional:
+
+```env
+ENABLE_WHATSAPP=true
+WHATSAPP_RUNTIME_DIR=/var/www/tienda-mooseplus-main/.mooseplus-runtime/whatsapp
+```
+
 ## 5. Instalar dependencias del proyecto
 
 ```bash
