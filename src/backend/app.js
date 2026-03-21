@@ -4089,6 +4089,11 @@ const SESSION_COOKIE_SIGNING_SECRET = String(
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     "",
 ).trim();
+const SESSION_COOKIE_TTL_SEC = Math.max(
+  24 * 60 * 60,
+  Number(process.env.SESSION_COOKIE_TTL_SEC) || 365 * 24 * 60 * 60,
+);
+const SESSION_COOKIE_TTL_MS = SESSION_COOKIE_TTL_SEC * 1000;
 const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax",
@@ -9241,7 +9246,10 @@ app.post("/api/session", async (req, res) => {
       });
       return res.status(500).json({ error: "Configuración de sesión inválida." });
     }
-    res.cookie(SESSION_COOKIE_NAME, cookieValue, SESSION_COOKIE_OPTIONS);
+    res.cookie(SESSION_COOKIE_NAME, cookieValue, {
+      ...SESSION_COOKIE_OPTIONS,
+      maxAge: SESSION_COOKIE_TTL_MS,
+    });
     console.info("[session] success", {
       ...requestMeta,
       id_usuario: idUsuario,

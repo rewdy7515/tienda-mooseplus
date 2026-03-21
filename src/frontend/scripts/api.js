@@ -495,13 +495,20 @@ const isAuthFatalErrorMessage = (msg = "") => {
   const text = String(msg || "").toLowerCase();
   if (!text) return false;
   return (
-    text.includes("sesión de auth no disponible") ||
-    text.includes("no se pudo leer la sesión de auth") ||
     text.includes("usuario no autenticado") ||
     text.includes("access denied") ||
     text.includes("auth required") ||
     text.includes("invalid jwt") ||
     text.includes("jwt")
+  );
+};
+
+const isRecoverableAuthBridgeError = (msg = "") => {
+  const text = String(msg || "").toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes("sesión de auth no disponible") ||
+    text.includes("no se pudo leer la sesión de auth")
   );
 };
 
@@ -1860,6 +1867,24 @@ export async function ensureServerSession() {
       sessionUserId: id,
       error: result.error,
     });
+    if (isRecoverableAuthBridgeError(result.error)) {
+      const fallbackUser = await fetchCurrentUserServer({
+        allowFallback: true,
+      });
+      if (fallbackUser?.id_usuario) {
+        logApiDebug("ensureServerSession:recoverWithServerCookie", {
+          ms: getElapsedMs(startedAt),
+          sessionUserId: id,
+          id_usuario: Number(fallbackUser.id_usuario) || null,
+        });
+        return {
+          ok: true,
+          id_usuario: Number(fallbackUser.id_usuario) || null,
+          user: fallbackUser,
+          recovered: true,
+        };
+      }
+    }
     if (isAuthFatalErrorMessage(result.error)) {
       await handleFatalAuthSessionError(result.error);
     }

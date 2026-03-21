@@ -23,8 +23,19 @@ const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
 };
 
+const goToEntregarServiciosByOrden = (idOrden) => {
+  const idOrdenNum = Number(idOrden);
+  if (!Number.isFinite(idOrdenNum) || idOrdenNum <= 0) return;
+  window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(idOrdenNum)}`;
+};
+
 backBtn?.addEventListener("click", () => {
   window.location.href = "historial_ordenes.html";
+});
+infoGridEl?.addEventListener("click", (event) => {
+  const btn = event.target?.closest(".btn-ver-servicios-orden");
+  if (!btn) return;
+  goToEntregarServiciosByOrden(btn.dataset.idOrden);
 });
 
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
@@ -175,6 +186,8 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null, { isSuperadmi
   const fecha = formatDDMMYYYY(orden?.fecha) || orden?.fecha || "-";
   const hora = formatHora12(orden?.hora_orden);
   const estado = buildEstadoMeta(orden);
+  const idOrdenNum = Number(orden?.id_orden);
+  const canOpenServicios = Number.isFinite(idOrdenNum) && idOrdenNum > 0;
   const rows = [
     { label: "N. orden", value: orden?.id_orden ?? "-" },
     ...(isSuperadmin ? [{ label: "Cliente", value: clienteNombre || "-" }] : []),
@@ -196,6 +209,13 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null, { isSuperadmi
       `
       )
       .join("")}
+    <div class="orden-servicios-row">
+      ${
+        canOpenServicios
+          ? `<button type="button" class="btn-ver-servicios-orden" data-id-orden="${idOrdenNum}">Ver servicios</button>`
+          : "-"
+      }
+    </div>
   `;
 };
 

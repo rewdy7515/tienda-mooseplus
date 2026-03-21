@@ -972,17 +972,23 @@
           if (resp?.error) {
             throw new Error(resp.error);
           }
+          const pinValue = String(resp?.pin || "Pendiente").trim() || "Pendiente";
           const status = document.createElement("span");
           status.className = "badge badge-green";
           status.textContent = "Servicio entregado";
+          const pinBadge = document.createElement("span");
+          pinBadge.className = "badge copyable";
+          pinBadge.dataset.clipboard = pinValue;
+          pinBadge.textContent = `PIN: ${pinValue}`;
           const copyBtn = document.createElement("button");
           copyBtn.type = "button";
           copyBtn.className = "btn-outline btn-copy-row";
           copyBtn.textContent = "Copiar";
           copyBtn.dataset.copy = encodeURIComponent(
-            resp.copy_text || `*${String(plataforma || "").toUpperCase()}*\n\n*PIN:* ${resp.pin || "Pendiente"}`,
+            resp.copy_text || `*${String(plataforma || "").toUpperCase()}*\n\n*PIN:* ${pinValue}`,
           );
           btn.parentElement?.appendChild(status);
+          btn.parentElement?.appendChild(pinBadge);
           btn.parentElement?.appendChild(copyBtn);
           btn.remove();
           return;

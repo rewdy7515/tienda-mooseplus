@@ -1436,7 +1436,7 @@ btnSendPayment?.addEventListener("click", async () => {
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
-            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), perfiles:perfiles(n_perfil)"
+            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, pendiente, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata, tarjeta_de_regalo)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata, tarjeta_de_regalo)), perfiles:perfiles(n_perfil), tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(pin), precios:precios!ventas_id_precio_fkey(id_plataforma, region, valor_tarjeta_de_regalo, moneda, plataformas:plataformas(nombre, entrega_inmediata, tarjeta_de_regalo))"
           )
           .eq("id_orden", resp.id_orden);
         if (ventasOrdErr) throw ventasOrdErr;
@@ -1445,12 +1445,19 @@ btnSendPayment?.addEventListener("click", async () => {
         const renovacionesPorUsuario = new Map();
         (ventasOrden || []).forEach((v) => {
           const cuentaRow = v.cuentas_miembro || v.cuentas || null;
-          const idPlataforma = Number(cuentaRow?.id_plataforma) || null;
-          const platName = cuentaRow?.plataformas?.nombre || "Plataforma";
-          const entregaInmediata = isTrue(cuentaRow?.plataformas?.entrega_inmediata);
+          const precioRow = v.precios || null;
+          const plataformaFromCuenta = cuentaRow?.plataformas || null;
+          const plataformaFromPrecio = precioRow?.plataformas || null;
+          const plataformaInfo = plataformaFromCuenta || plataformaFromPrecio || null;
+          const idPlataforma = Number(cuentaRow?.id_plataforma || precioRow?.id_plataforma) || null;
+          const platName = plataformaInfo?.nombre || "Plataforma";
+          const entregaInmediata = isTrue(plataformaInfo?.entrega_inmediata);
+          const isGiftCard = isTrue(plataformaInfo?.tarjeta_de_regalo);
           const perfilTxt = v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "";
           const correoTxt = v.correo_miembro || cuentaRow?.correo || "";
           const claveTxt = v.clave_miembro || cuentaRow?.clave || "";
+          const pinTxt = String(v?.tarjetas_de_regalo?.pin || "").trim();
+          const shouldNotifyInProcess = isTrue(v?.pendiente) || (idPlataforma && !entregaInmediata);
           const ventaUserId = userId || v.id_usuario;
 
           if (v.renovacion) {
@@ -1469,7 +1476,7 @@ btnSendPayment?.addEventListener("click", async () => {
           }
 
           if (!ventaUserId) return;
-          if (idPlataforma && !entregaInmediata) {
+          if (shouldNotifyInProcess) {
             const itemsProc = serviciosEnProcesoPorUsuario.get(ventaUserId) || [];
             itemsProc.push({
               plataforma: platName,
@@ -1480,13 +1487,21 @@ btnSendPayment?.addEventListener("click", async () => {
             return;
           }
 
-          if (!correoTxt) return;
+          if (!correoTxt && !isGiftCard) return;
           const itemsNew = nuevosServiciosPorUsuario.get(ventaUserId) || [];
           itemsNew.push({
             plataforma: platName,
             correoCuenta: correoTxt,
             clave: claveTxt,
             perfil: perfilTxt,
+            ...(isGiftCard
+              ? {
+                  region: precioRow?.region || "",
+                  valorTarjeta: precioRow?.valor_tarjeta_de_regalo || "",
+                  moneda: precioRow?.moneda || "",
+                  pin: pinTxt,
+                }
+              : {}),
             fechaCorte: v.fecha_corte || "",
             idVenta: v.id_venta || null,
           });
