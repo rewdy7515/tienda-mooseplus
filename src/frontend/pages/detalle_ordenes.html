@@ -14,8 +14,6 @@
         padding: 12px 14px;
       }
       .orden-info-grid {
-        position: relative;
-        padding-right: 132px;
         align-items: start;
       }
       .orden-info-break {
@@ -29,21 +27,57 @@
       }
       .btn-ver-servicios-orden {
         width: 100%;
+        box-sizing: border-box;
         display: inline-flex;
         justify-content: center;
         align-items: center;
-        background: #16a34a;
+        min-height: 42px;
+        margin-top: 2px;
+        padding: 10px 14px;
+        border-radius: 12px;
         border: 1px solid #16a34a;
+        background: #16a34a;
         color: #ffffff;
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        box-shadow:
+          0 8px 18px rgba(21, 128, 61, 0.28),
+          inset 0 1px 0 rgba(255, 255, 255, 0.22);
+        transition:
+          transform 0.18s ease,
+          box-shadow 0.18s ease,
+          background-color 0.18s ease;
+      }
+      .btn-ver-servicios-orden::after {
+        content: "→";
+        margin-left: 8px;
+        font-size: 15px;
+        line-height: 1;
+        opacity: 0.92;
       }
       .btn-ver-servicios-orden:hover {
+        transform: translateY(-1px);
         background: #15803d;
         border-color: #15803d;
+        box-shadow:
+          0 12px 22px rgba(21, 128, 61, 0.32),
+          inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      }
+      .btn-ver-servicios-orden:active {
+        transform: translateY(0);
+        box-shadow:
+          0 5px 12px rgba(21, 128, 61, 0.24),
+          inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      }
+      .btn-ver-servicios-orden:focus-visible {
+        outline: 2px solid #16a34a;
+        outline-offset: 2px;
       }
       .orden-estado-chip {
-        position: absolute;
-        top: 0;
-        right: 0;
+        grid-column: 1 / -1;
+        justify-self: end;
+        margin: 0 0 2px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -131,9 +165,6 @@
         white-space: nowrap;
       }
       @media (max-width: 700px) {
-        .orden-info-grid {
-          padding-right: 110px;
-        }
         #orden-items .cart-table-scroll {
           padding-bottom: 4px;
         }

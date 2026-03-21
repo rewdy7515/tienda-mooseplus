@@ -31,6 +31,7 @@ let expired = false;
 let processingOrder = false;
 let orderProcessed = false;
 let verifyRunning = false;
+let verifyPending = false;
 let cartMontoBs = null;
 let currentRateBs = null;
 const VERIFY_WINDOW_MS = 3 * 60 * 1000;
@@ -160,6 +161,42 @@ const extractRefMatches = (text) => {
   return raw.match(/\d{4,}/g) || [];
 };
 
+const extractPagoRefs = (pagoRow = {}) => {
+  const refs = new Set();
+  const refCol = normalizeReferenceDigits(pagoRow?.referencia);
+  if (refCol.length >= 4) refs.add(refCol);
+  extractRefMatches(pagoRow?.texto || "").forEach((refRaw) => {
+    const refDigits = normalizeReferenceDigits(refRaw);
+    if (refDigits.length >= 4) refs.add(refDigits);
+  });
+  return Array.from(refs);
+};
+
+const pagoMatchesLast4 = (pagoRow = {}, last4 = "") => {
+  const last4Digits = normalizeReferenceDigits(last4).slice(-4);
+  if (last4Digits.length !== 4) return false;
+  return extractPagoRefs(pagoRow).some((ref) => ref.slice(-4) === last4Digits);
+};
+
+const pickBestPagoMatch = (pagos = [], { last4 = "", montoBaseBs = null } = {}) => {
+  const candidates = (Array.isArray(pagos) ? pagos : [])
+    .map((row) => ({ row, pagoMonto: montoNum(row?.monto_bs) }))
+    .filter(({ row, pagoMonto }) => pagoMatchesLast4(row, last4) && Number.isFinite(pagoMonto));
+
+  if (!candidates.length) return null;
+  if (!Number.isFinite(montoBaseBs)) {
+    return candidates[0].row;
+  }
+
+  candidates.sort((a, b) => {
+    const diffA = Math.abs(Number(a.pagoMonto) - Number(montoBaseBs));
+    const diffB = Math.abs(Number(b.pagoMonto) - Number(montoBaseBs));
+    if (diffA !== diffB) return diffA - diffB;
+    return (Number(b.row?.id) || 0) - (Number(a.row?.id) || 0);
+  });
+  return candidates[0].row;
+};
+
 const montoNum = (val) => {
   if (val == null) return null;
   const raw = String(val).trim();
@@ -237,13 +274,7 @@ const verifyPago = async () => {
     .order("id", { ascending: false });
   if (resp.error) throw resp.error;
   const pagos = resp.data || [];
-  const match = pagos.find((p) => {
-    const textoRefs = extractRefMatches(p.texto || "");
-    const refMatch = textoRefs.some((n) => n.slice(-4) === last4);
-    if (!refMatch) return false;
-    const pagoMonto = montoNum(p.monto_bs);
-    return Number.isFinite(pagoMonto);
-  });
+  const match = pickBestPagoMatch(pagos, { last4, montoBaseBs });
   if (!match) {
     const elapsedMs = getElapsedFromOrdenMs();
     if (elapsedMs == null || elapsedMs >= 30 * 1000) {
@@ -264,8 +295,7 @@ const verifyPago = async () => {
   }
 
   if (sessionUserId) {
-    const textoRefs = extractRefMatches(match.texto || "");
-    const refMatch = textoRefs.find((n) => n.slice(-4) === last4);
+    const refMatch = extractPagoRefs(match).find((n) => n.slice(-4) === last4);
     const updates = {
       saldo_acreditado_a: sessionUserId,
       saldo_acreditado: true,
@@ -375,10 +405,16 @@ const verifyPago = async () => {
 };
 
 const triggerVerify = async () => {
-  if (verifyRunning) return;
+  if (verifyRunning) {
+    verifyPending = true;
+    return;
+  }
   verifyRunning = true;
   try {
-    await verifyPago();
+    do {
+      verifyPending = false;
+      await verifyPago();
+    } while (verifyPending && !orderProcessed && !expired);
   } finally {
     verifyRunning = false;
   }
