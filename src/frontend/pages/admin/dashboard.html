@@ -639,7 +639,21 @@
 
       const usernameEl = document.querySelector(".username");
       const adminLink = document.querySelector(".admin-link");
-      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const isTrue = (v) => {
+        if (v === true || v === 1) return true;
+        const normalized = String(v ?? "")
+          .trim()
+          .toLowerCase();
+        return (
+          normalized === "1" ||
+          normalized === "true" ||
+          normalized === "t" ||
+          normalized === "yes" ||
+          normalized === "y" ||
+          normalized === "si" ||
+          normalized === "s"
+        );
+      };
 
       const monthFilter = document.querySelector("#month-filter");
       const btnLoad = document.querySelector("#btn-dashboard-load");
@@ -751,6 +765,7 @@
         minimumFractionDigits: 1,
         maximumFractionDigits: 1,
       });
+      const SUPABASE_PAGE_SIZE = 1000;
 
       const getCaracasDateParts = () => {
         const now = new Date();
@@ -854,14 +869,12 @@
             supabase
               .from("tarjetas_de_regalo")
               .select("fecha_compra")
-              .eq("para_venta", false)
               .not("fecha_compra", "is", null)
               .order("fecha_compra", { ascending: true })
               .limit(1),
             supabase
               .from("tarjetas_de_regalo")
               .select("fecha_compra")
-              .eq("para_venta", false)
               .not("fecha_compra", "is", null)
               .order("fecha_compra", { ascending: false })
               .limit(1),
@@ -984,11 +997,36 @@
         if (Array.isArray(joined)) return joined[0]?.[field] ?? fallback;
         return joined?.[field] ?? fallback;
       };
+      const isGiftPlatformRow = (row) =>
+        isTrue(toJoinedField(row?.plataformas, "tarjeta_de_regalo", false));
+      const hasLinkedGiftCard = (row) => {
+        const giftId = Number(row?.id_tarjeta_de_regalo);
+        return Number.isFinite(giftId) && giftId > 0;
+      };
+      const isHistorialIngresoRow = (row) => {
+        if (isGiftPlatformRow(row)) return true;
+        if (hasLinkedGiftCard(row)) return true;
+        return isTrue(row?.venta_cliente);
+      };
 
       const formatMoney = (v) => moneyFmt.format(toNumber(v));
       const formatMoneyPlain = (v) => {
         const n = toNumber(v);
         return `${n.toFixed(2).replace(".", ",")}`;
+      };
+      const fetchAllPages = async (buildQuery) => {
+        const rows = [];
+        let from = 0;
+        while (true) {
+          const to = from + SUPABASE_PAGE_SIZE - 1;
+          const { data, error } = await buildQuery().range(from, to);
+          if (error) throw error;
+          const batch = Array.isArray(data) ? data : [];
+          rows.push(...batch);
+          if (batch.length < SUPABASE_PAGE_SIZE) break;
+          from += SUPABASE_PAGE_SIZE;
+        }
+        return rows;
       };
 
       const formatDDMMYYYY = (isoDate) => {
@@ -1842,9 +1880,14 @@
         const rowsRenovIngreso = [];
         const rowsRenovGasto = [];
         const ventasDiariasPorDia = {};
+        const scopedGiftRows = (giftRows || []).filter((row) => {
+          const rawPlatformId = Number(row?.id_plataforma);
+          if (rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID) return true;
+          return isTrue(toJoinedField(row?.plataformas, "tarjeta_de_regalo", false));
+        });
 
         historial.forEach((row) => {
-          const isIngreso = isTrue(row?.venta_cliente);
+          const isIngreso = isHistorialIngresoRow(row);
           const isRenov = isTrue(row?.renovacion);
           if (isIngreso) {
             rowsIngreso.push(row);
@@ -1860,19 +1903,19 @@
 
         const ingresosTotal = rowsIngreso.reduce((acc, r) => acc + toNumber(r?.monto), 0);
         const gastoHistorialTotal = rowsGasto.reduce((acc, r) => acc + toNumber(r?.monto), 0);
-        const gastoGiftTotal = giftRows.reduce((acc, r) => acc + toNumber(r?.costo), 0);
+        const gastoGiftTotal = scopedGiftRows.reduce((acc, r) => acc + toNumber(r?.costo), 0);
         const gastosTotal = gastoHistorialTotal + gastoGiftTotal;
         const netoTotal = ingresosTotal - gastosTotal;
 
         const renovIngresoTotal = rowsRenovIngreso.reduce((acc, r) => acc + toNumber(r?.monto), 0);
         const renovGastoHistorial = rowsRenovGasto.reduce((acc, r) => acc + toNumber(r?.monto), 0);
-        const renovGastoGift = giftRows.reduce(
+        const renovGastoGift = scopedGiftRows.reduce(
           (acc, r) => acc + (isTrue(r?.usado) ? toNumber(r?.costo) : 0),
           0,
         );
         const renovGastoTotal = renovGastoHistorial + renovGastoGift;
 
-        const movimientos = historial.length + giftRows.length;
+        const movimientos = historial.length + scopedGiftRows.length;
         const margenPct = ingresosTotal > 0 ? (netoTotal / ingresosTotal) * 100 : 0;
 
         const platformMap = new Map();
@@ -1895,12 +1938,12 @@
           const nombrePlataforma = toName(row?.plataformas, "Sin plataforma");
           const entry = upsertPlatform(row?.id_plataforma ?? null, nombrePlataforma);
           const monto = toNumber(row?.monto);
-          if (isTrue(row?.venta_cliente)) entry.ingresos += monto;
+          if (isHistorialIngresoRow(row)) entry.ingresos += monto;
           else entry.gastos += monto;
           entry.movimientos += 1;
         });
 
-        giftRows.forEach((row) => {
+        scopedGiftRows.forEach((row) => {
           const rawPlatformId = Number(row?.id_plataforma);
           const shouldRemapGiftPlatform =
             rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID &&
@@ -1945,7 +1988,7 @@
           entry.movimientos += 1;
         });
 
-        giftRows.forEach((row) => {
+        scopedGiftRows.forEach((row) => {
           const provNombre = toName(row?.proveedores, "Sin proveedor");
           const entry = upsertProvider(row?.id_proveedor ?? null, provNombre);
           const giftCost = toNumber(row?.costo);
@@ -1970,11 +2013,11 @@
           const day = upsertDay(row?.fecha_pago);
           if (!day) return;
           const monto = toNumber(row?.monto);
-          if (isTrue(row?.venta_cliente)) day.ingresos += monto;
+          if (isHistorialIngresoRow(row)) day.ingresos += monto;
           else day.gastos += monto;
         });
 
-        giftRows.forEach((row) => {
+        scopedGiftRows.forEach((row) => {
           const day = upsertDay(row?.fecha_compra);
           if (!day) return;
           day.gastos += toNumber(row?.costo);
@@ -1998,7 +2041,7 @@
           dailyRows,
           countIngresos: rowsIngreso.length,
           countGastos: rowsGasto.length,
-          countGift: giftRows.length,
+          countGift: scopedGiftRows.length,
           clientesActivosCount: 0,
           ventasActivasCount: 0,
           renovacionesClienteCount: rowsRenovIngreso.length,
@@ -2009,7 +2052,7 @@
       const buildVentasTrendStats = (historial) => {
         const ventasDiariasPorDia = {};
         (historial || []).forEach((row) => {
-          if (!isTrue(row?.venta_cliente)) return;
+          if (!isHistorialIngresoRow(row)) return;
           const day = isoDay(row?.fecha_pago);
           if (day) ventasDiariasPorDia[day] = (ventasDiariasPorDia[day] || 0) + 1;
         });
@@ -2017,29 +2060,30 @@
       };
 
       const fetchMonthData = async (range) => {
-        const [{ data: historialData, error: histErr }, { data: giftData, error: giftErr }] =
-          await Promise.all([
+        const [historialData, giftData] = await Promise.all([
+          fetchAllPages(() =>
             supabase
               .from("historial_ventas")
               .select(
-                "id_historial_ventas, monto, fecha_pago, venta_cliente, renovacion, id_plataforma, id_proveedor, plataformas(nombre), proveedores(nombre)",
+                "id_historial_ventas, monto, fecha_pago, venta_cliente, renovacion, id_plataforma, id_proveedor, id_tarjeta_de_regalo, plataformas(nombre, tarjeta_de_regalo), proveedores(nombre)",
               )
               .gte("fecha_pago", range.start)
               .lte("fecha_pago", range.end)
-              .order("fecha_pago", { ascending: true }),
+              .order("fecha_pago", { ascending: true })
+              .order("id_historial_ventas", { ascending: true }),
+          ),
+          fetchAllPages(() =>
             supabase
               .from("tarjetas_de_regalo")
               .select(
-                "id_tarjeta_de_regalo, costo, para_venta, usado, fecha_compra, id_plataforma, id_proveedor, plataformas(nombre), proveedores(nombre)",
+                "id_tarjeta_de_regalo, costo, para_venta, usado, fecha_compra, id_plataforma, id_proveedor, plataformas(nombre, tarjeta_de_regalo), proveedores(nombre)",
               )
-              .eq("para_venta", false)
               .gte("fecha_compra", range.start)
               .lte("fecha_compra", range.end)
-              .order("fecha_compra", { ascending: true }),
-          ]);
-
-        if (histErr) throw histErr;
-        if (giftErr) throw giftErr;
+              .order("fecha_compra", { ascending: true })
+              .order("id_tarjeta_de_regalo", { ascending: true }),
+          ),
+        ]);
 
         return {
           historial: historialData || [],
@@ -2116,15 +2160,19 @@
         });
       };
       const fetchPlatformSalesMonthly = async () => {
-        const { data, error } = await supabase
-          .from("historial_ventas")
-          .select("fecha_pago, id_plataforma, plataformas(nombre, color_1), venta_cliente")
-          .eq("venta_cliente", true)
-          .not("fecha_pago", "is", null)
-          .order("fecha_pago", { ascending: true });
-        if (error) throw error;
+        const data = await fetchAllPages(() =>
+          supabase
+            .from("historial_ventas")
+            .select(
+              "fecha_pago, id_plataforma, id_tarjeta_de_regalo, plataformas(nombre, color_1, tarjeta_de_regalo), venta_cliente",
+            )
+            .not("fecha_pago", "is", null)
+            .order("fecha_pago", { ascending: true })
+            .order("id_historial_ventas", { ascending: true }),
+        );
         const platformMap = new Map();
         (data || []).forEach((row) => {
+          if (!isHistorialIngresoRow(row)) return;
           const monthKey = monthKeyFromDate(row?.fecha_pago);
           if (!monthKey) return;
           const platformId = row?.id_plataforma ?? null;
