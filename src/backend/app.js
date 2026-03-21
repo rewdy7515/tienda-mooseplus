@@ -2821,10 +2821,77 @@ const normalizeMontoBs = (value) => {
 
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 
+const getRefExtractionSources = (text) => {
+  const base = String(text || "").trim();
+  const sources = [];
+  if (base) sources.push(base);
+
+  try {
+    const parsed = JSON.parse(base);
+    if (parsed && typeof parsed === "object") {
+      const nested = [
+        parsed.texto,
+        parsed.text,
+        parsed.mensaje,
+        parsed.message,
+        parsed.payload?.texto,
+        parsed.payload?.text,
+        parsed.payload?.mensaje,
+        parsed.payload?.message,
+      ];
+      nested.forEach((value) => {
+        const txt = String(value || "").trim();
+        if (txt) sources.push(txt);
+      });
+    }
+  } catch (_err) {
+    // Ignorar si no es JSON válido; usamos el texto crudo.
+  }
+
+  return Array.from(new Set(sources));
+};
+
+const extractRefKeywordCandidates = (text) => {
+  const sources = getRefExtractionSources(text);
+  const patterns = [
+    /(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])\s*(?:de\s*)?(?:operaci(?:o|ó)n|referencia)\s*[:#-]?\s*(\d{6,20})/gi,
+    /(?:operaci(?:o|ó)n|referencia)\s*(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])?\s*[:#-]?\s*(\d{6,20})/gi,
+    /(?:trx|transacci(?:o|ó)n|operaci(?:o|ó)n)\s*[:#-]?\s*(\d{6,20})/gi,
+  ];
+  const results = [];
+  sources.forEach((source) => {
+    patterns.forEach((pattern) => {
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(source)) !== null) {
+        const digits = normalizeReferenceDigits(match?.[1] || "");
+        if (digits.length >= 6) results.push(digits);
+      }
+    });
+  });
+  return Array.from(new Set(results));
+};
+
 const extractRefCandidates = (text) => {
-  const raw = String(text || "");
-  const matches = raw.match(/\d{4,}/g) || [];
-  return matches.map((m) => String(m).trim()).filter(Boolean);
+  const sources = getRefExtractionSources(text);
+  const keywordCandidates = extractRefKeywordCandidates(text);
+  const genericCandidates = [];
+  sources.forEach((source) => {
+    const matches = source.match(/\d{4,}/g) || [];
+    matches.forEach((match) => {
+      const digits = normalizeReferenceDigits(match);
+      if (digits.length >= 4) genericCandidates.push(digits);
+    });
+  });
+  return Array.from(new Set([...keywordCandidates, ...genericCandidates]));
+};
+
+const pickPrimaryReferenceCandidate = (text) => {
+  const keywordCandidates = extractRefKeywordCandidates(text);
+  if (keywordCandidates.length) return keywordCandidates[0];
+  const generic = extractRefCandidates(text).filter((value) => String(value || "").trim().length >= 6);
+  if (generic.length === 1) return generic[0];
+  return generic[0] || null;
 };
 
 const computeOrderMontoBs = async (orden = {}) => {
@@ -3055,6 +3122,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       return raw.replace(",", ".");
     };
     const monto = normalizeMonto(montoMatch);
+    const referenciaDetectada = pickPrimaryReferenceCandidate(texto);
 
     const payloadPagoMovil = {
       app: appName,
@@ -3064,6 +3132,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       dispositivo,
       hash,
       monto_bs: monto,
+      referencia: referenciaDetectada || null,
     };
     const { data: insertedPagoMovil, error: insErr } = await supabaseAdmin
       .from("pagomoviles")
