@@ -239,6 +239,17 @@ const addDaysToIsoDate = (dateIso, days) => {
 };
 
 async function findVentaAsociadaFromReporte(row) {
+  const ventaIdDirecta = toPositiveId(row?.id_venta);
+  if (ventaIdDirecta) {
+    const { data: ventaDirecta, error: ventaDirectaErr } = await supabase
+      .from("ventas")
+      .select("id_venta, id_usuario, fecha_corte")
+      .eq("id_venta", ventaIdDirecta)
+      .maybeSingle();
+    if (ventaDirectaErr) throw ventaDirectaErr;
+    if (ventaDirecta?.id_venta) return ventaDirecta;
+  }
+
   const cuentaId = Number(row?.id_cuenta);
   if (!Number.isFinite(cuentaId) || cuentaId <= 0) return null;
   const perfilId = Number(row?.id_perfil);
@@ -248,7 +259,7 @@ async function findVentaAsociadaFromReporte(row) {
     let query = supabase
       .from("ventas")
       .select("id_venta, id_usuario, fecha_corte")
-      .eq("id_cuenta", cuentaId)
+      .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`)
       .order("id_venta", { ascending: false })
       .limit(1);
     if (withUserFilter && row?.id_usuario) query = query.eq("id_usuario", row.id_usuario);
@@ -305,14 +316,52 @@ async function applyDiasExtraToVentaFechaCorte(row, ventaInfoFromFlow = null) {
 }
 
 async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
-  const ventaInfo = ventaInfoFromFlow || (await findVentaAsociadaFromReporte(row));
-  const ventaId = Number(ventaInfo?.id_venta);
-  if (!Number.isFinite(ventaId) || ventaId <= 0) return null;
-  const { error } = await supabase
+  const ventaIds = new Set();
+  const pushVentaId = (value) => {
+    const parsed = toPositiveId(value);
+    if (parsed) ventaIds.add(parsed);
+  };
+
+  pushVentaId(ventaInfoFromFlow?.id_venta);
+  pushVentaId(row?.id_venta);
+
+  let ventaInfo = ventaInfoFromFlow || null;
+  if (!ventaIds.size) {
+    ventaInfo = await findVentaAsociadaFromReporte(row);
+    pushVentaId(ventaInfo?.id_venta);
+  }
+
+  if (ventaIds.size) {
+    const ids = Array.from(ventaIds);
+    const { error } = await supabase
+      .from("ventas")
+      .update({ reportado: false })
+      .in("id_venta", ids);
+    if (error) throw error;
+    return ventaInfo || { id_venta: ids[0] };
+  }
+
+  const cuentaId = toPositiveId(row?.id_cuenta);
+  if (!cuentaId) return null;
+
+  let fallbackQuery = supabase
     .from("ventas")
     .update({ reportado: false })
-    .eq("id_venta", ventaId);
-  if (error) throw error;
+    .eq("reportado", true)
+    .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`);
+
+  const userId = toPositiveId(row?.id_usuario);
+  if (userId) fallbackQuery = fallbackQuery.eq("id_usuario", userId);
+
+  const perfilId = toPositiveId(row?.id_perfil);
+  if (perfilId) {
+    fallbackQuery = fallbackQuery.eq("id_perfil", perfilId);
+  } else {
+    fallbackQuery = fallbackQuery.is("id_perfil", null);
+  }
+
+  const { error: fallbackErr } = await fallbackQuery;
+  if (fallbackErr) throw fallbackErr;
   return ventaInfo;
 }
 
@@ -623,7 +672,7 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
+      "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
@@ -1066,11 +1115,7 @@ async function guardarCambios() {
       console.error("sumar dias fecha_corte reporte cerrado error", diasErr);
     }
 
-    try {
-      await clearVentaReportadoFlag(currentRow);
-    } catch (reportadoErr) {
-      console.error("limpiar ventas.reportado al cerrar reporte error", reportadoErr);
-    }
+    await clearVentaReportadoFlag(currentRow);
 
     try {
       await notifyReporteCerrado(currentRow);
@@ -1321,11 +1366,7 @@ async function reemplazarServicio(options = {}) {
       .eq("id_venta", ventaId);
     if (updVentaErr) throw updVentaErr;
 
-    try {
-      await clearVentaReportadoFlag(selectedRow, ventaInfo);
-    } catch (reportadoErr) {
-      console.error("limpiar ventas.reportado en reemplazo error", reportadoErr);
-    }
+    await clearVentaReportadoFlag(selectedRow, ventaInfo);
 
     const perfilAnteriorId = toPositiveId(rowPerfil?.id_perfil);
     let perfilTieneOtraVenta = false;

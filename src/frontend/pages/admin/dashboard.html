@@ -118,6 +118,40 @@
       .dashboard-trend h3 {
         margin: 0 0 6px;
       }
+      .dashboard-trend-kpi {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 0 0 8px;
+      }
+      .dashboard-trend-kpi-label {
+        margin: 0;
+        color: #6b7280;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .dashboard-trend-kpi-value {
+        margin: 0;
+        font-size: 44px;
+        line-height: 1.02;
+        font-weight: 800;
+        color: #111827;
+        letter-spacing: -0.03em;
+      }
+      .dashboard-trend-kpi-compare {
+        margin: 2px 0 0;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .dashboard-trend-kpi-compare.up {
+        color: #0f6d3e;
+      }
+      .dashboard-trend-kpi-compare.down {
+        color: #8d1c1c;
+      }
+      .dashboard-trend-kpi-compare.same {
+        color: #6b7280;
+      }
       .dashboard-trend-legend {
         display: flex;
         gap: 14px;
@@ -368,6 +402,9 @@
         .dashboard-kpi.neto .dashboard-kpi-value {
           font-size: 30px;
         }
+        .dashboard-trend-kpi-value {
+          font-size: 34px;
+        }
         .dashboard-bar-row:not(.compact) {
           grid-template-columns: 1fr;
           gap: 4px;
@@ -495,6 +532,11 @@
 
       <section class="dashboard-trend">
         <h3>Ventas del mes vs mes anterior</h3>
+        <div class="dashboard-trend-kpi">
+          <p class="dashboard-trend-kpi-label">Ventas acumuladas del mes</p>
+          <p id="ventas-trend-kpi-value" class="dashboard-trend-kpi-value">0</p>
+          <p id="ventas-trend-kpi-compare" class="dashboard-trend-kpi-compare">= Sin cambio vs mes anterior</p>
+        </div>
         <p class="dashboard-trend-legend">
           <span><span class="dashboard-trend-dot current"></span>Mes actual</span>
           <span><span class="dashboard-trend-dot previous"></span>Mes anterior</span>
@@ -712,6 +754,8 @@
       const ventasTrendChart = document.querySelector("#ventas-trend-chart");
       const ventasTrendSummary = document.querySelector("#ventas-trend-summary");
       const ventasTrendEmpty = document.querySelector("#ventas-trend-empty");
+      const ventasTrendKpiValue = document.querySelector("#ventas-trend-kpi-value");
+      const ventasTrendKpiCompare = document.querySelector("#ventas-trend-kpi-compare");
       const authWebNoteEl = document.querySelector("#auth-web-note");
       const authWebMonthlyChart = document.querySelector("#chart-auth-web-mensual");
       const emptyAuthWebMonthlyChart = document.querySelector("#empty-chart-auth-web-mensual");
@@ -1716,6 +1760,8 @@
           days.push(day);
         }
         if (!days.length) {
+          if (ventasTrendKpiValue) ventasTrendKpiValue.textContent = "0";
+          setCompare(ventasTrendKpiCompare, "int", 0, 0, "vs mes anterior");
           ventasTrendEmpty?.classList.remove("hidden");
           return;
         }
@@ -1733,6 +1779,17 @@
         );
         const currentMonthLabel = formatMonthLabel(monthKeyFromDate(range?.start));
         const previousMonthLabel = formatMonthLabel(previousMonthKey(monthKeyFromDate(range?.start)));
+        const dayTxt = String(currentCutDay).padStart(2, "0");
+        const trendCompareSuffix =
+          currentCutDay < endDay ? `vs mes anterior al día ${dayTxt}` : "vs mes anterior";
+        if (ventasTrendKpiValue) ventasTrendKpiValue.textContent = intFmt.format(currentAccum);
+        setCompare(
+          ventasTrendKpiCompare,
+          "int",
+          currentAccum,
+          previousSameCutAccum,
+          trendCompareSuffix,
+        );
         if (ventasTrendSummary) {
           ventasTrendSummary.textContent =
             `Al día ${String(currentCutDay).padStart(2, "0")}: ${currentMonthLabel} lleva ${intFmt.format(currentAccum)} ventas y ${previousMonthLabel} llevaba ${intFmt.format(previousSameCutAccum)} ventas para la misma fecha.`;
