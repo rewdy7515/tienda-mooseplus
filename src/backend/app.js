@@ -2099,7 +2099,7 @@ const buildWhatsappRecordatorioItems = async ({
     let plain = "";
     const ventaIds = uniqPositiveIds(group.ventaIds || []).sort((a, b) => a - b);
     let renewalCartUrl = "";
-    if (group.registrado === true && ventaIds.length) {
+    if (ventaIds.length) {
       try {
         renewalCartUrl = buildRenewalCartUrl({
           idUsuario: group.idUsuario,
@@ -2128,11 +2128,8 @@ const buildWhatsappRecordatorioItems = async ({
     const fechaPagoHeader = `\`Fecha de pago: ${fechaPagoMensaje}\``;
 
     if (effectiveMode === "cutoff_today") {
-      if (renewalCartUrl) {
-        plain = `🚨 *HOY* vencen tus membresías\nAñade tus renovaciones al carrito automaticamente:\n${renewalCartUrl}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-      } else {
-        plain = `🚨 *HOY* vencen tus membresías, puedes *renovar* por nuestra nueva pagina web:\n${buildPublicSiteUrl()}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-      }
+      const cutoffRenewalUrl = String(renewalCartUrl || "").trim() || buildPublicSiteUrl();
+      plain = `🚨 *HOY* vencen tus membresías\nAñade tus renovaciones al carrito automaticamente:\n${cutoffRenewalUrl}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     } else if (renewalCartUrl) {
       const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
       const intro = `Añade tus renovaciones al carrito automaticamente:\n${renewalCartUrl}`;
@@ -2854,6 +2851,7 @@ const getRefExtractionSources = (text) => {
 const extractRefKeywordCandidates = (text) => {
   const sources = getRefExtractionSources(text);
   const patterns = [
+    /\bref(?:erencia)?\.?\s*[:#-]?\s*(\d{4,20})/gi,
     /(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])\s*(?:de\s*)?(?:operaci(?:o|ó)n|referencia)\s*[:#-]?\s*(\d{6,20})/gi,
     /(?:operaci(?:o|ó)n|referencia)\s*(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])?\s*[:#-]?\s*(\d{6,20})/gi,
     /(?:trx|transacci(?:o|ó)n|operaci(?:o|ó)n)\s*[:#-]?\s*(\d{6,20})/gi,

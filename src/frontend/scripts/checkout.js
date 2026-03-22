@@ -1365,7 +1365,7 @@ btnSendPayment?.addEventListener("click", async () => {
           referencia: referenciaValue,
           comprobante: comprobantes,
           total: totalUsd,
-          tasa_actual: Number.isFinite(tasaBs) ? tasaBs : null,
+          tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
           monto_bs: montoBs,
           monto_transferido: montoTransferidoValue,
           marcado_pago: true,
@@ -1394,7 +1394,7 @@ btnSendPayment?.addEventListener("click", async () => {
       referencia: referenciaValue,
       comprobantes,
       total: totalUsd,
-      tasa_actual: Number.isFinite(tasaBs) ? tasaBs : null,
+      tasa_bs: Number.isFinite(tasaBs) ? tasaBs : null,
       monto_transferido: montoTransferidoValue,
       marcado_pago: true,
     };
