@@ -1966,11 +1966,13 @@ const checkMissingDataNotice = async (currentUser) => {
     const userId = Number(currentUser.id_usuario);
     const { data: ventas, error } = await supabase
       .from("ventas")
-      .select("id_venta, pendiente, correo_miembro, clave_miembro, id_precio, precios:precios(id_plataforma, plataformas:plataformas(correo_cliente, clave_cliente))")
+      .select(
+        "id_venta, id_orden, pendiente, correo_miembro, clave_miembro, id_precio, precios:precios(id_plataforma, plataformas:plataformas(correo_cliente, clave_cliente))"
+      )
       .eq("pendiente", true)
       .or(`id_usuario.eq.${userId},id_admin_venta.eq.${userId}`);
     if (error) throw error;
-    const hasMissing = (ventas || []).some((v) => {
+    const missingVentas = (ventas || []).filter((v) => {
       const plat = v.precios?.plataformas || {};
       const needsCorreo = plat.correo_cliente === true || plat.correo_cliente === "true" || plat.correo_cliente === "1";
       if (!needsCorreo) return false;
@@ -1979,10 +1981,22 @@ const checkMissingDataNotice = async (currentUser) => {
       const missingClave = needsClave ? !v.clave_miembro : false;
       return missingCorreo || missingClave;
     });
+    const hasMissing = missingVentas.length > 0;
+    const targetOrderIds = missingVentas
+      .map((v) => Number(v?.id_orden))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const targetOrderId = targetOrderIds.length ? Math.max(...targetOrderIds) : null;
+    missingDataBtn.dataset.idOrden = targetOrderId ? String(targetOrderId) : "";
     missingDataWrap.classList.toggle("hidden", !hasMissing);
     if (hasMissing && !missingDataBtn.dataset.bound) {
       missingDataBtn.addEventListener("click", () => {
-        window.location.href = "entregar_servicios.html?faltantes=1";
+        const idOrden = Number(missingDataBtn.dataset.idOrden || 0);
+        if (!Number.isFinite(idOrden) || idOrden <= 0) {
+          alert("No se encontró una orden asociada para completar estos datos.");
+          return;
+        }
+        const nextUrl = `entregar_servicios.html?id_orden=${encodeURIComponent(idOrden)}&faltantes=1`;
+        window.location.href = nextUrl;
       });
       missingDataBtn.dataset.bound = "1";
     }
