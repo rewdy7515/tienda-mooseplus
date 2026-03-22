@@ -3004,6 +3004,214 @@ const markPagoMovilCreditedForOrder = async ({ orden = {}, idUsuario = null } = 
   };
 };
 
+const markPagoMovilRowAsCredited = async ({
+  pagoId = null,
+  idUsuario = null,
+  referenciaMatch = null,
+} = {}) => {
+  const pagoIdNum = toPositiveInt(pagoId);
+  const userId = toPositiveInt(idUsuario);
+  if (!pagoIdNum || !userId) {
+    return { updated: false, reason: "invalid_pago_or_user" };
+  }
+
+  const updates = {
+    saldo_acreditado_a: userId,
+    saldo_acreditado: true,
+  };
+  const refDigits = normalizeReferenceDigits(referenciaMatch);
+  if (refDigits.length >= 4) {
+    updates.referencia = refDigits;
+  }
+
+  const { error: updErr } = await supabaseAdmin
+    .from("pagomoviles")
+    .update(updates)
+    .eq("id", pagoIdNum);
+  if (updErr) throw updErr;
+
+  return { updated: true, pago_id: pagoIdNum, saldo_acreditado_a: userId };
+};
+
+const creditSaldoUsdToUser = async ({ idUsuario = null, montoUsd = 0 } = {}) => {
+  const targetUserId = toPositiveInt(idUsuario);
+  const amount = Math.round((Number(montoUsd) || 0) * 100) / 100;
+  if (!targetUserId || !(amount > 0)) {
+    return { acreditado: false, monto: 0, saldoNuevo: null };
+  }
+
+  const { data: userRow, error: userErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("saldo")
+    .eq("id_usuario", targetUserId)
+    .maybeSingle();
+  if (userErr) throw userErr;
+
+  const saldoActual = Number(userRow?.saldo);
+  const saldoBase = Number.isFinite(saldoActual) ? saldoActual : 0;
+  const saldoNuevo = Math.round((saldoBase + amount) * 100) / 100;
+  const { error: updSaldoErr } = await supabaseAdmin
+    .from("usuarios")
+    .update({ saldo: saldoNuevo })
+    .eq("id_usuario", targetUserId);
+  if (updSaldoErr) throw updSaldoErr;
+
+  return { acreditado: true, monto: amount, saldoNuevo };
+};
+
+const autoProcessMatchedOrder = async (match = {}) => {
+  const idOrden = toPositiveInt(match?.id_orden);
+  if (!idOrden) {
+    return { processed: false, reason: "id_orden_invalido" };
+  }
+
+  const { data: orden, error: ordErr } = await supabaseAdmin
+    .from("ordenes")
+    .select(
+      "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, pago_verificado, en_espera, orden_cancelada",
+    )
+    .eq("id_orden", idOrden)
+    .maybeSingle();
+  if (ordErr) throw ordErr;
+  if (!orden?.id_orden) {
+    return { processed: false, reason: "orden_no_encontrada", id_orden: idOrden };
+  }
+  if (isTrue(orden?.orden_cancelada)) {
+    return { processed: false, reason: "orden_cancelada", id_orden: idOrden };
+  }
+  if (Number(orden?.id_metodo_de_pago) !== 1) {
+    return { processed: false, reason: "metodo_no_pagomovil", id_orden: idOrden };
+  }
+
+  const idUsuarioVentas = toPositiveInt(match?.id_usuario) || toPositiveInt(orden?.id_usuario);
+  if (!idUsuarioVentas) {
+    return { processed: false, reason: "id_usuario_invalido", id_orden: idOrden };
+  }
+
+  await markPagoMovilRowAsCredited({
+    pagoId: match?.pago_id,
+    idUsuario: idUsuarioVentas,
+    referenciaMatch: match?.referencia_match,
+  });
+
+  const { data: ventasExist, error: ventasErr } = await supabaseAdmin
+    .from("ventas")
+    .select("id_venta, pendiente")
+    .eq("id_orden", idOrden);
+  if (ventasErr) throw ventasErr;
+
+  if ((ventasExist || []).length) {
+    const pendientesCount = (ventasExist || []).filter((row) => isTrue(row?.pendiente)).length;
+    const { error: updOrdErr } = await supabaseAdmin
+      .from("ordenes")
+      .update({
+        pago_verificado: true,
+        en_espera: pendientesCount > 0,
+      })
+      .eq("id_orden", idOrden);
+    if (updOrdErr) throw updOrdErr;
+    return {
+      processed: true,
+      reason: "orden_ya_procesada",
+      id_orden: idOrden,
+      ventas: ventasExist.length,
+      pendientes: pendientesCount,
+    };
+  }
+
+  if (isTrue(orden?.pago_verificado)) {
+    return { processed: false, reason: "orden_ya_verificada", id_orden: idOrden };
+  }
+
+  const completeNoItemsOrder = async ({ montoAuto = 0, motivo = "sin_items" } = {}) => {
+    const saldoInfo = await creditSaldoUsdToUser({
+      idUsuario: idUsuarioVentas,
+      montoUsd: montoAuto,
+    });
+    const { error: updOrdErr } = await supabaseAdmin
+      .from("ordenes")
+      .update({
+        pago_verificado: true,
+        en_espera: false,
+      })
+      .eq("id_orden", idOrden);
+    if (updOrdErr) throw updOrdErr;
+
+    return {
+      processed: true,
+      reason: motivo,
+      id_orden: idOrden,
+      ventas: 0,
+      pendientes: 0,
+      saldo_acreditado: saldoInfo.acreditado,
+      excedente_acreditado: saldoInfo.monto,
+      saldo_nuevo: saldoInfo.saldoNuevo,
+    };
+  };
+
+  if (!toPositiveInt(orden?.id_carrito)) {
+    return completeNoItemsOrder({
+      montoAuto: Number(orden?.total) || 0,
+      motivo: "orden_sin_carrito",
+    });
+  }
+
+  const context = await buildCheckoutContext({
+    idUsuarioVentas,
+    carritoId: orden.id_carrito,
+    totalCliente: orden.total,
+  });
+  const montoBaseCobrado = await resolveMontoBaseCarrito({
+    carritoId: orden.id_carrito,
+    fallbackTotal: context.total,
+  });
+
+  if (!context.items?.length) {
+    return completeNoItemsOrder({
+      montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
+      motivo: "carrito_sin_items",
+    });
+  }
+
+  const archivos = normalizeFilesArray(orden?.comprobante);
+  const result = await processOrderFromItems({
+    ordenId: idOrden,
+    idUsuarioSesion: idUsuarioVentas,
+    idUsuarioVentas,
+    items: context.items,
+    priceMap: context.priceMap,
+    platInfoById: context.platInfoById,
+    platNameById: context.platNameById,
+    pickPrecio: context.pickPrecio,
+    descuentos: context.descuentos,
+    discountColumns: context.discountColumns,
+    discountColumnById: context.discountColumnById,
+    isCliente: context.isCliente,
+    referencia: orden?.referencia,
+    archivos,
+    id_metodo_de_pago: orden?.id_metodo_de_pago,
+    carritoId: orden.id_carrito,
+    montoHistorialTotalOverride: montoBaseCobrado,
+  });
+
+  const { error: updOrdErr } = await supabaseAdmin
+    .from("ordenes")
+    .update({
+      pago_verificado: true,
+      en_espera: result.pendientesCount > 0,
+    })
+    .eq("id_orden", idOrden);
+  if (updOrdErr) throw updOrdErr;
+
+  return {
+    processed: true,
+    reason: "orden_procesada",
+    id_orden: idOrden,
+    ventas: result.ventasCount,
+    pendientes: result.pendientesCount,
+  };
+};
+
 const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
   const pagoId = Number(pagoMovilRow?.id || 0);
   if (!pagoId) return { matched: false, reason: "invalid_pago_id" };
@@ -3140,10 +3348,13 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
     if (insErr) throw insErr;
 
     let matchResult = { matched: false, reason: "not_checked" };
+    let processResult = { processed: false, reason: "not_attempted" };
     try {
       matchResult = await autoMatchPagoMovilAgainstOrders(insertedPagoMovil || {});
       if (matchResult?.matched) {
         console.log("[bdv/notify] pago conciliado con orden", matchResult);
+        processResult = await autoProcessMatchedOrder(matchResult);
+        console.log("[bdv/notify] resultado procesamiento orden", processResult);
       } else {
         console.log("[bdv/notify] pago recibido sin orden coincidente", {
           pago_id: insertedPagoMovil?.id || null,
@@ -3159,6 +3370,8 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       duplicado: false,
       coincidencia_orden: matchResult?.matched === true,
       id_orden: matchResult?.id_orden || null,
+      orden_procesada: processResult?.processed === true,
+      razon_orden: processResult?.reason || null,
     });
   } catch (err) {
     console.error("bdv notify error", err);
