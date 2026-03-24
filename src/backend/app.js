@@ -118,6 +118,19 @@ const WHATSAPP_AUTO_RECORDATORIOS_ENABLED =
   process.env.WHATSAPP_AUTO_RECORDATORIOS !== "false";
 const WHATSAPP_AUTO_RECORDATORIOS_WEEKDAY_HOUR = 10;
 const WHATSAPP_AUTO_RECORDATORIOS_WEEKEND_HOUR = 11;
+const WHATSAPP_CUTOFF_PLATFORM_12_ID = 12;
+const WHATSAPP_CUTOFF_PLATFORM_12_MESSAGE = `*Su cuenta de Canva Pro ha vencido* 🎨
+
+En caso de no renovar, tendrá 24 horas para copiar sus diseños a su equipo principal. Transcurrido el tiempo se excluirá como miembro del equipo y se eliminaran los diseños *permanentemente*
+
+*Para copiar un diseño o carpeta a tu equipo principal debes:*
+
+1. Seleccionar el diseño o carpeta deseada y pulsar los 3 puntos.
+2. Seleccionar “Copiar a otro equipo”.
+3. Eligir tu cuenta (por ejemplo: “Equipo de Andrés Villarreal”).
+4. Pulsar “Copiar”.
+
+*‼️Por favor tomar previsiones*‼️`;
 const WHATSAPP_SEND_DELAY_MIN_MS = 8000;
 const WHATSAPP_SEND_DELAY_MAX_MS = 15000;
 const WHATSAPP_SEND_TIMEOUT_MS = Math.max(
@@ -152,6 +165,9 @@ let lastAutoRecordatoriosState = {
   sameDayCutoffTotal: 0,
   sameDayCutoffSent: 0,
   sameDayCutoffFailed: 0,
+  sameDayPlatform12Total: 0,
+  sameDayPlatform12Sent: 0,
+  sameDayPlatform12Failed: 0,
   updatedVentasCorteHoy: 0,
   recordatoriosEnviados: false,
   error: null,
@@ -167,6 +183,10 @@ const NUEVO_SERVICIO_NOTIF_QUEUE_BATCH = Math.max(
   Math.min(50, Number(process.env.NUEVO_SERVICIO_NOTIF_QUEUE_BATCH) || 20),
 );
 const NUEVO_SERVICIO_NOTIF_QUEUE_TABLE = "eventos_notificacion_nuevo_servicio";
+const WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID = Math.max(
+  1,
+  Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID) || 20,
+);
 const WEB_PUSH_SUBSCRIPTIONS_TABLE = "web_push_subscriptions";
 const WEB_PUSH_DELIVERY_QUEUE_TABLE = "web_push_delivery_queue";
 const SANDBOX_GIFTCARD_ORDERS_TABLE = "sandbox_giftcard_orders";
@@ -923,6 +943,13 @@ const getWhatsappAutoRecordatoriosHour = ({ weekday } = {}) => {
     : WHATSAPP_AUTO_RECORDATORIOS_WEEKDAY_HOUR;
 };
 
+const normalizeWhatsappRecordatorioMode = (mode = "pending") => {
+  const rawMode = String(mode || "").trim().toLowerCase();
+  if (rawMode === "cutoff_today") return "cutoff_today";
+  if (rawMode === "cutoff_today_platform_12") return "cutoff_today_platform_12";
+  return "pending";
+};
+
 const normalizeRecordatorioDiasAntes = (value, fallback = 1) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
@@ -1575,6 +1602,111 @@ const normalizePerfilText = (perfilRaw) => {
   return perfil;
 };
 
+const buildWhatsappPendingOrderAdminMessage = ({
+  correoMiembro = "",
+  claveMiembro = "",
+  cuentaNueva = null,
+} = {}) => {
+  const correo = String(correoMiembro || "").trim();
+  const clave = String(claveMiembro || "").trim();
+  if (!correo || !clave) return "";
+  const tipoCuenta = cuentaNueva === false ? "existente" : "nueva";
+  return `*PEDIDO PENDIENTE*
+Spotify - ${tipoCuenta}
+
+*Correo:* ${correo}
+*Clave:* ${clave}`;
+};
+
+const resolveWhatsappPhoneForUser = async (idUsuario) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return null;
+  const { data: userRow, error: userErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("telefono")
+    .eq("id_usuario", userId)
+    .maybeSingle();
+  if (userErr) throw userErr;
+  const phone = normalizeWhatsappPhone(userRow?.telefono);
+  return phone || null;
+};
+
+const maybeSendPendingSpotifyOrderToWhatsapp = async ({
+  idVenta = null,
+  idPlataformaHint = null,
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta);
+  if (!ventaId) {
+    return { sent: false, skipped: true, reason: "invalid_sale" };
+  }
+  const plataformaHint = Number(idPlataformaHint);
+  if (Number.isFinite(plataformaHint) && plataformaHint > 0 && plataformaHint !== 9) {
+    return { sent: false, skipped: true, reason: "not_spotify_platform" };
+  }
+
+  const { data: ventaRow, error: ventaErr } = await supabaseAdmin
+    .from("ventas")
+    .select("id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, precios(id_plataforma)")
+    .eq("id_venta", ventaId)
+    .maybeSingle();
+  if (ventaErr) throw ventaErr;
+  if (!ventaRow?.id_venta) {
+    return { sent: false, skipped: true, reason: "sale_not_found" };
+  }
+
+  const platId = Number(ventaRow?.precios?.id_plataforma || 0);
+  if (platId !== 9) {
+    return { sent: false, skipped: true, reason: "not_spotify_sale" };
+  }
+  if (!isTrue(ventaRow?.pendiente)) {
+    return { sent: false, skipped: true, reason: "sale_not_pending" };
+  }
+
+  const message = buildWhatsappPendingOrderAdminMessage({
+    correoMiembro: ventaRow?.correo_miembro,
+    claveMiembro: ventaRow?.clave_miembro,
+    cuentaNueva: ventaRow?.cuenta_nueva,
+  });
+  if (!message) {
+    return { sent: false, skipped: true, reason: "missing_member_credentials" };
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID);
+  if (!targetPhone) {
+    return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
+  }
+
+  await ensureWhatsappClientReady({
+    reason: "pending_spotify_order_alert",
+    allowWhenDisabled: true,
+  });
+
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de pedido pendiente",
+    );
+    return {
+      sent: true,
+      skipped: false,
+      reason: null,
+      id_venta: ventaId,
+      id_usuario_destino: WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID,
+      phone: targetPhone,
+    };
+  } finally {
+    await shutdownWhatsappClient({
+      reason: "pending_spotify_order_alert_completed",
+      allowWhenDisabled: true,
+    });
+  }
+};
+
 const markNuevoServicioQueueEventProcessed = async (idEvento, { error = null } = {}) => {
   if (!idEvento) return;
   const payload = {
@@ -1624,6 +1756,9 @@ const processNuevoServicioNotificationQueue = async () => {
     duplicates: 0,
     failed: 0,
     invalidUser: 0,
+    whatsappSent: 0,
+    whatsappFailed: 0,
+    whatsappSkipped: 0,
   };
 
   try {
@@ -1711,6 +1846,21 @@ const processNuevoServicioNotificationQueue = async () => {
           if (existingErr) throw existingErr;
           if ((existingRows || []).length) {
             result.duplicates += 1;
+            try {
+              const waRes = await maybeSendPendingSpotifyOrderToWhatsapp({
+                idVenta,
+                idPlataformaHint: plataformaEventoId,
+              });
+              if (waRes?.sent) result.whatsappSent += 1;
+              else if (waRes?.skipped) result.whatsappSkipped += 1;
+            } catch (waErr) {
+              result.whatsappFailed += 1;
+              console.error("[Notificaciones] WhatsApp pedido pendiente (duplicado) error", {
+                id_evento: idEvento,
+                id_venta: idVenta,
+                error: waErr?.message || waErr,
+              });
+            }
             await markNuevoServicioQueueEventProcessed(idEvento);
             continue;
           }
@@ -1747,6 +1897,22 @@ const processNuevoServicioNotificationQueue = async () => {
           id_usuario: idUsuario,
         });
         if (insErr) throw insErr;
+
+        try {
+          const waRes = await maybeSendPendingSpotifyOrderToWhatsapp({
+            idVenta,
+            idPlataformaHint: plataformaEventoId,
+          });
+          if (waRes?.sent) result.whatsappSent += 1;
+          else if (waRes?.skipped) result.whatsappSkipped += 1;
+        } catch (waErr) {
+          result.whatsappFailed += 1;
+          console.error("[Notificaciones] WhatsApp pedido pendiente error", {
+            id_evento: idEvento,
+            id_venta: idVenta,
+            error: waErr?.message || waErr,
+          });
+        }
 
         await markNuevoServicioQueueEventProcessed(idEvento);
         result.sent += 1;
@@ -1793,6 +1959,9 @@ const ensureDailyRecordatoriosState = (dateStr) => {
     sameDayCutoffTotal: 0,
     sameDayCutoffSent: 0,
     sameDayCutoffFailed: 0,
+    sameDayPlatform12Total: 0,
+    sameDayPlatform12Sent: 0,
+    sameDayPlatform12Failed: 0,
     updatedVentasCorteHoy: 0,
     recordatoriosEnviados: false,
     error: null,
@@ -1825,7 +1994,7 @@ const loadWhatsappRecordatorioVentas = async ({
   usersList = [],
   mode = "pending",
 } = {}) => {
-  const effectiveMode = mode === "cutoff_today" ? "cutoff_today" : "pending";
+  const effectiveMode = normalizeWhatsappRecordatorioMode(mode);
   if (!Array.isArray(usersList) || !usersList.length) return [];
 
   const userIds = uniqPositiveIds(usersList.map((user) => user.id_usuario));
@@ -1978,7 +2147,10 @@ const buildWhatsappRecordatorioItems = async ({
   targetUserIds = null,
   mode = "pending",
 } = {}) => {
-  const effectiveMode = mode === "cutoff_today" ? "cutoff_today" : "pending";
+  const effectiveMode = normalizeWhatsappRecordatorioMode(mode);
+  if (effectiveMode === "cutoff_today_platform_12") {
+    return [];
+  }
   const usersList = await loadWhatsappRecordatorioUsers({ targetUserIds });
   if (!usersList.length) return [];
 
@@ -2058,6 +2230,8 @@ const buildWhatsappRecordatorioItems = async ({
         signupUrl,
         plataformas: {},
         ventaIds: [],
+        platformIds: [],
+        ventaIdsByPlatform: {},
         fechasPago: [],
       };
     }
@@ -2072,6 +2246,16 @@ const buildWhatsappRecordatorioItems = async ({
     }
 
     if (venta.id_venta) acc[userId].ventaIds.push(venta.id_venta);
+    const normalizedPlatId = toPositiveInt(platId);
+    if (normalizedPlatId) {
+      acc[userId].platformIds.push(normalizedPlatId);
+      if (!Array.isArray(acc[userId].ventaIdsByPlatform[normalizedPlatId])) {
+        acc[userId].ventaIdsByPlatform[normalizedPlatId] = [];
+      }
+      if (venta.id_venta) {
+        acc[userId].ventaIdsByPlatform[normalizedPlatId].push(venta.id_venta);
+      }
+    }
     if (venta.fecha_corte) acc[userId].fechasPago.push(venta.fecha_corte);
 
     const detalle = [
@@ -2150,9 +2334,39 @@ const buildWhatsappRecordatorioItems = async ({
       plain,
       servicios,
       ventaIds: uniqPositiveIds(group.ventaIds),
+      platformIds: uniqPositiveIds(group.platformIds),
+      ventaIdsByPlatform: Object.entries(group.ventaIdsByPlatform || {}).reduce(
+        (acc, [platId, ids]) => {
+          const normalizedPlatId = toPositiveInt(platId);
+          if (!normalizedPlatId) return acc;
+          acc[normalizedPlatId] = uniqPositiveIds(ids || []);
+          return acc;
+        },
+        {},
+      ),
       mode: effectiveMode,
     };
   });
+};
+
+const buildWhatsappCutoffPlatform12Items = (cutoffTodayItems = []) => {
+  const items = Array.isArray(cutoffTodayItems) ? cutoffTodayItems : [];
+  return items
+    .filter((item) => {
+      const platformIds = uniqPositiveIds(item?.platformIds || []);
+      return platformIds.includes(WHATSAPP_CUTOFF_PLATFORM_12_ID);
+    })
+    .map((item) => {
+      const ventaIdsPlat12 = uniqPositiveIds(
+        item?.ventaIdsByPlatform?.[WHATSAPP_CUTOFF_PLATFORM_12_ID] || [],
+      );
+      return {
+        ...item,
+        plain: WHATSAPP_CUTOFF_PLATFORM_12_MESSAGE,
+        ventaIds: ventaIdsPlat12,
+        mode: "cutoff_today_platform_12",
+      };
+    });
 };
 
 const buildWhatsappRecordatorioPreviewItems = (
@@ -2236,7 +2450,7 @@ const countWhatsappSendableRecordatorios = (items = []) => {
 
 const buildEmptyWhatsappRecordatorioSendResult = (source = "", mode = "pending") => ({
   source,
-  mode,
+  mode: normalizeWhatsappRecordatorioMode(mode),
   total: 0,
   sent: 0,
   failed: 0,
@@ -2251,7 +2465,7 @@ const sendWhatsappRecordatorioBatch = async ({
   items = [],
   mode = "pending",
 } = {}) => {
-  const effectiveMode = mode === "cutoff_today" ? "cutoff_today" : "pending";
+  const effectiveMode = normalizeWhatsappRecordatorioMode(mode);
   const rows = Array.isArray(items) ? items : [];
   if (!rows.length) {
     return buildEmptyWhatsappRecordatorioSendResult(source, effectiveMode);
@@ -2320,7 +2534,7 @@ const sendWhatsappRecordatorioBatch = async ({
       );
 
       const ventaIdsItem = uniqPositiveIds(item.ventaIds || []);
-      if (ventaIdsItem.length) {
+      if (ventaIdsItem.length && effectiveMode !== "cutoff_today_platform_12") {
         const fechaCaracas = getCaracasDateStr(0);
         const updates =
           effectiveMode === "cutoff_today"
@@ -2542,10 +2756,11 @@ const sendWhatsappRecordatorios = async ({
       mode: "pending",
     });
 
+    let cutoffTodayItems = [];
     let cutoffTodayResult = buildEmptyWhatsappRecordatorioSendResult(source, "cutoff_today");
     if (includeCutoffTodayFollowUp) {
       try {
-        const cutoffTodayItems = await buildWhatsappRecordatorioItems({
+        cutoffTodayItems = await buildWhatsappRecordatorioItems({
           targetUserIds,
           mode: "cutoff_today",
         });
@@ -2569,21 +2784,47 @@ const sendWhatsappRecordatorios = async ({
       }
     }
 
+    const cutoffTodayPlatform12Items = includeCutoffTodayFollowUp
+      ? buildWhatsappCutoffPlatform12Items(cutoffTodayItems)
+      : [];
+    const cutoffTodayPlatform12Result = await sendWhatsappRecordatorioBatch({
+      source,
+      items: cutoffTodayPlatform12Items,
+      mode: "cutoff_today_platform_12",
+    });
+
     return {
       source,
-      total: Number(primaryResult.total || 0) + Number(cutoffTodayResult.total || 0),
-      sent: Number(primaryResult.sent || 0) + Number(cutoffTodayResult.sent || 0),
-      failed: Number(primaryResult.failed || 0) + Number(cutoffTodayResult.failed || 0),
+      total:
+        Number(primaryResult.total || 0) +
+        Number(cutoffTodayResult.total || 0) +
+        Number(cutoffTodayPlatform12Result.total || 0),
+      sent:
+        Number(primaryResult.sent || 0) +
+        Number(cutoffTodayResult.sent || 0) +
+        Number(cutoffTodayPlatform12Result.sent || 0),
+      failed:
+        Number(primaryResult.failed || 0) +
+        Number(cutoffTodayResult.failed || 0) +
+        Number(cutoffTodayPlatform12Result.failed || 0),
       skippedNoPhone:
-        Number(primaryResult.skippedNoPhone || 0) + Number(cutoffTodayResult.skippedNoPhone || 0),
+        Number(primaryResult.skippedNoPhone || 0) +
+        Number(cutoffTodayResult.skippedNoPhone || 0) +
+        Number(cutoffTodayPlatform12Result.skippedNoPhone || 0),
       skippedInvalidPhone:
         Number(primaryResult.skippedInvalidPhone || 0) +
-        Number(cutoffTodayResult.skippedInvalidPhone || 0),
+        Number(cutoffTodayResult.skippedInvalidPhone || 0) +
+        Number(cutoffTodayPlatform12Result.skippedInvalidPhone || 0),
       updatedVentas: Number(primaryResult.updatedVentas || 0),
       updatedVentasCorteHoy: Number(cutoffTodayResult.updatedVentas || 0),
-      items: [...(primaryResult.items || []), ...(cutoffTodayResult.items || [])],
+      items: [
+        ...(primaryResult.items || []),
+        ...(cutoffTodayResult.items || []),
+        ...(cutoffTodayPlatform12Result.items || []),
+      ],
       primary: primaryResult,
       cutoffToday: cutoffTodayResult,
+      cutoffTodayPlatform12: cutoffTodayPlatform12Result,
     };
   } finally {
     recordatoriosSendInProgress = false;
@@ -2615,6 +2856,9 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
     sameDayCutoffTotal: 0,
     sameDayCutoffSent: 0,
     sameDayCutoffFailed: 0,
+    sameDayPlatform12Total: 0,
+    sameDayPlatform12Sent: 0,
+    sameDayPlatform12Failed: 0,
     updatedVentasCorteHoy: 0,
     recordatoriosEnviados,
     error: null,
@@ -2654,12 +2898,15 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
       sameDayCutoffTotal: Number(result?.cutoffToday?.total || 0),
       sameDayCutoffSent: Number(result?.cutoffToday?.sent || 0),
       sameDayCutoffFailed: Number(result?.cutoffToday?.failed || 0),
+      sameDayPlatform12Total: Number(result?.cutoffTodayPlatform12?.total || 0),
+      sameDayPlatform12Sent: Number(result?.cutoffTodayPlatform12?.sent || 0),
+      sameDayPlatform12Failed: Number(result?.cutoffTodayPlatform12?.failed || 0),
       updatedVentasCorteHoy: Number(result.updatedVentasCorteHoy || 0),
       recordatoriosEnviados,
       error: null,
     };
     console.log(
-      `[WhatsApp] Recordatorios auto ${dateStr} ${weekday}: total=${result.total}, sent=${result.sent}, failed=${result.failed}, skipped_no_phone=${result.skippedNoPhone}, skipped_invalid_phone=${result.skippedInvalidPhone}, corte_hoy_sent=${result?.cutoffToday?.sent || 0}, recordatorios_enviados=${recordatoriosEnviados}`,
+      `[WhatsApp] Recordatorios auto ${dateStr} ${weekday}: total=${result.total}, sent=${result.sent}, failed=${result.failed}, skipped_no_phone=${result.skippedNoPhone}, skipped_invalid_phone=${result.skippedInvalidPhone}, corte_hoy_sent=${result?.cutoffToday?.sent || 0}, corte_hoy_plat12_sent=${result?.cutoffTodayPlatform12?.sent || 0}, recordatorios_enviados=${recordatoriosEnviados}`,
     );
   } catch (err) {
     if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
@@ -2684,6 +2931,9 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
         sameDayCutoffTotal: 0,
         sameDayCutoffSent: 0,
         sameDayCutoffFailed: 0,
+        sameDayPlatform12Total: 0,
+        sameDayPlatform12Sent: 0,
+        sameDayPlatform12Failed: 0,
         updatedVentasCorteHoy: 0,
         recordatoriosEnviados,
         error: err?.message || "WhatsApp no listo",
@@ -2709,6 +2959,9 @@ const runAutoWhatsappRecordatoriosIfNeeded = async () => {
       sameDayCutoffTotal: 0,
       sameDayCutoffSent: 0,
       sameDayCutoffFailed: 0,
+      sameDayPlatform12Total: 0,
+      sameDayPlatform12Sent: 0,
+      sameDayPlatform12Failed: 0,
       updatedVentasCorteHoy: 0,
       recordatoriosEnviados,
       error: err?.message || "Error desconocido",
@@ -3999,18 +4252,21 @@ app.get("/api/whatsapp/recordatorios/pendientes", async (req, res) => {
 
     const pendingItems = await buildWhatsappRecordatorioItems();
     let cutoffTodayItems = [];
+    let cutoffTodayPlatform12Items = [];
     if (includeCutoffToday) {
       try {
         cutoffTodayItems = await buildWhatsappRecordatorioItems({
           mode: "cutoff_today",
         });
+        cutoffTodayPlatform12Items = buildWhatsappCutoffPlatform12Items(cutoffTodayItems);
       } catch (err) {
         if (!isMissingColumnError(err, "recordatorio_corte_enviado")) throw err;
         cutoffTodayItems = [];
+        cutoffTodayPlatform12Items = [];
       }
     }
 
-    const items = [...pendingItems, ...cutoffTodayItems];
+    const items = [...pendingItems, ...cutoffTodayItems, ...cutoffTodayPlatform12Items];
     const previewItems = buildWhatsappRecordatorioPreviewItems(items);
     return res.json({
       ok: true,
@@ -5289,7 +5545,9 @@ const getCheckoutDiscountColumnsFromRows = (rows = []) => {
     const nb = Number(b.split("_")[1]) || 0;
     return na - nb;
   });
-  return out.length ? out : ["descuento_1", "descuento_2"];
+  return out.length
+    ? out
+    : ["descuento_1", "descuento_2", "descuento_3", "descuento_4", "descuento_5"];
 };
 
 const buildCheckoutDiscountColumnByIdMap = (rows = [], cols = []) => {
@@ -5487,7 +5745,13 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
       esMayorista,
       isCliente,
       descuentos: [],
-      discountColumns: ["descuento_1", "descuento_2"],
+      discountColumns: [
+        "descuento_1",
+        "descuento_2",
+        "descuento_3",
+        "descuento_4",
+        "descuento_5",
+      ],
       discountColumnById: {},
     };
   }

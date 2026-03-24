@@ -428,7 +428,13 @@
       const descuentosModalBackdropEl = descuentosModalEl?.querySelector(".modal-backdrop");
       const descuentosTableEl = document.getElementById("descuentos-table");
 
-      const FALLBACK_DISCOUNT_COLUMNS = ["descuento_1", "descuento_2", "descuento_3", "descuento_4"];
+      const FALLBACK_DISCOUNT_COLUMNS = [
+        "descuento_1",
+        "descuento_2",
+        "descuento_3",
+        "descuento_4",
+        "descuento_5",
+      ];
       let descuentoColumnas = [...FALLBACK_DISCOUNT_COLUMNS];
       let descuentoOpciones = [];
       let descuentoPosByLegacyId = {};

@@ -350,6 +350,13 @@
         if (!Number.isFinite(parsed) || parsed <= 0) return null;
         return Math.trunc(parsed);
       };
+      const normalizeCredentialValue = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const lower = raw.toLowerCase();
+        if (raw === "-" || lower === "null" || lower === "undefined") return "";
+        return raw;
+      };
       const loadReemplazosBloqueados = async (force = false) => {
         if (force) {
           reemplazosCache = null;
@@ -775,7 +782,7 @@
             const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -902,6 +909,8 @@
                 rows: [],
               };
             }
+            const cuentaMiembro = v.cuentas_miembro || null;
+            const cuentaConCredenciales = cuentaMiembro || v.cuentas || null;
             grouped[platId].groups[motherId].rows.push({
               id_venta: v.id_venta,
               cliente,
@@ -912,8 +921,8 @@
               servicio,
               valor_tarjeta_de_regalo: precio.valor_tarjeta_de_regalo ?? null,
               cuenta_nueva: v.cuenta_nueva,
-              correo: v.correo_miembro || "-",
-              clave: v.clave_miembro || "-",
+              correo: v.correo_miembro || cuentaConCredenciales?.correo || "-",
+              clave: v.clave_miembro || cuentaConCredenciales?.clave || "-",
               plataforma: platName,
               fecha_corte: v.fecha_corte || "",
               perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
@@ -926,6 +935,7 @@
               tarjeta_de_regalo: grouped[platId].tarjeta_de_regalo,
               meses_contratados: v.meses_contratados || 1,
               id_cuenta: v.id_cuenta || null,
+              id_cuenta_miembro: v.id_cuenta_miembro || null,
               id_perfil: v.id_perfil || null,
               reportado: v.reportado === true,
               asignado_a: v.asignado_a || null,
@@ -946,8 +956,8 @@
         const plataforma = btn?.dataset?.plataforma || "";
         const idPlataforma = btn?.dataset?.idPlataforma || "";
         const isGiftCard = btn?.dataset?.tarjetaRegalo === "true";
-        const correoCuenta = btn?.dataset?.correo || "";
-        const claveCuenta = btn?.dataset?.clave || "";
+        const correoCuenta = normalizeCredentialValue(btn?.dataset?.correo || "");
+        const claveCuenta = normalizeCredentialValue(btn?.dataset?.clave || "");
         const fechaCorteRaw = (btn?.dataset?.fecha || "").trim();
         const ventaSinFechaCorte = !fechaCorteRaw;
         const perfil = btn?.dataset?.perfil || "";
@@ -955,6 +965,7 @@
         const porAcceso = btn?.dataset?.poracceso === "true";
         const usaPines = btn?.dataset?.usapines === "true";
         const existingMadreId = btn?.dataset?.idCuenta || "";
+        const existingCuentaMiembroId = btn?.dataset?.idCuentaMiembro || "";
         const existingPerfilId = btn?.dataset?.idPerfil || "";
         const isCompleta = btn?.dataset?.completa === "true";
         const mesesContratados = Number(btn?.dataset?.meses || 1);
@@ -995,13 +1006,12 @@
         }
         const { data: reemplazosBloqueados, error: replErr } = await loadReemplazosBloqueados();
         if (replErr) throw replErr;
-        const correoCuentaNorm = String(correoCuenta || "").trim().toLowerCase();
-        if (!correoCuentaNorm) {
-          alert("Falta el correo del cliente.");
-          return;
-        }
+        const correoCuentaNorm = correoCuenta ? correoCuenta.toLowerCase() : "";
+        const claveCuentaNorm = claveCuenta || "";
 
         let nuevaCuentaId = null;
+        let cuentaEntregaCorreo = correoCuentaNorm;
+        let cuentaEntregaClave = claveCuentaNorm;
         const findCuentaByCorreo = async (correoValue) => {
           const exactCorreo = String(correoValue || "").trim();
           if (!exactCorreo) return null;
@@ -1025,8 +1035,9 @@
           );
           return match || null;
         };
-        const cuentaExist = await findCuentaByCorreo(correoCuentaNorm);
-        if (cuentaExist?.id_cuenta) {
+        const updateCuentaForEntrega = async ({ idCuenta, claveActual = null, correoActual = null } = {}) => {
+          const idCuentaNum = toPositiveId(idCuenta);
+          if (!idCuentaNum) return;
           const updateCuenta = {
             inactiva: false,
             ocupado: false,
@@ -1042,19 +1053,77 @@
           if (Number.isFinite(proveedorId) && proveedorId > 0) {
             updateCuenta.id_proveedor = proveedorId;
           }
-          if (claveCuenta && claveCuenta !== (cuentaExist.clave || "")) {
-            updateCuenta.clave = claveCuenta;
+          if (correoCuentaNorm && correoCuentaNorm !== String(correoActual || "").trim().toLowerCase()) {
+            updateCuenta.correo = correoCuentaNorm;
+          }
+          if (claveCuentaNorm && claveCuentaNorm !== String(claveActual || "")) {
+            updateCuenta.clave = claveCuentaNorm;
           }
           const { error: updCuentaErr } = await supabase
             .from("cuentas")
             .update(updateCuenta)
-            .eq("id_cuenta", cuentaExist.id_cuenta);
+            .eq("id_cuenta", idCuentaNum);
           if (updCuentaErr) throw updCuentaErr;
+        };
+
+        let cuentaExist = null;
+        const existingCuentaMiembroNum = toPositiveId(existingCuentaMiembroId);
+        if (!forceCuentaCompleta && existingCuentaMiembroNum) {
+          const { data: cuentaVinculada, error: cuentaVinculadaErr } = await supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, clave")
+            .eq("id_cuenta", existingCuentaMiembroNum)
+            .maybeSingle();
+          if (cuentaVinculadaErr) throw cuentaVinculadaErr;
+          if (cuentaVinculada?.id_cuenta) {
+            const cuentaVinculadaCorreo = normalizeCredentialValue(cuentaVinculada?.correo || "")
+              .trim()
+              .toLowerCase();
+            if (cuentaVinculadaCorreo || correoCuentaNorm) {
+              cuentaExist = cuentaVinculada;
+            }
+          }
+        }
+        if (!cuentaExist && correoCuentaNorm) {
+          cuentaExist = await findCuentaByCorreo(correoCuentaNorm);
+        }
+        if (!cuentaExist && !correoCuentaNorm && hasIdPlataforma) {
+          let stockQuery = supabase
+            .from("cuentas")
+            .select("id_cuenta, correo, clave, venta_miembro")
+            .eq("id_plataforma", idPlataformaNum)
+            .eq("ocupado", false)
+            .or("inactiva.is.null,inactiva.eq.false");
+          if (!forceCuentaCompleta) {
+            stockQuery = stockQuery.eq("venta_miembro", true);
+          }
+          const { data: cuentasDisponibles, error: cuentasDisponiblesErr } = await stockQuery
+            .order("id_cuenta", { ascending: true })
+            .limit(300);
+          if (cuentasDisponiblesErr) throw cuentasDisponiblesErr;
+          cuentaExist = (cuentasDisponibles || []).find((row) => {
+            const cuentaId = toPositiveId(row?.id_cuenta);
+            const cuentaCorreo = normalizeCredentialValue(row?.correo || "");
+            return !!cuentaId && !!cuentaCorreo && !reemplazosBloqueados.cuentas.has(cuentaId);
+          }) || null;
+        }
+        if (cuentaExist?.id_cuenta) {
+          await updateCuentaForEntrega({
+            idCuenta: cuentaExist.id_cuenta,
+            claveActual: cuentaExist?.clave || null,
+            correoActual: cuentaExist?.correo || null,
+          });
           nuevaCuentaId = cuentaExist.id_cuenta;
+          cuentaEntregaCorreo =
+            correoCuentaNorm || normalizeCredentialValue(cuentaExist?.correo || "").toLowerCase();
+          cuentaEntregaClave = claveCuentaNorm || normalizeCredentialValue(cuentaExist?.clave || "");
         } else {
+          if (!correoCuentaNorm) {
+            throw new Error("Faltan datos de la cuenta y no hay stock disponible para entregar.");
+          }
           const insertCuenta = {
             correo: correoCuentaNorm,
-            clave: claveCuenta || null,
+            clave: claveCuentaNorm || null,
             inactiva: false,
             ocupado: false,
             venta_dominio: true,
@@ -1074,6 +1143,8 @@
             .single();
           if (cuentaErr) throw cuentaErr;
           nuevaCuentaId = cuentaNueva?.id_cuenta || null;
+          cuentaEntregaCorreo = correoCuentaNorm;
+          cuentaEntregaClave = claveCuentaNorm;
         }
         if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
 
@@ -1174,8 +1245,8 @@
           cuenta_nueva: false,
         };
         if (forceCuentaCompleta) {
-          updateVenta.correo_miembro = correoCuentaNorm || null;
-          updateVenta.clave_miembro = claveCuenta || null;
+          updateVenta.correo_miembro = cuentaEntregaCorreo || null;
+          updateVenta.clave_miembro = cuentaEntregaClave || null;
         }
         if (ventaSinFechaCorte) {
           updateVenta.fecha_corte = nextIso;
@@ -1206,8 +1277,8 @@
         copyBtn.type = "button";
         copyBtn.className = "btn-outline btn-copy-row";
         copyBtn.textContent = "Copiar";
-        let copyCorreo = correoCuenta || "";
-        let copyClave = claveCuenta || "";
+        let copyCorreo = cuentaEntregaCorreo || "";
+        let copyClave = cuentaEntregaClave || "";
         let copyPerfil = nPerfil || "";
         let copyPin = "";
         let copyFecha = nextIso;

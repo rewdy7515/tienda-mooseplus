@@ -408,6 +408,20 @@
         return num.toFixed(2);
       };
 
+      const formatHora12 = (hora) => {
+        if (!hora) return "-";
+        const raw = String(hora).trim();
+        const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+        if (!match) return raw;
+        let hh = Number(match[1]);
+        const mm = match[2];
+        if (!Number.isFinite(hh)) return raw;
+        const suffix = hh >= 12 ? "pm" : "am";
+        hh = hh % 12;
+        if (hh === 0) hh = 12;
+        return `${hh}:${mm} ${suffix}`;
+      };
+
       const formatOrdenMonto = (orden) => {
         const metodoInfo = metodoMap[orden?.id_metodo_de_pago] || null;
         const pagoEnBolivares = isTrue(metodoInfo?.bolivares);
@@ -572,7 +586,7 @@
             ? `<span class="referencia-cell">${referencia}<button type="button" class="btn-outline btn-ver-comprobante" data-comprobante="${encodeURIComponent(comprobanteUrl)}">Ver imagen</button></span>`
             : referencia;
           const fecha = formatDDMMYYYY(orden.fecha) || orden.fecha || "-";
-          const hora = orden.hora_orden || "-";
+          const hora = formatHora12(orden.hora_orden);
           const verificado = isTrue(orden.pago_verificado);
           const cancelada = isTrue(orden.orden_cancelada);
           const estado = cancelada ? "Rechazada" : verificado ? "Verificado" : "Pendiente";

@@ -238,20 +238,149 @@ const getClosestDiscountPct = (rows, value, column) => {
   return Number(best?.[column]) || 0;
 };
 
-const calcItemTotals = (item, price, platform, descuentos) => {
+const getDiscountColumnsFromRows = (rows = []) => {
+  const cols = new Set();
+  (rows || []).forEach((row) => {
+    Object.keys(row || {}).forEach((k) => {
+      const key = String(k || "").toLowerCase();
+      if (/^descuento_\d+$/i.test(key)) cols.add(key);
+    });
+  });
+  const out = Array.from(cols).sort((a, b) => {
+    const na = Number(a.split("_")[1]) || 0;
+    const nb = Number(b.split("_")[1]) || 0;
+    return na - nb;
+  });
+  return out.length
+    ? out
+    : ["descuento_1", "descuento_2", "descuento_3", "descuento_4", "descuento_5"];
+};
+
+const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
+  const ids = [];
+  (rows || []).forEach((row) => {
+    const id = Number(row?.id_descuento);
+    if (!Number.isFinite(id)) return;
+    if (!ids.includes(id)) ids.push(id);
+  });
+  const map = {};
+  ids.forEach((id, idx) => {
+    if (cols[idx]) map[id] = cols[idx];
+  });
+  return map;
+};
+
+const resolveDiscountColumn = (
+  platform,
+  mode,
+  discountColumns,
+  discountColumnById,
+  isCliente = true,
+) => {
+  const isItemsMode = mode === "items";
+  const groupField = isItemsMode
+    ? isCliente
+      ? "id_descuento_cantidad_detal"
+      : "id_descuento_cantidad_mayor"
+    : isCliente
+      ? "id_descuento_mes_detal"
+      : "id_descuento_mes_mayor";
+  const legacyField = isItemsMode ? "id_descuento_cantidad" : "id_descuento_mes";
+  const preferredRaw = platform?.[groupField];
+  const hasPreferredRaw =
+    preferredRaw !== null &&
+    preferredRaw !== undefined &&
+    String(preferredRaw).trim() !== "";
+  const raw = hasPreferredRaw ? preferredRaw : platform?.[legacyField];
+  const asText = String(raw || "").trim();
+  if (/^descuento_\d+$/i.test(asText)) return asText.toLowerCase();
+  const asNum = Number(raw);
+  if (Number.isFinite(asNum) && asNum >= 1) {
+    const direct = `descuento_${Math.trunc(asNum)}`;
+    if (discountColumns.includes(direct)) return direct;
+    const mapped = discountColumnById[Math.trunc(asNum)];
+    if (mapped) return mapped;
+  }
+  return mode === "items" ? "descuento_2" : "descuento_1";
+};
+
+const isDiscountEnabledForAudience = (platform, mode = "months", isCliente = true) => {
+  if (mode === "items") {
+    return isCliente
+      ? !(
+          platform?.aplica_descuento_cantidad_detal === false ||
+          platform?.aplica_descuento_cantidad_detal === "false" ||
+          platform?.aplica_descuento_cantidad_detal === 0 ||
+          platform?.aplica_descuento_cantidad_detal === "0"
+        )
+      : !(
+          platform?.aplica_descuento_cantidad_mayor === false ||
+          platform?.aplica_descuento_cantidad_mayor === "false" ||
+          platform?.aplica_descuento_cantidad_mayor === 0 ||
+          platform?.aplica_descuento_cantidad_mayor === "0"
+        );
+  }
+  return isCliente
+    ? !(
+        platform?.aplica_descuento_mes_detal === false ||
+        platform?.aplica_descuento_mes_detal === "false" ||
+        platform?.aplica_descuento_mes_detal === 0 ||
+        platform?.aplica_descuento_mes_detal === "0"
+      )
+    : !(
+        platform?.aplica_descuento_mes_mayor === false ||
+        platform?.aplica_descuento_mes_mayor === "false" ||
+        platform?.aplica_descuento_mes_mayor === 0 ||
+        platform?.aplica_descuento_mes_mayor === "0"
+      );
+};
+
+const calcItemTotals = (
+  item,
+  price,
+  platform,
+  descuentos,
+  discountColumns = [],
+  discountColumnById = {},
+  isCliente = true,
+) => {
   const unit = Number(price?.precio_usd_detal) || 0;
   const qtyVal = Math.max(1, Number(item?.cantidad) || 1);
-  const mesesVal = Math.max(1, Number(item?.meses) || Number(price?.duracion) || 1);
+  const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
+  const mesesVal = isGiftCard
+    ? 1
+    : Math.max(1, Number(item?.meses) || Number(price?.duracion) || 1);
   const baseSubtotal = round2(unit * qtyVal * mesesVal);
   let descuentoMesesVal = 0;
   let descuentoCantidadVal = 0;
   let rateMeses = 0;
-  if (platform?.descuento_meses) {
-    const rawRate = getClosestDiscountPct(descuentos, mesesVal, "descuento_1");
+
+  const monthEnabled =
+    !!platform?.descuento_meses &&
+    !isGiftCard &&
+    isDiscountEnabledForAudience(platform, "months", isCliente);
+  const qtyEnabled = isDiscountEnabledForAudience(platform, "items", isCliente);
+  const monthColumn = resolveDiscountColumn(
+    platform,
+    "months",
+    discountColumns,
+    discountColumnById,
+    isCliente,
+  );
+  const qtyColumn = resolveDiscountColumn(
+    platform,
+    "items",
+    discountColumns,
+    discountColumnById,
+    isCliente,
+  );
+
+  if (monthEnabled) {
+    const rawRate = getClosestDiscountPct(descuentos, mesesVal, monthColumn);
     rateMeses = rawRate > 1 ? rawRate / 100 : rawRate;
     descuentoMesesVal = round2(baseSubtotal * rateMeses);
   }
-  const rawRateQty = getClosestDiscountPct(descuentos, qtyVal, "descuento_2");
+  const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qtyVal, qtyColumn) : 0;
   const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
   if (rateQty > 0) {
     descuentoCantidadVal = round2(baseSubtotal * rateQty);
@@ -282,6 +411,8 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
   itemsTitleEl?.classList.remove("hidden");
 
   const descuentos = catalog?.descuentos || [];
+  const discountColumns = getDiscountColumnsFromRows(descuentos);
+  const discountColumnById = buildDiscountColumnByIdMap(descuentos, discountColumns);
   const precios = (catalog?.precios || [])
     .map((p) => {
       const precio = useMayor && p.precio_usd_mayor != null ? p.precio_usd_mayor : p.precio_usd_detal;
@@ -314,7 +445,15 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
     .map((item, idx) => {
       const price = priceById[item.id_precio] || {};
       const platform = platformById[price.id_plataforma] || {};
-      const totals = calcItemTotals(item, price, platform, descuentos);
+      const totals = calcItemTotals(
+        item,
+        price,
+        platform,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        !useMayor,
+      );
       const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
       const detalle =
         price.plan || (platform.tarjeta_de_regalo ? `Región: ${price.region || "-"}` : "");

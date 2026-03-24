@@ -221,6 +221,21 @@
         adminSearchTarget.textContent = safe;
         adminSearchTarget.classList.toggle("hidden", !safe);
       };
+      const formatDateDMY = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const base = raw.slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(base)) {
+          const [y, m, d] = base.split("-");
+          return `${d}/${m}/${y}`;
+        }
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) return raw;
+        const d = String(parsed.getDate()).padStart(2, "0");
+        const m = String(parsed.getMonth() + 1).padStart(2, "0");
+        const y = parsed.getFullYear();
+        return `${d}/${m}/${y}`;
+      };
 
       const renderTable = (items = [], platformColors = new Map()) => {
         if (!tbody) return;
@@ -296,7 +311,7 @@
           <div class="notif-item">
             <h4>${title}</h4>
             <p>${mensaje}</p>
-            <small>${n.fecha || ""}</small>
+            <small>${formatDateDMY(n.fecha)}</small>
           </div>
         `;
           })

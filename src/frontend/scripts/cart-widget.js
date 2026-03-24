@@ -63,7 +63,9 @@ if (!window.__cartWidgetInit) {
           const nb = Number(b.split("_")[1]) || 0;
           return na - nb;
         });
-        return out.length ? out : ["descuento_1", "descuento_2"];
+        return out.length
+          ? out
+          : ["descuento_1", "descuento_2", "descuento_3", "descuento_4", "descuento_5"];
       };
       const buildDiscountColumnByIdMap = (rows = [], cols = []) => {
         const ids = [];

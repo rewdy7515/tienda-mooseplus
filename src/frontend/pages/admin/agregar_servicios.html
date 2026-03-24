@@ -809,7 +809,9 @@
           if (histErr) throw histErr;
 
           // Crear tareas automáticas al agregar cuentas por pantalla.
-          if (porPantalla && cuentaInserted?.id_cuenta) {
+          const omitirTareasAutomaticas =
+            venta_perfil === true && venta_miembro === false;
+          if (porPantalla && cuentaInserted?.id_cuenta && !omitirTareasAutomaticas) {
             const tareasRows = [
               { id_tarea: 2, cuenta: cuentaInserted.id_cuenta },
             ];
