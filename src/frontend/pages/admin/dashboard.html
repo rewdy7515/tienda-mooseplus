@@ -191,6 +191,18 @@
         color: #6b7280;
         margin: 8px 0 0;
       }
+      .dashboard-line-chart {
+        width: 100%;
+        height: 210px;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+        border: 1px solid #edf2f7;
+        margin-top: 10px;
+      }
+      .dashboard-line-chart-empty {
+        color: #6b7280;
+        margin: 8px 0 0;
+      }
       .dashboard-block {
         background: #fff;
         border: 1px solid #e5e7eb;
@@ -560,6 +572,16 @@
           <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-auth-web-mensual">
             Sin registros con auth para graficar.
           </p>
+          <p class="dashboard-mini-note" id="auth-web-daily-note">-</p>
+          <svg
+            id="chart-auth-web-diario"
+            class="dashboard-line-chart hidden"
+            viewBox="0 0 1000 240"
+            preserveAspectRatio="none"
+          ></svg>
+          <p class="dashboard-line-chart-empty hidden" id="empty-chart-auth-web-diario">
+            Sin registros diarios con auth para el mes actual.
+          </p>
         </section>
 
         <section class="dashboard-block">
@@ -759,6 +781,9 @@
       const authWebNoteEl = document.querySelector("#auth-web-note");
       const authWebMonthlyChart = document.querySelector("#chart-auth-web-mensual");
       const emptyAuthWebMonthlyChart = document.querySelector("#empty-chart-auth-web-mensual");
+      const authWebDailyNoteEl = document.querySelector("#auth-web-daily-note");
+      const authWebDailyChart = document.querySelector("#chart-auth-web-diario");
+      const emptyAuthWebDailyChart = document.querySelector("#empty-chart-auth-web-diario");
       const traficoSemanaNoteEl = document.querySelector("#trafico-semana-note");
       const traficoSemanaChart = document.querySelector("#chart-trafico-semana");
       const emptyTraficoSemanaChart = document.querySelector("#empty-chart-trafico-semana");
@@ -1278,6 +1303,8 @@
           vendedores_auth_confirmados: 0,
           vendedores_auth_confirmados_mes_anterior: 0,
           registros_por_mes: [],
+          mes_actual: "",
+          registros_por_dia_mes_actual: [],
         },
         trafico: {
           actual: {
@@ -1678,6 +1705,93 @@
           container.appendChild(barRow);
         });
       };
+      const renderAuthWebDailyLineChart = (rows, monthKey) => {
+        if (!authWebDailyChart) return;
+        authWebDailyChart.innerHTML = "";
+        const normalizedRows = (Array.isArray(rows) ? rows : [])
+          .map((row) => ({
+            dia: Number(row?.dia) || 0,
+            cantidad: Number(row?.cantidad) || 0,
+          }))
+          .filter((row) => Number.isInteger(row.dia) && row.dia > 0)
+          .sort((a, b) => a.dia - b.dia);
+        const hasPositive = normalizedRows.some((row) => row.cantidad > 0);
+        const monthLabel = formatMonthLabel(monthKey || "") || "mes actual";
+        const totalMes = normalizedRows.reduce((acc, row) => acc + (Number(row?.cantidad) || 0), 0);
+        if (!normalizedRows.length || !hasPositive) {
+          authWebDailyChart.classList.add("hidden");
+          emptyAuthWebDailyChart?.classList.remove("hidden");
+          if (authWebDailyNoteEl) {
+            authWebDailyNoteEl.textContent = `Registros diarios en ${monthLabel}: ${intFmt.format(totalMes)} usuarios.`;
+          }
+          return;
+        }
+        authWebDailyChart.classList.remove("hidden");
+        emptyAuthWebDailyChart?.classList.add("hidden");
+        if (authWebDailyNoteEl) {
+          authWebDailyNoteEl.textContent =
+            `Registros diarios en ${monthLabel}: ${intFmt.format(totalMes)} usuarios con auth confirmado.`;
+        }
+
+        const values = normalizedRows.map((row) => Number(row?.cantidad) || 0);
+        const maxY = Math.max(1, ...values);
+        const w = 1000;
+        const h = 240;
+        const px = 44;
+        const pyTop = 16;
+        const pyBottom = 34;
+        const innerW = w - px * 2;
+        const innerH = h - pyTop - pyBottom;
+        const toX = (idx) =>
+          px + (normalizedRows.length <= 1 ? innerW / 2 : (idx / (normalizedRows.length - 1)) * innerW);
+        const toY = (value) => pyTop + innerH - (value / maxY) * innerH;
+        const path = values
+          .map((value, idx) => `${idx === 0 ? "M" : "L"}${toX(idx).toFixed(2)},${toY(value).toFixed(2)}`)
+          .join(" ");
+        const axisY = pyTop + innerH;
+        const gridLines = [0, 0.25, 0.5, 0.75, 1]
+          .map((ratio) => {
+            const y = pyTop + innerH - innerH * ratio;
+            return `<line x1="${px}" y1="${y}" x2="${w - px}" y2="${y}" stroke="#e2e8f0" stroke-width="1" />`;
+          })
+          .join("");
+        const yTicks = [0, 0.25, 0.5, 0.75, 1]
+          .map((ratio) => {
+            const y = pyTop + innerH - innerH * ratio;
+            const value = Math.round(maxY * ratio);
+            return `<text x="${(px - 8).toFixed(2)}" y="${(y + 3).toFixed(2)}" text-anchor="end" fill="#64748b" font-size="10">${value}</text>`;
+          })
+          .join("");
+        const labelStep = normalizedRows.length > 26 ? 2 : 1;
+        const xLabels = normalizedRows
+          .map((row, idx) => {
+            const x = toX(idx);
+            const showLabel =
+              idx === 0 ||
+              idx === normalizedRows.length - 1 ||
+              row.dia % labelStep === 0;
+            return showLabel
+              ? `<text x="${x.toFixed(2)}" y="${(axisY + 16).toFixed(2)}" text-anchor="middle" fill="#6b7280" font-size="9">${row.dia}</text>`
+              : "";
+          })
+          .join("");
+        const points = normalizedRows
+          .map((row, idx) => {
+            const value = Number(row?.cantidad) || 0;
+            return `<circle cx="${toX(idx).toFixed(2)}" cy="${toY(value).toFixed(2)}" r="3.1" fill="#0f766e">
+              <title>Día ${row.dia}: ${intFmt.format(value)} registros</title>
+            </circle>`;
+          })
+          .join("");
+        authWebDailyChart.innerHTML = `
+          ${gridLines}
+          ${yTicks}
+          <line x1="${px}" y1="${axisY}" x2="${w - px}" y2="${axisY}" stroke="#cbd5e1" stroke-width="1.2" />
+          <path d="${path}" fill="none" stroke="#0f766e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          ${points}
+          ${xLabels}
+        `;
+      };
       const renderAnaliticaWeb = (analiticaWeb, monthVal) => {
         const authRows = Array.isArray(analiticaWeb?.auth?.registros_por_mes)
           ? analiticaWeb.auth.registros_por_mes.map((row) => ({
@@ -1690,6 +1804,16 @@
           color: "#0f766e",
           titleBuilder: (row) => `${row.label}: ${intFmt.format(row.cantidad)} registros`,
         });
+        const authDailyRows = Array.isArray(analiticaWeb?.auth?.registros_por_dia_mes_actual)
+          ? analiticaWeb.auth.registros_por_dia_mes_actual.map((row) => ({
+              dia: Number(row?.dia) || 0,
+              cantidad: Number(row?.cantidad) || 0,
+            }))
+          : [];
+        renderAuthWebDailyLineChart(
+          authDailyRows,
+          String(analiticaWeb?.auth?.mes_actual || "").trim(),
+        );
         if (authWebNoteEl) {
           const totalUsuarios = Number(analiticaWeb?.auth?.usuarios_auth_confirmados) || 0;
           const total = Number(analiticaWeb?.auth?.clientes_auth_confirmados) || 0;

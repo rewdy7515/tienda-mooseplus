@@ -5869,6 +5869,8 @@
                 pendiente: false,
                 meses_contratados: 1,
                 recordatorio_enviado: false,
+                recordatorio_corte_enviado: false,
+                aviso_admin: false,
               };
               if (usaCorreoCliente || correoVal) {
                 ventaPayload.correo_miembro = correoVal;
@@ -5941,6 +5943,8 @@
                   pendiente: false,
                   meses_contratados: 1,
                   recordatorio_enviado: false,
+                  recordatorio_corte_enviado: false,
+                  aviso_admin: false,
                 })
                 .select("id_venta")
                 .single();

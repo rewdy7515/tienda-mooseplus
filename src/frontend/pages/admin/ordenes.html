@@ -957,6 +957,7 @@
             saldoAFavor = Math.max(0, parseMoney(modalResult));
           }
           const prevText = entregarBtn.textContent;
+          let processedOk = false;
           entregarBtn.disabled = true;
           entregarBtn.textContent = "Procesando...";
           setStatus(`Procesando orden #${idOrden}...`);
@@ -972,6 +973,7 @@
               return;
             }
             markOrdenProcesada(idOrden, resp?.id_admin);
+            processedOk = true;
             if (!resp?.already_processed) {
               try {
                 await notifyVentasEntregadas(idOrden);
@@ -994,7 +996,7 @@
               `.btn-entregar[data-orden="${idOrden}"]`
             );
             [currentBtn, currentBtnComprobantes].forEach((btn) => {
-              if (btn) {
+              if (btn && !processedOk) {
                 btn.disabled = false;
                 btn.textContent = prevText || "Entregar servicio";
               }

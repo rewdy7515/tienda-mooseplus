@@ -1550,6 +1550,14 @@ const isMissingColumnError = (err, columnName = "") => {
   return message.includes("does not exist") && message.includes(String(columnName).toLowerCase());
 };
 
+const isUniqueViolationError = (err, hint = "") => {
+  const code = String(err?.code || "").trim();
+  if (code !== "23505") return false;
+  if (!hint) return true;
+  const meta = `${err?.message || ""} ${err?.details || ""} ${err?.hint || ""}`.toLowerCase();
+  return meta.includes(String(hint).toLowerCase());
+};
+
 const SUPABASE_TRANSIENT_RETRIES = 2;
 const SUPABASE_TRANSIENT_RETRY_BASE_MS = 150;
 const SUPABASE_SELECT_PAGE_SIZE = 1000;
@@ -3798,7 +3806,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       .maybeSingle();
     if (existsErr) throw existsErr;
     if (exists?.hash) {
-      return res.json({ ok: true, duplicado: true });
+      return res.json({ ok: true, duplicado: true, motivo: "hash_duplicado" });
     }
 
     const montoMatch =
@@ -3815,7 +3823,28 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       return raw.replace(",", ".");
     };
     const monto = normalizeMonto(montoMatch);
-    const referenciaDetectada = pickPrimaryReferenceCandidate(texto);
+    const referenciaRaw = pickPrimaryReferenceCandidate(texto);
+    const referenciaDetectada = normalizeReferenceDigits(referenciaRaw);
+    const referenciaValor = referenciaDetectada.length >= 6 ? referenciaDetectada : null;
+
+    if (referenciaValor) {
+      const { data: referenciaExists, error: refExistsErr } = await supabaseAdmin
+        .from("pagomoviles")
+        .select("id, referencia")
+        .eq("referencia", referenciaValor)
+        .limit(1)
+        .maybeSingle();
+      if (refExistsErr) throw refExistsErr;
+      if (referenciaExists?.id) {
+        return res.json({
+          ok: true,
+          duplicado: true,
+          motivo: "referencia_duplicada",
+          referencia: referenciaValor,
+          id_existente: referenciaExists.id,
+        });
+      }
+    }
 
     const payloadPagoMovil = {
       app: appName,
@@ -3825,14 +3854,27 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       dispositivo,
       hash,
       monto_bs: monto,
-      referencia: referenciaDetectada || null,
+      referencia: referenciaValor,
     };
     const { data: insertedPagoMovil, error: insErr } = await supabaseAdmin
       .from("pagomoviles")
       .insert(payloadPagoMovil)
       .select("id, referencia, texto, monto_bs")
       .single();
-    if (insErr) throw insErr;
+    if (insErr) {
+      if (isUniqueViolationError(insErr, "referencia")) {
+        return res.json({
+          ok: true,
+          duplicado: true,
+          motivo: "referencia_duplicada",
+          referencia: referenciaValor,
+        });
+      }
+      if (isUniqueViolationError(insErr, "hash")) {
+        return res.json({ ok: true, duplicado: true, motivo: "hash_duplicado" });
+      }
+      throw insErr;
+    }
 
     let matchResult = { matched: false, reason: "not_checked" };
     let processResult = { processed: false, reason: "not_attempted" };
@@ -6505,6 +6547,7 @@ const processOrderFromItems = async ({
       renovacion: true,
       recordatorio_enviado: false,
       recordatorio_corte_enviado: false,
+      aviso_admin: false,
       pendiente: renovarPendiente,
       suspendido: false,
     };
@@ -7035,6 +7078,7 @@ const processOrderFromItems = async ({
       renovacion: false,
       recordatorio_enviado: false,
       recordatorio_corte_enviado: false,
+      aviso_admin: false,
       completa: isCompleta && isCorreoCliente ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? false : null,
     };
@@ -10244,6 +10288,7 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     };
     const monthValRaw = String(req.query?.month || "").trim();
     const monthVal = monthRegex.test(monthValRaw) ? monthValRaw : buildCaracasMonthKey();
+    const currentMonthVal = buildCaracasMonthKey();
     const monthToIndex = (value = "") => {
       const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
       if (!match) return null;
@@ -10282,7 +10327,8 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     const previousMonthVal = indexToMonthKey((monthToIndex(monthVal) || 0) - 1);
     const range = buildMonthRange(monthVal);
     const prevRange = buildMonthRange(previousMonthVal);
-    if (!range || !prevRange) {
+    const currentMonthRange = buildMonthRange(currentMonthVal);
+    if (!range || !prevRange || !currentMonthRange) {
       return res.status(400).json({ error: "Mes inválido." });
     }
 
@@ -10509,6 +10555,21 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     const registrosPorMes = Array.from(registrosPorMesMap.entries())
       .map(([monthKey, cantidad]) => ({ monthKey, cantidad }))
       .sort((a, b) => String(a.monthKey).localeCompare(String(b.monthKey)));
+    const registrosPorDiaMesActualMap = new Map(
+      buildMonthDateKeys(currentMonthRange).map((dateKey) => [dateKey, 0]),
+    );
+    authConfirmedLinkedRows.forEach((row) => {
+      const dateKey = String(row?.fecha_confirmacion || "").trim();
+      if (!dateKey || !registrosPorDiaMesActualMap.has(dateKey)) return;
+      registrosPorDiaMesActualMap.set(dateKey, (registrosPorDiaMesActualMap.get(dateKey) || 0) + 1);
+    });
+    const registrosPorDiaMesActual = Array.from(registrosPorDiaMesActualMap.entries()).map(
+      ([dateKey, cantidad]) => ({
+        fecha: dateKey,
+        dia: Number(String(dateKey).slice(-2)) || 0,
+        cantidad: Number(cantidad) || 0,
+      }),
+    );
 
     const countConfirmedUntil = (dateLimit, predicate = null) =>
       authConfirmedLinkedRows.filter((row) => {
@@ -10539,6 +10600,8 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         vendedores_auth_confirmados: vendedoresAuthConfirmados,
         vendedores_auth_confirmados_mes_anterior: vendedoresAuthConfirmadosPrev,
         registros_por_mes: registrosPorMes,
+        mes_actual: currentMonthVal,
+        registros_por_dia_mes_actual: registrosPorDiaMesActual,
       },
       trafico: {
         actual: aggregateTrafficRows(traficoActualRows, range),

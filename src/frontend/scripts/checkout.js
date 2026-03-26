@@ -81,6 +81,31 @@ const isImageFile = (file) => {
   return /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(name);
 };
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const parseFlexibleDecimal = (value) => {
+  if (value == null) return null;
+  const raw = String(value).trim().replace(/\s+/g, "").replace(/[^0-9,.-]/g, "");
+  if (!raw) return null;
+  const sign = raw.startsWith("-") ? -1 : 1;
+  const unsigned = raw.replace(/-/g, "");
+  if (!unsigned) return null;
+  const lastComma = unsigned.lastIndexOf(",");
+  const lastDot = unsigned.lastIndexOf(".");
+  const decimalIdx = Math.max(lastComma, lastDot);
+  let normalized = "";
+  for (let i = 0; i < unsigned.length; i += 1) {
+    const ch = unsigned[i];
+    if (ch >= "0" && ch <= "9") {
+      normalized += ch;
+      continue;
+    }
+    if ((ch === "," || ch === ".") && i === decimalIdx) {
+      normalized += ".";
+    }
+  }
+  if (!normalized || normalized === ".") return null;
+  const parsed = Number(`${sign < 0 ? "-" : ""}${normalized}`);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const hasTransientNetworkMessage = (value = "") => {
   const msg = String(value || "").toLowerCase();
   if (!msg) return false;
@@ -1322,10 +1347,8 @@ btnSendPayment?.addEventListener("click", async () => {
     if (isMetodoBs && refInput) refInput.value = referenciaValue;
     let montoTransferidoValue = null;
     if (requiereMontoTransferido) {
-      const rawMontoTransferido = String(montoTransferidoInput?.value || "")
-        .trim()
-        .replace(",", ".");
-      const parsedMontoTransferido = Number(rawMontoTransferido);
+      const rawMontoTransferido = String(montoTransferidoInput?.value || "").trim();
+      const parsedMontoTransferido = parseFlexibleDecimal(rawMontoTransferido);
       if (!Number.isFinite(parsedMontoTransferido) || parsedMontoTransferido <= 0) {
         alert("Ingresa un monto transferido válido.");
         montoTransferidoInput?.classList.add("input-error");
@@ -1591,3 +1614,13 @@ dropzone?.addEventListener("click", () => dropzone.classList.remove("input-error
 montoTransferidoInput?.addEventListener("focus", () =>
   montoTransferidoInput.classList.remove("input-error")
 );
+montoTransferidoInput?.addEventListener("input", () => {
+  const raw = String(montoTransferidoInput.value || "");
+  const cleaned = raw.replace(/[^\d,.\s]/g, "").replace(/\s+/g, "");
+  if (cleaned !== raw) montoTransferidoInput.value = cleaned;
+});
+montoTransferidoInput?.addEventListener("blur", () => {
+  const parsed = parseFlexibleDecimal(montoTransferidoInput.value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return;
+  montoTransferidoInput.value = parsed.toFixed(2);
+});
