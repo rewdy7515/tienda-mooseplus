@@ -1840,9 +1840,15 @@ async function handleFatalAuthSessionError(reason = "") {
     if (isAnonymousAllowedPath()) {
       return;
     }
-    const loginHref = getLoginHref();
-    const current = `${window.location.origin}${window.location.pathname}`;
-    if (current !== loginHref) {
+    const loginUrl = new URL(getLoginHref());
+    const currentParams = new URLSearchParams(window.location.search || "");
+    const renewalToken = String(currentParams.get("rr") || "").trim();
+    if (renewalToken) {
+      loginUrl.searchParams.set("rr", renewalToken);
+    }
+    const loginHref = loginUrl.toString();
+    const current = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+    if (current !== `${loginUrl.origin}${loginUrl.pathname}${loginUrl.search}`) {
       window.location.replace(loginHref);
     }
   }

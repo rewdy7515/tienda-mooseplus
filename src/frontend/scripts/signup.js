@@ -49,13 +49,27 @@ const signupToken =
   new URLSearchParams(window.location.search || "").get("t") ||
   new URLSearchParams(window.location.search || "").get("registro_token") ||
   "";
+const renewalReminderToken = String(
+  new URLSearchParams(window.location.search || "").get("rr") || "",
+).trim();
 const signupSuccessPreviewMode =
   new URLSearchParams(window.location.search || "").get("preview_success") === "1";
 let signupTokenContext = null;
 const SIGNUP_CONFIRM_REDIRECT_URL = "https://mooseplus.com/login.html";
 
+function getLoginPageUrl() {
+  const params = new URLSearchParams();
+  if (renewalReminderToken) params.set("rr", renewalReminderToken);
+  const query = params.toString();
+  return `login.html${query ? `?${query}` : ""}`;
+}
+
 function getSignupEmailRedirectUrl() {
-  return SIGNUP_CONFIRM_REDIRECT_URL;
+  const loginUrl = new URL(SIGNUP_CONFIRM_REDIRECT_URL);
+  if (renewalReminderToken) {
+    loginUrl.searchParams.set("rr", renewalReminderToken);
+  }
+  return loginUrl.toString();
 }
 
 const limitMessage = () =>
@@ -462,6 +476,9 @@ function init() {
   loadPaginaBranding({ logoSelectors: [".auth-logo"], applyFavicon: true }).catch((err) => {
     console.warn("signup branding load error", err);
   });
+  if (goLoginBtn) {
+    goLoginBtn.href = getLoginPageUrl();
+  }
 
   if (signupSuccessPreviewMode) {
     showSignupSuccessView({ startCooldown: false });
@@ -605,7 +622,7 @@ function init() {
   signupResendBtn?.addEventListener("click", handleResendButtonClick);
   goLoginBtn?.addEventListener("click", (e) => {
     e.preventDefault();
-    window.location.href = "login.html";
+    window.location.href = getLoginPageUrl();
   });
 
   const capitalizeField = (input) => {

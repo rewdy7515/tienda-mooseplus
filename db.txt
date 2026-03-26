@@ -93,6 +93,7 @@ CREATE TABLE public.descuentos (
   descuento_2 real,
   descuento_3 real,
   descuento_4 real,
+  descuento_5 real,
   CONSTRAINT descuentos_pkey PRIMARY KEY (id_descuento)
 );
 CREATE TABLE public.eventos_notificacion_nuevo_servicio (
@@ -540,7 +541,7 @@ CREATE TABLE public.ventas (
   infinito boolean,
   corte_reemplazo boolean,
   meses_contratados smallint,
-  pendiente boolean,
+  pendiente boolean DEFAULT false,
   pago_verificado boolean,
   pago_rechazado boolean,
   id_precio bigint,
@@ -559,6 +560,7 @@ CREATE TABLE public.ventas (
   fecha_recordatorio_enviado date,
   asignado_a bigint,
   recordatorio_corte_enviado boolean DEFAULT false,
+  aviso_admin boolean DEFAULT false,
   CONSTRAINT ventas_pkey PRIMARY KEY (id_venta),
   CONSTRAINT ventas_asignado_a_fkey FOREIGN KEY (asignado_a) REFERENCES public.usuarios(id_usuario),
   CONSTRAINT ventas_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),

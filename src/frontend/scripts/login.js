@@ -13,10 +13,39 @@ const toggleBtn = document.querySelector(".toggle-password");
 const signupBtn = document.getElementById("login-signup-link");
 const forgotBtn = document.getElementById("login-forgot-link");
 const submitBtn = document.querySelector(".auth-submit");
+const renewalReminderToken = String(
+  new URLSearchParams(window.location.search || "").get("rr") || "",
+).trim();
 let forgotLoading = false;
 let captchaController = null;
 let captchaInitPromise = null;
 const LOGIN_DEBUG_PREFIX = "[login-debug]";
+
+const buildSignupHref = () => {
+  const params = new URLSearchParams();
+  if (renewalReminderToken) params.set("rr", renewalReminderToken);
+  const query = params.toString();
+  return `signup.html${query ? `?${query}` : ""}`;
+};
+
+const buildPostLoginRedirect = () => {
+  if (!renewalReminderToken) return "index.html";
+  const params = new URLSearchParams();
+  params.set("rr", renewalReminderToken);
+  return `cart.html?${params.toString()}`;
+};
+
+const renderNoRegisteredEmailError = () => {
+  if (!emailError) return;
+  emailError.textContent = "";
+  const textNode = document.createTextNode("Correo no registrado. ");
+  const link = document.createElement("a");
+  link.className = "link-inline";
+  link.href = buildSignupHref();
+  link.textContent = "Registrate aquí";
+  emailError.append(textNode, link);
+  emailInput.classList.add("input-error");
+};
 
 const getDebugNow = () =>
   typeof performance !== "undefined" && typeof performance.now === "function"
@@ -292,9 +321,7 @@ async function handleLogin(event) {
             .ilike("correo", email)
             .maybeSingle();
           if (!userRow) {
-            emailError.innerHTML =
-              'Correo no registrado. <a class="link-inline" href="signup.html">Registrate aquí</a>';
-            emailInput.classList.add("input-error");
+            renderNoRegisteredEmailError();
           } else {
             passwordInput.value = "";
             passwordError.textContent = "Contraseña incorrecta";
@@ -402,9 +429,14 @@ async function handleLogin(event) {
     } catch (err) {
       console.warn("No se pudo precargar carrito", err);
     }
-    logLoginDebug("redirect:index", { delayMs: 400 });
+    const postLoginHref = buildPostLoginRedirect();
+    logLoginDebug("redirect:post_login", {
+      delayMs: 400,
+      target: postLoginHref,
+      hasRenewalToken: Boolean(renewalReminderToken),
+    });
     setTimeout(() => {
-      window.location.href = "index.html";
+      window.location.href = postLoginHref;
     }, 400);
   } catch (err) {
     console.error("Login error:", err);
@@ -429,9 +461,10 @@ function initToggle() {
 
 function initSignupRedirect() {
   if (!signupBtn) return;
+  signupBtn.href = buildSignupHref();
   signupBtn.addEventListener("click", (e) => {
     e.preventDefault();
-    window.location.href = "signup.html";
+    window.location.href = buildSignupHref();
   });
 }
 

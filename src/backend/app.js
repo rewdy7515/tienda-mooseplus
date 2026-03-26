@@ -187,6 +187,16 @@ const WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID = Math.max(
   1,
   Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID) || 20,
 );
+const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED =
+  process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER !== "false" && process.env.VERCEL !== "1";
+const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS) || 15000,
+);
+const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH = Math.max(
+  1,
+  Math.min(200, Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH) || 80),
+);
 const WEB_PUSH_SUBSCRIPTIONS_TABLE = "web_push_subscriptions";
 const WEB_PUSH_DELIVERY_QUEUE_TABLE = "web_push_delivery_queue";
 const SANDBOX_GIFTCARD_ORDERS_TABLE = "sandbox_giftcard_orders";
@@ -229,6 +239,16 @@ let nuevoServicioNotifQueueLastResult = {
   invalidUser: 0,
 };
 let nuevoServicioNotifQueueLastError = null;
+let pendingSpotifyAlertsInProgress = false;
+let pendingSpotifyAlertsAvisoAdminMissing = false;
+let pendingSpotifyAlertsLastRunAt = null;
+let pendingSpotifyAlertsLastResult = {
+  fetched: 0,
+  sent: 0,
+  failed: 0,
+  skipped: 0,
+};
+let pendingSpotifyAlertsLastError = null;
 const WEB_PUSH_IS_CONFIGURED =
   Boolean(String(webPushVapidPublicKey || "").trim()) &&
   Boolean(String(webPushVapidPrivateKey || "").trim());
@@ -1646,10 +1666,25 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
 
   const { data: ventaRow, error: ventaErr } = await supabaseAdmin
     .from("ventas")
-    .select("id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, precios(id_plataforma)")
+    .select(
+      "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, precios(id_plataforma)",
+    )
     .eq("id_venta", ventaId)
     .maybeSingle();
+  if (ventaErr && isMissingColumnError(ventaErr, "aviso_admin")) {
+    if (!pendingSpotifyAlertsAvisoAdminMissing) {
+      console.warn(
+        "[WhatsApp] Falta la columna ventas.aviso_admin. El aviso de pedidos Spotify pendientes se omite hasta crearla.",
+      );
+    }
+    pendingSpotifyAlertsAvisoAdminMissing = true;
+    return { sent: false, skipped: true, reason: "missing_aviso_admin_column" };
+  }
   if (ventaErr) throw ventaErr;
+  if (pendingSpotifyAlertsAvisoAdminMissing) {
+    console.log("[WhatsApp] Columna ventas.aviso_admin detectada nuevamente.");
+    pendingSpotifyAlertsAvisoAdminMissing = false;
+  }
   if (!ventaRow?.id_venta) {
     return { sent: false, skipped: true, reason: "sale_not_found" };
   }
@@ -1660,6 +1695,9 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   }
   if (!isTrue(ventaRow?.pendiente)) {
     return { sent: false, skipped: true, reason: "sale_not_pending" };
+  }
+  if (isTrue(ventaRow?.aviso_admin)) {
+    return { sent: false, skipped: true, reason: "already_notified_admin" };
   }
 
   const message = buildWhatsappPendingOrderAdminMessage({
@@ -1691,6 +1729,13 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
       WHATSAPP_SEND_TIMEOUT_MS,
       "Timeout enviando alerta de pedido pendiente",
     );
+
+    const { error: avisoErr } = await supabaseAdmin
+      .from("ventas")
+      .update({ aviso_admin: true })
+      .eq("id_venta", ventaId);
+    if (avisoErr) throw avisoErr;
+
     return {
       sent: true,
       skipped: false,
@@ -1935,6 +1980,127 @@ const processNuevoServicioNotificationQueue = async () => {
   } finally {
     nuevoServicioNotifQueueLastRunAt = new Date().toISOString();
     nuevoServicioNotifQueueInProgress = false;
+  }
+};
+
+const processPendingSpotifyAdminAlerts = async () => {
+  if (!WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED || !shouldStartWhatsapp) {
+    return {
+      skipped: true,
+      reason: "disabled",
+      ...pendingSpotifyAlertsLastResult,
+    };
+  }
+  if (pendingSpotifyAlertsInProgress) {
+    return {
+      skipped: true,
+      reason: "in_progress",
+      ...pendingSpotifyAlertsLastResult,
+    };
+  }
+
+  pendingSpotifyAlertsInProgress = true;
+  const result = {
+    fetched: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+  };
+
+  try {
+    const { data: ventasRows, error: ventasErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, id_precio, pendiente, correo_miembro, clave_miembro, aviso_admin")
+      .eq("pendiente", true)
+      .not("correo_miembro", "is", null)
+      .not("clave_miembro", "is", null)
+      .or("aviso_admin.eq.false,aviso_admin.is.null")
+      .order("id_venta", { ascending: true })
+      .limit(WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH);
+
+    if (ventasErr && isMissingColumnError(ventasErr, "aviso_admin")) {
+      if (!pendingSpotifyAlertsAvisoAdminMissing) {
+        console.warn(
+          "[WhatsApp] Worker de pedidos Spotify pendientes desactivado: falta columna ventas.aviso_admin.",
+        );
+      }
+      pendingSpotifyAlertsAvisoAdminMissing = true;
+      pendingSpotifyAlertsLastError = null;
+      pendingSpotifyAlertsLastResult = result;
+      return {
+        skipped: true,
+        reason: "missing_aviso_admin_column",
+        ...result,
+      };
+    }
+    if (ventasErr) throw ventasErr;
+
+    if (pendingSpotifyAlertsAvisoAdminMissing) {
+      console.log("[WhatsApp] Worker de pedidos Spotify pendientes reactivado.");
+      pendingSpotifyAlertsAvisoAdminMissing = false;
+    }
+
+    const ventas = Array.isArray(ventasRows) ? ventasRows : [];
+    result.fetched = ventas.length;
+    if (!ventas.length) {
+      pendingSpotifyAlertsLastError = null;
+      pendingSpotifyAlertsLastResult = result;
+      return { ...result };
+    }
+
+    const precioIds = uniqPositiveIds(ventas.map((row) => row?.id_precio));
+    const priceMap = {};
+    if (precioIds.length) {
+      const { data: pricesRows, error: pricesErr } = await supabaseAdmin
+        .from("precios")
+        .select("id_precio, id_plataforma")
+        .in("id_precio", precioIds);
+      if (pricesErr) throw pricesErr;
+      (pricesRows || []).forEach((row) => {
+        const idPrecio = toPositiveInt(row?.id_precio);
+        if (!idPrecio) return;
+        priceMap[idPrecio] = Number(row?.id_plataforma || 0) || 0;
+      });
+    }
+
+    for (const venta of ventas) {
+      const idVenta = toPositiveInt(venta?.id_venta);
+      if (!idVenta) {
+        result.skipped += 1;
+        continue;
+      }
+      const idPrecio = toPositiveInt(venta?.id_precio);
+      const platId = idPrecio ? Number(priceMap[idPrecio] || 0) : 0;
+      if (platId !== 9) {
+        result.skipped += 1;
+        continue;
+      }
+
+      try {
+        const sendRes = await maybeSendPendingSpotifyOrderToWhatsapp({
+          idVenta,
+          idPlataformaHint: 9,
+        });
+        if (sendRes?.sent) result.sent += 1;
+        else result.skipped += 1;
+      } catch (err) {
+        result.failed += 1;
+        console.error("[WhatsApp] Worker pedidos Spotify pendientes error", {
+          id_venta: idVenta,
+          error: err?.message || err,
+        });
+      }
+    }
+
+    pendingSpotifyAlertsLastError = null;
+    pendingSpotifyAlertsLastResult = result;
+    return { ...result };
+  } catch (err) {
+    pendingSpotifyAlertsLastError = err?.message || "Error desconocido";
+    throw err;
+  } finally {
+    pendingSpotifyAlertsLastRunAt = new Date().toISOString();
+    pendingSpotifyAlertsInProgress = false;
   }
 };
 
@@ -2282,13 +2448,22 @@ const buildWhatsappRecordatorioItems = async ({
 
     let plain = "";
     const ventaIds = uniqPositiveIds(group.ventaIds || []).sort((a, b) => a - b);
+    let renewalCartToken = "";
     let renewalCartUrl = "";
+    let signupRenewalUrl = String(group.signupUrl || "").trim();
     if (ventaIds.length) {
       try {
         renewalCartUrl = buildRenewalCartUrl({
           idUsuario: group.idUsuario,
           ventaIds,
         });
+        renewalCartToken = String(new URL(renewalCartUrl).searchParams.get("rr") || "").trim();
+
+        if (!group.registrado && renewalCartToken) {
+          signupRenewalUrl = buildSignupRegistrationUrl(group.idUsuario, {
+            renewalToken: renewalCartToken,
+          });
+        }
       } catch (err) {
         console.error("[recordatorios] renewal cart url build error", {
           userId: group.idUsuario,
@@ -2296,6 +2471,9 @@ const buildWhatsappRecordatorioItems = async ({
         });
       }
     }
+    const renewalTargetUrl = String(
+      group.registrado ? renewalCartUrl : signupRenewalUrl || renewalCartUrl,
+    ).trim();
     const fechasPagoUnicas = Array.from(
       new Set(
         (Array.isArray(group.fechasPago) ? group.fechasPago : [])
@@ -2312,16 +2490,15 @@ const buildWhatsappRecordatorioItems = async ({
     const fechaPagoHeader = `\`Fecha de pago: ${fechaPagoMensaje}\``;
 
     if (effectiveMode === "cutoff_today") {
-      const cutoffRenewalUrl = String(renewalCartUrl || "").trim() || buildPublicSiteUrl();
+      const cutoffRenewalUrl = renewalTargetUrl || buildPublicSiteUrl();
       plain = `🚨 *HOY* vencen tus membresías\nAñade tus renovaciones al carrito automaticamente:\n${cutoffRenewalUrl}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
-    } else if (renewalCartUrl) {
+    } else if (renewalTargetUrl) {
       const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
-      const intro = `Añade tus renovaciones al carrito automaticamente:\n${renewalCartUrl}`;
+      const intro = `Añade tus renovaciones al carrito automaticamente:\n${renewalTargetUrl}`;
       plain = `${saludo}\n${intro}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     } else {
       const saludo = `*¡Hola ${group.cliente}! ❤️🫎*`;
-      const signupUrl = String(group.signupUrl || "").trim();
-      const renewUrl = signupUrl || buildPublicSiteUrl();
+      const renewUrl = signupRenewalUrl || buildPublicSiteUrl();
       const intro = `Renueva tus membresías por nuestra nueva pagina web:\n${renewUrl}`;
       plain = `${saludo}\n${intro}\n\n${fechaPagoHeader}\n\n${bloques}\n\nRenueva ahora para seguir disfrutando de nuestros servicios sin interrupciones 🔁✨`;
     }
@@ -3021,6 +3198,22 @@ if (NUEVO_SERVICIO_NOTIF_QUEUE_ENABLED) {
   });
 }
 
+if (WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED && shouldStartWhatsapp) {
+  console.log(
+    `[WhatsApp] Worker pedidos Spotify pendientes activo (cada ${Math.round(
+      WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS / 1000,
+    )}s).`,
+  );
+  setInterval(() => {
+    processPendingSpotifyAdminAlerts().catch((err) => {
+      console.error("[WhatsApp] Worker pedidos Spotify pendientes error", err);
+    });
+  }, WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS);
+  processPendingSpotifyAdminAlerts().catch((err) => {
+    console.error("[WhatsApp] Worker pedidos Spotify pendientes init error", err);
+  });
+}
+
 if (WEB_PUSH_QUEUE_WORKER_ENABLED) {
   if (WEB_PUSH_IS_CONFIGURED) {
     console.log(
@@ -3073,32 +3266,70 @@ const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "
 
 const getRefExtractionSources = (text) => {
   const base = String(text || "").trim();
-  const sources = [];
-  if (base) sources.push(base);
+  if (!base) return [];
 
   try {
     const parsed = JSON.parse(base);
     if (parsed && typeof parsed === "object") {
+      // Si el webhook llega como JSON, extraemos solo campos útiles del mensaje para
+      // evitar tomar timestamps u otros números técnicos como referencia.
       const nested = [
         parsed.texto,
         parsed.text,
         parsed.mensaje,
         parsed.message,
+        parsed.referencia,
+        parsed.ref,
+        parsed.reference,
         parsed.payload?.texto,
         parsed.payload?.text,
         parsed.payload?.mensaje,
         parsed.payload?.message,
+        parsed.payload?.referencia,
+        parsed.payload?.ref,
+        parsed.payload?.reference,
       ];
-      nested.forEach((value) => {
-        const txt = String(value || "").trim();
-        if (txt) sources.push(txt);
-      });
+      const sources = nested
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+      return Array.from(new Set(sources));
     }
   } catch (_err) {
     // Ignorar si no es JSON válido; usamos el texto crudo.
   }
 
-  return Array.from(new Set(sources));
+  return [base];
+};
+
+const extractRefFieldCandidates = (text) => {
+  const base = String(text || "").trim();
+  if (!base) return [];
+
+  try {
+    const parsed = JSON.parse(base);
+    if (!parsed || typeof parsed !== "object") return [];
+    const fieldCandidates = [
+      parsed.referencia,
+      parsed.ref,
+      parsed.reference,
+      parsed.nro_referencia,
+      parsed.numero_referencia,
+      parsed.payload?.referencia,
+      parsed.payload?.ref,
+      parsed.payload?.reference,
+      parsed.payload?.nro_referencia,
+      parsed.payload?.numero_referencia,
+    ];
+    return Array.from(
+      new Set(
+        fieldCandidates
+          .map((value) => normalizeReferenceDigits(value))
+          .filter((digits) => digits.length >= 6),
+      ),
+    );
+  } catch (_err) {
+    return [];
+  }
 };
 
 const extractRefKeywordCandidates = (text) => {
@@ -3125,6 +3356,7 @@ const extractRefKeywordCandidates = (text) => {
 
 const extractRefCandidates = (text) => {
   const sources = getRefExtractionSources(text);
+  const fieldCandidates = extractRefFieldCandidates(text);
   const keywordCandidates = extractRefKeywordCandidates(text);
   const genericCandidates = [];
   sources.forEach((source) => {
@@ -3134,15 +3366,17 @@ const extractRefCandidates = (text) => {
       if (digits.length >= 4) genericCandidates.push(digits);
     });
   });
-  return Array.from(new Set([...keywordCandidates, ...genericCandidates]));
+  return Array.from(
+    new Set([...fieldCandidates, ...keywordCandidates, ...genericCandidates]),
+  );
 };
 
 const pickPrimaryReferenceCandidate = (text) => {
   const keywordCandidates = extractRefKeywordCandidates(text);
   if (keywordCandidates.length) return keywordCandidates[0];
-  const generic = extractRefCandidates(text).filter((value) => String(value || "").trim().length >= 6);
-  if (generic.length === 1) return generic[0];
-  return generic[0] || null;
+  const fieldCandidates = extractRefFieldCandidates(text);
+  if (fieldCandidates.length) return fieldCandidates[0];
+  return null;
 };
 
 const computeOrderMontoBs = async (orden = {}) => {
@@ -4839,10 +5073,14 @@ const buildSignupRegistrationToken = (idUsuario) => {
   return `${SIGNUP_ULTRA_PREFIX}${payloadPart}${signaturePart}`;
 };
 
-const buildSignupRegistrationUrl = (idUsuario) => {
+const buildSignupRegistrationUrl = (idUsuario, options = {}) => {
   const token = buildSignupRegistrationToken(idUsuario);
   const signupUrl = new URL("/signup", PUBLIC_SITE_URL);
   signupUrl.searchParams.set("t", token);
+  const renewalToken = String(options?.renewalToken || options?.rr || "").trim();
+  if (renewalToken) {
+    signupUrl.searchParams.set("rr", renewalToken);
+  }
   return signupUrl.toString();
 };
 
