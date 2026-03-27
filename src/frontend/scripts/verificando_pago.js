@@ -6,6 +6,7 @@ attachLogoHome();
 attachLogout(clearServerSession);
 
 const statusEl = document.querySelector("#verif-status");
+const verifCard = document.querySelector(".verif-card");
 const processingBlock = document.querySelector("#processing-block");
 const ordenDisplay = document.querySelector("#orden-display");
 const refDisplay = document.querySelector("#ref-display");
@@ -16,18 +17,15 @@ const btnEditRef = document.querySelector("#btn-edit-ref");
 const btnSaveRef = document.querySelector("#btn-save-ref");
 const progressBar = document.querySelector("#progress-bar");
 const countdownEl = document.querySelector("#countdown");
-const retryActions = document.querySelector("#retry-actions");
-const btnRetry = document.querySelector("#btn-retry");
-const btnBackCart = document.querySelector("#btn-back-cart");
 
 const params = new URLSearchParams(window.location.search);
 const idOrden = Number(params.get("id_orden"));
 
 let orden = null;
 let pagosInsertChannel = null;
+let ordenUpdateChannel = null;
 let countdownTimer = null;
 let currentUserId = null;
-let expired = false;
 let processingOrder = false;
 let orderProcessed = false;
 let verifyRunning = false;
@@ -36,14 +34,44 @@ let cartMontoBs = null;
 let currentRateBs = null;
 const VERIFY_WINDOW_MS = 3 * 60 * 1000;
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const buildEntregaUrl = () => `entregar_servicios.html?id_orden=${encodeURIComponent(orden?.id_orden || idOrden)}`;
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
 };
 
-const toggleRetryActions = (show) => {
-  if (!retryActions) return;
-  retryActions.classList.toggle("hidden", !show);
+const showVerifiedFallbackView = () => {
+  if (!verifCard) return;
+  verifCard.innerHTML = `
+    <h2>¡Tu pago fue verificado!</h2>
+    <p class="verif-message">Gracias por tu compra</p>
+    <button type="button" class="btn-primary" id="btn-view-services">Ver servicios</button>
+  `;
+  document.querySelector("#btn-view-services")?.addEventListener("click", () => {
+    window.location.href = buildEntregaUrl();
+  });
+};
+
+const redirectToEntregaServicios = () => {
+  const targetUrl = buildEntregaUrl();
+  setTimeout(() => {
+    const stillHere = /\/verificando_pago\.html$/i.test(window.location.pathname);
+    if (stillHere) {
+      showVerifiedFallbackView();
+    }
+  }, 1200);
+  try {
+    window.location.href = targetUrl;
+  } catch (_err) {
+    showVerifiedFallbackView();
+  }
+};
+
+const handlePagoVerificado = () => {
+  if (orderProcessed) return;
+  orderProcessed = true;
+  setStatus("Pago verificado. Redirigiendo...");
+  redirectToEntregaServicios();
 };
 
 const formatCountdown = (msLeft) => {
@@ -70,18 +98,6 @@ const getElapsedFromOrdenMs = () => {
   return Date.now() - dt.getTime();
 };
 
-const getCaracasParts = () => {
-  const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
-  const pad2 = (val) => String(val).padStart(2, "0");
-  const fecha = `${caracasNow.getFullYear()}-${pad2(caracasNow.getMonth() + 1)}-${pad2(
-    caracasNow.getDate()
-  )}`;
-  const hora = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
-    caracasNow.getSeconds()
-  )}`;
-  return { fecha, hora };
-};
-
 const refreshCurrentRate = async () => {
   const rate = await fetchP2PRate();
   if (Number.isFinite(rate)) {
@@ -105,14 +121,6 @@ const updateCountdown = () => {
   }
   const elapsed = Date.now() - dt.getTime();
   const remaining = Math.max(0, VERIFY_WINDOW_MS - elapsed);
-  if (remaining <= 0 && !expired) {
-    expired = true;
-    if (processingBlock) processingBlock.classList.add("hidden");
-    if (progressBar) progressBar.style.width = "0%";
-    if (countdownEl) countdownEl.textContent = "0min 0seg";
-    setStatus("Pago no encontrado");
-    toggleRetryActions(true);
-  }
   const pct = Math.max(0, Math.min(100, (remaining / VERIFY_WINDOW_MS) * 100));
   if (progressBar) progressBar.style.width = `${pct}%`;
   if (countdownEl) countdownEl.textContent = formatCountdown(remaining);
@@ -230,20 +238,15 @@ const creditSaldo = async (amountUsd) => {
 
 const verifyPago = async () => {
   if (!orden) return;
-  if (expired || processingOrder || orderProcessed) return;
-  toggleRetryActions(false);
+  if (processingOrder || orderProcessed) return;
   if (orden?.orden_cancelada) {
     orderProcessed = true;
     setStatus("Orden cancelada.");
     if (processingBlock) processingBlock.classList.add("hidden");
-    toggleRetryActions(false);
     return;
   }
   if (orden?.pago_verificado) {
-    orderProcessed = true;
-    setStatus("Pago verificado. Redirigiendo...");
-    toggleRetryActions(false);
-    window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(orden.id_orden)}`;
+    handlePagoVerificado();
     return;
   }
   const refStr = String(orden.referencia || "").trim();
@@ -278,7 +281,7 @@ const verifyPago = async () => {
   if (!match) {
     const elapsedMs = getElapsedFromOrdenMs();
     if (elapsedMs == null || elapsedMs >= 30 * 1000) {
-      setStatus("Pago no encontrado. Reintentando...");
+      setStatus("Seguimos verificando tu pago...");
     }
     return;
   }
@@ -290,7 +293,7 @@ const verifyPago = async () => {
   const sessionUserId = currentUserId || requireSession();
   const pagoMonto = montoNum(match.monto_bs);
   if (!Number.isFinite(pagoMonto)) {
-    setStatus("Pago no encontrado.");
+    setStatus("Seguimos verificando tu pago...");
     return;
   }
 
@@ -319,7 +322,6 @@ const verifyPago = async () => {
       orden.orden_cancelada = true;
       orderProcessed = true;
       if (processingBlock) processingBlock.classList.add("hidden");
-      toggleRetryActions(false);
       setStatus("Pago insuficiente. Orden cancelada.");
       return;
     }
@@ -347,7 +349,6 @@ const verifyPago = async () => {
     orden.orden_cancelada = true;
     orderProcessed = true;
     if (processingBlock) processingBlock.classList.add("hidden");
-    toggleRetryActions(false);
     setStatus("Pago insuficiente. Orden cancelada.");
     return;
   }
@@ -398,10 +399,7 @@ const verifyPago = async () => {
   }
   orden.en_espera = false;
   orden.pago_verificado = true;
-  orderProcessed = true;
-
-  setStatus("Pago verificado. Redirigiendo...");
-  window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(orden.id_orden)}`;
+  handlePagoVerificado();
 };
 
 const triggerVerify = async () => {
@@ -414,7 +412,7 @@ const triggerVerify = async () => {
     do {
       verifyPending = false;
       await verifyPago();
-    } while (verifyPending && !orderProcessed && !expired);
+    } while (verifyPending && !orderProcessed);
   } finally {
     verifyRunning = false;
   }
@@ -428,6 +426,16 @@ const stopPagosInsertSubscription = () => {
     console.warn("remove pagomoviles channel error", err);
   }
   pagosInsertChannel = null;
+};
+
+const stopOrdenUpdateSubscription = () => {
+  if (!ordenUpdateChannel) return;
+  try {
+    supabase.removeChannel(ordenUpdateChannel);
+  } catch (err) {
+    console.warn("remove orden channel error", err);
+  }
+  ordenUpdateChannel = null;
 };
 
 const startPagosInsertSubscription = () => {
@@ -487,47 +495,30 @@ const bindEdit = () => {
   });
 };
 
-const bindRetryActions = () => {
-  btnRetry?.addEventListener("click", async () => {
-    if (!orden) return;
-    try {
-      const { fecha, hora } = getCaracasParts();
-      const { error } = await supabase
-        .from("ordenes")
-        .update({ hora_orden: hora, fecha, en_espera: true })
-        .eq("id_orden", orden.id_orden);
-      if (error) throw error;
-      orden.hora_orden = hora;
-      orden.fecha = fecha;
-      orden.en_espera = true;
-      expired = false;
-      if (processingBlock) processingBlock.classList.remove("hidden");
-      toggleRetryActions(false);
-      setStatus("Reintentando...");
-      startCountdown();
-      await triggerVerify();
-      startPagosInsertSubscription();
-    } catch (err) {
-      console.error("reintentar orden error", err);
-      setStatus("No se pudo reintentar.");
-    }
-  });
-  btnBackCart?.addEventListener("click", () => {
-    (async () => {
-      if (orden?.id_orden) {
-        try {
-          await supabase
-            .from("ordenes")
-            .update({ orden_cancelada: true })
-            .eq("id_orden", orden.id_orden);
-          orden.orden_cancelada = true;
-        } catch (err) {
-          console.error("cancelar orden error", err);
+const startOrdenUpdateSubscription = () => {
+  if (ordenUpdateChannel || !idOrden) return;
+  ordenUpdateChannel = supabase
+    .channel(`verificando-pago-orden-${idOrden}`)
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "ordenes", filter: `id_orden=eq.${idOrden}` },
+      (payload) => {
+        const updated = payload?.new || null;
+        if (!updated) return;
+        orden = { ...(orden || {}), ...updated };
+        renderRef();
+        renderOrden();
+        renderMonto();
+        if (updated.pago_verificado === true) {
+          handlePagoVerificado();
         }
       }
-      window.location.href = "cart.html";
-    })();
-  });
+    )
+    .subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.error("orden subscription status", status);
+      }
+    });
 };
 
 async function init() {
@@ -562,13 +553,17 @@ async function init() {
     renderRef();
     renderOrden();
     renderMonto();
+    if (orden?.pago_verificado) {
+      handlePagoVerificado();
+      return;
+    }
     bindEdit();
-    bindRetryActions();
     startCountdown();
     triggerVerify().catch((err) => {
       console.error("verificar pago inicial error", err);
     });
     startPagosInsertSubscription();
+    startOrdenUpdateSubscription();
   } catch (err) {
     console.error("verificando pago init error", err);
     setStatus("No se pudo cargar la orden.");
@@ -579,5 +574,6 @@ init();
 
 window.addEventListener("beforeunload", () => {
   stopPagosInsertSubscription();
+  stopOrdenUpdateSubscription();
   if (countdownTimer) clearInterval(countdownTimer);
 });
