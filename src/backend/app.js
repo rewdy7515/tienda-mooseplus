@@ -187,6 +187,10 @@ const WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID = Math.max(
   1,
   Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID) || 20,
 );
+const WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID = Math.max(
+  1,
+  Number(process.env.WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID) || 23,
+);
 const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED =
   process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER !== "false" && process.env.VERCEL !== "1";
 const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS = Math.max(
@@ -1755,6 +1759,96 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   } finally {
     await shutdownWhatsappClient({
       reason: "pending_spotify_order_alert_completed",
+      allowWhenDisabled: true,
+    });
+  }
+};
+
+const buildWhatsappManualVerificationMessage = ({
+  metodoPagoNombre = "",
+  referencia = "",
+} = {}) => {
+  const metodo = String(metodoPagoNombre || "").trim() || "No especificado";
+  const ref = String(referencia || "").trim() || "-";
+  return `*VERIFICACIÓN MANUAL*
+Metodo de pago: ${metodo}
+Ref: ${ref}`;
+};
+
+const notifyManualVerificationToWhatsappAdmin = async ({
+  idOrden = null,
+  source = "manual_verification",
+} = {}) => {
+  const ordenId = toPositiveInt(idOrden);
+  if (!ordenId) {
+    return { sent: false, skipped: true, reason: "invalid_order" };
+  }
+
+  const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+    .from("ordenes")
+    .select("id_orden, referencia, pago_verificado, orden_cancelada, id_metodo_de_pago")
+    .eq("id_orden", ordenId)
+    .maybeSingle();
+  if (ordenErr) throw ordenErr;
+  if (!ordenRow?.id_orden) {
+    return { sent: false, skipped: true, reason: "order_not_found" };
+  }
+  if (isTrue(ordenRow?.pago_verificado)) {
+    return { sent: false, skipped: true, reason: "order_already_verified" };
+  }
+  if (isTrue(ordenRow?.orden_cancelada)) {
+    return { sent: false, skipped: true, reason: "order_cancelled" };
+  }
+
+  const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
+  let metodoPagoNombre = "";
+  if (metodoPagoId) {
+    const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
+      .from("metodos_de_pago")
+      .select("nombre")
+      .eq("id_metodo_de_pago", metodoPagoId)
+      .maybeSingle();
+    if (metodoPagoErr) throw metodoPagoErr;
+    metodoPagoNombre = String(metodoPagoRow?.nombre || "").trim();
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID);
+  if (!targetPhone) {
+    return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
+  }
+
+  const referenciaText = String(ordenRow?.referencia || "").trim();
+  const message = buildWhatsappManualVerificationMessage({
+    metodoPagoNombre: metodoPagoNombre || `ID ${metodoPagoId || "-"}`,
+    referencia: referenciaText || "-",
+  });
+
+  await ensureWhatsappClientReady({
+    reason: `manual_verification_alert:${source}`,
+    allowWhenDisabled: true,
+  });
+
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de verificación manual",
+    );
+    return {
+      sent: true,
+      skipped: false,
+      reason: null,
+      id_orden: ordenId,
+      id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+      phone: targetPhone,
+    };
+  } finally {
+    await shutdownWhatsappClient({
+      reason: `manual_verification_alert_completed:${source}`,
       allowWhenDisabled: true,
     });
   }
@@ -12063,7 +12157,7 @@ app.post("/api/checkout", async (req, res) => {
     const referenciaTrim = String(referencia || "").trim();
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
-      .select("id_metodo_de_pago, verificacion_automatica, bolivares")
+      .select("id_metodo_de_pago, nombre, verificacion_automatica, bolivares")
       .eq("id_metodo_de_pago", id_metodo_de_pago)
       .maybeSingle();
     if (metodoPagoErr) throw metodoPagoErr;
@@ -12212,6 +12306,28 @@ app.post("/api/checkout", async (req, res) => {
     });
 
     if (requierePendiente) {
+      if (requiereEntregaManual && Number.isFinite(ordenId) && ordenId > 0) {
+        setImmediate(() => {
+          notifyManualVerificationToWhatsappAdmin({
+            idOrden: ordenId,
+            source: "checkout_manual_payment_method",
+          })
+            .then((result) => {
+              console.log("[checkout] whatsapp verificacion manual", {
+                id_orden: ordenId,
+                sent: !!result?.sent,
+                skipped: !!result?.skipped,
+                reason: result?.reason || null,
+              });
+            })
+            .catch((notifyErr) => {
+              console.error("[checkout] whatsapp verificacion manual error", {
+                id_orden: ordenId,
+                error: notifyErr?.message || notifyErr,
+              });
+            });
+        });
+      }
       try {
         await supabaseAdmin
           .from("carritos")
@@ -12287,6 +12403,84 @@ app.post("/api/checkout", async (req, res) => {
       });
     }
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ordenes/notificar-verificacion-manual", async (req, res) => {
+  const idOrden = Number(req.body?.id_orden);
+  const source = String(req.body?.source || "frontend_timeout").trim().slice(0, 80);
+  if (!Number.isFinite(idOrden) || idOrden <= 0) {
+    return res.status(400).json({ error: "id_orden inválido" });
+  }
+
+  try {
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    const sessionUserId = Number(idUsuarioSesion);
+    if (!Number.isFinite(sessionUserId) || sessionUserId <= 0) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+
+    const { data: sessionPerms, error: sessionPermErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("permiso_superadmin")
+      .eq("id_usuario", sessionUserId)
+      .maybeSingle();
+    if (sessionPermErr) throw sessionPermErr;
+    const sessionIsSuper = isTrue(sessionPerms?.permiso_superadmin);
+
+    const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+      .from("ordenes")
+      .select("id_orden, id_usuario, id_admin, pago_verificado, orden_cancelada")
+      .eq("id_orden", idOrden)
+      .maybeSingle();
+    if (ordenErr) throw ordenErr;
+    if (!ordenRow?.id_orden) {
+      return res.status(404).json({ error: "Orden no encontrada" });
+    }
+
+    const orderUserId = Number(ordenRow?.id_usuario);
+    const orderAdminId = Number(ordenRow?.id_admin);
+    const canAccessOrder =
+      sessionIsSuper ||
+      (Number.isFinite(orderUserId) && orderUserId > 0 && orderUserId === sessionUserId) ||
+      (Number.isFinite(orderAdminId) && orderAdminId > 0 && orderAdminId === sessionUserId);
+    if (!canAccessOrder) {
+      return res.status(403).json({ error: "Orden no pertenece al usuario." });
+    }
+
+    if (isTrue(ordenRow?.pago_verificado)) {
+      return res.json({
+        ok: true,
+        sent: false,
+        skipped: true,
+        reason: "order_already_verified",
+      });
+    }
+    if (isTrue(ordenRow?.orden_cancelada)) {
+      return res.json({
+        ok: true,
+        sent: false,
+        skipped: true,
+        reason: "order_cancelled",
+      });
+    }
+
+    const notifyResult = await notifyManualVerificationToWhatsappAdmin({
+      idOrden,
+      source,
+    });
+    return res.json({
+      ok: true,
+      ...notifyResult,
+    });
+  } catch (err) {
+    console.error("[ordenes/notificar-verificacion-manual] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudo enviar notificación de verificación manual" });
   }
 });
 

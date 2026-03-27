@@ -1,5 +1,12 @@
 import { requireSession, attachLogout, attachLogoHome } from "./session.js";
-import { clearServerSession, supabase, loadCurrentUser, procesarOrden, fetchP2PRate } from "./api.js";
+import {
+  clearServerSession,
+  supabase,
+  loadCurrentUser,
+  procesarOrden,
+  fetchP2PRate,
+  notificarVerificacionManualOrden,
+} from "./api.js";
 
 requireSession();
 attachLogoHome();
@@ -32,12 +39,29 @@ let verifyRunning = false;
 let verifyPending = false;
 let cartMontoBs = null;
 let currentRateBs = null;
+let countdownExpired = false;
+let manualVerificationNotified = false;
 const VERIFY_WINDOW_MS = 3 * 60 * 1000;
+const MANUAL_VERIFICATION_PENDING_MSG =
+  "Pago no detectado, se envió una notificación a un admin para que verifique manualmente";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 const buildEntregaUrl = () => `entregar_servicios.html?id_orden=${encodeURIComponent(orden?.id_orden || idOrden)}`;
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
+};
+
+const notifyManualVerificationAdmin = async (source = "countdown_expired") => {
+  if (manualVerificationNotified) return true;
+  const orderId = Number(orden?.id_orden ?? idOrden);
+  if (!Number.isFinite(orderId) || orderId <= 0) return false;
+  const resp = await notificarVerificacionManualOrden(orderId, { source });
+  if (!resp?.error) {
+    manualVerificationNotified = true;
+    return true;
+  }
+  console.error("notificar verificacion manual error", resp?.error || "error desconocido");
+  return false;
 };
 
 const showVerifiedFallbackView = () => {
@@ -70,6 +94,13 @@ const redirectToEntregaServicios = () => {
 const handlePagoVerificado = () => {
   if (orderProcessed) return;
   orderProcessed = true;
+  countdownExpired = false;
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  if (progressBar) progressBar.style.width = "0%";
+  if (countdownEl) countdownEl.textContent = "0min 0seg";
   setStatus("Pago verificado. Redirigiendo...");
   redirectToEntregaServicios();
 };
@@ -121,6 +152,24 @@ const updateCountdown = () => {
   }
   const elapsed = Date.now() - dt.getTime();
   const remaining = Math.max(0, VERIFY_WINDOW_MS - elapsed);
+  if (remaining <= 0) {
+    if (progressBar) progressBar.style.width = "0%";
+    if (countdownEl) countdownEl.textContent = "0min 0seg";
+    if (!countdownExpired) {
+      countdownExpired = true;
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+      if (!orderProcessed && !orden?.pago_verificado) {
+        setStatus(MANUAL_VERIFICATION_PENDING_MSG);
+        notifyManualVerificationAdmin("countdown_expired").catch((err) => {
+          console.error("notificar admin countdown expired error", err);
+        });
+      }
+    }
+    return;
+  }
   const pct = Math.max(0, Math.min(100, (remaining / VERIFY_WINDOW_MS) * 100));
   if (progressBar) progressBar.style.width = `${pct}%`;
   if (countdownEl) countdownEl.textContent = formatCountdown(remaining);
@@ -252,14 +301,22 @@ const verifyPago = async () => {
   const refStr = String(orden.referencia || "").trim();
   const refDigits = normalizeReferenceDigits(refStr);
   if (refDigits.length < 4) {
-    setStatus("Ingresa los últimos 4 dígitos de referencia.");
+    if (countdownExpired) {
+      setStatus(MANUAL_VERIFICATION_PENDING_MSG);
+    } else {
+      setStatus("Ingresa los últimos 4 dígitos de referencia.");
+    }
     return;
   }
   const last4 = refDigits.slice(-4);
   const totalUsd = Number(orden.total);
   const tasaBs = await refreshCurrentRate();
   if (!Number.isFinite(tasaBs) || !Number.isFinite(totalUsd)) {
-    setStatus("No se pudo obtener la tasa actual o el total.");
+    if (countdownExpired) {
+      setStatus(MANUAL_VERIFICATION_PENDING_MSG);
+    } else {
+      setStatus("No se pudo obtener la tasa actual o el total.");
+    }
     return;
   }
 
@@ -279,6 +336,10 @@ const verifyPago = async () => {
   const pagos = resp.data || [];
   const match = pickBestPagoMatch(pagos, { last4, montoBaseBs });
   if (!match) {
+    if (countdownExpired) {
+      setStatus(MANUAL_VERIFICATION_PENDING_MSG);
+      return;
+    }
     const elapsedMs = getElapsedFromOrdenMs();
     if (elapsedMs == null || elapsedMs >= 30 * 1000) {
       setStatus("Seguimos verificando tu pago...");
@@ -293,7 +354,11 @@ const verifyPago = async () => {
   const sessionUserId = currentUserId || requireSession();
   const pagoMonto = montoNum(match.monto_bs);
   if (!Number.isFinite(pagoMonto)) {
-    setStatus("Seguimos verificando tu pago...");
+    if (countdownExpired) {
+      setStatus(MANUAL_VERIFICATION_PENDING_MSG);
+    } else {
+      setStatus("Seguimos verificando tu pago...");
+    }
     return;
   }
 
@@ -308,7 +373,11 @@ const verifyPago = async () => {
   }
 
   if (!Number.isFinite(montoBaseBs)) {
-    setStatus("No se pudo obtener el monto de la orden.");
+    if (countdownExpired) {
+      setStatus(MANUAL_VERIFICATION_PENDING_MSG);
+    } else {
+      setStatus("No se pudo obtener el monto de la orden.");
+    }
     return;
   }
   const diffReal = Number((pagoMonto - montoBaseBs).toFixed(2));
@@ -538,6 +607,8 @@ async function init() {
       .single();
     if (error) throw error;
     orden = data;
+    countdownExpired = false;
+    manualVerificationNotified = false;
     if (orden?.id_carrito) {
       const { data: cartData, error: cartErr } = await supabase
         .from("carritos")

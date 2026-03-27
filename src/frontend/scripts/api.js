@@ -1243,6 +1243,39 @@ export async function procesarOrden(id_orden, options = {}) {
   }
 }
 
+export async function notificarVerificacionManualOrden(id_orden, options = {}) {
+  await ensureServerSession();
+  const orderId = Number(id_orden);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    return { error: "id_orden inválido" };
+  }
+  try {
+    const payload = { id_orden: orderId };
+    const source = String(options?.source || "").trim();
+    if (source) payload.source = source;
+    const res = await fetch(`${API_BASE}/api/ordenes/notificar-verificacion-manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("ordenes/notificar-verificacion-manual response", res.status, text);
+      return { error: text || "No se pudo notificar verificación manual", status: res.status };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("notificarVerificacionManualOrden error", err);
+    return {
+      error: getFriendlyApiErrorMessage(
+        err,
+        "No se pudo notificar al admin por un problema de conexión.",
+      ),
+    };
+  }
+}
+
 export async function updateCartMontos(monto_usd) {
   await ensureServerSession();
   try {
