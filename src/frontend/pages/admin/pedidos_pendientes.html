@@ -651,7 +651,7 @@
                           ? `<span class="pedido-asignado">Asignado a: ${escapeHtml(getPedidoAsignadoLabel(r))}</span>`
                           : `<button class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
                       }
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.porAcceso ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -835,7 +835,7 @@
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
               .select(
-                "id_plataforma, nombre, color_1, link_pagina, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_acceso, usa_pines, tarjeta_de_regalo",
+                "id_plataforma, nombre, color_1, link_pagina, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, por_pantalla, por_acceso, usa_pines, tarjeta_de_regalo",
               )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
@@ -881,6 +881,10 @@
                   platInfo.por_acceso === true ||
                   platInfo.por_acceso === "true" ||
                   platInfo.por_acceso === "1",
+                por_pantalla:
+                  platInfo.por_pantalla === true ||
+                  platInfo.por_pantalla === "true" ||
+                  platInfo.por_pantalla === "1",
                 usa_pines:
                   platInfo.usa_pines === true ||
                   platInfo.usa_pines === "true" ||
@@ -931,6 +935,7 @@
               cuenta_madre: grouped[platId].cuenta_madre && !isCompleta && !isPlat11,
               completa: isCompleta,
               por_acceso: grouped[platId].por_acceso,
+              por_pantalla: grouped[platId].por_pantalla,
               usa_pines: grouped[platId].usa_pines,
               tarjeta_de_regalo: grouped[platId].tarjeta_de_regalo,
               meses_contratados: v.meses_contratados || 1,
@@ -963,6 +968,7 @@
         const perfil = btn?.dataset?.perfil || "";
         const nPerfil = btn?.dataset?.nperfil || "";
         const porAcceso = btn?.dataset?.poracceso === "true";
+        const porPantalla = btn?.dataset?.porpantalla === "true";
         const usaPines = btn?.dataset?.usapines === "true";
         const existingMadreId = btn?.dataset?.idCuenta || "";
         const existingCuentaMiembroId = btn?.dataset?.idCuentaMiembro || "";
@@ -1352,6 +1358,7 @@
           pin: copyPin,
           fechaCorte: copyFecha,
           porAcceso,
+          porPantalla,
           usaPines,
           ventaPerfil: copyVentaPerfil,
           ventaMiembro: copyVentaMiembro,

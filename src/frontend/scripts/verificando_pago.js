@@ -69,7 +69,7 @@ const showVerifiedFallbackView = () => {
   verifCard.innerHTML = `
     <h2>¡Tu pago fue verificado!</h2>
     <p class="verif-message">Gracias por tu compra</p>
-    <button type="button" class="btn-primary" id="btn-view-services">Ver servicios</button>
+    <button type="button" class="btn-primary btn-view-services" id="btn-view-services">Ver servicios</button>
   `;
   document.querySelector("#btn-view-services")?.addEventListener("click", () => {
     window.location.href = buildEntregaUrl();

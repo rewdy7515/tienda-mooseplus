@@ -494,6 +494,10 @@
         background: #d1fae5;
         color: #065f46;
       }
+      .estado-cell.pendiente {
+        background: #dbeafe;
+        color: #1e40af;
+      }
       .cuenta-estado-pill {
         display: inline-flex;
         align-items: center;
@@ -1032,7 +1036,10 @@
         const cmp = new Date(d.getFullYear(), d.getMonth(), d.getDate());
         return cmp <= today;
       };
-      const getEstadoVenta = ({ suspendido, fecha_corte } = {}) => {
+      const getEstadoVenta = ({ pendiente, suspendido, fecha_corte } = {}) => {
+        if (isTrue(pendiente)) {
+          return { label: "Pendiente", className: "pendiente" };
+        }
         if (suspendido === true) {
           return { label: "Suspendido", className: "suspendido" };
         }
@@ -1514,6 +1521,7 @@
         clienteNombre,
         correo,
         fechaCorte,
+        pendiente,
         userId,
         cuentaId,
         idPerfil,
@@ -1524,7 +1532,10 @@
           currentCanvaFlags || getPlatFlags({}, { fallbackAll: true });
         const showPerfil = flags.showPerfil ?? true;
         const showPerfilId = flags.porPantalla === true;
-        const estadoInfo = getEstadoVenta({ fecha_corte: fechaCorte });
+        const estadoInfo = getEstadoVenta({
+          fecha_corte: fechaCorte,
+          pendiente: isTrue(pendiente),
+        });
         const correoCell = isAdminUser
           ? `<div class="fecha-wrap">
               <span class="correo-copy correo-text" data-clipboard="${escapeHtml(correo || "")}">${escapeHtml(correo || "-")}</span>
@@ -1742,6 +1753,7 @@
           pin: pinVal,
           fechaCorte: fechaVal,
           porAcceso: currentCuentaDetalle?.por_acceso,
+          porPantalla: currentCuentaDetalle?.por_pantalla,
           usaPines: currentCuentaDetalle?.usa_pines,
           ventaPerfil,
           ventaMiembro,
@@ -2890,6 +2902,7 @@
               const estadoInfo = getEstadoVenta({
                 fecha_corte: r.fecha_corte,
                 suspendido: r.suspendido === true,
+                pendiente: r.pendiente === true,
               });
               return `
               <tr>
@@ -2921,6 +2934,7 @@
                       pin: r.pin,
                       fechaCorte: r.fecha_corte,
                       porAcceso: r.por_acceso,
+                      porPantalla: r.por_pantalla,
                       usaPines: r.usa_pines,
                       ventaPerfil: r.venta_perfil,
                       ventaMiembro: r.venta_miembro,
@@ -2978,7 +2992,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido",
+              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido, pendiente",
             )
             .eq("id_usuario", idUsuario);
           if (error) throw error;
@@ -3097,11 +3111,13 @@
               pin: perfilInfo.pin ?? "",
               fecha_corte: v.fecha_corte || "",
               suspendido: v.suspendido === true,
+              pendiente: v.pendiente === true,
               id_precio: v.id_precio ?? null,
               id_plataforma: platId,
               perfil_hogar: perfilInfo.perfil_hogar,
               es_subcuenta: false,
               por_acceso: !!platInfo.por_acceso,
+              por_pantalla: !!platInfo.por_pantalla,
               usa_pines: !!platInfo.usa_pines,
               venta_perfil: cuenta.venta_perfil,
               venta_miembro: cuenta.venta_miembro,
@@ -3280,7 +3296,7 @@
           try {
             const { error } = await supabase
               .from("ventas")
-              .update({ pendiente: true })
+              .update({ pendiente: true, aviso_admin: false })
               .eq("id_venta", ventaId);
             if (error) throw error;
             reactBtn.disabled = true;
@@ -3435,7 +3451,7 @@
           currentCanvaFlags = canvaFlags;
           const { data: ventas, error: vErr } = await supabase
             .from("ventas")
-            .select("id_venta, id_usuario, id_perfil, fecha_corte, suspendido, id_precio, correo_miembro")
+            .select("id_venta, id_usuario, id_perfil, fecha_corte, suspendido, pendiente, id_precio, correo_miembro")
             .eq("id_cuenta", cuenta.id_cuenta)
             .not("id_perfil", "is", null)
             .order("id_venta", { ascending: true });
@@ -3479,6 +3495,7 @@
             const estadoInfo = getEstadoVenta({
               suspendido: v.suspendido === true,
               fecha_corte: v.fecha_corte,
+              pendiente: v.pendiente === true,
             });
             const perfilInfo = perfilesMap[v.id_perfil] || {};
             const cliente = usersMap[v.id_usuario] || "-";
@@ -3644,6 +3661,7 @@
             fecha_corte: v.fecha_corte || "",
             fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
             suspendido: v.suspendido === true,
+            pendiente: v.pendiente === true,
             id_precio: v.id_precio ?? null,
           }));
         }
@@ -3674,6 +3692,7 @@
               fecha_corte: v.fecha_corte || "",
               fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
               suspendido: v.suspendido === true,
+              pendiente: v.pendiente === true,
               id_precio: v.id_precio ?? null,
             }));
             if (!rows.length) {
@@ -3696,6 +3715,7 @@
             fecha_corte: "",
             fecha_corte_fmt: "",
             suspendido: false,
+            pendiente: false,
             id_precio: null,
           });
         }
@@ -3712,6 +3732,7 @@
             fecha_corte: "",
             fecha_corte_fmt: "",
             suspendido: false,
+            pendiente: false,
             id_precio: null,
           });
         }
@@ -3759,6 +3780,7 @@
               const estadoRow = getEstado({
                 suspendido: p.suspendido === true,
                 fecha_corte: fecha,
+                pendiente: p.pendiente === true,
               });
               const copyText = buildServiceCopyText({
                 plataforma: info.plataformaNombre,
@@ -3769,6 +3791,7 @@
                 pin: p.pin,
                 fechaCorte: fecha,
                 porAcceso: info.por_acceso,
+                porPantalla: info.por_pantalla,
                 usaPines: info.usa_pines,
                 ventaPerfil: info.venta_perfil,
                 ventaMiembro: info.venta_miembro,
@@ -3835,6 +3858,7 @@
                 pin: p.pin,
                 fechaCorte: p.fecha_corte,
                 porAcceso: info.por_acceso,
+                porPantalla: info.por_pantalla,
                 usaPines: info.usa_pines,
                 ventaPerfil: info.venta_perfil,
                 ventaMiembro: info.venta_miembro,
@@ -3913,6 +3937,7 @@
                 pin: p.pin,
                 fechaCorte: p.fecha_corte,
                 porAcceso: info.por_acceso,
+                porPantalla: info.por_pantalla,
                 usaPines: info.usa_pines,
                 ventaPerfil: info.venta_perfil,
                 ventaMiembro: info.venta_miembro,
@@ -3978,6 +4003,7 @@
               pin: p.pin,
               fechaCorte: p.fecha_corte,
               porAcceso: info.por_acceso,
+              porPantalla: info.por_pantalla,
               usaPines: info.usa_pines,
               ventaPerfil: info.venta_perfil,
               ventaMiembro: info.venta_miembro,
@@ -4067,7 +4093,7 @@
               ${showClaveCliente ? `<td>${r.clave || "-"}</td>` : ""}
               <td>${r.usuario || "-"}</td>
               <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
-              <td>${r.estado || "-"}</td>
+              <td class="estado-cell ${r.estadoClass || ""}">${r.estado || "-"}</td>
             </tr>`,
             )
             .join("");
@@ -4316,6 +4342,7 @@
                             pin: m.pin,
                             fechaCorte: m.fecha_corte,
                             porAcceso: info.por_acceso,
+                            porPantalla: info.por_pantalla,
                             usaPines: info.usa_pines,
                             ventaPerfil: m.venta_perfil ?? info.venta_perfil,
                             ventaMiembro: m.venta_miembro ?? info.venta_miembro,
@@ -4539,7 +4566,7 @@
           if (perfilIds.length) {
             const { data: ventas, error: ventErr } = await supabase
             .from("ventas")
-            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido, id_precio, correo_miembro, clave_miembro")
+            .select("id_perfil, id_usuario, id_venta, fecha_corte, suspendido, pendiente, id_precio, correo_miembro, clave_miembro")
               .in("id_perfil", perfilIds);
             if (ventErr) throw ventErr;
             ventasMap = (ventas || []).reduce((acc, v) => {
@@ -4548,6 +4575,7 @@
                 id_venta: v.id_venta,
                 fecha_corte: v.fecha_corte,
                 suspendido: v.suspendido,
+                pendiente: v.pendiente,
                 id_precio: v.id_precio,
                 correo_miembro: v.correo_miembro,
                 clave_miembro: v.clave_miembro,
@@ -4584,7 +4612,7 @@
           // Ventas de cuenta completa (sin perfiles)
           if (colMode === "ocupado" || colMode === "miembro") {
             const ventasSelect =
-              "id_venta, id_usuario, fecha_corte, suspendido, id_precio";
+              "id_venta, id_usuario, fecha_corte, suspendido, pendiente, id_precio";
             let ventasCta = [];
             if (cuenta.venta_dominio === true) {
               const queryResults = await Promise.all([
@@ -4695,6 +4723,7 @@
                 fecha_corte_fmt:
                   formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
                 suspendido: ventasMap[p.id_perfil]?.suspendido === true,
+                pendiente: isTrue(ventasMap[p.id_perfil]?.pendiente),
                 reemplazado: enReemplazos,
                 id_precio: ventasMap[p.id_perfil]?.id_precio ?? null,
               };
@@ -4719,6 +4748,7 @@
                   clave: ventaInfo.clave_miembro || "",
                   fecha_corte: ventaInfo.fecha_corte || "",
                   suspendido: ventaInfo.suspendido === true,
+                  pendiente: isTrue(ventaInfo.pendiente),
                   id_precio: ventaInfo.id_precio ?? null,
                 };
               })
@@ -4749,16 +4779,23 @@
                 return acc;
               }, {});
             }
-            plat9Rows = (ventas9 || []).map((v) => ({
-              id_venta: v.id_venta || null,
-              cliente: userNames9[v.id_usuario] || "-",
-              correo: cuenta.correo || "-",
-              clave: cuenta.clave || "-",
-              usuario: v.id_usuario ? `#${v.id_usuario}` : "-",
-              fecha_corte: v.fecha_corte || "",
-              fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
-              estado: v.pendiente ? "Pendiente" : "Activo",
-            }));
+            plat9Rows = (ventas9 || []).map((v) => {
+              const estadoInfo = getEstadoVenta({
+                pendiente: v.pendiente === true,
+                fecha_corte: v.fecha_corte || "",
+              });
+              return {
+                id_venta: v.id_venta || null,
+                cliente: userNames9[v.id_usuario] || "-",
+                correo: cuenta.correo || "-",
+                clave: cuenta.clave || "-",
+                usuario: v.id_usuario ? `#${v.id_usuario}` : "-",
+                fecha_corte: v.fecha_corte || "",
+                fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
+                estado: estadoInfo.label,
+                estadoClass: estadoInfo.className,
+              };
+            });
           }
 
           // Miembros extras por id_cuenta_madre
@@ -5419,7 +5456,7 @@
           try {
             const { error } = await supabase
               .from("ventas")
-              .update({ pendiente: true })
+              .update({ pendiente: true, aviso_admin: false })
               .eq("id_venta", ventaId);
             if (error) throw error;
             if (currentCuentaId) {
@@ -6000,7 +6037,7 @@
               if (fechaCell) fechaCell.textContent = fechaFmt;
               if (estadoCell) {
                 estadoCell.textContent = estadoInfo.label;
-                estadoCell.classList.remove("activo", "vencido", "suspendido");
+                estadoCell.classList.remove("activo", "vencido", "suspendido", "pendiente");
                 if (estadoInfo.className)
                   estadoCell.classList.add(estadoInfo.className);
               }
@@ -6024,6 +6061,7 @@
                 pin: "",
                 fechaCorte: fechaVal,
                 porAcceso: currentCuentaDetalle?.por_acceso,
+                porPantalla: currentCuentaDetalle?.por_pantalla,
                 usaPines: currentCuentaDetalle?.usa_pines,
                 ventaPerfil: currentCuentaDetalle?.venta_perfil,
                 ventaMiembro: currentCuentaDetalle?.venta_miembro,
@@ -7085,6 +7123,7 @@
             pin: dataDestino.pin,
             fechaCorte: fechaCorteVentaRelacionada,
             porAcceso: currentCuentaDetalle.por_acceso,
+            porPantalla: currentCuentaDetalle.por_pantalla,
             usaPines: currentCuentaDetalle.usa_pines,
             ventaPerfil: currentCuentaDetalle.venta_perfil,
             ventaMiembro: currentCuentaDetalle.venta_miembro,
@@ -8421,7 +8460,7 @@
           if (!perfilDestino) {
             await supabase
               .from("ventas")
-              .update({ pendiente: true, reportado: true })
+              .update({ pendiente: true, reportado: true, aviso_admin: false })
               .eq("id_venta", ventaId);
             alert("Sin stock de cuentas madre. Solicitud enviada.");
             return;
@@ -8435,6 +8474,7 @@
               id_perfil: nuevoPerfil,
               pendiente: true,
               reportado: true,
+              aviso_admin: false,
               id_precio: ventaInfo?.id_precio ?? null,
             })
             .eq("id_venta", ventaId);

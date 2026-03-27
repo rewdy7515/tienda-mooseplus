@@ -6,20 +6,60 @@
     <title>Dashboard</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
+      :root {
+        --dash-bg: #f2f5f8;
+        --dash-card: #ffffff;
+        --dash-border: #dbe3ec;
+        --dash-text: #142033;
+        --dash-muted: #5f6d83;
+        --dash-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+        --dash-green: #0f6d3e;
+        --dash-red: #8d1c1c;
+      }
+      body {
+        background: radial-gradient(circle at 92% -16%, #e8f2ff 0%, transparent 42%), var(--dash-bg);
+      }
       .dashboard-page {
+        width: min(100%, 1360px);
+        margin: 0 auto;
+        padding: 14px clamp(10px, 2.2vw, 24px) 22px;
+        box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 16px;
+        color: var(--dash-text);
+      }
+      .dashboard-card-shell,
+      .dashboard-trend,
+      .dashboard-block {
+        background: var(--dash-card);
+        border: 1px solid var(--dash-border);
+        border-radius: 16px;
+        box-shadow: var(--dash-shadow);
+      }
+      .dashboard-card-shell {
+        padding: 14px;
       }
       .dashboard-toolbar {
         display: flex;
         justify-content: space-between;
-        align-items: flex-end;
+        align-items: flex-start;
+        gap: 14px;
         flex-wrap: wrap;
-        gap: 12px;
       }
-      .dashboard-toolbar h2 {
+      .dashboard-title-group h2 {
         margin: 0;
+        letter-spacing: -0.01em;
+      }
+      .dashboard-toolbar-subtitle {
+        margin: 6px 0 0;
+        font-size: 13px;
+        color: var(--dash-muted);
+      }
+      #dashboard-status {
+        margin: 8px 0 0;
+        font-size: 12px;
+        color: #35445a;
       }
       .dashboard-controls {
         display: flex;
@@ -34,89 +74,96 @@
       }
       .dashboard-control label {
         font-size: 12px;
-        color: #6b7280;
+        color: var(--dash-muted);
       }
       .dashboard-control input,
       .dashboard-control select {
         min-width: 170px;
       }
-      .dashboard-kpis {
+      .dashboard-kpi-layout {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .dashboard-kpis-primary,
+      .dashboard-kpis-secondary {
         display: grid;
         grid-template-columns: repeat(12, minmax(0, 1fr));
         gap: 10px;
       }
       .dashboard-kpi {
         background: #fff;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 10px 12px;
-        grid-column: span 3;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 12px;
       }
       .dashboard-kpi-label {
         margin: 0;
-        color: #6b7280;
+        color: var(--dash-muted);
         font-size: 12px;
       }
       .dashboard-kpi-value {
         margin: 6px 0 0;
         font-size: 22px;
-        font-weight: 700;
+        line-height: 1.1;
+        font-weight: 800;
+        letter-spacing: -0.01em;
       }
       .dashboard-kpi-compare {
-        margin: 6px 0 0;
+        margin: 7px 0 0;
         font-size: 12px;
-        font-weight: 600;
-        color: #6b7280;
+        font-weight: 700;
+        color: var(--dash-muted);
       }
       .dashboard-kpi-compare.up {
-        color: #0f6d3e;
+        color: var(--dash-green);
       }
       .dashboard-kpi-compare.down {
-        color: #8d1c1c;
+        color: var(--dash-red);
       }
       .dashboard-kpi-compare.same {
-        color: #6b7280;
-      }
-      .dashboard-kpi.neto {
-        grid-column: span 6;
-        background: #eff5ff;
-        border-color: #dbe7ff;
-      }
-      .dashboard-kpi.neto .dashboard-kpi-label {
-        font-size: 13px;
-        font-weight: 600;
-        color: #42546f;
-      }
-      .dashboard-kpi.neto .dashboard-kpi-value {
-        font-size: 36px;
-        line-height: 1.05;
-      }
-      .dashboard-kpi.ingresos,
-      .dashboard-kpi.gastos {
-        grid-column: span 3;
-      }
-      .dashboard-kpi.gift {
-        grid-column: span 12;
+        color: var(--dash-muted);
       }
       .dashboard-kpi-value.pos {
-        color: #0f6d3e;
+        color: var(--dash-green);
       }
       .dashboard-kpi-value.neg {
-        color: #8d1c1c;
+        color: var(--dash-red);
       }
-      .dashboard-grid {
-        display: grid;
-        grid-template-columns: 1fr;
+      .dashboard-kpis-primary .dashboard-kpi.neto {
+        grid-column: span 6;
+        background: #ffffff;
+        border-color: #d5e2fb;
+      }
+      .dashboard-kpis-primary .dashboard-kpi.neto .dashboard-kpi-label {
+        font-size: 13px;
+        font-weight: 700;
+        color: #42546f;
+      }
+      .dashboard-kpis-primary .dashboard-kpi.neto .dashboard-kpi-value {
+        font-size: 38px;
+      }
+      .dashboard-kpis-primary .dashboard-kpi.ingresos,
+      .dashboard-kpis-primary .dashboard-kpi.gastos {
+        grid-column: span 3;
+      }
+      .dashboard-kpis-secondary .dashboard-kpi {
+        grid-column: span 2;
+        min-height: 108px;
+      }
+      .dashboard-kpis-secondary .dashboard-kpi.gift {
+        grid-column: span 4;
+      }
+      .dashboard-overview {
+        display: flex;
+        flex-direction: column;
         gap: 12px;
       }
       .dashboard-trend {
-        background: #fff;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 12px;
+        padding: 14px;
       }
       .dashboard-trend h3 {
-        margin: 0 0 6px;
+        margin: 0 0 8px;
       }
       .dashboard-trend-kpi {
         display: flex;
@@ -126,17 +173,16 @@
       }
       .dashboard-trend-kpi-label {
         margin: 0;
-        color: #6b7280;
+        color: var(--dash-muted);
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 700;
       }
       .dashboard-trend-kpi-value {
         margin: 0;
         font-size: 44px;
         line-height: 1.02;
         font-weight: 800;
-        color: #111827;
-        letter-spacing: -0.03em;
+        color: #101828;
       }
       .dashboard-trend-kpi-compare {
         margin: 2px 0 0;
@@ -144,13 +190,13 @@
         font-weight: 700;
       }
       .dashboard-trend-kpi-compare.up {
-        color: #0f6d3e;
+        color: var(--dash-green);
       }
       .dashboard-trend-kpi-compare.down {
-        color: #8d1c1c;
+        color: var(--dash-red);
       }
       .dashboard-trend-kpi-compare.same {
-        color: #6b7280;
+        color: var(--dash-muted);
       }
       .dashboard-trend-legend {
         display: flex;
@@ -158,14 +204,14 @@
         align-items: center;
         flex-wrap: wrap;
         margin: 0 0 8px;
-        color: #6b7280;
+        color: var(--dash-muted);
         font-size: 12px;
       }
       .dashboard-trend-summary {
         margin: 0 0 10px;
-        color: #6b7280;
+        color: var(--dash-muted);
         font-size: 13px;
-        line-height: 1.55;
+        line-height: 1.5;
       }
       .dashboard-trend-dot {
         width: 10px;
@@ -182,59 +228,74 @@
       }
       .dashboard-trend-chart {
         width: 100%;
-        height: 240px;
-        border-radius: 10px;
-        background: linear-gradient(180deg, #f9fafb 0%, #ffffff 100%);
-        border: 1px solid #f1f5f9;
-      }
-      .dashboard-trend-empty {
-        color: #6b7280;
-        margin: 8px 0 0;
-      }
-      .dashboard-line-chart {
-        width: 100%;
-        height: 210px;
+        height: 250px;
         border-radius: 10px;
         background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
         border: 1px solid #edf2f7;
-        margin-top: 10px;
       }
-      .dashboard-line-chart-empty {
-        color: #6b7280;
+      .dashboard-trend-empty {
+        color: var(--dash-muted);
         margin: 8px 0 0;
       }
       .dashboard-block {
-        background: #fff;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 12px;
+        padding: 14px;
       }
       .dashboard-block h3 {
         margin: 0 0 8px;
       }
-      .dashboard-block .status {
-        margin: 0;
-      }
-      .dashboard-empty {
-        color: #6b7280;
-        margin: 8px 0 0;
-      }
-      .dashboard-metric-pos {
-        color: #0f6d3e;
-        font-weight: 600;
-      }
-      .dashboard-metric-neg {
-        color: #8d1c1c;
-        font-weight: 600;
-      }
       .dashboard-mini-note {
         margin: 0;
-        font-size: 12px;
-        color: #6b7280;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--dash-muted);
       }
       .dashboard-extra-disclaimer {
-        margin-top: 6px;
-        color: #6b7280;
+        margin-top: 8px;
+        color: var(--dash-muted);
+      }
+      .dashboard-empty,
+      .dashboard-bars-empty,
+      .dashboard-vertical-chart-empty,
+      .dashboard-line-chart-empty {
+        color: var(--dash-muted);
+      }
+      .dashboard-metric-pos {
+        color: var(--dash-green);
+        font-weight: 700;
+      }
+      .dashboard-metric-neg {
+        color: var(--dash-red);
+        font-weight: 700;
+      }
+      .dashboard-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .dashboard-section-head h3 {
+        margin: 0;
+      }
+      .dashboard-section-note {
+        margin: 4px 0 0;
+        color: var(--dash-muted);
+        font-size: 13px;
+      }
+      .dashboard-platform-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .dashboard-platform-span-2 {
+        grid-column: span 2;
+      }
+      .dashboard-web-grid,
+      .dashboard-auth-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .dashboard-auth-grid .dashboard-block:first-child {
+        grid-column: span 2;
       }
       .dashboard-bars {
         display: flex;
@@ -244,7 +305,7 @@
       }
       .dashboard-bar-row {
         display: grid;
-        grid-template-columns: minmax(120px, 170px) 1fr auto;
+        grid-template-columns: minmax(120px, 190px) 1fr auto;
         align-items: center;
         gap: 10px;
       }
@@ -276,17 +337,11 @@
         min-width: 24px;
         text-align: right;
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 700;
         color: #111827;
       }
-      .dashboard-bars-empty {
-        color: #6b7280;
-        margin: 0 0 10px;
-      }
       .dashboard-subchart {
-        margin: 14px 0 10px;
-        padding-top: 12px;
-        border-top: 1px solid #e5e7eb;
+        margin: 0;
       }
       .dashboard-subchart-header {
         display: flex;
@@ -300,12 +355,11 @@
         margin: 0;
         font-size: 14px;
         font-weight: 700;
-        color: #111827;
       }
       .dashboard-subchart-note {
         margin: 4px 0 0;
         font-size: 12px;
-        color: #6b7280;
+        color: var(--dash-muted);
       }
       .dashboard-subchart-control {
         display: flex;
@@ -315,21 +369,21 @@
       }
       .dashboard-subchart-control label {
         font-size: 12px;
-        color: #6b7280;
+        color: var(--dash-muted);
       }
       .dashboard-vertical-chart {
         display: flex;
         align-items: stretch;
         gap: 10px;
-        min-height: 250px;
+        min-height: 252px;
         padding: 16px 14px 10px;
-        border: 1px solid #eef2f7;
+        border: 1px solid #edf2f7;
         border-radius: 12px;
         background:
           repeating-linear-gradient(
             to top,
-            rgba(148, 163, 184, 0.14) 0,
-            rgba(148, 163, 184, 0.14) 1px,
+            rgba(148, 163, 184, 0.13) 0,
+            rgba(148, 163, 184, 0.13) 1px,
             transparent 1px,
             transparent 24px
           ),
@@ -337,14 +391,10 @@
         overflow-x: auto;
         overflow-y: hidden;
       }
-      .dashboard-vertical-chart-empty {
-        color: #6b7280;
-        margin: 0;
-      }
       .dashboard-vertical-bar {
         flex: 0 0 64px;
         display: grid;
-        grid-template-rows: 20px 160px 32px;
+        grid-template-rows: 20px 160px 34px;
         align-items: center;
         gap: 8px;
         min-height: 220px;
@@ -353,7 +403,6 @@
         min-height: 20px;
         font-size: 12px;
         font-weight: 700;
-        color: #111827;
       }
       .dashboard-vertical-bar-fill-wrap {
         position: relative;
@@ -362,7 +411,6 @@
         display: flex;
         align-items: flex-end;
         justify-content: center;
-        padding-bottom: 0;
       }
       .dashboard-vertical-bar-fill-wrap::after {
         content: "";
@@ -386,33 +434,156 @@
         line-height: 1.2;
         color: #4b5563;
         word-break: break-word;
-        align-self: start;
       }
-      @media (max-width: 1024px) {
-        .dashboard-kpi {
+      .dashboard-line-chart {
+        width: 100%;
+        height: 210px;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+        border: 1px solid #edf2f7;
+        margin-top: 10px;
+      }
+      .dashboard-auth-pie-wrap {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 10px 0 6px;
+        padding: 10px;
+        border: 1px solid #edf2f7;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+      }
+      .dashboard-auth-pie {
+        width: 180px;
+        height: 180px;
+        display: block;
+      }
+      .dashboard-auth-pie-legend {
+        display: grid;
+        gap: 8px;
+        min-width: 220px;
+      }
+      .dashboard-auth-pie-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12px;
+        color: #334155;
+      }
+      .dashboard-auth-pie-item-main {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .dashboard-auth-pie-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        display: inline-block;
+      }
+      .dashboard-auth-pie-dot.auth {
+        background: #0f766e;
+      }
+      .dashboard-auth-pie-dot.noauth {
+        background: #f59e0b;
+      }
+      .dashboard-auth-pie-value {
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .dashboard-block .cuenta-table-wrap {
+        border: 1px solid #edf2f7;
+        border-radius: 12px;
+        overflow: auto;
+        max-height: 360px;
+      }
+      .dashboard-block .table-base {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 520px;
+        background: #fff;
+      }
+      .dashboard-block .table-base th,
+      .dashboard-block .table-base td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #edf2f7;
+        text-align: left;
+        font-size: 13px;
+      }
+      .dashboard-block .table-base th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #f8fbff;
+        color: #455670;
+        font-weight: 700;
+      }
+      .dashboard-block .table-base tbody tr:hover {
+        background: #f8fbff;
+      }
+      @media (max-width: 1200px) {
+        .dashboard-kpis-secondary .dashboard-kpi {
+          grid-column: span 3;
+        }
+        .dashboard-kpis-secondary .dashboard-kpi.gift {
           grid-column: span 6;
         }
-        .dashboard-kpi.neto {
+      }
+      @media (max-width: 1024px) {
+        .dashboard-kpis-primary .dashboard-kpi.neto {
+          grid-column: span 12;
+        }
+        .dashboard-kpis-primary .dashboard-kpi.ingresos,
+        .dashboard-kpis-primary .dashboard-kpi.gastos {
+          grid-column: span 6;
+        }
+        .dashboard-kpis-secondary .dashboard-kpi {
+          grid-column: span 4;
+        }
+        .dashboard-kpis-secondary .dashboard-kpi.gift {
           grid-column: span 12;
         }
       }
-      @media (max-width: 720px) {
-        .dashboard-control input,
-        .dashboard-control select {
-          min-width: 140px;
-        }
-        .dashboard-kpis {
+      @media (max-width: 860px) {
+        .dashboard-platform-grid,
+        .dashboard-web-grid,
+        .dashboard-auth-grid {
           grid-template-columns: 1fr;
         }
-        .dashboard-kpi,
-        .dashboard-kpi.neto,
-        .dashboard-kpi.ingresos,
-        .dashboard-kpi.gastos,
-        .dashboard-kpi.gift {
+        .dashboard-platform-span-2,
+        .dashboard-auth-grid .dashboard-block:first-child {
           grid-column: span 1;
         }
-        .dashboard-kpi.neto .dashboard-kpi-value {
-          font-size: 30px;
+      }
+      @media (max-width: 720px) {
+        .dashboard-page {
+          padding: 10px 10px 16px;
+        }
+        .dashboard-controls {
+          width: 100%;
+        }
+        .dashboard-control {
+          flex: 1 1 100%;
+        }
+        .dashboard-control input,
+        .dashboard-control select {
+          min-width: 100%;
+        }
+        .dashboard-kpis-primary,
+        .dashboard-kpis-secondary {
+          grid-template-columns: 1fr;
+        }
+        .dashboard-kpis-primary .dashboard-kpi.neto,
+        .dashboard-kpis-primary .dashboard-kpi.ingresos,
+        .dashboard-kpis-primary .dashboard-kpi.gastos,
+        .dashboard-kpis-secondary .dashboard-kpi,
+        .dashboard-kpis-secondary .dashboard-kpi.gift {
+          grid-column: span 1;
+        }
+        .dashboard-kpis-primary .dashboard-kpi.neto .dashboard-kpi-value {
+          font-size: 32px;
         }
         .dashboard-trend-kpi-value {
           font-size: 34px;
@@ -420,10 +591,6 @@
         .dashboard-bar-row:not(.compact) {
           grid-template-columns: 1fr;
           gap: 4px;
-        }
-        .dashboard-bar-row.compact {
-          grid-template-columns: minmax(64px, 82px) 1fr auto;
-          gap: 8px;
         }
         .dashboard-bar-value {
           text-align: left;
@@ -434,13 +601,17 @@
         .dashboard-subchart-control {
           min-width: 100%;
         }
-        .dashboard-vertical-chart {
-          gap: 8px;
-          padding: 14px 10px 10px;
+        .dashboard-auth-pie-wrap {
+          padding: 8px;
+          gap: 10px;
         }
-        .dashboard-vertical-bar {
-          flex-basis: 54px;
-          grid-template-rows: 20px 160px 36px;
+        .dashboard-auth-pie {
+          width: 160px;
+          height: 160px;
+          margin: 0 auto;
+        }
+        .dashboard-auth-pie-legend {
+          min-width: 100%;
         }
       }
     </style>
@@ -450,249 +621,293 @@
     <script src="../../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas dashboard-page">
-      <div class="dashboard-toolbar">
-        <h2>Dashboard mensual</h2>
-        <div class="dashboard-controls">
-          <div class="dashboard-control">
-            <label for="month-filter">Mes</label>
-            <select id="month-filter"></select>
+      <section class="dashboard-card-shell">
+        <div class="dashboard-toolbar">
+          <div class="dashboard-title-group">
+            <h2>Dashboard mensual</h2>
+            <p class="dashboard-toolbar-subtitle">Vista ejecutiva de métricas y comportamiento operativo por periodo.</p>
+            <p class="status" id="dashboard-status">Cargando...</p>
           </div>
-          <button type="button" class="btn-primary" id="btn-dashboard-load">Aplicar</button>
-          <button type="button" class="btn-outline" id="btn-dashboard-back">Volver</button>
+          <div class="dashboard-controls">
+            <div class="dashboard-control">
+              <label for="month-filter">Mes</label>
+              <select id="month-filter"></select>
+            </div>
+            <button type="button" class="btn-primary" id="btn-dashboard-load">Aplicar</button>
+            <button type="button" class="btn-outline" id="btn-dashboard-back">Volver</button>
+          </div>
         </div>
-      </div>
-
-      <p class="status" id="dashboard-status">Cargando...</p>
-
-      <section class="dashboard-kpis" id="dashboard-kpis">
-        <article class="dashboard-kpi neto">
-          <p class="dashboard-kpi-label">Utilidad neta</p>
-          <p class="dashboard-kpi-value" id="kpi-neto">$0.00</p>
-          <p class="dashboard-kpi-compare" id="cmp-neto">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi ingresos">
-          <p class="dashboard-kpi-label">Ingresos</p>
-          <p class="dashboard-kpi-value" id="kpi-ingresos">$0.00</p>
-          <p class="dashboard-kpi-compare" id="cmp-ingresos">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi gastos">
-          <p class="dashboard-kpi-label">Gastos (incluye tarjetas)</p>
-          <p class="dashboard-kpi-value" id="kpi-gastos">$0.00</p>
-          <p class="dashboard-kpi-compare" id="cmp-gastos">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Margen neto</p>
-          <p class="dashboard-kpi-value" id="kpi-margen">0%</p>
-          <p class="dashboard-kpi-compare" id="cmp-margen">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Movimientos</p>
-          <p class="dashboard-kpi-value" id="kpi-movs">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-movs">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Clientes activos</p>
-          <p class="dashboard-kpi-value" id="kpi-clientes-activos">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-clientes-activos">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Ventas activas</p>
-          <p class="dashboard-kpi-value" id="kpi-ventas-activas">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-ventas-activas">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Usuarios web con auth</p>
-          <p class="dashboard-kpi-value" id="kpi-auth-web-total">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-auth-web-total">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Clientes web con auth</p>
-          <p class="dashboard-kpi-value" id="kpi-auth-web-clientes">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-auth-web-clientes">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Vendedores web con auth</p>
-          <p class="dashboard-kpi-value" id="kpi-auth-web-vendedores">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-auth-web-vendedores">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Renovaciones del mes</p>
-          <p class="dashboard-kpi-value" id="kpi-renov-count">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-renov-count">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Ventas nuevas del mes</p>
-          <p class="dashboard-kpi-value" id="kpi-nuevas-count">0</p>
-          <p class="dashboard-kpi-compare" id="cmp-nuevas-count">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Renovaciones cliente (ingreso)</p>
-          <p class="dashboard-kpi-value" id="kpi-renov-ing">$0.00</p>
-          <p class="dashboard-kpi-compare" id="cmp-renov-ing">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi">
-          <p class="dashboard-kpi-label">Renovaciones proveedor (gasto)</p>
-          <p class="dashboard-kpi-value" id="kpi-renov-gast">$0.00</p>
-          <p class="dashboard-kpi-compare" id="cmp-renov-gast">= Sin cambio vs mes anterior</p>
-        </article>
-        <article class="dashboard-kpi gift">
-          <p class="dashboard-kpi-label">Gasto en tarjetas no venta</p>
-          <p class="dashboard-kpi-value" id="kpi-gift">$0.00</p>
-          <p class="dashboard-kpi-compare" id="cmp-gift">= Sin cambio vs mes anterior</p>
-        </article>
       </section>
 
-      <section class="dashboard-trend">
-        <h3>Ventas del mes vs mes anterior</h3>
-        <div class="dashboard-trend-kpi">
-          <p class="dashboard-trend-kpi-label">Ventas acumuladas del mes</p>
-          <p id="ventas-trend-kpi-value" class="dashboard-trend-kpi-value">0</p>
-          <p id="ventas-trend-kpi-compare" class="dashboard-trend-kpi-compare">= Sin cambio vs mes anterior</p>
+      <section class="dashboard-kpi-layout" id="dashboard-kpis">
+        <div class="dashboard-kpis-primary">
+          <article class="dashboard-kpi neto">
+            <p class="dashboard-kpi-label">Utilidad neta</p>
+            <p class="dashboard-kpi-value" id="kpi-neto">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-neto">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi ingresos">
+            <p class="dashboard-kpi-label">Ingresos</p>
+            <p class="dashboard-kpi-value" id="kpi-ingresos">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-ingresos">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi gastos">
+            <p class="dashboard-kpi-label">Gastos (incluye tarjetas)</p>
+            <p class="dashboard-kpi-value" id="kpi-gastos">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-gastos">= Sin cambio vs mes anterior</p>
+          </article>
         </div>
-        <p class="dashboard-trend-legend">
-          <span><span class="dashboard-trend-dot current"></span>Mes actual</span>
-          <span><span class="dashboard-trend-dot previous"></span>Mes anterior</span>
-        </p>
-        <p id="ventas-trend-summary" class="dashboard-trend-summary">-</p>
-        <svg id="ventas-trend-chart" class="dashboard-trend-chart" viewBox="0 0 1000 260" preserveAspectRatio="none"></svg>
-        <p id="ventas-trend-empty" class="dashboard-trend-empty hidden">Sin ventas para graficar.</p>
+        <div class="dashboard-kpis-secondary">
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Margen neto</p>
+            <p class="dashboard-kpi-value" id="kpi-margen">0%</p>
+            <p class="dashboard-kpi-compare" id="cmp-margen">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Movimientos</p>
+            <p class="dashboard-kpi-value" id="kpi-movs">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-movs">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Clientes activos</p>
+            <p class="dashboard-kpi-value" id="kpi-clientes-activos">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-clientes-activos">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Ventas activas</p>
+            <p class="dashboard-kpi-value" id="kpi-ventas-activas">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-ventas-activas">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Usuarios web con auth</p>
+            <p class="dashboard-kpi-value" id="kpi-auth-web-total">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-auth-web-total">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Clientes web con auth</p>
+            <p class="dashboard-kpi-value" id="kpi-auth-web-clientes">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-auth-web-clientes">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Vendedores web con auth</p>
+            <p class="dashboard-kpi-value" id="kpi-auth-web-vendedores">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-auth-web-vendedores">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Renovaciones del mes</p>
+            <p class="dashboard-kpi-value" id="kpi-renov-count">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-renov-count">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Ventas nuevas del mes</p>
+            <p class="dashboard-kpi-value" id="kpi-nuevas-count">0</p>
+            <p class="dashboard-kpi-compare" id="cmp-nuevas-count">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Renovaciones cliente (ingreso)</p>
+            <p class="dashboard-kpi-value" id="kpi-renov-ing">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-renov-ing">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Renovaciones proveedor (gasto)</p>
+            <p class="dashboard-kpi-value" id="kpi-renov-gast">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-renov-gast">= Sin cambio vs mes anterior</p>
+          </article>
+          <article class="dashboard-kpi gift">
+            <p class="dashboard-kpi-label">Gasto en tarjetas no venta</p>
+            <p class="dashboard-kpi-value" id="kpi-gift">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-gift">= Sin cambio vs mes anterior</p>
+          </article>
+        </div>
       </section>
 
-      <div class="dashboard-grid">
-        <section class="dashboard-block">
+      <section class="dashboard-overview">
+        <article class="dashboard-block">
           <h3>Resumen del mes</h3>
           <p class="dashboard-mini-note" id="summary-note">-</p>
           <p class="dashboard-mini-note dashboard-extra-disclaimer hidden" id="extra-note"></p>
-        </section>
-
-        <section class="dashboard-block">
-          <h3>Registros web con auth</h3>
-          <p class="dashboard-mini-note" id="auth-web-note">-</p>
-          <div id="chart-auth-web-mensual" class="dashboard-vertical-chart"></div>
-          <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-auth-web-mensual">
-            Sin registros con auth para graficar.
-          </p>
-          <p class="dashboard-mini-note" id="auth-web-daily-note">-</p>
-          <svg
-            id="chart-auth-web-diario"
-            class="dashboard-line-chart hidden"
-            viewBox="0 0 1000 240"
-            preserveAspectRatio="none"
-          ></svg>
-          <p class="dashboard-line-chart-empty hidden" id="empty-chart-auth-web-diario">
-            Sin registros diarios con auth para el mes actual.
-          </p>
-        </section>
-
-        <section class="dashboard-block">
-          <h3>Tráfico web por día de la semana</h3>
-          <p class="dashboard-mini-note" id="trafico-semana-note">-</p>
-          <div id="chart-trafico-semana" class="dashboard-vertical-chart"></div>
-          <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-trafico-semana">
-            Sin tráfico web para este periodo.
-          </p>
-        </section>
-
-        <section class="dashboard-block">
-          <h3>Tráfico web por hora del día</h3>
-          <p class="dashboard-mini-note" id="trafico-hora-note">-</p>
-          <div id="chart-trafico-hora" class="dashboard-bars"></div>
-          <p class="dashboard-bars-empty hidden" id="empty-chart-trafico-hora">
-            Sin tráfico web para este periodo.
-          </p>
-        </section>
-
-        <section class="dashboard-block">
-          <h3>Por plataforma</h3>
-          <div class="cuenta-table-wrap">
-            <table class="table-base" id="table-plataformas">
-              <thead>
-                <tr>
-                  <th>Plataforma</th>
-                  <th>Ingresos</th>
-                  <th>Gastos</th>
-                  <th>Neto</th>
-                  <th>Mov.</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+        </article>
+        <article class="dashboard-trend">
+          <h3>Ventas del mes vs mes anterior</h3>
+          <div class="dashboard-trend-kpi">
+            <p class="dashboard-trend-kpi-label">Ventas acumuladas del mes</p>
+            <p id="ventas-trend-kpi-value" class="dashboard-trend-kpi-value">0</p>
+            <p id="ventas-trend-kpi-compare" class="dashboard-trend-kpi-compare">= Sin cambio vs mes anterior</p>
           </div>
-          <p class="dashboard-empty hidden" id="empty-plataformas">Sin datos para este mes.</p>
-        </section>
-
-        <section class="dashboard-block">
-          <h3>Pagos a proveedores</h3>
-          <div class="cuenta-table-wrap">
-            <table class="table-base" id="table-proveedores">
-              <thead>
-                <tr>
-                  <th>Proveedor</th>
-                  <th>Gasto total</th>
-                  <th>Renovaciones</th>
-                  <th>Mov.</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="dashboard-empty hidden" id="empty-proveedores">Sin gastos de proveedores en este mes.</p>
-        </section>
-
-        <section class="dashboard-block">
-          <h3>Ventas activas por plataforma</h3>
-          <div id="chart-activas-plataforma" class="dashboard-bars"></div>
-          <p class="dashboard-bars-empty hidden" id="empty-chart-activas-plataforma">
-            Sin ventas activas para este periodo.
+          <p class="dashboard-trend-legend">
+            <span><span class="dashboard-trend-dot current"></span>Mes actual</span>
+            <span><span class="dashboard-trend-dot previous"></span>Mes anterior</span>
           </p>
-          <div class="dashboard-subchart">
-            <div class="dashboard-subchart-header">
-              <div>
-                <p class="dashboard-subchart-title">Ventas por mes de la plataforma seleccionada</p>
-                <p class="dashboard-subchart-note">Conteo mensual de ventas al cliente registradas en historial.</p>
-              </div>
-              <div class="dashboard-subchart-control">
-                <label for="platform-monthly-select">Plataforma</label>
-                <select id="platform-monthly-select" class="form-input"></select>
-              </div>
-            </div>
-            <div id="platform-monthly-chart" class="dashboard-vertical-chart"></div>
-            <p class="dashboard-vertical-chart-empty hidden" id="empty-platform-monthly-chart">
-              Sin ventas para graficar en esta plataforma.
+          <p id="ventas-trend-summary" class="dashboard-trend-summary">-</p>
+          <svg id="ventas-trend-chart" class="dashboard-trend-chart" viewBox="0 0 1000 260" preserveAspectRatio="none"></svg>
+          <p id="ventas-trend-empty" class="dashboard-trend-empty hidden">Sin ventas para graficar.</p>
+        </article>
+      </section>
+
+      <section class="dashboard-section dashboard-card-shell">
+        <div class="dashboard-section-head">
+          <h3>Desempeño por plataforma</h3>
+          <p class="dashboard-section-note">Distribución de ventas activas, evolución mensual y tablas operativas por plataforma.</p>
+        </div>
+        <div class="dashboard-platform-grid">
+          <article class="dashboard-block">
+            <h3>Ventas activas por plataforma</h3>
+            <div id="chart-activas-plataforma" class="dashboard-bars"></div>
+            <p class="dashboard-bars-empty hidden" id="empty-chart-activas-plataforma">
+              Sin ventas activas para este periodo.
             </p>
-          </div>
-          <div class="cuenta-table-wrap">
-            <table class="table-base" id="table-activas-plataforma">
-              <thead>
-                <tr>
-                  <th>Plataforma</th>
-                  <th>Ventas activas</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="dashboard-empty hidden" id="empty-activas-plataforma">Sin ventas activas para este periodo.</p>
-        </section>
+            <div class="cuenta-table-wrap">
+              <table class="table-base" id="table-activas-plataforma">
+                <thead>
+                  <tr>
+                    <th>Plataforma</th>
+                    <th>Ventas activas</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="dashboard-empty hidden" id="empty-activas-plataforma">Sin ventas activas para este periodo.</p>
+          </article>
 
-        <section class="dashboard-block">
-          <h3>Flujo diario</h3>
-          <div class="cuenta-table-wrap">
-            <table class="table-base" id="table-diario">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Ingresos</th>
-                  <th>Gastos</th>
-                  <th>Neto</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <p class="dashboard-empty hidden" id="empty-diario">Sin movimientos diarios para este mes.</p>
-        </section>
-      </div>
+          <article class="dashboard-block">
+            <h3>Ventas por mes de la plataforma seleccionada</h3>
+            <div class="dashboard-subchart">
+              <div class="dashboard-subchart-header">
+                <div>
+                  <p class="dashboard-subchart-note">Conteo mensual de ventas al cliente registradas en historial.</p>
+                </div>
+                <div class="dashboard-subchart-control">
+                  <label for="platform-monthly-select">Plataforma</label>
+                  <select id="platform-monthly-select" class="form-input"></select>
+                </div>
+              </div>
+              <div id="platform-monthly-chart" class="dashboard-vertical-chart"></div>
+              <p class="dashboard-vertical-chart-empty hidden" id="empty-platform-monthly-chart">
+                Sin ventas para graficar en esta plataforma.
+              </p>
+            </div>
+          </article>
+
+          <article class="dashboard-block dashboard-platform-span-2">
+            <h3>Por plataforma</h3>
+            <div class="cuenta-table-wrap">
+              <table class="table-base" id="table-plataformas">
+                <thead>
+                  <tr>
+                    <th>Plataforma</th>
+                    <th>Ingresos</th>
+                    <th>Gastos</th>
+                    <th>Neto</th>
+                    <th>Mov.</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="dashboard-empty hidden" id="empty-plataformas">Sin datos para este mes.</p>
+          </article>
+
+          <article class="dashboard-block">
+            <h3>Pagos a proveedores</h3>
+            <div class="cuenta-table-wrap">
+              <table class="table-base" id="table-proveedores">
+                <thead>
+                  <tr>
+                    <th>Proveedor</th>
+                    <th>Gasto total</th>
+                    <th>Renovaciones</th>
+                    <th>Mov.</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="dashboard-empty hidden" id="empty-proveedores">Sin gastos de proveedores en este mes.</p>
+          </article>
+
+          <article class="dashboard-block">
+            <h3>Flujo diario</h3>
+            <div class="cuenta-table-wrap">
+              <table class="table-base" id="table-diario">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Ingresos</th>
+                    <th>Gastos</th>
+                    <th>Neto</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="dashboard-empty hidden" id="empty-diario">Sin movimientos diarios para este mes.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="dashboard-section dashboard-card-shell">
+        <div class="dashboard-section-head">
+          <h3>Analítica de tráfico web</h3>
+          <p class="dashboard-section-note">Vista conjunta del comportamiento de visitas por día de semana y hora del día.</p>
+        </div>
+        <div class="dashboard-web-grid">
+          <article class="dashboard-block">
+            <h3>Tráfico web por día de la semana</h3>
+            <p class="dashboard-mini-note" id="trafico-semana-note">-</p>
+            <div id="chart-trafico-semana" class="dashboard-bars"></div>
+            <p class="dashboard-bars-empty hidden" id="empty-chart-trafico-semana">
+              Sin tráfico web para este periodo.
+            </p>
+          </article>
+
+          <article class="dashboard-block">
+            <h3>Tráfico web por hora del día</h3>
+            <p class="dashboard-mini-note" id="trafico-hora-note">-</p>
+            <div id="chart-trafico-hora" class="dashboard-bars"></div>
+            <p class="dashboard-bars-empty hidden" id="empty-chart-trafico-hora">
+              Sin tráfico web para este periodo.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="dashboard-section dashboard-card-shell">
+        <div class="dashboard-section-head">
+          <h3>Registros web con auth</h3>
+          <p class="dashboard-section-note">Seguimiento de usuarios autenticados por mes y comportamiento diario del periodo activo.</p>
+        </div>
+        <div class="dashboard-auth-grid">
+          <article class="dashboard-block">
+            <p class="dashboard-mini-note" id="auth-web-note">-</p>
+            <div class="dashboard-auth-pie-wrap">
+              <svg
+                id="chart-auth-web-activos-pie"
+                class="dashboard-auth-pie"
+                viewBox="0 0 220 220"
+                preserveAspectRatio="xMidYMid meet"
+              ></svg>
+              <div id="auth-web-activos-pie-legend" class="dashboard-auth-pie-legend"></div>
+            </div>
+            <p class="dashboard-mini-note" id="auth-web-activos-pie-note">-</p>
+            <div id="chart-auth-web-mensual" class="dashboard-vertical-chart"></div>
+            <p class="dashboard-vertical-chart-empty hidden" id="empty-chart-auth-web-mensual">
+              Sin registros con auth para graficar.
+            </p>
+            <p class="dashboard-mini-note" id="auth-web-daily-note">-</p>
+            <svg
+              id="chart-auth-web-diario"
+              class="dashboard-line-chart hidden"
+              viewBox="0 0 1000 240"
+              preserveAspectRatio="none"
+            ></svg>
+            <p class="dashboard-line-chart-empty hidden" id="empty-chart-auth-web-diario">
+              Sin registros diarios con auth para el mes actual.
+            </p>
+          </article>
+        </div>
+      </section>
+
     </main>
 
     <script type="module">
@@ -779,6 +994,9 @@
       const ventasTrendKpiValue = document.querySelector("#ventas-trend-kpi-value");
       const ventasTrendKpiCompare = document.querySelector("#ventas-trend-kpi-compare");
       const authWebNoteEl = document.querySelector("#auth-web-note");
+      const authWebActivosPieChart = document.querySelector("#chart-auth-web-activos-pie");
+      const authWebActivosPieLegend = document.querySelector("#auth-web-activos-pie-legend");
+      const authWebActivosPieNote = document.querySelector("#auth-web-activos-pie-note");
       const authWebMonthlyChart = document.querySelector("#chart-auth-web-mensual");
       const emptyAuthWebMonthlyChart = document.querySelector("#empty-chart-auth-web-mensual");
       const authWebDailyNoteEl = document.querySelector("#auth-web-daily-note");
@@ -1868,7 +2086,69 @@
           ${xLabels}
         `;
       };
-      const renderAnaliticaWeb = (analiticaWeb, monthVal) => {
+      const renderAuthActivePieChart = (activeClientsCount, authClientsCount) => {
+        if (!authWebActivosPieChart || !authWebActivosPieLegend || !authWebActivosPieNote) return;
+        const active = Math.max(0, Number(activeClientsCount) || 0);
+        const authRaw = Math.max(0, Number(authClientsCount) || 0);
+        const registrados = Math.min(active, authRaw);
+        const noRegistrados = Math.max(0, active - registrados);
+        const pctRegistrados = active > 0 ? (registrados / active) * 100 : 0;
+        const pctNoRegistrados = active > 0 ? (noRegistrados / active) * 100 : 0;
+
+        const cx = 110;
+        const cy = 110;
+        const radius = 70;
+        const stroke = 28;
+        const circumference = 2 * Math.PI * radius;
+        const authArc = (pctRegistrados / 100) * circumference;
+        const noAuthArc = circumference - authArc;
+
+        authWebActivosPieChart.innerHTML = `
+          <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="#e2e8f0" stroke-width="${stroke}" />
+          <circle
+            cx="${cx}" cy="${cy}" r="${radius}"
+            fill="none" stroke="#0f766e" stroke-width="${stroke}" stroke-linecap="butt"
+            transform="rotate(-90 ${cx} ${cy})"
+            stroke-dasharray="${authArc.toFixed(2)} ${Math.max(0, circumference - authArc).toFixed(2)}"
+          />
+          <circle
+            cx="${cx}" cy="${cy}" r="${radius}"
+            fill="none" stroke="#f59e0b" stroke-width="${stroke}" stroke-linecap="butt"
+            transform="rotate(-90 ${cx} ${cy})"
+            stroke-dasharray="${noAuthArc.toFixed(2)} ${Math.max(0, circumference - noAuthArc).toFixed(2)}"
+            stroke-dashoffset="${(-authArc).toFixed(2)}"
+          />
+          <text x="${cx}" y="${cy - 2}" text-anchor="middle" fill="#0f172a" font-size="26" font-weight="800">${pctRegistrados.toFixed(1)}%</text>
+          <text x="${cx}" y="${cy + 18}" text-anchor="middle" fill="#64748b" font-size="12">registrados</text>
+        `;
+
+        authWebActivosPieLegend.innerHTML = `
+          <div class="dashboard-auth-pie-item">
+            <span class="dashboard-auth-pie-item-main">
+              <span class="dashboard-auth-pie-dot auth"></span>
+              Registrados en web
+            </span>
+            <span class="dashboard-auth-pie-value">${intFmt.format(registrados)} (${pctRegistrados.toFixed(1)}%)</span>
+          </div>
+          <div class="dashboard-auth-pie-item">
+            <span class="dashboard-auth-pie-item-main">
+              <span class="dashboard-auth-pie-dot noauth"></span>
+              No registrados en web
+            </span>
+            <span class="dashboard-auth-pie-value">${intFmt.format(noRegistrados)} (${pctNoRegistrados.toFixed(1)}%)</span>
+          </div>
+          <div class="dashboard-auth-pie-item">
+            <span class="dashboard-auth-pie-item-main">Base clientes activos</span>
+            <span class="dashboard-auth-pie-value">${intFmt.format(active)}</span>
+          </div>
+        `;
+
+        authWebActivosPieNote.textContent =
+          active > 0
+            ? `Base de cálculo: ${intFmt.format(active)} clientes activos del mes seleccionado.`
+            : "Sin clientes activos para calcular la cobertura de registro web.";
+      };
+      const renderAnaliticaWeb = (analiticaWeb, monthVal, activeClientsCount = 0) => {
         const authRows = Array.isArray(analiticaWeb?.auth?.registros_por_mes)
           ? analiticaWeb.auth.registros_por_mes.map((row) => ({
               monthKey: String(row?.monthKey || "").trim(),
@@ -1889,6 +2169,10 @@
         renderAuthWebDailyLineChart(
           authDailyRows,
           String(analiticaWeb?.auth?.mes_actual || "").trim(),
+        );
+        renderAuthActivePieChart(
+          activeClientsCount,
+          Number(analiticaWeb?.auth?.clientes_auth_confirmados) || 0,
         );
         if (authWebNoteEl) {
           const totalUsuarios = Number(analiticaWeb?.auth?.usuarios_auth_confirmados) || 0;
@@ -1924,7 +2208,7 @@
               hora: Number(row?.hora),
             }))
           : [];
-        renderSimpleVerticalChart(traficoSemanaChart, emptyTraficoSemanaChart, semanaRows, {
+        renderSimpleHorizontalChart(traficoSemanaChart, emptyTraficoSemanaChart, semanaRows, {
           color: "#2563eb",
           valueFormatter: formatAverageValue,
           titleBuilder: (row) =>
@@ -2540,7 +2824,11 @@
         renderPlatformMonthlyChart(platformMonthlyData || [], selectedPlatformMonthlyKey);
         renderVentasTrendChart(trendStats, prevTrendStats, range);
         renderDaily(stats.dailyRows);
-        renderAnaliticaWeb(analiticaWeb, monthKeyFromDate(range?.start) || "");
+        renderAnaliticaWeb(
+          analiticaWeb,
+          monthKeyFromDate(range?.start) || "",
+          stats.clientesActivosCount || 0,
+        );
 
         if (summaryNoteEl) {
           const cutNote = isProgressCut ? " · Corte parcial según fecha actual de Caracas" : "";

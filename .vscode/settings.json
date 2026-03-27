@@ -1,0 +1,27 @@
+{
+  "liveServer.settings.ignoreFiles": [
+    "**/.git/**",
+    "**/.DS_Store",
+    "**/node_modules/**",
+    "**/.wwebjs_auth/**",
+    "**/.wwebjs_cache/**",
+    "**/db.txt",
+    "**/*.log",
+    "**/api/**",
+    "**/config/**",
+    "**/supabase/**",
+    "**/whatsapp web/**"
+  ],
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/node_modules/**": true,
+    "**/.wwebjs_auth/**": true,
+    "**/.wwebjs_cache/**": true,
+    "**/db.txt": true,
+    "**/*.log": true,
+    "**/api/**": true,
+    "**/config/**": true,
+    "**/supabase/**": true,
+    "**/whatsapp web/**": true
+  }
+}

@@ -520,6 +520,7 @@
           pin,
           fechaCorte: v.fecha_corte,
           porAcceso: plataforma.por_acceso,
+          porPantalla: plataforma.por_pantalla,
           usaPines: plataforma.usa_pines,
           ventaPerfil: v.cuentas?.venta_perfil,
           ventaMiembro: v.cuentas?.venta_miembro,
@@ -573,6 +574,7 @@
           pin: v.pin,
           fechaCorte: "",
           porAcceso: plataforma.por_acceso,
+          porPantalla: plataforma.por_pantalla,
           usaPines: plataforma.usa_pines,
           ventaPerfil: v.cuentas?.venta_perfil,
           ventaMiembro: v.cuentas?.venta_miembro,
@@ -791,7 +793,7 @@
           const { data: plataformasInfo, error: platErr } = await supabase
             .from("plataformas")
             .select(
-              "id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso, cuenta_madre, link_pagina"
+              "id_plataforma, nombre, max_dig_pin, usa_pines, corte_por_clave, corte_directo, por_acceso, por_pantalla, cuenta_madre, link_pagina"
             )
             .in("id_plataforma", platIds);
           if (platErr) throw platErr;
@@ -815,6 +817,10 @@
             acc[p.id_plataforma] = !!p.por_acceso;
             return acc;
           }, {});
+          const platScreenMap = (plataformasInfo || []).reduce((acc, p) => {
+            acc[p.id_plataforma] = !!p.por_pantalla;
+            return acc;
+          }, {});
           platCorteClaveMap = (plataformasInfo || []).reduce((acc, p) => {
             acc[p.id_plataforma] = !!p.corte_por_clave;
             return acc;
@@ -835,6 +841,7 @@
                 max_dig_pin: platMaxMap[entry.plataforma.id_plataforma] || null,
                 usa_pines: platPinesMap[entry.plataforma.id_plataforma] || false,
                 por_acceso: platAccessMap[entry.plataforma.id_plataforma] || false,
+                por_pantalla: platScreenMap[entry.plataforma.id_plataforma] || false,
                 cuenta_madre: platInfo.cuenta_madre === true,
                 link_pagina: platInfo.link_pagina || "",
               },

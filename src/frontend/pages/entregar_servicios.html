@@ -391,7 +391,13 @@
         }
         if (item.correo) lines.push(`*Correo:* ${item.correo}`);
         lines.push(`*Clave:* ${item.clave || "-"}`);
-        if (item.n_perfil) lines.push(`*Perfil:* M${item.n_perfil}`);
+        const porPantalla = isTrue(item?.por_pantalla);
+        const porAcceso = isTrue(item?.por_acceso);
+        if (!porPantalla && porAcceso) {
+          lines.push("*Acceso:* 1 dispositivo");
+        } else if (porPantalla && item.n_perfil) {
+          lines.push(`*Perfil:* M${item.n_perfil}`);
+        }
         if (item.pin) lines.push(`*PIN:* ${item.pin}`);
         if (fechaCorte) {
           lines.push("*Próxima fecha de pago:*", `_${formatFechaCorte(fechaCorte)}_`);
@@ -495,6 +501,7 @@
                         pin: pinVenta,
                         fechaCorte: r.fecha_corte,
                         porAcceso: r.por_acceso,
+                        porPantalla: r.por_pantalla,
                         usaPines: r.usa_pines,
                         ventaPerfil: r.venta_perfil,
                         ventaMiembro: r.venta_miembro,
@@ -770,6 +777,7 @@
               plataforma: platName,
               id_plataforma: platId,
               por_acceso: porAcceso,
+              por_pantalla: isTrue(plat.por_pantalla),
               usa_pines: usaPines,
               venta_perfil: ventaPerfil,
               venta_miembro: ventaMiembro,
@@ -834,6 +842,7 @@
               plataforma: platName,
               id_plataforma: platId,
               por_acceso: porAcceso,
+              por_pantalla: isTrue(plat.por_pantalla),
               usa_pines: usaPines,
               venta_perfil: ventaPerfil,
               venta_miembro: ventaMiembro,

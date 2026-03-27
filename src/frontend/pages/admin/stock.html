@@ -3,222 +3,411 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stock</title>
+    <title>Dashboard de Inventario</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
+      :root {
+        --dash-bg: #f2f5f8;
+        --dash-panel: #ffffff;
+        --dash-border: #dbe3ec;
+        --dash-text: #152033;
+        --dash-muted: #5d6b82;
+        --dash-shadow: 0 14px 30px rgba(11, 23, 42, 0.08);
+        --ok: #15803d;
+        --warn: #d97706;
+        --danger: #dc2626;
+        --chip-bg: #eef2ff;
+      }
+
+      body {
+        background: radial-gradient(circle at 90% -20%, #e9f4ff 0%, transparent 45%), var(--dash-bg);
+      }
+
       .stock-dashboard {
+        font-family: "Plus Jakarta Sans", "Segoe UI", "Noto Sans", sans-serif;
+        color: var(--dash-text);
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 18px;
       }
-      .stock-panel {
-        background: #fff;
-        border: 1px solid #e5e7eb;
+
+      .panel {
+        background: var(--dash-panel);
+        border: 1px solid var(--dash-border);
         border-radius: 18px;
-        padding: 18px;
-        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+        box-shadow: var(--dash-shadow);
+        padding: 16px;
       }
-      .stock-panel-header {
+
+      .topbar {
         display: flex;
-        align-items: flex-start;
         justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 14px;
+        gap: 14px;
+        align-items: flex-start;
       }
-      .stock-panel-header h3 {
+
+      .topbar h1 {
         margin: 0;
+        font-size: 24px;
+        letter-spacing: -0.01em;
       }
-      .stock-note {
-        margin: 4px 0 0;
-        color: #475569;
+
+      .topbar p {
+        margin: 6px 0 0;
+        color: var(--dash-muted);
+        font-size: 13px;
+      }
+
+      .topbar-controls {
+        display: grid;
+        grid-template-columns: minmax(190px, 280px) 140px 130px;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .topbar-controls .form-input,
+      .topbar-controls .form-select {
+        width: 100%;
+        min-height: 38px;
+        border-radius: 10px;
+      }
+
+      .date-range-wrap {
+        display: none;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .date-range-wrap.visible {
+        display: grid;
+      }
+
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .kpi-card {
+        border: 1px solid var(--dash-border);
+        border-radius: 14px;
+        padding: 14px;
+        background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+      }
+
+      .kpi-label {
+        display: block;
+        color: var(--dash-muted);
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+
+      .kpi-value {
+        font-size: 26px;
+        font-weight: 800;
+        line-height: 1.08;
+      }
+
+      .kpi-foot {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--dash-muted);
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .summary-card {
+        border: 1px solid var(--dash-border);
+        border-radius: 14px;
+        padding: 12px;
+        background: #fcfdff;
+      }
+
+      .summary-card h3 {
+        margin: 0 0 10px;
         font-size: 14px;
       }
-      .stock-legend {
+
+      .summary-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
         display: flex;
-        flex-wrap: wrap;
-        gap: 10px 16px;
-        margin-bottom: 14px;
-      }
-      .stock-legend-item {
-        display: inline-flex;
-        align-items: center;
+        flex-direction: column;
         gap: 8px;
-        font-size: 13px;
-        color: #334155;
       }
-      .stock-legend-swatch {
-        width: 12px;
-        height: 12px;
-        border-radius: 999px;
-      }
-      .stock-legend-swatch.stock {
-        background: #16a34a;
-      }
-      .stock-legend-swatch.vencidos {
-        background: #f97316;
-      }
-      .stock-legend-swatch.promedio {
-        background: #2563eb;
-      }
-      .stock-chart-wrap {
-        overflow-x: auto;
-        padding-bottom: 4px;
-      }
-      .stock-chart {
-        min-width: 760px;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        padding: 14px;
-        border-radius: 16px;
-        background:
-          repeating-linear-gradient(
-            to right,
-            rgba(148, 163, 184, 0.15) 0 1px,
-            transparent 1px 72px
-          ),
-          linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
-      }
-      .stock-chart-group {
+
+      .summary-item {
         display: grid;
-        grid-template-columns: minmax(170px, 220px) minmax(360px, 1fr);
-        gap: 16px;
+        grid-template-columns: minmax(90px, 1fr) minmax(90px, 1.6fr) auto;
+        gap: 8px;
         align-items: center;
-        padding: 14px;
-        border-radius: 14px;
-        background: rgba(255, 255, 255, 0.88);
-        border: 1px solid rgba(226, 232, 240, 0.9);
-      }
-      .stock-chart-bars {
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .stock-chart-metric {
-        display: grid;
-        grid-template-columns: 82px minmax(180px, 1fr) 56px;
-        align-items: center;
-        gap: 10px;
-      }
-      .stock-chart-metric-label {
         font-size: 12px;
-        line-height: 1.2;
-        color: #475569;
-        font-weight: 700;
       }
-      .stock-chart-track {
-        height: 18px;
+
+      .summary-item .name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .summary-track {
+        width: 100%;
+        height: 9px;
         border-radius: 999px;
-        background: rgba(226, 232, 240, 0.95);
+        background: #e5edf5;
         overflow: hidden;
       }
-      .stock-chart-value {
-        font-size: 11px;
-        line-height: 1.1;
-        color: #0f172a;
-        font-weight: 700;
-        text-align: right;
-      }
-      .stock-chart-bar {
+
+      .summary-fill {
         height: 100%;
-        min-width: 0;
-        border-radius: 999px;
-        box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
+        border-radius: inherit;
+        min-width: 4%;
       }
-      .stock-chart-bar.stock {
-        background: linear-gradient(180deg, #34d399 0%, #16a34a 100%);
+
+      .summary-fill.danger {
+        background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
       }
-      .stock-chart-bar.vencidos {
-        background: linear-gradient(180deg, #fdba74 0%, #f97316 100%);
+
+      .summary-fill.warn {
+        background: linear-gradient(90deg, #fbbf24 0%, #d97706 100%);
       }
-      .stock-chart-bar.promedio {
-        background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+
+      .summary-fill.ok {
+        background: linear-gradient(90deg, #4ade80 0%, #15803d 100%);
       }
-      .stock-chart-label {
-        width: 100%;
-        text-align: left;
+
+      .alerts-title,
+      .section-title {
+        margin: 0 0 10px;
+        font-size: 15px;
       }
-      .stock-chart-platform {
+
+      .alerts-list {
+        margin: 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 6px;
+        color: #1f2e45;
+      }
+
+      .alerts-list .critical {
+        color: var(--danger);
+        font-weight: 600;
+      }
+
+      .table-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+        align-items: center;
+      }
+
+      .table-note {
+        margin: 0;
+        color: var(--dash-muted);
+        font-size: 12px;
+      }
+
+      .badge {
         display: inline-flex;
         align-items: center;
-        justify-content: flex-start;
-        gap: 8px;
-        font-size: 13px;
-        font-weight: 700;
-        color: #0f172a;
-      }
-      .stock-chart-dot {
-        width: 10px;
-        height: 10px;
         border-radius: 999px;
-        background: var(--plat-color, #94a3b8);
-        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
       }
-      .stock-chart-plan {
-        margin-top: 4px;
-        font-size: 12px;
-        color: #64748b;
+
+      .badge.critico {
+        background: #fee2e2;
+        color: #991b1b;
       }
-      .stock-empty {
-        margin: 0;
-        color: #64748b;
-        font-size: 14px;
+
+      .badge.medio {
+        background: #fef3c7;
+        color: #92400e;
       }
-      .stock-empty.hidden {
-        display: none;
+
+      .badge.estable {
+        background: #dcfce7;
+        color: #166534;
       }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
       .stock-table {
         width: 100%;
         border-collapse: collapse;
+        min-width: 960px;
       }
+
       .stock-table th,
       .stock-table td {
-        border: 1px solid #e5e7eb;
-        padding: 10px 12px;
+        border-bottom: 1px solid #e5ebf3;
+        padding: 10px 8px;
         text-align: left;
+        vertical-align: middle;
       }
+
       .stock-table th {
-        background: #0f172a;
-        color: #fff;
-        font-size: 13px;
+        font-size: 12px;
+        color: #4a5b75;
+        font-weight: 700;
       }
-      .stock-table tbody tr:nth-child(odd) {
-        background: #f8fafc;
+
+      .th-sort {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        padding: 0;
       }
-      .stock-service-cell {
-        min-width: 220px;
+
+      .th-sort .sort-indicator {
+        font-size: 10px;
+        color: #7a8ba5;
       }
-      .stock-service-title {
+
+      .stock-table tbody tr:hover {
+        background: #f8fbff;
+      }
+
+      .stock-table tbody tr.row-critico {
+        background: #fff7f7;
+      }
+
+      .platform-name {
         display: inline-flex;
         align-items: center;
         gap: 8px;
         font-weight: 700;
-        color: #0f172a;
       }
-      .stock-service-plan {
-        display: block;
-        margin-top: 3px;
+
+      .platform-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--dot-color, #94a3b8);
+      }
+
+      .coverage {
+        font-weight: 700;
+      }
+
+      .coverage-tip {
+        color: #667790;
+        font-size: 11px;
+      }
+
+      .mini-action {
+        white-space: nowrap;
+      }
+
+      .mobile-cards {
+        display: none;
+      }
+
+      .mobile-card {
+        border: 1px solid var(--dash-border);
+        border-radius: 14px;
+        padding: 12px;
+        background: #ffffff;
+        box-shadow: 0 8px 20px rgba(11, 23, 42, 0.06);
+      }
+
+      .mobile-card.row-critico {
+        border-color: #fecaca;
+        background: #fff7f7;
+      }
+
+      .mobile-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .mobile-name {
+        margin: 0;
+        font-size: 15px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .mobile-metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
         font-size: 12px;
-        color: #64748b;
       }
-      @media (max-width: 700px) {
-        .stock-panel {
-          padding: 14px;
+
+      .mobile-metric {
+        border: 1px solid #e8edf5;
+        border-radius: 10px;
+        padding: 8px;
+      }
+
+      .mobile-metric .label {
+        color: var(--dash-muted);
+        display: block;
+        margin-bottom: 3px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 1080px) {
+        .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
-        .stock-panel-header {
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .topbar {
           flex-direction: column;
         }
-        .stock-chart {
-          min-width: 0;
-          padding: 12px;
-        }
-        .stock-chart-group {
+        .topbar-controls {
+          width: 100%;
           grid-template-columns: 1fr;
-          gap: 12px;
         }
-        .stock-chart-metric {
-          grid-template-columns: 70px minmax(120px, 1fr) 48px;
+        .table-wrap {
+          display: none;
+        }
+        .mobile-cards {
+          display: grid;
+          gap: 10px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .kpis {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -228,71 +417,120 @@
     <script src="../../scripts/header-loader.js"></script>
 
     <main class="categorias-dinamicas stock-dashboard">
-      <section class="stock-panel">
-        <div class="stock-panel-header">
+      <section class="panel">
+        <div class="topbar">
           <div>
-            <h2>Stock</h2>
-            <p class="stock-note" id="stock-status">Cargando metricas de stock...</p>
+            <h1>Dashboard de Inventario</h1>
+            <p id="stock-status">Cargando inventario...</p>
+          </div>
+          <div>
+            <div class="topbar-controls">
+              <input
+                id="stock-search"
+                class="form-input"
+                type="search"
+                placeholder="Buscar plataforma..."
+                autocomplete="off"
+              />
+              <select id="stock-filter-status" class="form-select">
+                <option value="all">Todos los estados</option>
+                <option value="critico">Critico</option>
+                <option value="medio">Medio</option>
+                <option value="estable">Estable</option>
+              </select>
+              <select id="stock-range" class="form-select">
+                <option value="30">Ultimos 30 dias</option>
+                <option value="60">Ultimos 60 dias</option>
+                <option value="90">Ultimos 90 dias</option>
+                <option value="custom">Rango personalizado</option>
+              </select>
+            </div>
+            <div id="stock-custom-range" class="date-range-wrap">
+              <input id="stock-date-from" class="form-input" type="date" />
+              <input id="stock-date-to" class="form-input" type="date" />
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="stock-panel">
-        <div class="stock-panel-header">
-          <div>
-            <h3>Stock vs. demanda</h3>
-            <p class="stock-note" id="stock-chart-note">
-              Barras por plataforma y tipo de plan operativo. El promedio diario usa ventas al cliente de los ultimos 30 dias.
-            </p>
-          </div>
-        </div>
-        <div class="stock-legend">
-          <span class="stock-legend-item">
-            <span class="stock-legend-swatch stock"></span>
-            Stock libre
-          </span>
-          <span class="stock-legend-item">
-            <span class="stock-legend-swatch vencidos"></span>
-            Espacios vencidos
-          </span>
-          <span class="stock-legend-item">
-            <span class="stock-legend-swatch promedio"></span>
-            Avg. diario 30d
-          </span>
-        </div>
-        <div class="stock-chart-wrap">
-          <div id="stock-chart" class="stock-chart"></div>
-        </div>
-        <p class="stock-empty hidden" id="stock-chart-empty">Sin datos para graficar.</p>
+      <section class="kpis" id="stock-kpis">
+        <article class="kpi-card">
+          <span class="kpi-label">Stock total disponible</span>
+          <div class="kpi-value" id="kpi-stock">-</div>
+          <p class="kpi-foot">Suma de cuentas o espacios listos para venta.</p>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label">Cuentas vencidas</span>
+          <div class="kpi-value" id="kpi-vencidos">-</div>
+          <p class="kpi-foot">Pendientes por renovar o atender.</p>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label">Avg venta diaria</span>
+          <div class="kpi-value" id="kpi-avg">-</div>
+          <p class="kpi-foot" id="kpi-avg-foot">Promedio diario del rango seleccionado.</p>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-label">Cobertura general estimada</span>
+          <div class="kpi-value" id="kpi-cobertura">-</div>
+          <p class="kpi-foot">(Stock total + vencidas) / avg venta diaria.</p>
+        </article>
       </section>
 
-      <section class="stock-panel">
-        <div class="stock-panel-header">
-          <div>
-            <h3>Detalle</h3>
-            <p class="stock-note">
-              Incluye reemplazos pendientes como referencia adicional, aunque no se grafican en las tres barras principales.
-            </p>
-          </div>
+      <section class="panel">
+        <h2 class="section-title">Resumen rapido</h2>
+        <div class="summary-grid">
+          <article class="summary-card">
+            <h3>Menor cobertura</h3>
+            <ul class="summary-list" id="summary-low-coverage"></ul>
+          </article>
+          <article class="summary-card">
+            <h3>Mas cuentas vencidas</h3>
+            <ul class="summary-list" id="summary-expired"></ul>
+          </article>
+          <article class="summary-card">
+            <h3>Mayor avg venta diaria</h3>
+            <ul class="summary-list" id="summary-rotation"></ul>
+          </article>
         </div>
-        <div class="cuenta-table-wrap">
+      </section>
+
+      <section class="panel">
+        <h2 class="alerts-title">Alertas importantes</h2>
+        <ul id="stock-alerts" class="alerts-list"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="table-top">
+          <h2 class="section-title" style="margin: 0">Plataformas</h2>
+          <p id="stock-table-note" class="table-note">Calculando cobertura...</p>
+        </div>
+
+        <div class="table-wrap">
           <table class="stock-table">
             <thead>
               <tr>
-                <th>Servicio</th>
-                <th>Stock libre</th>
-                <th>Espacios vencidos</th>
-                <th>Reemplazos pendientes</th>
-                <th>Avg. diario 30d</th>
+                <th><button class="th-sort" data-sort="nombre">Plataforma <span class="sort-indicator">↕</span></button></th>
+                <th><button class="th-sort" data-sort="stock">Stock actual <span class="sort-indicator">↕</span></button></th>
+                <th><button class="th-sort" data-sort="vencidos">Cuentas vencidas <span class="sort-indicator">↕</span></button></th>
+                <th><button class="th-sort" data-sort="avg_diario">Avg venta diaria <span class="sort-indicator">↕</span></button></th>
+                <th>
+                  <button class="th-sort" data-sort="cobertura_dias">
+                    Cobertura estimada (dias) <span class="sort-indicator">↕</span>
+                  </button>
+                </th>
+                <th><button class="th-sort" data-sort="estado">Estado <span class="sort-indicator">↕</span></button></th>
+                <th>Accion rapida</th>
               </tr>
             </thead>
             <tbody id="stock-body">
               <tr>
-                <td colspan="5" class="status">Cargando...</td>
+                <td colspan="7" class="status">Cargando...</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        <div id="stock-mobile-cards" class="mobile-cards"></div>
       </section>
     </main>
 
@@ -306,17 +544,46 @@
       const adminLink = document.querySelector(".admin-link");
       const stockLink = document.querySelector(".stock-link");
       const statusEl = document.querySelector("#stock-status");
-      const chartNoteEl = document.querySelector("#stock-chart-note");
-      const chartEl = document.querySelector("#stock-chart");
-      const chartEmptyEl = document.querySelector("#stock-chart-empty");
+      const tableNoteEl = document.querySelector("#stock-table-note");
+
+      const searchEl = document.querySelector("#stock-search");
+      const statusFilterEl = document.querySelector("#stock-filter-status");
+      const rangeEl = document.querySelector("#stock-range");
+      const customRangeWrap = document.querySelector("#stock-custom-range");
+      const dateFromEl = document.querySelector("#stock-date-from");
+      const dateToEl = document.querySelector("#stock-date-to");
+
+      const kpiStockEl = document.querySelector("#kpi-stock");
+      const kpiVencidosEl = document.querySelector("#kpi-vencidos");
+      const kpiAvgEl = document.querySelector("#kpi-avg");
+      const kpiAvgFootEl = document.querySelector("#kpi-avg-foot");
+      const kpiCoberturaEl = document.querySelector("#kpi-cobertura");
+
+      const lowCoverageEl = document.querySelector("#summary-low-coverage");
+      const expiredEl = document.querySelector("#summary-expired");
+      const rotationEl = document.querySelector("#summary-rotation");
+      const alertsEl = document.querySelector("#stock-alerts");
+
       const tbody = document.querySelector("#stock-body");
+      const mobileCardsEl = document.querySelector("#stock-mobile-cards");
+      const sortButtons = Array.from(document.querySelectorAll(".th-sort"));
 
       const intFmt = new Intl.NumberFormat("es-VE");
       const avgFmt = new Intl.NumberFormat("es-VE", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
       });
-      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const state = {
+        allRows: [],
+        filteredRows: [],
+        sortKey: "cobertura_dias",
+        sortDir: "asc",
+        rangeDays: 30,
+        rangeStart: "",
+        rangeEnd: "",
+      };
+
       const PLAN_SORT_ORDER = {
         Acceso: 1,
         Perfil: 2,
@@ -325,6 +592,8 @@
         Completa: 5,
         "Gift Card": 6,
       };
+
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const setStatus = (message = "") => {
         if (statusEl) statusEl.textContent = message;
@@ -361,6 +630,26 @@
         const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
         date.setUTCDate(date.getUTCDate() + Number(deltaDays || 0));
         return date.toISOString().slice(0, 10);
+      };
+
+      const daysBetweenInclusive = (fromIso, toIso) => {
+        const a = new Date(`${fromIso}T00:00:00Z`).getTime();
+        const b = new Date(`${toIso}T00:00:00Z`).getTime();
+        if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 1;
+        return Math.max(1, Math.floor((b - a) / 86400000) + 1);
+      };
+
+      const getStatusByCoverage = (coverageDays) => {
+        const numeric = Number(coverageDays);
+        if (!Number.isFinite(numeric) || numeric < 3) return "critico";
+        if (numeric <= 7) return "medio";
+        return "estable";
+      };
+
+      const formatCoverage = (value) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return "Sin consumo";
+        return `${avgFmt.format(numeric)} dias`;
       };
 
       const resolvePlanLabel = ({
@@ -416,96 +705,350 @@
             stock: 0,
             vencidos: 0,
             reemplazos: 0,
-            ventas_30d: 0,
+            ventas_periodo: 0,
             avg_diario: 0,
           });
         }
         return map.get(key);
       };
 
-      const renderTable = (rows = []) => {
-        if (!tbody) return;
-        if (!rows.length) {
-          tbody.innerHTML = '<tr><td colspan="5" class="status">Sin datos.</td></tr>';
-          return;
-        }
-        tbody.innerHTML = rows
-          .map(
-            (row) => `
-              <tr>
-                <td class="stock-service-cell">
-                  <span class="stock-service-title">
-                    <span class="stock-chart-dot" style="--plat-color:${escapeHtml(row.color_1)}"></span>
-                    ${escapeHtml(row.nombre_plataforma)}
-                  </span>
-                  <span class="stock-service-plan">${escapeHtml(row.plan_label)}</span>
-                </td>
-                <td>${intFmt.format(Number(row.stock || 0))}</td>
-                <td>${intFmt.format(Number(row.vencidos || 0))}</td>
-                <td>${intFmt.format(Number(row.reemplazos || 0))}</td>
-                <td>${avgFmt.format(Number(row.avg_diario || 0))}</td>
-              </tr>`,
-          )
-          .join("");
+      const aggregateByPlatform = (planRows = [], dayDivisor = 30) => {
+        const map = new Map();
+        planRows.forEach((row) => {
+          const id = toPositiveInt(row?.id_plataforma);
+          if (!id) return;
+          if (!map.has(id)) {
+            map.set(id, {
+              id_plataforma: id,
+              nombre_plataforma: row?.nombre_plataforma || `Plataforma ${id}`,
+              color_1: row?.color_1 || "#94a3b8",
+              stock: 0,
+              vencidos: 0,
+              reemplazos: 0,
+              ventas_periodo: 0,
+              avg_diario: 0,
+              cobertura_dias: 0,
+              estado: "critico",
+            });
+          }
+          const entry = map.get(id);
+          entry.stock += Number(row?.stock || 0);
+          entry.vencidos += Number(row?.vencidos || 0);
+          entry.reemplazos += Number(row?.reemplazos || 0);
+          entry.ventas_periodo += Number(row?.ventas_periodo || 0);
+        });
+
+        const rows = Array.from(map.values()).map((row) => {
+          const avgDiario = Number((Number(row.ventas_periodo || 0) / Math.max(1, dayDivisor)).toFixed(2));
+          const stockConVencidas = Number(row.stock || 0) + Number(row.vencidos || 0);
+          const cobertura = avgDiario > 0 ? Number((stockConVencidas / avgDiario).toFixed(2)) : Number.POSITIVE_INFINITY;
+          const estado = getStatusByCoverage(cobertura);
+          return {
+            ...row,
+            avg_diario: avgDiario,
+            cobertura_dias: cobertura,
+            estado,
+          };
+        });
+
+        return rows.sort((a, b) => a.nombre_plataforma.localeCompare(b.nombre_plataforma, "es"));
       };
 
-      const buildBarHtml = ({ value = 0, maxValue = 0, kind = "stock", label = "" } = {}) => {
-        const numeric = Number(value) || 0;
-        const safeMax = Number(maxValue) || 0;
-        const widthPct = numeric > 0 && safeMax > 0 ? Math.max((numeric / safeMax) * 100, 4) : 0;
+      const buildSummaryItem = ({ name = "", value = 0, fill = 0, tone = "ok", suffix = "" } = {}) => {
         return `
-          <div class="stock-chart-metric" title="${escapeHtml(String(numeric))}">
-            <span class="stock-chart-metric-label">${escapeHtml(label)}</span>
-            <div class="stock-chart-track">
-              <div class="stock-chart-bar ${escapeHtml(kind)}" style="width:${widthPct}%"></div>
-            </div>
-            <span class="stock-chart-value">${escapeHtml(avgFmt.format(numeric))}</span>
-          </div>
+          <li class="summary-item">
+            <span class="name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+            <span class="summary-track"><span class="summary-fill ${escapeHtml(tone)}" style="width:${Math.max(
+              6,
+              fill,
+            )}%"></span></span>
+            <strong>${escapeHtml(avgFmt.format(value))}${escapeHtml(suffix)}</strong>
+          </li>
         `;
       };
 
-      const renderChart = (rows = []) => {
-        if (!chartEl || !chartEmptyEl) return;
+      const renderSummaries = (rows = []) => {
+        const maxCoverage = Math.max(1, ...rows.map((r) => (Number.isFinite(r.cobertura_dias) ? r.cobertura_dias : 0)));
+        const maxExpired = Math.max(1, ...rows.map((r) => Number(r.vencidos || 0)));
+        const maxRotation = Math.max(1, ...rows.map((r) => Number(r.avg_diario || 0)));
+
+        const lowCoverage = [...rows]
+          .filter((r) => Number(r.avg_diario || 0) > 0)
+          .sort((a, b) => Number(a.cobertura_dias || 0) - Number(b.cobertura_dias || 0))
+          .slice(0, 5);
+
+        const mostExpired = [...rows]
+          .sort((a, b) => Number(b.vencidos || 0) - Number(a.vencidos || 0))
+          .slice(0, 5);
+
+        const highRotation = [...rows]
+          .sort((a, b) => Number(b.avg_diario || 0) - Number(a.avg_diario || 0))
+          .slice(0, 5);
+
+        lowCoverageEl.innerHTML = lowCoverage.length
+          ? lowCoverage
+              .map((row) =>
+                buildSummaryItem({
+                  name: row.nombre_plataforma,
+                  value: row.cobertura_dias,
+                  fill: (Number(row.cobertura_dias || 0) / maxCoverage) * 100,
+                  tone: "danger",
+                  suffix: "d",
+                }),
+              )
+              .join("")
+          : '<li class="summary-item">Sin datos suficientes.</li>';
+
+        expiredEl.innerHTML = mostExpired.length
+          ? mostExpired
+              .map((row) =>
+                buildSummaryItem({
+                  name: row.nombre_plataforma,
+                  value: row.vencidos,
+                  fill: (Number(row.vencidos || 0) / maxExpired) * 100,
+                  tone: "warn",
+                }),
+              )
+              .join("")
+          : '<li class="summary-item">Sin datos suficientes.</li>';
+
+        rotationEl.innerHTML = highRotation.length
+          ? highRotation
+              .map((row) =>
+                buildSummaryItem({
+                  name: row.nombre_plataforma,
+                  value: row.avg_diario,
+                  fill: (Number(row.avg_diario || 0) / maxRotation) * 100,
+                  tone: "ok",
+                }),
+              )
+              .join("")
+          : '<li class="summary-item">Sin datos suficientes.</li>';
+      };
+
+      const renderAlerts = (rows = []) => {
+        if (!alertsEl) return;
+
+        const lowStock = rows.filter((r) => Number(r.stock || 0) <= 5);
+        const highExpired = rows.filter((r) => Number(r.vencidos || 0) >= 5);
+        const highRotation = rows.filter((r) => Number(r.avg_diario || 0) >= 1);
+        const criticalCoverage = rows.filter((r) => r.estado === "critico");
+
+        const lines = [];
+        if (criticalCoverage.length) {
+          lines.push(
+            `<li class="critical">Cobertura critica (&lt; 3 dias): ${escapeHtml(
+              criticalCoverage.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+            )}${criticalCoverage.length > 6 ? "..." : ""}</li>`,
+          );
+        }
+        if (lowStock.length) {
+          lines.push(
+            `<li>Stock bajo (<= 5): ${escapeHtml(
+              lowStock.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+            )}${lowStock.length > 6 ? "..." : ""}</li>`,
+          );
+        }
+        if (highExpired.length) {
+          lines.push(
+            `<li>Muchas cuentas vencidas (>= 5): ${escapeHtml(
+              highExpired.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+            )}${highExpired.length > 6 ? "..." : ""}</li>`,
+          );
+        }
+        if (highRotation.length) {
+          lines.push(
+            `<li>Alta rotacion (avg diario >= 1): ${escapeHtml(
+              highRotation.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+            )}${highRotation.length > 6 ? "..." : ""}</li>`,
+          );
+        }
+
+        alertsEl.innerHTML = lines.length ? lines.join("") : "<li>Sin alertas relevantes en este momento.</li>";
+      };
+
+      const renderKpis = (rows = []) => {
+        const totalStock = rows.reduce((sum, row) => sum + Number(row.stock || 0), 0);
+        const totalVencidos = rows.reduce((sum, row) => sum + Number(row.vencidos || 0), 0);
+        const totalAvg = rows.reduce((sum, row) => sum + Number(row.avg_diario || 0), 0);
+        const coverageBase = totalStock + totalVencidos;
+        const coverage = totalAvg > 0 ? coverageBase / totalAvg : Number.POSITIVE_INFINITY;
+        const criticos = rows.filter((r) => r.estado === "critico").length;
+
+        kpiStockEl.textContent = intFmt.format(totalStock);
+        kpiVencidosEl.textContent = intFmt.format(totalVencidos);
+        kpiAvgEl.textContent = avgFmt.format(Number(totalAvg.toFixed(2)));
+        kpiCoberturaEl.textContent = formatCoverage(Number(coverage.toFixed(2)));
+        kpiAvgFootEl.textContent = `Promedio diario (${intFmt.format(rows.length)} plataformas evaluadas).`;
+
+        if (tableNoteEl) {
+          tableNoteEl.textContent =
+            `${intFmt.format(rows.length)} plataformas | ${intFmt.format(criticos)} en estado critico.`;
+        }
+      };
+
+      const compareValues = (a, b, key) => {
+        if (key === "nombre") {
+          return String(a.nombre_plataforma || "").localeCompare(String(b.nombre_plataforma || ""), "es");
+        }
+        if (key === "estado") {
+          const rank = { critico: 1, medio: 2, estable: 3 };
+          return (rank[a.estado] || 99) - (rank[b.estado] || 99);
+        }
+        const valA = Number(a[key]);
+        const valB = Number(b[key]);
+        const numA = Number.isFinite(valA) ? valA : Number.POSITIVE_INFINITY;
+        const numB = Number.isFinite(valB) ? valB : Number.POSITIVE_INFINITY;
+        return numA - numB;
+      };
+
+      const getSortedRows = (rows = []) => {
+        const key = state.sortKey;
+        const dir = state.sortDir === "asc" ? 1 : -1;
+        return [...rows].sort((a, b) => compareValues(a, b, key) * dir);
+      };
+
+      const renderTable = (rows = []) => {
+        if (!tbody) return;
         if (!rows.length) {
-          chartEl.innerHTML = "";
-          chartEmptyEl.classList.remove("hidden");
+          tbody.innerHTML = '<tr><td colspan="7" class="status">Sin datos para mostrar.</td></tr>';
+          mobileCardsEl.innerHTML = '<p class="status">Sin datos para mostrar.</p>';
           return;
         }
-        chartEmptyEl.classList.add("hidden");
-        const maxValue = Math.max(
-          1,
-          ...rows.flatMap((row) => [
-            Number(row.stock || 0),
-            Number(row.vencidos || 0),
-            Number(row.avg_diario || 0),
-          ]),
-        );
-        chartEl.innerHTML = rows
-          .map(
-            (row) => `
-              <div class="stock-chart-group">
-                <div class="stock-chart-label">
-                  <div class="stock-chart-platform">
-                    <span class="stock-chart-dot" style="--plat-color:${escapeHtml(row.color_1)}"></span>
+
+        tbody.innerHTML = rows
+          .map((row) => {
+            const badge = row.estado;
+            const isCritical = row.estado === "critico";
+            return `
+              <tr class="${isCritical ? "row-critico" : ""}">
+                <td>
+                  <span class="platform-name">
+                    <span class="platform-dot" style="--dot-color:${escapeHtml(row.color_1)}"></span>
                     ${escapeHtml(row.nombre_plataforma)}
-                  </div>
-                  <div class="stock-chart-plan">${escapeHtml(row.plan_label)}</div>
-                </div>
-                <div class="stock-chart-bars">
-                  ${buildBarHtml({ value: row.stock, maxValue, kind: "stock", label: "Stock" })}
-                  ${buildBarHtml({ value: row.vencidos, maxValue, kind: "vencidos", label: "Vencidos" })}
-                  ${buildBarHtml({ value: row.avg_diario, maxValue, kind: "promedio", label: "Avg. diario" })}
-                </div>
-              </div>`,
-          )
+                  </span>
+                </td>
+                <td>${intFmt.format(Number(row.stock || 0))}</td>
+                <td>${intFmt.format(Number(row.vencidos || 0))}</td>
+                <td>${avgFmt.format(Number(row.avg_diario || 0))}</td>
+                <td>
+                  <div class="coverage">${escapeHtml(formatCoverage(row.cobertura_dias))}</div>
+                  <div class="coverage-tip" title="Cobertura = (stock actual + cuentas vencidas) / avg venta diaria">(stock + vencidas)/avg</div>
+                </td>
+                <td><span class="badge ${escapeHtml(badge)}">${escapeHtml(badge)}</span></td>
+                <td>
+                  <button class="btn-outline btn-small mini-action" data-focus-platform="${escapeHtml(
+                    row.nombre_plataforma,
+                  )}">
+                    Enfocar
+                  </button>
+                </td>
+              </tr>`;
+          })
           .join("");
+
+        mobileCardsEl.innerHTML = rows
+          .map((row) => {
+            const isCritical = row.estado === "critico";
+            return `
+              <article class="mobile-card ${isCritical ? "row-critico" : ""}">
+                <div class="mobile-head">
+                  <h3 class="mobile-name">
+                    <span class="platform-dot" style="--dot-color:${escapeHtml(row.color_1)}"></span>
+                    ${escapeHtml(row.nombre_plataforma)}
+                  </h3>
+                  <span class="badge ${escapeHtml(row.estado)}">${escapeHtml(row.estado)}</span>
+                </div>
+                <div class="mobile-metrics">
+                  <div class="mobile-metric"><span class="label">Stock actual</span><strong>${intFmt.format(
+                    Number(row.stock || 0),
+                  )}</strong></div>
+                  <div class="mobile-metric"><span class="label">Cuentas vencidas</span><strong>${intFmt.format(
+                    Number(row.vencidos || 0),
+                  )}</strong></div>
+                  <div class="mobile-metric"><span class="label">Avg venta diaria</span><strong>${avgFmt.format(
+                    Number(row.avg_diario || 0),
+                  )}</strong></div>
+                  <div class="mobile-metric" title="Cobertura = (stock actual + cuentas vencidas) / avg venta diaria"><span class="label">Cobertura</span><strong>${escapeHtml(
+                    formatCoverage(row.cobertura_dias),
+                  )}</strong></div>
+                </div>
+              </article>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-focus-platform]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const name = button.getAttribute("data-focus-platform") || "";
+            if (searchEl) {
+              searchEl.value = name;
+              applyFilters();
+              searchEl.focus();
+            }
+          });
+        });
+      };
+
+      const applyFilters = () => {
+        const search = String(searchEl?.value || "").trim().toLowerCase();
+        const statusFilter = String(statusFilterEl?.value || "all");
+
+        const filtered = state.allRows.filter((row) => {
+          const bySearch = !search || String(row.nombre_plataforma || "").toLowerCase().includes(search);
+          const byStatus = statusFilter === "all" || row.estado === statusFilter;
+          return bySearch && byStatus;
+        });
+
+        state.filteredRows = getSortedRows(filtered);
+        renderKpis(state.filteredRows);
+        renderSummaries(state.filteredRows);
+        renderAlerts(state.filteredRows);
+        renderTable(state.filteredRows);
+      };
+
+      const getDateRange = () => {
+        const today = getCaracasToday();
+        const selected = String(rangeEl?.value || "30");
+        if (selected === "custom") {
+          const from = String(dateFromEl?.value || "").trim();
+          const to = String(dateToEl?.value || "").trim();
+          if (from && to && to >= from) {
+            return { start: from, end: to, dayDivisor: daysBetweenInclusive(from, to) };
+          }
+          return { start: shiftIsoDate(today, -29), end: today, dayDivisor: 30 };
+        }
+        const days = Math.max(1, Number(selected) || 30);
+        const start = shiftIsoDate(today, -(days - 1));
+        return { start, end: today, dayDivisor: days };
+      };
+
+      const updateRangeInputs = () => {
+        const isCustom = String(rangeEl?.value || "") === "custom";
+        customRangeWrap.classList.toggle("visible", isCustom);
+      };
+
+      const updateSortIndicators = () => {
+        sortButtons.forEach((btn) => {
+          const indicator = btn.querySelector(".sort-indicator");
+          if (!indicator) return;
+          const key = btn.dataset.sort;
+          if (key === state.sortKey) {
+            indicator.textContent = state.sortDir === "asc" ? "↑" : "↓";
+          } else {
+            indicator.textContent = "↕";
+          }
+        });
       };
 
       async function loadData() {
-        const today = getCaracasToday();
-        const avgStart = shiftIsoDate(today, -29);
+        const { start, end, dayDivisor } = getDateRange();
+        state.rangeStart = start;
+        state.rangeEnd = end;
+        state.rangeDays = dayDivisor;
+
         try {
-          setStatus("Cargando metricas de stock...");
+          setStatus("Cargando metricas de inventario...");
+
           const [
             { data: plataformas, error: platErr },
             { data: perfilesLibres, error: perfErr },
@@ -545,7 +1088,7 @@
               .select(
                 "id_venta, fecha_corte, cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, perfil_hogar)",
               )
-              .lte("fecha_corte", today)
+              .lte("fecha_corte", end)
               .eq("recordatorio_enviado", true)
               .or("reportado.is.null,reportado.eq.false")
               .or("suspendido.is.null,suspendido.eq.false")
@@ -563,8 +1106,8 @@
               )
               .eq("venta_cliente", true)
               .not("fecha_pago", "is", null)
-              .gte("fecha_pago", avgStart)
-              .lte("fecha_pago", today),
+              .gte("fecha_pago", start)
+              .lte("fecha_pago", end),
           ]);
 
           if (platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr) {
@@ -707,48 +1250,38 @@
               historial: histRow,
             });
             const entry = ensureMetricEntry(metricsMap, platformById, platformId, planLabel);
-            if (entry) entry.ventas_30d += 1;
+            if (entry) entry.ventas_periodo += 1;
           });
 
-          const rows = sortMetricRows(
+          const planRows = sortMetricRows(
             Array.from(metricsMap.values())
               .map((row) => ({
                 ...row,
-                avg_diario: Number((Number(row.ventas_30d || 0) / 30).toFixed(2)),
+                avg_diario: Number((Number(row.ventas_periodo || 0) / Math.max(1, dayDivisor)).toFixed(2)),
               }))
               .filter(
                 (row) =>
                   Number(row.stock || 0) > 0 ||
                   Number(row.vencidos || 0) > 0 ||
                   Number(row.reemplazos || 0) > 0 ||
-                  Number(row.ventas_30d || 0) > 0,
+                  Number(row.ventas_periodo || 0) > 0,
               ),
           );
 
-          renderChart(rows);
-          renderTable(rows);
+          state.allRows = aggregateByPlatform(planRows, dayDivisor);
 
-          const totalStock = rows.reduce((sum, row) => sum + Number(row.stock || 0), 0);
-          const totalVencidos = rows.reduce((sum, row) => sum + Number(row.vencidos || 0), 0);
-          const totalReemplazos = rows.reduce((sum, row) => sum + Number(row.reemplazos || 0), 0);
-          chartNoteEl.textContent =
-            `Barras por plataforma y tipo de plan operativo. Avg. diario calculado sobre ${intFmt.format(
-              historialRows.length,
-            )} ventas al cliente registradas entre ${avgStart} y ${today}.`;
           setStatus(
-            `${intFmt.format(totalStock)} espacios libres, ${intFmt.format(
-              totalVencidos,
-            )} vencidos y ${intFmt.format(totalReemplazos)} reemplazos pendientes.`,
+            `Rango ${start} a ${end}. Cobertura calculada con ${intFmt.format(
+              dayDivisor,
+            )} dias de promedio y ${intFmt.format(historialRows.length)} ventas cliente.`,
           );
+          updateSortIndicators();
+          applyFilters();
         } catch (err) {
           console.error("stock load error", err);
-          renderChart([]);
-          renderTable([]);
-          setStatus("No se pudo cargar el stock.");
-          if (chartNoteEl) {
-            chartNoteEl.textContent =
-              "No fue posible calcular la grafica con los datos actuales.";
-          }
+          state.allRows = [];
+          applyFilters();
+          setStatus("No se pudo cargar el dashboard de inventario.");
         }
       }
 
@@ -760,14 +1293,17 @@
             window.location.replace("../index.html");
             return;
           }
+
           if (user && usernameEl) {
             const fullName = [user.nombre, user.apellido].filter(Boolean).join(" ").trim();
             usernameEl.textContent = fullName || user.correo || "Usuario";
           }
+
           if (adminLink) {
             adminLink.classList.remove("hidden");
             adminLink.style.display = "block";
           }
+
           if (stockLink) {
             stockLink.classList.remove("hidden");
             stockLink.style.display = "block";
@@ -777,6 +1313,40 @@
           window.location.replace("../index.html");
           return;
         }
+
+        const today = getCaracasToday();
+        if (dateToEl) dateToEl.value = today;
+        if (dateFromEl) dateFromEl.value = shiftIsoDate(today, -29);
+
+        searchEl?.addEventListener("input", applyFilters);
+        statusFilterEl?.addEventListener("change", applyFilters);
+        rangeEl?.addEventListener("change", () => {
+          updateRangeInputs();
+          loadData();
+        });
+        dateFromEl?.addEventListener("change", () => {
+          if (String(rangeEl?.value || "") === "custom") loadData();
+        });
+        dateToEl?.addEventListener("change", () => {
+          if (String(rangeEl?.value || "") === "custom") loadData();
+        });
+
+        sortButtons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const key = btn.dataset.sort;
+            if (!key) return;
+            if (state.sortKey === key) {
+              state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+            } else {
+              state.sortKey = key;
+              state.sortDir = key === "nombre" ? "asc" : "desc";
+            }
+            updateSortIndicators();
+            applyFilters();
+          });
+        });
+
+        updateRangeInputs();
         await loadData();
       }
 

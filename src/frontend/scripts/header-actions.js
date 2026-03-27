@@ -523,14 +523,22 @@ if (!window.__headerActionsInit) {
     enableTutorialScrollLock();
     render();
   };
-  const setOrdenesPendingBadge = (hasPending) => {
+  const setOrdenesPendingBadge = ({
+    hasPendingVerification = false,
+    hasPendingManualPayment = false,
+  } = {}) => {
     if (!ordenesHeaderBtn) return;
-    ordenesHeaderBtn.classList.toggle("has-pending-verification", !!hasPending);
+    const showManualPayment = !!hasPendingManualPayment;
+    const showVerification = !!hasPendingVerification && !showManualPayment;
+    ordenesHeaderBtn.classList.toggle("has-pending-verification", showVerification);
+    ordenesHeaderBtn.classList.toggle("has-pending-manual-payment", showManualPayment);
     ordenesHeaderBtn.setAttribute(
       "title",
-      hasPending
-        ? "Hay comprobantes pendientes por verificar"
-        : "Ordenes",
+      showManualPayment
+        ? "Hay pagos pendientes de metodos no automatizados"
+        : showVerification
+          ? "Hay comprobantes pendientes por verificar"
+          : "Ordenes",
     );
   };
   const refreshOrdenesPendingBadge = async () => {
@@ -538,29 +546,58 @@ if (!window.__headerActionsInit) {
     try {
       const { data: metodosRows, error: metodosErr } = await supabase
         .from("metodos_de_pago")
-        .select("id_metodo_de_pago")
-        .eq("verificacion_automatica", false);
+        .select("id_metodo_de_pago, verificacion_automatica, pago_automatizado");
       if (metodosErr) throw metodosErr;
-      const metodosNoAutomaticos = (metodosRows || [])
+      const isExplicitFalse = (value) =>
+        value === false ||
+        value === 0 ||
+        value === "0" ||
+        value === "false" ||
+        value === "f";
+      const metodosNoVerificacionAutomatica = (metodosRows || [])
+        .filter((row) => isExplicitFalse(row?.verificacion_automatica))
         .map((row) => Number(row?.id_metodo_de_pago))
         .filter((id) => Number.isFinite(id) && id > 0);
-      if (!metodosNoAutomaticos.length) {
-        setOrdenesPendingBadge(false);
-        return;
+      const metodosPagoNoAutomatizado = (metodosRows || [])
+        .filter((row) => isExplicitFalse(row?.pago_automatizado))
+        .map((row) => Number(row?.id_metodo_de_pago))
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      let hasPendingVerification = false;
+      if (metodosNoVerificacionAutomatica.length) {
+        const { data: ordenesRows, error: ordenesErr } = await supabase
+          .from("ordenes")
+          .select("id_orden")
+          .in("id_metodo_de_pago", metodosNoVerificacionAutomatica)
+          .eq("marcado_pago", true)
+          .neq("pago_verificado", true)
+          .neq("orden_cancelada", true)
+          .limit(1);
+        if (ordenesErr) throw ordenesErr;
+        hasPendingVerification = (ordenesRows || []).length > 0;
       }
-      const { data: ordenesRows, error: ordenesErr } = await supabase
-        .from("ordenes")
-        .select("id_orden")
-        .in("id_metodo_de_pago", metodosNoAutomaticos)
-        .eq("marcado_pago", true)
-        .neq("pago_verificado", true)
-        .neq("orden_cancelada", true)
-        .limit(1);
-      if (ordenesErr) throw ordenesErr;
-      setOrdenesPendingBadge((ordenesRows || []).length > 0);
+
+      let hasPendingManualPayment = false;
+      if (metodosPagoNoAutomatizado.length) {
+        const { data: ordenesManualRows, error: ordenesManualErr } = await supabase
+          .from("ordenes")
+          .select("id_orden")
+          .in("id_metodo_de_pago", metodosPagoNoAutomatizado)
+          .eq("marcado_pago", true)
+          .neq("pago_verificado", true)
+          .neq("orden_cancelada", true)
+          .limit(1);
+        if (ordenesManualErr) throw ordenesManualErr;
+        hasPendingManualPayment = (ordenesManualRows || []).length > 0;
+      }
+
+      setOrdenesPendingBadge({ hasPendingVerification, hasPendingManualPayment });
     } catch (err) {
       console.error("ordenes pending badge error", err);
-      setOrdenesPendingBadge(false);
+      setOrdenesPendingBadge({
+        hasPendingVerification: false,
+        hasPendingManualPayment: false,
+      });
     }
   };
   let headerHeight = 0;
@@ -881,7 +918,10 @@ if (!window.__headerActionsInit) {
         if (isSuper) {
           await refreshOrdenesPendingBadge();
         } else {
-          setOrdenesPendingBadge(false);
+          setOrdenesPendingBadge({
+            hasPendingVerification: false,
+            hasPendingManualPayment: false,
+          });
         }
       }
       if (headerEl) {

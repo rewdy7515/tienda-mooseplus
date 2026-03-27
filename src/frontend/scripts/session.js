@@ -2,6 +2,82 @@ const SESSION_KEY = "sessionUserId";
 const SESSION_ROLES_KEY = "sessionUserRoles";
 const CART_CACHE_KEY = "cachedCart";
 
+const installLocalhostNavigationGuard = () => {
+  if (typeof window === "undefined") return;
+  if (window.__LOCALHOST_NAV_GUARD_INSTALLED__) return;
+  const host = String(window.location.hostname || "").trim().toLowerCase();
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  if (!isLocal) return;
+  if (window.location.search.includes("allow_auto_reload=1")) return;
+  window.__LOCALHOST_NAV_GUARD_INSTALLED__ = true;
+
+  const now = () => Date.now();
+  const sameUrl = (rawHref = "") => {
+    try {
+      const target = new URL(String(rawHref || ""), window.location.href);
+      const current = new URL(window.location.href);
+      return target.href === current.href;
+    } catch (_err) {
+      return false;
+    }
+  };
+
+  const shouldBlockSameUrlNavigation = (href) => {
+    if (!sameUrl(href)) return false;
+    const key = "__localhost_nav_guard_last_same_url__";
+    const ts = now();
+    const prevTs = Number(sessionStorage.getItem(key) || 0);
+    sessionStorage.setItem(key, String(ts));
+    return Number.isFinite(prevTs) && ts - prevTs < 2500;
+  };
+
+  try {
+    const proto = window.Location && window.Location.prototype;
+    if (proto?.reload && !proto.reload.__localhostGuardWrapped) {
+      const originalReload = proto.reload;
+      const guardedReload = function guardedReload() {
+        // Evita recarga automática en bucle durante desarrollo local.
+        // Si necesitas restaurarla temporalmente usa ?allow_auto_reload=1.
+        console.warn("[localhost-nav-guard] location.reload bloqueado en entorno local");
+      };
+      guardedReload.__localhostGuardWrapped = true;
+      guardedReload.__localhostGuardOriginal = originalReload;
+      Object.defineProperty(proto, "reload", {
+        configurable: true,
+        writable: true,
+        value: guardedReload,
+      });
+    }
+
+    const patchNavMethod = (name) => {
+      if (typeof proto?.[name] !== "function") return;
+      if (proto[name].__localhostGuardWrapped) return;
+      const original = proto[name];
+      const wrapped = function guardedNavigate(nextHref) {
+        if (shouldBlockSameUrlNavigation(nextHref)) {
+          console.warn(`[localhost-nav-guard] location.${name} bloqueado (misma URL en bucle)`);
+          return;
+        }
+        return original.apply(this, arguments);
+      };
+      wrapped.__localhostGuardWrapped = true;
+      wrapped.__localhostGuardOriginal = original;
+      Object.defineProperty(proto, name, {
+        configurable: true,
+        writable: true,
+        value: wrapped,
+      });
+    };
+
+    patchNavMethod("assign");
+    patchNavMethod("replace");
+  } catch (_err) {
+    // noop
+  }
+};
+
+installLocalhostNavigationGuard();
+
 const normalizeFlag = (value) =>
   value === true ||
   value === "true" ||

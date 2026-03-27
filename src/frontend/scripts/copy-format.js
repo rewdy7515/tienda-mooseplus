@@ -9,6 +9,7 @@ export function buildServiceCopyText({
   pin = "",
   fechaCorte = "",
   porAcceso = false,
+  porPantalla = null,
   usaPines = false,
   ventaPerfil = true,
   idPlataforma = null,
@@ -20,6 +21,8 @@ export function buildServiceCopyText({
   valorTarjeta = "",
   moneda = "",
 } = {}) {
+  const isTrue = (value) =>
+    value === true || value === 1 || value === "1" || value === "true" || value === "t";
   const lines = [];
   const platLabelRaw = (plataforma || "").toString().toUpperCase();
   const regionTxt = String(region || "").trim() || "-";
@@ -46,15 +49,18 @@ export function buildServiceCopyText({
   lines.push(`*Correo:* ${correo || ""}`);
   lines.push(`*Clave:* ${clave || ""}`);
   const hideExtras = !ventaPerfil && !ventaMiembro;
-  if (porAcceso && !hideExtras) {
-    lines.push("*1 acceso*");
-  } else {
-    if (nPerfil && (ventaPerfil || usaPines) && !hideExtras) {
+  const hasPorAcceso = isTrue(porAcceso);
+  const hasPorPantalla = porPantalla === null || porPantalla === undefined ? null : isTrue(porPantalla);
+  const canShowPerfilLinea = hasPorPantalla === null ? true : hasPorPantalla || hasPorAcceso;
+  if (!hideExtras && canShowPerfilLinea) {
+    if (hasPorPantalla === false && hasPorAcceso) {
+      lines.push("*Acceso:* 1 dispositivo");
+    } else if (nPerfil && (ventaPerfil || usaPines)) {
       const perfilTxt = String(nPerfil).startsWith("M") ? String(nPerfil) : `M${nPerfil}`;
       lines.push(`*Perfil:* ${perfilTxt}`);
     }
-    if (pin && usaPines && !hideExtras) lines.push(`*Pin:* ${pin}`);
   }
+  if (pin && usaPines && !hideExtras) lines.push(`*Pin:* ${pin}`);
   if (!hideExtras) {
     lines.push("");
     lines.push("*Próxima fecha de pago:*");

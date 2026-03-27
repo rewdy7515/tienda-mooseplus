@@ -1,6 +1,8 @@
 (function () {
   const container = document.getElementById("app-header");
   if (!container) return;
+  // Evita que el texto del menú/header se use como snippet en buscadores.
+  container.setAttribute("data-nosnippet", "");
   const HEADER_AVATAR_CACHE_PREFIX = "headerAvatarCache";
 
   const getCookie = (name) => {

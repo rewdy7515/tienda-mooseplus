@@ -198,7 +198,7 @@ async function markVentaPendienteByReporteRule({
 
   const { error: updErr } = await supabase
     .from("ventas")
-    .update({ pendiente: true })
+    .update({ pendiente: true, aviso_admin: false })
     .eq("id_venta", ventaFinalId);
   if (updErr) throw updErr;
 }

@@ -1666,6 +1666,8 @@ const resolveWhatsappPhoneForUser = async (idUsuario) => {
 const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   idVenta = null,
   idPlataformaHint = null,
+  manageWhatsappLifecycle = true,
+  ventaSnapshot = null,
 } = {}) => {
   const ventaId = toPositiveInt(idVenta);
   if (!ventaId) {
@@ -1676,32 +1678,42 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
     return { sent: false, skipped: true, reason: "not_spotify_platform" };
   }
 
-  const { data: ventaRow, error: ventaErr } = await supabaseAdmin
-    .from("ventas")
-    .select(
-      "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, precios(id_plataforma)",
-    )
-    .eq("id_venta", ventaId)
-    .maybeSingle();
-  if (ventaErr && isMissingColumnError(ventaErr, "aviso_admin")) {
-    if (!pendingSpotifyAlertsAvisoAdminMissing) {
-      console.warn(
-        "[WhatsApp] Falta la columna ventas.aviso_admin. El aviso de pedidos Spotify pendientes se omite hasta crearla.",
-      );
+  let ventaRow = null;
+  const snapshotVentaId = toPositiveInt(ventaSnapshot?.id_venta);
+  if (snapshotVentaId && snapshotVentaId === ventaId) {
+    ventaRow = ventaSnapshot;
+  } else {
+    const { data, error: ventaErr } = await supabaseAdmin
+      .from("ventas")
+      .select(
+        "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, precios(id_plataforma)",
+      )
+      .eq("id_venta", ventaId)
+      .maybeSingle();
+    if (ventaErr && isMissingColumnError(ventaErr, "aviso_admin")) {
+      if (!pendingSpotifyAlertsAvisoAdminMissing) {
+        console.warn(
+          "[WhatsApp] Falta la columna ventas.aviso_admin. El aviso de pedidos Spotify pendientes se omite hasta crearla.",
+        );
+      }
+      pendingSpotifyAlertsAvisoAdminMissing = true;
+      return { sent: false, skipped: true, reason: "missing_aviso_admin_column" };
     }
-    pendingSpotifyAlertsAvisoAdminMissing = true;
-    return { sent: false, skipped: true, reason: "missing_aviso_admin_column" };
-  }
-  if (ventaErr) throw ventaErr;
-  if (pendingSpotifyAlertsAvisoAdminMissing) {
-    console.log("[WhatsApp] Columna ventas.aviso_admin detectada nuevamente.");
-    pendingSpotifyAlertsAvisoAdminMissing = false;
+    if (ventaErr) throw ventaErr;
+    if (pendingSpotifyAlertsAvisoAdminMissing) {
+      console.log("[WhatsApp] Columna ventas.aviso_admin detectada nuevamente.");
+      pendingSpotifyAlertsAvisoAdminMissing = false;
+    }
+    ventaRow = data || null;
   }
   if (!ventaRow?.id_venta) {
     return { sent: false, skipped: true, reason: "sale_not_found" };
   }
 
-  const platId = Number(ventaRow?.precios?.id_plataforma || 0);
+  const nestedPrecio = Array.isArray(ventaRow?.precios)
+    ? ventaRow.precios[0] || null
+    : ventaRow?.precios || null;
+  const platId = Number(nestedPrecio?.id_plataforma || ventaRow?.id_plataforma || 0);
   if (platId !== 9) {
     return { sent: false, skipped: true, reason: "not_spotify_sale" };
   }
@@ -1726,10 +1738,15 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
     return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
   }
 
-  await ensureWhatsappClientReady({
-    reason: "pending_spotify_order_alert",
-    allowWhenDisabled: true,
-  });
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? "pending_spotify_order_alert"
+        : "pending_spotify_order_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
 
   try {
     const client = getWhatsappClient();
@@ -1757,10 +1774,12 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
       phone: targetPhone,
     };
   } finally {
-    await shutdownWhatsappClient({
-      reason: "pending_spotify_order_alert_completed",
-      allowWhenDisabled: true,
-    });
+    if (shouldManageWhatsappLifecycle) {
+      await shutdownWhatsappClient({
+        reason: "pending_spotify_order_alert_completed",
+        allowWhenDisabled: true,
+      });
+    }
   }
 };
 
@@ -2108,90 +2127,117 @@ const processPendingSpotifyAdminAlerts = async () => {
     failed: 0,
     skipped: 0,
   };
+  let managedWhatsappForRun = false;
 
   try {
-    const { data: ventasRows, error: ventasErr } = await supabaseAdmin
-      .from("ventas")
-      .select("id_venta, id_precio, pendiente, correo_miembro, clave_miembro, aviso_admin")
-      .eq("pendiente", true)
-      .not("correo_miembro", "is", null)
-      .not("clave_miembro", "is", null)
-      .or("aviso_admin.eq.false,aviso_admin.is.null")
-      .order("id_venta", { ascending: true })
-      .limit(WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH);
+    let lastVentaId = 0;
+    while (true) {
+      let query = supabaseAdmin
+        .from("ventas")
+        .select(
+          "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, precios!inner(id_plataforma)",
+        )
+        .eq("pendiente", true)
+        .eq("precios.id_plataforma", 9)
+        .not("correo_miembro", "is", null)
+        .not("clave_miembro", "is", null)
+        .or("aviso_admin.eq.false,aviso_admin.is.null")
+        .order("id_venta", { ascending: true })
+        .limit(WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH);
+      if (lastVentaId > 0) {
+        query = query.gt("id_venta", lastVentaId);
+      }
 
-    if (ventasErr && isMissingColumnError(ventasErr, "aviso_admin")) {
-      if (!pendingSpotifyAlertsAvisoAdminMissing) {
-        console.warn(
-          "[WhatsApp] Worker de pedidos Spotify pendientes desactivado: falta columna ventas.aviso_admin.",
+      const { data: ventasRows, error: ventasErr } = await query;
+
+      if (ventasErr && isMissingColumnError(ventasErr, "aviso_admin")) {
+        if (!pendingSpotifyAlertsAvisoAdminMissing) {
+          console.warn(
+            "[WhatsApp] Worker de pedidos Spotify pendientes desactivado: falta columna ventas.aviso_admin.",
+          );
+        }
+        pendingSpotifyAlertsAvisoAdminMissing = true;
+        pendingSpotifyAlertsLastError = null;
+        pendingSpotifyAlertsLastResult = result;
+        return {
+          skipped: true,
+          reason: "missing_aviso_admin_column",
+          ...result,
+        };
+      }
+      if (ventasErr) throw ventasErr;
+
+      if (pendingSpotifyAlertsAvisoAdminMissing) {
+        console.log("[WhatsApp] Worker de pedidos Spotify pendientes reactivado.");
+        pendingSpotifyAlertsAvisoAdminMissing = false;
+      }
+
+      const ventas = Array.isArray(ventasRows) ? ventasRows : [];
+      if (!ventas.length) break;
+      result.fetched += ventas.length;
+
+      const batchMaxVentaId = ventas.reduce((maxId, row) => {
+        const rowVentaId = toPositiveInt(row?.id_venta);
+        if (!rowVentaId) return maxId;
+        return rowVentaId > maxId ? rowVentaId : maxId;
+      }, 0);
+
+      for (const venta of ventas) {
+        const idVenta = toPositiveInt(venta?.id_venta);
+        if (!idVenta) {
+          result.skipped += 1;
+          continue;
+        }
+
+        const hasMessageData = Boolean(
+          buildWhatsappPendingOrderAdminMessage({
+            correoMiembro: venta?.correo_miembro,
+            claveMiembro: venta?.clave_miembro,
+            cuentaNueva: venta?.cuenta_nueva,
+          }),
         );
+        if (!hasMessageData) {
+          result.skipped += 1;
+          continue;
+        }
+
+        try {
+          if (!managedWhatsappForRun) {
+            await ensureWhatsappClientReady({
+              reason: "pending_spotify_orders_worker",
+              allowWhenDisabled: true,
+            });
+            managedWhatsappForRun = true;
+          }
+
+          const sendRes = await maybeSendPendingSpotifyOrderToWhatsapp({
+            idVenta,
+            idPlataformaHint: 9,
+            manageWhatsappLifecycle: false,
+            ventaSnapshot: venta,
+          });
+          if (sendRes?.sent) result.sent += 1;
+          else result.skipped += 1;
+        } catch (err) {
+          result.failed += 1;
+          console.error("[WhatsApp] Worker pedidos Spotify pendientes error", {
+            id_venta: idVenta,
+            error: err?.message || err,
+          });
+        }
       }
-      pendingSpotifyAlertsAvisoAdminMissing = true;
-      pendingSpotifyAlertsLastError = null;
-      pendingSpotifyAlertsLastResult = result;
-      return {
-        skipped: true,
-        reason: "missing_aviso_admin_column",
-        ...result,
-      };
-    }
-    if (ventasErr) throw ventasErr;
 
-    if (pendingSpotifyAlertsAvisoAdminMissing) {
-      console.log("[WhatsApp] Worker de pedidos Spotify pendientes reactivado.");
-      pendingSpotifyAlertsAvisoAdminMissing = false;
+      if (batchMaxVentaId <= 0 || ventas.length < WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH) {
+        break;
+      }
+      lastVentaId = batchMaxVentaId;
     }
 
-    const ventas = Array.isArray(ventasRows) ? ventasRows : [];
-    result.fetched = ventas.length;
-    if (!ventas.length) {
-      pendingSpotifyAlertsLastError = null;
-      pendingSpotifyAlertsLastResult = result;
-      return { ...result };
-    }
-
-    const precioIds = uniqPositiveIds(ventas.map((row) => row?.id_precio));
-    const priceMap = {};
-    if (precioIds.length) {
-      const { data: pricesRows, error: pricesErr } = await supabaseAdmin
-        .from("precios")
-        .select("id_precio, id_plataforma")
-        .in("id_precio", precioIds);
-      if (pricesErr) throw pricesErr;
-      (pricesRows || []).forEach((row) => {
-        const idPrecio = toPositiveInt(row?.id_precio);
-        if (!idPrecio) return;
-        priceMap[idPrecio] = Number(row?.id_plataforma || 0) || 0;
+    if (!managedWhatsappForRun && isWhatsappClientActive() && !whatsappBootInProgress) {
+      await shutdownWhatsappClient({
+        reason: "pending_spotify_orders_worker_idle",
+        allowWhenDisabled: true,
       });
-    }
-
-    for (const venta of ventas) {
-      const idVenta = toPositiveInt(venta?.id_venta);
-      if (!idVenta) {
-        result.skipped += 1;
-        continue;
-      }
-      const idPrecio = toPositiveInt(venta?.id_precio);
-      const platId = idPrecio ? Number(priceMap[idPrecio] || 0) : 0;
-      if (platId !== 9) {
-        result.skipped += 1;
-        continue;
-      }
-
-      try {
-        const sendRes = await maybeSendPendingSpotifyOrderToWhatsapp({
-          idVenta,
-          idPlataformaHint: 9,
-        });
-        if (sendRes?.sent) result.sent += 1;
-        else result.skipped += 1;
-      } catch (err) {
-        result.failed += 1;
-        console.error("[WhatsApp] Worker pedidos Spotify pendientes error", {
-          id_venta: idVenta,
-          error: err?.message || err,
-        });
-      }
     }
 
     pendingSpotifyAlertsLastError = null;
@@ -2201,6 +2247,16 @@ const processPendingSpotifyAdminAlerts = async () => {
     pendingSpotifyAlertsLastError = err?.message || "Error desconocido";
     throw err;
   } finally {
+    if (managedWhatsappForRun) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "pending_spotify_orders_worker_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[WhatsApp] No se pudo apagar el cliente tras pedidos pendientes", shutdownErr);
+      }
+    }
     pendingSpotifyAlertsLastRunAt = new Date().toISOString();
     pendingSpotifyAlertsInProgress = false;
   }
@@ -2383,7 +2439,7 @@ const loadWhatsappRecordatorioContextMaps = async (ventasList = []) => {
         (from, to) =>
           supabaseAdmin
             .from("plataformas")
-            .select("id_plataforma, nombre, correo_cliente")
+            .select("id_plataforma, nombre, correo_cliente, por_pantalla, por_acceso")
             .in("id_plataforma", platIds)
             .order("id_plataforma", { ascending: true })
             .range(from, to),
@@ -2469,9 +2525,26 @@ const buildWhatsappRecordatorioItems = async ({
       platInfo.correo_cliente === true ||
       platInfo.correo_cliente === "true" ||
       platInfo.correo_cliente === "1";
+    const allowPerfilByScreen =
+      platInfo.por_pantalla === true ||
+      platInfo.por_pantalla === "true" ||
+      platInfo.por_pantalla === "1" ||
+      platInfo.por_pantalla === 1 ||
+      platInfo.por_pantalla === "t";
+    const allowPerfilByAccess =
+      platInfo.por_acceso === true ||
+      platInfo.por_acceso === "true" ||
+      platInfo.por_acceso === "1" ||
+      platInfo.por_acceso === 1 ||
+      platInfo.por_acceso === "t";
     const correo = useCorreoCliente ? venta.correo_miembro || "-" : cuenta.correo || "-";
     const perfInfo = venta.id_perfil ? mapPerf[venta.id_perfil] : null;
-    const perfilTxt = perfInfo?.n ? `Perfil: M${perfInfo.n}` : "";
+    const perfilTxt =
+      !allowPerfilByScreen && allowPerfilByAccess
+        ? "Acceso: 1 dispositivo"
+        : allowPerfilByScreen && perfInfo?.n
+          ? `Perfil: M${perfInfo.n}`
+          : "";
     const isNetflix = Number(platId) === 1;
     const isPlan2Precio = Number(venta.id_precio) === 4 || Number(venta.id_precio) === 5;
     const isNetflixPlan2 = isNetflix && (isPlan2Precio || perfInfo?.hogar);
@@ -3306,6 +3379,11 @@ if (WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED && shouldStartWhatsapp) {
       WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS / 1000,
     )}s).`,
   );
+  onWhatsappReady(() => {
+    processPendingSpotifyAdminAlerts().catch((err) => {
+      console.error("[WhatsApp] Worker pedidos Spotify pendientes ready error", err);
+    });
+  });
   setInterval(() => {
     processPendingSpotifyAdminAlerts().catch((err) => {
       console.error("[WhatsApp] Worker pedidos Spotify pendientes error", err);
@@ -6264,7 +6342,11 @@ const buildOrdenItemDetalle = ({
   if (correoRenovacion) {
     parts.push(`Correo: ${correoRenovacion}`);
   }
-  if (nPerfil) {
+  const showPerfilByScreen = isTrue(platformInfo?.por_pantalla);
+  const showPerfilByAccess = isTrue(platformInfo?.por_acceso);
+  if (!showPerfilByScreen && showPerfilByAccess) {
+    parts.push("Acceso: 1 dispositivo");
+  } else if (showPerfilByScreen && nPerfil) {
     parts.push(`Perfil: M${nPerfil}`);
   }
   if (item?.id_venta) {
@@ -6670,6 +6752,9 @@ const processOrderFromItems = async ({
       pendiente: renovarPendiente,
       suspendido: false,
     };
+    if (isSuspendidaAnt) {
+      updatePayload.cuenta_nueva = false;
+    }
     if (isCuentaCompletaRenov) {
       updatePayload.cuenta_pagada_admin = false;
     }
