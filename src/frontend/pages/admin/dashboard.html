@@ -554,7 +554,7 @@
           <span><span class="dashboard-trend-dot previous"></span>Mes anterior</span>
         </p>
         <p id="ventas-trend-summary" class="dashboard-trend-summary">-</p>
-        <svg id="ventas-trend-chart" class="dashboard-trend-chart" viewBox="0 0 1000 240" preserveAspectRatio="none"></svg>
+        <svg id="ventas-trend-chart" class="dashboard-trend-chart" viewBox="0 0 1000 260" preserveAspectRatio="none"></svg>
         <p id="ventas-trend-empty" class="dashboard-trend-empty hidden">Sin ventas para graficar.</p>
       </section>
 
@@ -797,6 +797,10 @@
       let trendLastStats = null;
       let trendLastPrevStats = null;
       let trendLastRange = null;
+      let authDailySelectedDay = null;
+      let authDailyHoverDay = null;
+      let authDailyLastRows = [];
+      let authDailyLastMonthKey = "";
       let platformSalesMonthlyRows = [];
       let selectedPlatformMonthlyKey = "";
       const MONTH_NAMES_ES = [
@@ -885,6 +889,25 @@
         return `${monthName} ${m[1]}`;
       };
       const formatAverageValue = (value) => avgFmt.format(Number(value) || 0);
+      const getPointRxScale = (svgEl, viewBoxW, viewBoxH) => {
+        const vw = Number(svgEl?.clientWidth) || 0;
+        const vh = Number(svgEl?.clientHeight) || 0;
+        const w = Number(viewBoxW) || 0;
+        const h = Number(viewBoxH) || 0;
+        if (vw <= 0 || vh <= 0 || w <= 0 || h <= 0) return 1;
+        const sx = vw / w;
+        const sy = vh / h;
+        if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) return 1;
+        return sy / sx;
+      };
+      const buildEllipsePoint = (cx, cy, r, fill, rxScale = 1, extraAttrs = "") => {
+        const x = Number(cx) || 0;
+        const y = Number(cy) || 0;
+        const radius = Math.max(0, Number(r) || 0);
+        const scale = Number.isFinite(Number(rxScale)) && Number(rxScale) > 0 ? Number(rxScale) : 1;
+        const attrs = String(extraAttrs || "").trim();
+        return `<ellipse cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" rx="${(radius * scale).toFixed(2)}" ry="${radius.toFixed(2)}" fill="${escapeHtml(fill)}"${attrs ? ` ${attrs}` : ""} />`;
+      };
       const formatHourLabel12 = (hourVal) => {
         const hour = Number(hourVal);
         if (!Number.isInteger(hour) || hour < 0 || hour > 23) return "-";
@@ -1298,6 +1321,8 @@
         auth: {
           usuarios_auth_confirmados: 0,
           usuarios_auth_confirmados_mes_anterior: 0,
+          usuarios_auth_confirmados_enlazados: 0,
+          usuarios_auth_confirmados_enlazados_mes_anterior: 0,
           clientes_auth_confirmados: 0,
           clientes_auth_confirmados_mes_anterior: 0,
           vendedores_auth_confirmados: 0,
@@ -1708,6 +1733,12 @@
       const renderAuthWebDailyLineChart = (rows, monthKey) => {
         if (!authWebDailyChart) return;
         authWebDailyChart.innerHTML = "";
+        const normalizedMonthKey = String(monthKey || "").trim();
+        if (normalizedMonthKey !== authDailyLastMonthKey) {
+          authDailySelectedDay = null;
+          authDailyHoverDay = null;
+        }
+        authDailyLastMonthKey = normalizedMonthKey;
         const normalizedRows = (Array.isArray(rows) ? rows : [])
           .map((row) => ({
             dia: Number(row?.dia) || 0,
@@ -1715,12 +1746,16 @@
           }))
           .filter((row) => Number.isInteger(row.dia) && row.dia > 0)
           .sort((a, b) => a.dia - b.dia);
+        authDailyLastRows = normalizedRows.map((row) => ({ ...row }));
         const hasPositive = normalizedRows.some((row) => row.cantidad > 0);
-        const monthLabel = formatMonthLabel(monthKey || "") || "mes actual";
+        const monthLabel = formatMonthLabel(normalizedMonthKey) || "mes actual";
         const totalMes = normalizedRows.reduce((acc, row) => acc + (Number(row?.cantidad) || 0), 0);
+        const baseNote = `Registros diarios en ${monthLabel}: ${intFmt.format(totalMes)} usuarios con auth confirmado.`;
         if (!normalizedRows.length || !hasPositive) {
           authWebDailyChart.classList.add("hidden");
           emptyAuthWebDailyChart?.classList.remove("hidden");
+          authDailySelectedDay = null;
+          authDailyHoverDay = null;
           if (authWebDailyNoteEl) {
             authWebDailyNoteEl.textContent = `Registros diarios en ${monthLabel}: ${intFmt.format(totalMes)} usuarios.`;
           }
@@ -1728,9 +1763,22 @@
         }
         authWebDailyChart.classList.remove("hidden");
         emptyAuthWebDailyChart?.classList.add("hidden");
+        const daySet = new Set(normalizedRows.map((row) => row.dia));
+        if (!daySet.has(authDailySelectedDay)) authDailySelectedDay = null;
+        if (!daySet.has(authDailyHoverDay)) authDailyHoverDay = null;
+        const activeDay =
+          Number.isInteger(authDailyHoverDay) && authDailyHoverDay > 0
+            ? authDailyHoverDay
+            : Number.isInteger(authDailySelectedDay) && authDailySelectedDay > 0
+              ? authDailySelectedDay
+              : null;
+        const activeRow = activeDay
+          ? normalizedRows.find((row) => row.dia === activeDay) || null
+          : null;
         if (authWebDailyNoteEl) {
-          authWebDailyNoteEl.textContent =
-            `Registros diarios en ${monthLabel}: ${intFmt.format(totalMes)} usuarios con auth confirmado.`;
+          authWebDailyNoteEl.textContent = activeRow
+            ? `${baseNote} Día ${activeRow.dia}: ${intFmt.format(activeRow.cantidad)} usuarios registrados.`
+            : baseNote;
         }
 
         const values = normalizedRows.map((row) => Number(row?.cantidad) || 0);
@@ -1745,6 +1793,7 @@
         const toX = (idx) =>
           px + (normalizedRows.length <= 1 ? innerW / 2 : (idx / (normalizedRows.length - 1)) * innerW);
         const toY = (value) => pyTop + innerH - (value / maxY) * innerH;
+        const pointRxScale = getPointRxScale(authWebDailyChart, w, h);
         const path = values
           .map((value, idx) => `${idx === 0 ? "M" : "L"}${toX(idx).toFixed(2)},${toY(value).toFixed(2)}`)
           .join(" ");
@@ -1778,9 +1827,34 @@
         const points = normalizedRows
           .map((row, idx) => {
             const value = Number(row?.cantidad) || 0;
-            return `<circle cx="${toX(idx).toFixed(2)}" cy="${toY(value).toFixed(2)}" r="3.1" fill="#0f766e">
-              <title>Día ${row.dia}: ${intFmt.format(value)} registros</title>
-            </circle>`;
+            const active = activeRow?.dia === row.dia;
+            const radius = active ? 4.6 : 3.1;
+            const color = active ? "#0b5d57" : "#0f766e";
+            return buildEllipsePoint(toX(idx), toY(value), radius, color, pointRxScale);
+          })
+          .join("");
+        const activeLabel = activeRow
+          ? (() => {
+              const idx = normalizedRows.findIndex((row) => row.dia === activeRow.dia);
+              if (idx < 0) return "";
+              const x = toX(idx);
+              const y = toY(Number(activeRow.cantidad) || 0);
+              const valueLabel = intFmt.format(Number(activeRow.cantidad) || 0);
+              return `<text x="${x.toFixed(2)}" y="${Math.max(14, y - 10).toFixed(2)}" text-anchor="middle" fill="#0b5d57" font-size="11" font-weight="700">${valueLabel}</text>
+                ${buildEllipsePoint(x, y, 5.4, "#0b5d57", pointRxScale)}`;
+            })()
+          : "";
+        const hitTargets = normalizedRows
+          .map((row, idx) => {
+            const value = Number(row?.cantidad) || 0;
+            return buildEllipsePoint(
+              toX(idx),
+              toY(value),
+              11,
+              "transparent",
+              pointRxScale,
+              `data-auth-day="${row.dia}" style="cursor:pointer;"`,
+            );
           })
           .join("");
         authWebDailyChart.innerHTML = `
@@ -1788,7 +1862,9 @@
           ${yTicks}
           <line x1="${px}" y1="${axisY}" x2="${w - px}" y2="${axisY}" stroke="#cbd5e1" stroke-width="1.2" />
           <path d="${path}" fill="none" stroke="#0f766e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          ${activeLabel}
           ${points}
+          ${hitTargets}
           ${xLabels}
         `;
       };
@@ -1823,8 +1899,14 @@
             Number(analiticaWeb?.auth?.usuarios_auth_confirmados_mes_anterior) || 0;
           const prevVendedores =
             Number(analiticaWeb?.auth?.vendedores_auth_confirmados_mes_anterior) || 0;
+          const totalEnlazados =
+            Number(analiticaWeb?.auth?.usuarios_auth_confirmados_enlazados) ||
+            total + totalVendedores;
+          const prevTotalEnlazados =
+            Number(analiticaWeb?.auth?.usuarios_auth_confirmados_enlazados_mes_anterior) ||
+            prev + prevVendedores;
           authWebNoteEl.textContent =
-            `Registrados con auth confirmado hasta ${formatMonthLabel(monthVal)}: ${intFmt.format(totalUsuarios)} usuarios, ${intFmt.format(total)} clientes y ${intFmt.format(totalVendedores)} vendedores (mes anterior: ${intFmt.format(prevTotalUsuarios)}, ${intFmt.format(prev)} y ${intFmt.format(prevVendedores)}).`;
+            `Verificados en Auth hasta ${formatMonthLabel(monthVal)}: ${intFmt.format(totalUsuarios)} usuarios en total, ${intFmt.format(total)} clientes y ${intFmt.format(totalVendedores)} vendedores. Enlazados en la tabla usuarios: ${intFmt.format(totalEnlazados)}. Mes anterior: ${intFmt.format(prevTotalUsuarios)} en total (${intFmt.format(prev)} clientes, ${intFmt.format(prevVendedores)} vendedores) y ${intFmt.format(prevTotalEnlazados)} enlazados.`;
         }
 
         const traficoActual = analiticaWeb?.trafico?.actual || {};
@@ -1932,6 +2014,7 @@
         const toX = (idx) =>
           px + (days.length <= 1 ? innerW / 2 : (idx / (days.length - 1)) * innerW);
         const toY = (value) => pyTop + innerH - (value / maxY) * innerH;
+        const trendPointRxScale = getPointRxScale(ventasTrendChart, w, h);
         const buildPath = (vals) => {
           const points = vals
             .map((val, idx) => (val == null ? null : { x: toX(idx), y: toY(Number(val) || 0) }))
@@ -1986,7 +2069,7 @@
         const selectionLabel =
           selectedX != null && selectedY != null
             ? `<text x="${selectedX.toFixed(2)}" y="${Math.max(14, selectedY - 10).toFixed(2)}" text-anchor="middle" fill="${selectedColor}" font-size="11" font-weight="700">${selectedValue}</text>
-               <circle cx="${selectedX.toFixed(2)}" cy="${selectedY.toFixed(2)}" r="5.5" fill="${selectedColor}" />`
+               ${buildEllipsePoint(selectedX, selectedY, 5.5, selectedColor, trendPointRxScale)}`
             : "";
         const clickTargets = days
           .map((day, idx) => {
@@ -2007,8 +2090,20 @@
           <line x1="${px}" y1="${axisY}" x2="${w - px}" y2="${axisY}" stroke="#d1d5db" stroke-width="1.2" />
           <path d="${prevPath}" fill="none" stroke="#9ca3af" stroke-width="2.5" />
           <path d="${currPath}" fill="none" stroke="#111827" stroke-width="3.25" />
-          <circle cx="${toX(Math.max(0, currentCutDay - 1)).toFixed(2)}" cy="${toY(endCurr).toFixed(2)}" r="4.5" fill="#111827" />
-          <circle cx="${toX(prevVals.length - 1).toFixed(2)}" cy="${toY(endPrev).toFixed(2)}" r="3.8" fill="#9ca3af" />
+          ${buildEllipsePoint(
+            toX(Math.max(0, currentCutDay - 1)),
+            toY(endCurr),
+            4.5,
+            "#111827",
+            trendPointRxScale,
+          )}
+          ${buildEllipsePoint(
+            toX(prevVals.length - 1),
+            toY(endPrev),
+            3.8,
+            "#9ca3af",
+            trendPointRxScale,
+          )}
           ${selectionLabel}
           ${clickTargets}
           ${xLabels}
@@ -2052,6 +2147,34 @@
         trendHoverDay = null;
         trendHoverSeries = null;
         renderVentasTrendChart(trendLastStats, trendLastPrevStats, trendLastRange);
+      });
+      authWebDailyChart?.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!(target instanceof SVGElement)) return;
+        const day = Number(target.dataset?.authDay || 0);
+        if (!Number.isInteger(day) || day <= 0) return;
+        authDailySelectedDay = day;
+        renderAuthWebDailyLineChart(authDailyLastRows, authDailyLastMonthKey);
+      });
+      authWebDailyChart?.addEventListener("mousemove", (e) => {
+        const target = e.target;
+        if (!(target instanceof SVGElement)) return;
+        const day = Number(target.dataset?.authDay || 0);
+        if (!Number.isInteger(day) || day <= 0) {
+          if (authDailyHoverDay !== null) {
+            authDailyHoverDay = null;
+            renderAuthWebDailyLineChart(authDailyLastRows, authDailyLastMonthKey);
+          }
+          return;
+        }
+        if (authDailyHoverDay === day) return;
+        authDailyHoverDay = day;
+        renderAuthWebDailyLineChart(authDailyLastRows, authDailyLastMonthKey);
+      });
+      authWebDailyChart?.addEventListener("mouseleave", () => {
+        if (authDailyHoverDay === null) return;
+        authDailyHoverDay = null;
+        renderAuthWebDailyLineChart(authDailyLastRows, authDailyLastMonthKey);
       });
 
       const computeStats = (historial, giftRows) => {

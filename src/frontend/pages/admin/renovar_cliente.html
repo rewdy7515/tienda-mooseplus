@@ -1864,7 +1864,7 @@
               id_venta: it.id_venta,
               id_plataforma: it.id_plataforma ? Number(it.id_plataforma) : null,
               id_cuenta: it.id_cuenta ? Number(it.id_cuenta) : null,
-              registrado_por: registradoPor,
+              registrado_por: null,
               id_usuario_cliente: it.id_usuario_cliente ? Number(it.id_usuario_cliente) : null,
               id_metodo_de_pago: metodoId,
               referencia: refValue,
@@ -1882,7 +1882,7 @@
                 id_venta: it.id_venta ? Number(it.id_venta) : null,
                 id_plataforma: it.id_plataforma ? Number(it.id_plataforma) : null,
                 id_cuenta: it.id_cuenta ? Number(it.id_cuenta) : null,
-                registrado_por: registradoPor,
+                registrado_por: null,
               });
               if (gastoErr) throw gastoErr;
             }
@@ -2137,7 +2137,7 @@
             id_venta: modalRowContext.id_venta,
             id_plataforma: modalRowContext.id_plataforma || null,
             id_cuenta: modalRowContext.id_cuenta || null,
-            registrado_por: registradoPor,
+            registrado_por: null,
             id_usuario_cliente: modalRowContext.id_usuario_cliente || null,
             referencia: ref,
           });
@@ -2154,7 +2154,7 @@
               id_venta: modalRowContext.id_venta,
               id_plataforma: modalRowContext.id_plataforma || null,
               id_cuenta: modalRowContext.id_cuenta || null,
-              registrado_por: registradoPor,
+              registrado_por: null,
             });
             if (gastoErr) throw gastoErr;
           }

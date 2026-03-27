@@ -1020,6 +1020,7 @@
             tasa_bs: checkoutSummaryState.tasa_bs,
             id_usuario_override: idCliente,
             bypass_verificacion: isSuperAdmin === true,
+            historial_registrado_por_origen: "cuenta_nueva",
             custom_item_amounts: checkoutSummaryState.items.map((item) => ({
               id_item: item.id_item,
               monto_usd: item.monto_usd,

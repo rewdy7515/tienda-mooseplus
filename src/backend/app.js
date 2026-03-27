@@ -3271,10 +3271,22 @@ const normalizeMontoBs = (value) => {
 };
 
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const stripQuoteChars = (value) =>
+  String(value || "").replace(/["'`“”‘’«»]/g, " ");
+const normalizeNotificationTextForParsing = (value) =>
+  stripQuoteChars(value).replace(/\s+/g, " ").trim();
 
 const getRefExtractionSources = (text) => {
   const base = String(text || "").trim();
   if (!base) return [];
+  const sources = [];
+  const pushSource = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return;
+    if (!sources.includes(raw)) sources.push(raw);
+    const normalized = normalizeNotificationTextForParsing(raw);
+    if (normalized && !sources.includes(normalized)) sources.push(normalized);
+  };
 
   try {
     const parsed = JSON.parse(base);
@@ -3297,16 +3309,15 @@ const getRefExtractionSources = (text) => {
         parsed.payload?.ref,
         parsed.payload?.reference,
       ];
-      const sources = nested
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
-      return Array.from(new Set(sources));
+      nested.forEach((value) => pushSource(value));
+      if (sources.length) return sources;
     }
   } catch (_err) {
     // Ignorar si no es JSON válido; usamos el texto crudo.
   }
 
-  return [base];
+  pushSource(base);
+  return sources;
 };
 
 const extractRefFieldCandidates = (text) => {
@@ -3343,10 +3354,10 @@ const extractRefFieldCandidates = (text) => {
 const extractRefKeywordCandidates = (text) => {
   const sources = getRefExtractionSources(text);
   const patterns = [
-    /\bref(?:erencia)?\.?\s*[:#-]?\s*(\d{4,20})/gi,
-    /(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])\s*(?:de\s*)?(?:operaci(?:o|ó)n|referencia)\s*[:#-]?\s*(\d{6,20})/gi,
-    /(?:operaci(?:o|ó)n|referencia)\s*(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])?\s*[:#-]?\s*(\d{6,20})/gi,
-    /(?:trx|transacci(?:o|ó)n|operaci(?:o|ó)n)\s*[:#-]?\s*(\d{6,20})/gi,
+    /\bref(?:erencia)?\.?\s*[:#-]?\s*["'`“”‘’«»]?\s*(\d{4,20})/gi,
+    /(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])\s*(?:de\s*)?(?:operaci(?:o|ó)n|referencia)\s*[:#-]?\s*["'`“”‘’«»]?\s*(\d{6,20})/gi,
+    /(?:operaci(?:o|ó)n|referencia)\s*(?:n(?:u|ú)mero|num(?:ero)?|n[º°#])?\s*[:#-]?\s*["'`“”‘’«»]?\s*(\d{6,20})/gi,
+    /(?:trx|transacci(?:o|ó)n|operaci(?:o|ó)n)\s*[:#-]?\s*["'`“”‘’«»]?\s*(\d{6,20})/gi,
   ];
   const results = [];
   sources.forEach((source) => {
@@ -3687,6 +3698,9 @@ const autoProcessMatchedOrder = async (match = {}) => {
     id_metodo_de_pago: orden?.id_metodo_de_pago,
     carritoId: orden.id_carrito,
     montoHistorialTotalOverride: montoBaseCobrado,
+    snapshotTotalUsd: orden?.total ?? context?.total ?? null,
+    snapshotMontoBsTotal: orden?.monto_bs ?? null,
+    snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
   });
 
   const { error: updOrdErr } = await supabaseAdmin
@@ -3791,6 +3805,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
     const appName = "BDV";
     const titulo = "BDV";
     const texto = rawText;
+    const textoForParsing = normalizeNotificationTextForParsing(rawText);
     const fecha = new Date().toISOString();
     const dispositivo = "unknown";
 
@@ -3810,9 +3825,9 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
     }
 
     const montoMatch =
-      texto.match(/Bs\.?\s*([0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]+)?)/i)?.[1] ||
-      texto.match(/Bs\.?\s*([0-9]+(?:[.,][0-9]+)?)/i)?.[1] ||
-      texto.match(/Bs\.?\s*(0[.,][0-9]+)/i)?.[1] ||
+      textoForParsing.match(/Bs\.?\s*([0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]+)?)/i)?.[1] ||
+      textoForParsing.match(/Bs\.?\s*([0-9]+(?:[.,][0-9]+)?)/i)?.[1] ||
+      textoForParsing.match(/Bs\.?\s*(0[.,][0-9]+)/i)?.[1] ||
       null;
     const normalizeMonto = (val) => {
       if (!val) return null;
@@ -3823,7 +3838,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       return raw.replace(",", ".");
     };
     const monto = normalizeMonto(montoMatch);
-    const referenciaRaw = pickPrimaryReferenceCandidate(texto);
+    const referenciaRaw = pickPrimaryReferenceCandidate(textoForParsing);
     const referenciaDetectada = normalizeReferenceDigits(referenciaRaw);
     const referenciaValor = referenciaDetectada.length >= 6 ? referenciaDetectada : null;
 
@@ -6255,6 +6270,7 @@ const buildCheckoutItemSummaryRows = async ({
       id_precio: toPositiveInt(item?.id_precio) || null,
       id_plataforma: platId,
       renovacion: item?.renovacion === true,
+      id_venta: toPositiveInt(item?.id_venta) || null,
       cantidad: Math.max(1, Number(item?.cantidad) || 1),
       meses: Math.max(1, Number(item?.meses) || 1),
       detalle: buildOrdenItemDetalle({
@@ -6399,6 +6415,7 @@ const syncOrdenItemsSnapshot = async ({
     id_orden: orderIdNum,
     id_plataforma: row.id_plataforma,
     renovacion: row.renovacion,
+    id_venta: toPositiveInt(row?.id_venta) || null,
     detalle: row.detalle,
     monto_usd: row.monto_usd,
     monto_bs: row.monto_bs,
@@ -6437,6 +6454,7 @@ const processOrderFromItems = async ({
   ordenId,
   idUsuarioSesion,
   idUsuarioVentas,
+  historialRegistradoPor = null,
   adminInvolucradoId = null,
   items,
   priceMap,
@@ -6453,6 +6471,9 @@ const processOrderFromItems = async ({
   carritoId,
   montoHistorialTotalOverride,
   itemAmountMapById = null,
+  snapshotTotalUsd = null,
+  snapshotMontoBsTotal = null,
+  snapshotTasaBs = null,
 }) => {
   console.log("[checkout] processOrderFromItems start", {
     ordenId,
@@ -6462,6 +6483,10 @@ const processOrderFromItems = async ({
     carritoId,
   });
   const isoHoy = todayInVenezuela();
+  const historialRegistradoPorId =
+    Number.isFinite(Number(historialRegistradoPor)) && Number(historialRegistradoPor) > 0
+      ? Math.trunc(Number(historialRegistradoPor))
+      : null;
   const referenciaNum = Number.isFinite(Number(referencia)) ? Number(referencia) : null;
   const archivosArr = Array.isArray(archivos) ? archivos : [];
   const comprobanteHist = archivosArr?.[0] || null;
@@ -7028,7 +7053,8 @@ const processOrderFromItems = async ({
     lineDistributedAmountsByItemId.set(itemId, buildDistributedAmounts(lineAmount, itemRows.length));
   });
 
-  const ventasToInsert = [...asignaciones, ...pendientes].map((a) => {
+  const sourceRowsForVentas = [...asignaciones, ...pendientes];
+  const ventasToInsert = sourceRowsForVentas.map((a) => {
     const mesesValRaw = a.meses || 1;
     const mesesVal =
       Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
@@ -7097,6 +7123,23 @@ const processOrderFromItems = async ({
     insertedVentas = ventasRes || [];
   }
 
+  const resolvedVentaByItemId = new Map();
+  (items || []).forEach((item) => {
+    const itemId = toPositiveInt(item?.id_item);
+    const ventaId = toPositiveInt(item?.id_venta);
+    if (itemId && ventaId && !resolvedVentaByItemId.has(itemId)) {
+      resolvedVentaByItemId.set(itemId, ventaId);
+    }
+  });
+  insertedVentas.forEach((venta, idx) => {
+    const source = sourceRowsForVentas[idx] || {};
+    const itemId = toPositiveInt(source?.id_item_carrito);
+    const ventaId = toPositiveInt(venta?.id_venta);
+    if (itemId && ventaId && !resolvedVentaByItemId.has(itemId)) {
+      resolvedVentaByItemId.set(itemId, ventaId);
+    }
+  });
+
   const giftSoldIds = Array.from(
     new Set(
       (insertedVentas || [])
@@ -7141,7 +7184,7 @@ const processOrderFromItems = async ({
       id_orden: ordenId,
       id_plataforma: platId,
       id_cuenta: v.id_cuenta,
-      registrado_por: idUsuarioSesion,
+      registrado_por: historialRegistradoPorId,
       id_metodo_de_pago,
       referencia: referenciaNum,
       comprobante: comprobanteHist,
@@ -7181,7 +7224,7 @@ const processOrderFromItems = async ({
       id_orden: ordenId,
       id_plataforma: platId,
       id_cuenta: cuentaAnt,
-      registrado_por: idUsuarioSesion,
+      registrado_por: historialRegistradoPorId,
       id_metodo_de_pago,
       referencia: referenciaNum,
       comprobante: comprobanteHist,
@@ -7243,6 +7286,30 @@ const processOrderFromItems = async ({
       );
     }
   }
+
+  const snapshotItems = (items || []).map((item) => {
+    const itemId = toPositiveInt(item?.id_item);
+    if (!itemId) return item;
+    const resolvedVentaId = toPositiveInt(resolvedVentaByItemId.get(itemId));
+    if (!resolvedVentaId || resolvedVentaId === toPositiveInt(item?.id_venta)) return item;
+    return { ...item, id_venta: resolvedVentaId };
+  });
+  await syncOrdenItemsSnapshot({
+    ordenId,
+    items: snapshotItems,
+    priceMap,
+    platInfoById,
+    platNameById,
+    pickPrecio,
+    descuentos,
+    discountColumns,
+    discountColumnById,
+    isCliente,
+    totalUsd: snapshotTotalUsd,
+    montoBsTotal: snapshotMontoBsTotal,
+    tasaBs: snapshotTasaBs,
+    customItemAmountMap: hasCustomItemAmounts ? itemAmountMapById : null,
+  });
 
   // marca recursos como ocupados
   const perfilesIds = uniqPositiveIds(asignaciones.map((a) => a.id_perfil));
@@ -10526,26 +10593,28 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         .map((row) => [String(row?.id_auth || "").trim().toLowerCase(), row])
         .filter(([authId]) => !!authId),
     );
-    const authConfirmedLinkedRows = (authUsers || [])
+    const authConfirmedRows = (authUsers || [])
       .map((row) => {
-        const authId = String(row?.id || "").trim().toLowerCase();
-        const usuario = authId ? usuarioByAuthId.get(authId) : null;
-        if (!usuario) return null;
         if (!isAuthUserVerified(row)) return null;
         const fechaConfirmacion = toCaracasDate(
           row?.email_confirmed_at || row?.phone_confirmed_at || row?.confirmed_at,
         );
         if (!fechaConfirmacion) return null;
+        const authId = String(row?.id || "").trim().toLowerCase();
+        const usuario = authId ? usuarioByAuthId.get(authId) : null;
         return {
           ...row,
-          usuario,
           fecha_confirmacion: fechaConfirmacion,
+          usuario,
         };
       })
       .filter(Boolean);
+    const authConfirmedLinkedRows = authConfirmedRows
+      .map((row) => (row?.usuario ? row : null))
+      .filter(Boolean);
 
     const registrosPorMesMap = new Map();
-    authConfirmedLinkedRows.forEach((row) => {
+    authConfirmedRows.forEach((row) => {
       const monthKey = toCaracasMonth(
         row?.email_confirmed_at || row?.phone_confirmed_at || row?.confirmed_at,
       );
@@ -10558,7 +10627,7 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     const registrosPorDiaMesActualMap = new Map(
       buildMonthDateKeys(currentMonthRange).map((dateKey) => [dateKey, 0]),
     );
-    authConfirmedLinkedRows.forEach((row) => {
+    authConfirmedRows.forEach((row) => {
       const dateKey = String(row?.fecha_confirmacion || "").trim();
       if (!dateKey || !registrosPorDiaMesActualMap.has(dateKey)) return;
       registrosPorDiaMesActualMap.set(dateKey, (registrosPorDiaMesActualMap.get(dateKey) || 0) + 1);
@@ -10571,23 +10640,54 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       }),
     );
 
-    const countConfirmedUntil = (dateLimit, predicate = null) =>
-      authConfirmedLinkedRows.filter((row) => {
+    const countConfirmedUntil = (rows, dateLimit, predicate = null) =>
+      rows.filter((row) => {
         const matchesDate = String(row?.fecha_confirmacion || "").trim() <= String(dateLimit || "");
         if (!matchesDate) return false;
         if (typeof predicate !== "function") return true;
         return predicate(row);
       }).length;
 
-    const isClienteAuthRow = (row) => row?.usuario?.acceso_cliente === true;
-    const isVendedorAuthRow = (row) => row?.usuario?.acceso_cliente !== true;
+    const resolveAuthAccesoCliente = (row = {}) => {
+      if (row?.usuario && row?.usuario?.acceso_cliente != null) {
+        return isTrue(row.usuario.acceso_cliente);
+      }
+      const rawFromAuth = row?.user_metadata?.acceso_cliente ?? row?.app_metadata?.acceso_cliente;
+      if (rawFromAuth == null || String(rawFromAuth).trim() === "") {
+        return false;
+      }
+      return isTrue(rawFromAuth);
+    };
+    const isClienteAuthRow = (row) => resolveAuthAccesoCliente(row) === true;
+    const isVendedorAuthRow = (row) => resolveAuthAccesoCliente(row) !== true;
 
-    const usuariosAuthConfirmados = countConfirmedUntil(range.end);
-    const usuariosAuthConfirmadosPrev = countConfirmedUntil(prevRange.end);
-    const clientesAuthConfirmados = countConfirmedUntil(range.end, isClienteAuthRow);
-    const clientesAuthConfirmadosPrev = countConfirmedUntil(prevRange.end, isClienteAuthRow);
-    const vendedoresAuthConfirmados = countConfirmedUntil(range.end, isVendedorAuthRow);
-    const vendedoresAuthConfirmadosPrev = countConfirmedUntil(prevRange.end, isVendedorAuthRow);
+    const usuariosAuthConfirmados = countConfirmedUntil(authConfirmedRows, range.end);
+    const usuariosAuthConfirmadosPrev = countConfirmedUntil(authConfirmedRows, prevRange.end);
+    const usuariosAuthConfirmadosLinked = countConfirmedUntil(authConfirmedLinkedRows, range.end);
+    const usuariosAuthConfirmadosLinkedPrev = countConfirmedUntil(
+      authConfirmedLinkedRows,
+      prevRange.end,
+    );
+    const clientesAuthConfirmados = countConfirmedUntil(
+      authConfirmedRows,
+      range.end,
+      isClienteAuthRow,
+    );
+    const clientesAuthConfirmadosPrev = countConfirmedUntil(
+      authConfirmedRows,
+      prevRange.end,
+      isClienteAuthRow,
+    );
+    const vendedoresAuthConfirmados = countConfirmedUntil(
+      authConfirmedRows,
+      range.end,
+      isVendedorAuthRow,
+    );
+    const vendedoresAuthConfirmadosPrev = countConfirmedUntil(
+      authConfirmedRows,
+      prevRange.end,
+      isVendedorAuthRow,
+    );
 
     return res.json({
       ok: true,
@@ -10595,6 +10695,8 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       auth: {
         usuarios_auth_confirmados: usuariosAuthConfirmados,
         usuarios_auth_confirmados_mes_anterior: usuariosAuthConfirmadosPrev,
+        usuarios_auth_confirmados_enlazados: usuariosAuthConfirmadosLinked,
+        usuarios_auth_confirmados_enlazados_mes_anterior: usuariosAuthConfirmadosLinkedPrev,
         clientes_auth_confirmados: clientesAuthConfirmados,
         clientes_auth_confirmados_mes_anterior: clientesAuthConfirmadosPrev,
         vendedores_auth_confirmados: vendedoresAuthConfirmados,
@@ -11107,7 +11209,7 @@ app.get("/api/ordenes/detalle", async (req, res) => {
     const { data: ordenesItems, error: ordenesItemsErr } = await supabaseAdmin
       .from("ordenes_items")
       .select(
-        "id_item_orden, id_orden, id_plataforma, renovacion, detalle, monto_usd, monto_bs, plataformas:plataformas(nombre, imagen, tarjeta_de_regalo)",
+        "id_item_orden, id_orden, id_plataforma, id_venta, renovacion, detalle, monto_usd, monto_bs, plataformas:plataformas(nombre, imagen, tarjeta_de_regalo)",
       )
       .eq("id_orden", idOrden)
       .order("id_item_orden", { ascending: true });
@@ -11828,6 +11930,7 @@ app.post("/api/checkout", async (req, res) => {
     bypass_verificacion,
     id_admin,
     custom_item_amounts,
+    historial_registrado_por_origen,
   } = req.body || {};
   const archivos = Array.isArray(comprobantes) ? comprobantes : Array.isArray(comprobante) ? comprobante : [];
   if (!id_metodo_de_pago || !referencia || !Array.isArray(archivos)) {
@@ -11866,6 +11969,13 @@ app.post("/api/checkout", async (req, res) => {
       return res.status(403).json({ error: "No autorizado para omitir verificación" });
     }
     const bypassVerificacion = sessionIsSuper || bypassRequested;
+    const registraHistorialDesdeCuentaNueva =
+      String(historial_registrado_por_origen || "")
+        .trim()
+        .toLowerCase() === "cuenta_nueva" &&
+      hasOverride &&
+      sessionIsSuper;
+    const historialRegistradoPor = registraHistorialDesdeCuentaNueva ? idUsuarioSesion : null;
     const customItemAmountMap = normalizeCheckoutCustomItemAmounts(custom_item_amounts);
     const hasCustomItemAmounts = customItemAmountMap.size > 0;
     const adminInvolucradoGiftId =
@@ -12123,6 +12233,7 @@ app.post("/api/checkout", async (req, res) => {
       ordenId,
       idUsuarioSesion,
       idUsuarioVentas,
+      historialRegistradoPor,
       items,
       priceMap,
       platInfoById,
@@ -12139,6 +12250,9 @@ app.post("/api/checkout", async (req, res) => {
       montoHistorialTotalOverride: hasCustomItemAmounts ? null : montoBaseCobrado,
       itemAmountMapById: hasCustomItemAmounts ? customItemAmountMap : null,
       adminInvolucradoId: adminInvolucradoGiftId,
+      snapshotTotalUsd: checkoutTotal,
+      snapshotMontoBsTotal: monto_bs,
+      snapshotTasaBs: tasaBs,
     });
     console.log("[checkout] procesado", {
       id_orden: ordenId,
@@ -12417,6 +12531,9 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       carritoId: orden.id_carrito,
       montoHistorialTotalOverride: montoBaseCobrado,
       adminInvolucradoId: idAdminEntrega,
+      snapshotTotalUsd: orden?.total ?? context?.total ?? null,
+      snapshotMontoBsTotal: orden?.monto_bs ?? null,
+      snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
     });
     console.log("[ordenes/procesar] procesado", {
       id_orden: idOrden,

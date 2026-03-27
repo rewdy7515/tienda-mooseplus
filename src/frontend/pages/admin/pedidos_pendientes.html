@@ -1265,7 +1265,7 @@
             id_venta: Number(idVenta),
             id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
             id_cuenta: nuevaCuentaId,
-            registrado_por: currentUser?.id_usuario || null,
+            registrado_por: null,
           });
           if (histErr) throw histErr;
         }

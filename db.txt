@@ -286,8 +286,10 @@ CREATE TABLE public.ordenes_items (
   monto_usd double precision,
   monto_bs real,
   id_cuenta bigint,
+  id_venta bigint,
   CONSTRAINT ordenes_items_pkey PRIMARY KEY (id_item_orden),
   CONSTRAINT ordenes_items_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
+  CONSTRAINT ordenes_items_id_venta_fkey FOREIGN KEY (id_venta) REFERENCES public.ventas(id_venta),
   CONSTRAINT ordenes_items_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT ordenes_items_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden)
 );
