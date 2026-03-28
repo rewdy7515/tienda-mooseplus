@@ -191,6 +191,21 @@ const WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID = Math.max(
   1,
   Number(process.env.WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID) || 23,
 );
+const WHATSAPP_MANUAL_VERIFICATION_ALERT_TITLE = "Verificación manual de pago";
+const WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED =
+  process.env.WHATSAPP_MANUAL_VERIFICATION_WATCHER !== "false" && process.env.VERCEL !== "1";
+const WHATSAPP_MANUAL_VERIFICATION_WATCHER_INTERVAL_MS = Math.max(
+  10000,
+  Number(process.env.WHATSAPP_MANUAL_VERIFICATION_WATCHER_INTERVAL_MS) || 30000,
+);
+const WHATSAPP_MANUAL_VERIFICATION_WINDOW_MS = Math.max(
+  60000,
+  Number(process.env.WHATSAPP_MANUAL_VERIFICATION_WINDOW_MS) || 3 * 60 * 1000,
+);
+const WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH = Math.max(
+  1,
+  Math.min(300, Number(process.env.WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH) || 120),
+);
 const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED =
   process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER !== "false" && process.env.VERCEL !== "1";
 const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS = Math.max(
@@ -253,6 +268,18 @@ let pendingSpotifyAlertsLastResult = {
   skipped: 0,
 };
 let pendingSpotifyAlertsLastError = null;
+let manualVerificationWatcherInProgress = false;
+let manualVerificationWatcherLastRunAt = null;
+let manualVerificationWatcherLastResult = {
+  fetched: 0,
+  sentWhatsapp: 0,
+  notifCreated: 0,
+  alreadyNotified: 0,
+  skippedRecent: 0,
+  skippedNoDate: 0,
+  failed: 0,
+};
+let manualVerificationWatcherLastError = null;
 const WEB_PUSH_IS_CONFIGURED =
   Boolean(String(webPushVapidPublicKey || "").trim()) &&
   Boolean(String(webPushVapidPrivateKey || "").trim());
@@ -1794,6 +1821,83 @@ Metodo de pago: ${metodo}
 Ref: ${ref}`;
 };
 
+const buildManualVerificationAdminNotificationMessage = ({
+  idOrden = null,
+  metodoPagoNombre = "",
+  referencia = "",
+  source = "",
+} = {}) => {
+  const ordenId = toPositiveInt(idOrden);
+  const metodo = String(metodoPagoNombre || "").trim() || "No especificado";
+  const ref = String(referencia || "").trim() || "-";
+  const origen = String(source || "").trim() || "manual";
+  return [
+    "Pago enviado sin verificación automática.",
+    `ID Orden: #${ordenId || "-"}`,
+    `Método: ${metodo}`,
+    `Referencia: ${ref}`,
+    `Origen: ${origen}`,
+  ].join("<br>");
+};
+
+const ensureManualVerificationAdminInboxNotification = async ({
+  idOrden = null,
+  metodoPagoNombre = "",
+  referencia = "",
+  source = "",
+} = {}) => {
+  const ordenId = toPositiveInt(idOrden);
+  if (!ordenId) {
+    return { created: false, skipped: true, reason: "invalid_order", id_notificacion: null };
+  }
+
+  const { data: existingNotif, error: existingNotifErr } = await supabaseAdmin
+    .from("notificaciones")
+    .select("id_notificacion")
+    .eq("id_usuario", WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID)
+    .eq("id_orden", ordenId)
+    .eq("titulo", WHATSAPP_MANUAL_VERIFICATION_ALERT_TITLE)
+    .order("id_notificacion", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingNotifErr) throw existingNotifErr;
+  if (existingNotif?.id_notificacion) {
+    return {
+      created: false,
+      skipped: true,
+      reason: "already_notified",
+      id_notificacion: Number(existingNotif.id_notificacion) || null,
+    };
+  }
+
+  const payload = {
+    titulo: WHATSAPP_MANUAL_VERIFICATION_ALERT_TITLE,
+    mensaje: buildManualVerificationAdminNotificationMessage({
+      idOrden: ordenId,
+      metodoPagoNombre,
+      referencia,
+      source,
+    }),
+    fecha: getCaracasDateStr(0),
+    leido: false,
+    id_usuario: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+    id_orden: ordenId,
+  };
+  const { data: insertedNotif, error: insertErr } = await supabaseAdmin
+    .from("notificaciones")
+    .insert(payload)
+    .select("id_notificacion")
+    .maybeSingle();
+  if (insertErr) throw insertErr;
+
+  return {
+    created: true,
+    skipped: false,
+    reason: null,
+    id_notificacion: Number(insertedNotif?.id_notificacion) || null,
+  };
+};
+
 const notifyManualVerificationToWhatsappAdmin = async ({
   idOrden = null,
   source = "manual_verification",
@@ -1831,12 +1935,56 @@ const notifyManualVerificationToWhatsappAdmin = async ({
     metodoPagoNombre = String(metodoPagoRow?.nombre || "").trim();
   }
 
-  const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID);
-  if (!targetPhone) {
-    return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
+  const referenciaText = String(ordenRow?.referencia || "").trim();
+  let inboxNotifResult = {
+    created: false,
+    skipped: false,
+    reason: null,
+    id_notificacion: null,
+  };
+  try {
+    inboxNotifResult = await ensureManualVerificationAdminInboxNotification({
+      idOrden: ordenId,
+      metodoPagoNombre: metodoPagoNombre || `ID ${metodoPagoId || "-"}`,
+      referencia: referenciaText || "-",
+      source,
+    });
+  } catch (notifErr) {
+    console.error("[manual_verification] notificacion interna error", {
+      id_orden: ordenId,
+      error: notifErr?.message || notifErr,
+    });
+    inboxNotifResult = {
+      created: false,
+      skipped: true,
+      reason: "notification_insert_error",
+      id_notificacion: null,
+      error: notifErr?.message || String(notifErr),
+    };
+  }
+  if (inboxNotifResult?.reason === "already_notified") {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "already_notified",
+      id_orden: ordenId,
+      id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+      inbox_notification: inboxNotifResult,
+    };
   }
 
-  const referenciaText = String(ordenRow?.referencia || "").trim();
+  const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "target_admin_phone_missing",
+      id_orden: ordenId,
+      id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+      inbox_notification: inboxNotifResult,
+    };
+  }
+
   const message = buildWhatsappManualVerificationMessage({
     metodoPagoNombre: metodoPagoNombre || `ID ${metodoPagoId || "-"}`,
     referencia: referenciaText || "-",
@@ -1847,6 +1995,7 @@ const notifyManualVerificationToWhatsappAdmin = async ({
     allowWhenDisabled: true,
   });
 
+  let sendErr = null;
   try {
     const client = getWhatsappClient();
     await withTimeout(
@@ -1857,20 +2006,41 @@ const notifyManualVerificationToWhatsappAdmin = async ({
       WHATSAPP_SEND_TIMEOUT_MS,
       "Timeout enviando alerta de verificación manual",
     );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    try {
+      await shutdownWhatsappClient({
+        reason: `manual_verification_alert_completed:${source}`,
+        allowWhenDisabled: true,
+      });
+    } catch (shutdownErr) {
+      console.error("[manual_verification] whatsapp shutdown error", shutdownErr);
+    }
+  }
+
+  if (sendErr) {
     return {
-      sent: true,
+      sent: false,
       skipped: false,
-      reason: null,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
       id_orden: ordenId,
       id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
       phone: targetPhone,
+      inbox_notification: inboxNotifResult,
     };
-  } finally {
-    await shutdownWhatsappClient({
-      reason: `manual_verification_alert_completed:${source}`,
-      allowWhenDisabled: true,
-    });
   }
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_orden: ordenId,
+    id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+    phone: targetPhone,
+    inbox_notification: inboxNotifResult,
+  };
 };
 
 const markNuevoServicioQueueEventProcessed = async (idEvento, { error = null } = {}) => {
@@ -2259,6 +2429,124 @@ const processPendingSpotifyAdminAlerts = async () => {
     }
     pendingSpotifyAlertsLastRunAt = new Date().toISOString();
     pendingSpotifyAlertsInProgress = false;
+  }
+};
+
+const parseCaracasOrderDateTime = (fechaRaw, horaRaw) => {
+  const fechaMatch = String(fechaRaw || "").match(/\d{4}-\d{2}-\d{2}/);
+  const horaMatch = String(horaRaw || "").match(/\d{2}:\d{2}:\d{2}/);
+  if (!fechaMatch || !horaMatch) return null;
+  const parsed = new Date(`${fechaMatch[0]}T${horaMatch[0]}-04:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const hasManualVerificationWindowElapsed = (ordenRow = {}) => {
+  const orderDate = parseCaracasOrderDateTime(ordenRow?.fecha, ordenRow?.hora_orden);
+  if (!orderDate) return null;
+  const elapsedMs = Date.now() - orderDate.getTime();
+  return elapsedMs >= WHATSAPP_MANUAL_VERIFICATION_WINDOW_MS;
+};
+
+const processPendingManualVerificationAlerts = async () => {
+  if (!WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED) {
+    return {
+      skipped: true,
+      reason: "disabled",
+      ...manualVerificationWatcherLastResult,
+    };
+  }
+  if (manualVerificationWatcherInProgress) {
+    return {
+      skipped: true,
+      reason: "in_progress",
+      ...manualVerificationWatcherLastResult,
+    };
+  }
+
+  manualVerificationWatcherInProgress = true;
+  const result = {
+    fetched: 0,
+    sentWhatsapp: 0,
+    notifCreated: 0,
+    alreadyNotified: 0,
+    skippedRecent: 0,
+    skippedNoDate: 0,
+    failed: 0,
+  };
+
+  try {
+    const fechaMin = getCaracasDateStr(-3);
+    const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
+      .from("ordenes")
+      .select(
+        "id_orden, fecha, hora_orden, id_metodo_de_pago, marcado_pago, en_espera, pago_verificado, orden_cancelada",
+      )
+      .eq("id_metodo_de_pago", 1)
+      .eq("marcado_pago", true)
+      .eq("en_espera", true)
+      .eq("pago_verificado", false)
+      .or("orden_cancelada.eq.false,orden_cancelada.is.null")
+      .gte("fecha", fechaMin)
+      .order("id_orden", { ascending: false })
+      .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
+    if (pendingErr) throw pendingErr;
+
+    const orders = Array.isArray(pendingOrders) ? pendingOrders : [];
+    result.fetched = orders.length;
+
+    for (const ordenRow of orders) {
+      const ordenId = toPositiveInt(ordenRow?.id_orden);
+      if (!ordenId) {
+        result.failed += 1;
+        continue;
+      }
+
+      const isExpired = hasManualVerificationWindowElapsed(ordenRow);
+      if (isExpired === null) {
+        result.skippedNoDate += 1;
+        continue;
+      }
+      if (isExpired !== true) {
+        result.skippedRecent += 1;
+        continue;
+      }
+
+      try {
+        const notifyRes = await notifyManualVerificationToWhatsappAdmin({
+          idOrden: ordenId,
+          source: "manual_verification_watcher",
+        });
+        const notifCreated = notifyRes?.inbox_notification?.created === true;
+        if (notifyRes?.reason === "already_notified") {
+          result.alreadyNotified += 1;
+          continue;
+        }
+        if (notifCreated) result.notifCreated += 1;
+        if (notifyRes?.sent) {
+          result.sentWhatsapp += 1;
+          continue;
+        }
+        if (notifCreated) continue;
+        result.failed += 1;
+      } catch (notifyErr) {
+        result.failed += 1;
+        console.error("[manual_verification_watcher] notify error", {
+          id_orden: ordenId,
+          error: notifyErr?.message || notifyErr,
+        });
+      }
+    }
+
+    manualVerificationWatcherLastError = null;
+    manualVerificationWatcherLastResult = result;
+    return { ...result };
+  } catch (err) {
+    manualVerificationWatcherLastError = err?.message || "Error desconocido";
+    throw err;
+  } finally {
+    manualVerificationWatcherLastRunAt = new Date().toISOString();
+    manualVerificationWatcherInProgress = false;
   }
 };
 
@@ -3391,6 +3679,22 @@ if (WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED && shouldStartWhatsapp) {
   }, WHATSAPP_PEDIDO_PENDIENTE_WATCHER_INTERVAL_MS);
   processPendingSpotifyAdminAlerts().catch((err) => {
     console.error("[WhatsApp] Worker pedidos Spotify pendientes init error", err);
+  });
+}
+
+if (WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED) {
+  console.log(
+    `[Notificaciones] Worker verificación manual activo (cada ${Math.round(
+      WHATSAPP_MANUAL_VERIFICATION_WATCHER_INTERVAL_MS / 1000,
+    )}s, ventana ${Math.round(WHATSAPP_MANUAL_VERIFICATION_WINDOW_MS / 1000)}s).`,
+  );
+  setInterval(() => {
+    processPendingManualVerificationAlerts().catch((err) => {
+      console.error("[manual_verification_watcher] error", err);
+    });
+  }, WHATSAPP_MANUAL_VERIFICATION_WATCHER_INTERVAL_MS);
+  processPendingManualVerificationAlerts().catch((err) => {
+    console.error("[manual_verification_watcher] init error", err);
   });
 }
 

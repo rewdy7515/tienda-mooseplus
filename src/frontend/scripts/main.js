@@ -67,6 +67,7 @@ const tasaActualEl = document.querySelector("#tasa-actual");
 const tasaMarkupWrapEl = document.querySelector("#tasa-markup-wrap");
 const tasaMarkupInputEl = document.querySelector("#tasa-markup-input");
 const whatsappQrWarningWrap = document.querySelector("#whatsapp-qr-warning-wrap");
+const whatsappQrWarningTitleEl = whatsappQrWarningWrap?.querySelector("strong") || null;
 const whatsappQrWarningMessageEl = document.querySelector("#whatsapp-qr-warning-message");
 const whatsappQrWarningBtn = document.querySelector("#whatsapp-qr-warning-btn");
 const pageLoaderLogoEl = document.querySelector(".page-loader__logo");
@@ -92,9 +93,12 @@ const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 180;
 const MOBILE_PULL_REFRESH_THRESHOLD_PX = 160;
 const MOBILE_PULL_REFRESH_AXIS_LOCK_PX = 14;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
-const PAGE_LOADER_LOGO_FALLBACK =
-  STATIC_HEADER_LOGO_HREF;
+const PAGE_LOADER_LOGO_FALLBACK = STATIC_HEADER_LOGO_HREF;
 const PUSH_PERMISSION_DISMISS_PREFIX = "pushPermissionPromptDismissed";
+const WHATSAPP_QR_WARNING_TITLE = "Bot sin sesion de whatsapp";
+const WHATSAPP_QR_WARNING_DEFAULT_MESSAGE = "El bot del servidor no tiene una sesión activa.";
+const WHATSAPP_QR_WARNING_BUTTON_LABEL = "Iniciar whatsapp";
+const WHATSAPP_QR_WARNING_LOADING_LABEL = "Generando QR...";
 let homeBannersSliderTimer = null;
 let homeBannersSliderRunId = 0;
 let homeBannersCurrentIndex = 0;
@@ -132,9 +136,6 @@ const normalizeGiftCardAmountKey = (value) => {
 };
 
 recordatoriosPendientesBtn?.addEventListener("click", () => {
-  window.location.href = "admin/recordatorios.html";
-});
-whatsappQrWarningBtn?.addEventListener("click", () => {
   window.location.href = "admin/recordatorios.html";
 });
 const loaderAvatarLayerEl = document.querySelector(".page-loader__avatar-layer");
@@ -190,6 +191,7 @@ let tasaAutoRefreshEnabled = false;
 let pushPermissionPromptBusy = false;
 let currentPushPromptUserId = null;
 let whatsappQrWarningPollTimer = null;
+let whatsappQrWarningActionInProgress = false;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -272,9 +274,15 @@ const clearPushPermissionPromptDismissal = (userId = currentPushPromptUserId) =>
 const hideWhatsappQrWarning = () => {
   if (!whatsappQrWarningWrap) return;
   whatsappQrWarningWrap.classList.add("hidden");
+  if (whatsappQrWarningTitleEl) {
+    whatsappQrWarningTitleEl.textContent = WHATSAPP_QR_WARNING_TITLE;
+  }
   if (whatsappQrWarningMessageEl) {
-    whatsappQrWarningMessageEl.textContent =
-      "El bot del servidor necesita que escanees el QR para reactivar los recordatorios automáticos.";
+    whatsappQrWarningMessageEl.textContent = WHATSAPP_QR_WARNING_DEFAULT_MESSAGE;
+  }
+  if (whatsappQrWarningBtn) {
+    whatsappQrWarningBtn.disabled = false;
+    whatsappQrWarningBtn.textContent = WHATSAPP_QR_WARNING_BUTTON_LABEL;
   }
 };
 
@@ -284,18 +292,32 @@ const stopWhatsappQrWarningPolling = () => {
   whatsappQrWarningPollTimer = null;
 };
 
-const renderWhatsappQrWarning = (payload = null) => {
+const renderWhatsappQrWarning = (payload = null, { isSuperadmin = false } = {}) => {
   if (!whatsappQrWarningWrap || !whatsappQrWarningMessageEl) return;
-  const ready = payload?.ready === true;
-  const hasQr = Boolean(String(payload?.qrRaw || "").trim());
-  if (ready || !hasQr) {
+  if (!isSuperadmin) {
     hideWhatsappQrWarning();
     return;
   }
+  const ready = payload?.ready === true;
+  const hasQr = Boolean(String(payload?.qrRaw || "").trim());
+  if (ready) {
+    hideWhatsappQrWarning();
+    return;
+  }
+  if (whatsappQrWarningTitleEl) {
+    whatsappQrWarningTitleEl.textContent = WHATSAPP_QR_WARNING_TITLE;
+  }
   const updatedAt = String(payload?.qrUpdatedAt || "").trim();
-  whatsappQrWarningMessageEl.textContent = updatedAt
-    ? `El bot del servidor necesita que escanees el QR para reactivar los recordatorios automáticos. QR generado: ${updatedAt}.`
-    : "El bot del servidor necesita que escanees el QR para reactivar los recordatorios automáticos.";
+  if (hasQr) {
+    whatsappQrWarningMessageEl.textContent = updatedAt
+      ? `El bot del servidor no tiene una sesión activa. QR generado: ${updatedAt}.`
+      : "El bot del servidor no tiene una sesión activa. QR generado, escanéalo para iniciar sesión.";
+  } else if (payload?.booting || payload?.active) {
+    whatsappQrWarningMessageEl.textContent =
+      "El bot del servidor no tiene una sesión activa. Generando QR para iniciar sesión.";
+  } else {
+    whatsappQrWarningMessageEl.textContent = WHATSAPP_QR_WARNING_DEFAULT_MESSAGE;
+  }
   whatsappQrWarningWrap.classList.remove("hidden");
 };
 
@@ -308,7 +330,7 @@ const loadWhatsappQrWarning = async ({ isSuperadmin = false } = {}) => {
   try {
     const resp = await fetchWhatsappQrStatus({ autoStart: false });
     if (resp?.error) throw new Error(resp.error);
-    renderWhatsappQrWarning(resp);
+    renderWhatsappQrWarning(resp, { isSuperadmin: true });
   } catch (err) {
     console.error("whatsapp qr warning load error", err);
     hideWhatsappQrWarning();
@@ -327,6 +349,41 @@ const startWhatsappQrWarningPolling = ({ isSuperadmin = false } = {}) => {
     });
   }, 60 * 1000);
 };
+
+const startWhatsappFromHomeWarning = async () => {
+  if (whatsappQrWarningActionInProgress) return;
+  whatsappQrWarningActionInProgress = true;
+  if (whatsappQrWarningBtn) {
+    whatsappQrWarningBtn.disabled = true;
+    whatsappQrWarningBtn.textContent = WHATSAPP_QR_WARNING_LOADING_LABEL;
+  }
+  try {
+    const resp = await fetchWhatsappQrStatus({ autoStart: true });
+    if (resp?.error) throw new Error(resp.error);
+    renderWhatsappQrWarning(resp, { isSuperadmin: true });
+    if (resp?.ready !== true) {
+      window.location.href = "admin/recordatorios.html";
+    }
+  } catch (err) {
+    console.error("whatsapp qr warning start error", err);
+    if (whatsappQrWarningMessageEl) {
+      whatsappQrWarningMessageEl.textContent =
+        "No se pudo iniciar WhatsApp. Intenta nuevamente.";
+    }
+  } finally {
+    whatsappQrWarningActionInProgress = false;
+    if (whatsappQrWarningBtn) {
+      whatsappQrWarningBtn.disabled = false;
+      whatsappQrWarningBtn.textContent = WHATSAPP_QR_WARNING_BUTTON_LABEL;
+    }
+  }
+};
+
+whatsappQrWarningBtn?.addEventListener("click", () => {
+  startWhatsappFromHomeWarning().catch((err) => {
+    console.error("whatsapp qr warning start unhandled error", err);
+  });
+});
 
 const hidePushPermissionPrompt = () => {
   pushPermissionWrap?.classList.add("hidden");
