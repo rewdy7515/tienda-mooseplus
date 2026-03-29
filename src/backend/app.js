@@ -1434,6 +1434,39 @@ const shutdownWhatsappClient = async ({
   reason = "unspecified",
   allowWhenDisabled = false,
 } = {}) => {
+  const reasonText = String(reason || "").toLowerCase();
+  const isPendingSpotifyShutdown =
+    reasonText.includes("pending_spotify_orders_worker") ||
+    reasonText.includes("pending_spotify_order");
+  const isManualVerificationShutdown = reasonText.includes("manual_verification");
+  const isNuevoServicioShutdown =
+    reasonText.includes("nuevo_servicio") || reasonText.includes("new_service");
+  const isRecordatoriosShutdown =
+    reasonText.includes("recordatorio") ||
+    reasonText.includes("recordatorios") ||
+    reasonText.includes("auto_schedule") ||
+    reasonText.includes("auto_run");
+
+  const hasRecordatoriosWork = recordatoriosSendInProgress || autoRecordatoriosRunInProgress;
+  const pendingConflicts =
+    manualVerificationWatcherInProgress || nuevoServicioNotifQueueInProgress || hasRecordatoriosWork;
+  const manualConflicts =
+    pendingSpotifyAlertsInProgress || nuevoServicioNotifQueueInProgress || hasRecordatoriosWork;
+  const nuevoServicioConflicts =
+    pendingSpotifyAlertsInProgress || manualVerificationWatcherInProgress || hasRecordatoriosWork;
+  const recordatoriosConflicts =
+    pendingSpotifyAlertsInProgress || manualVerificationWatcherInProgress || nuevoServicioNotifQueueInProgress;
+
+  if (
+    (isPendingSpotifyShutdown && pendingConflicts) ||
+    (isManualVerificationShutdown && manualConflicts) ||
+    (isNuevoServicioShutdown && nuevoServicioConflicts) ||
+    (isRecordatoriosShutdown && recordatoriosConflicts)
+  ) {
+    console.log(`[WhatsApp] Omitiendo apagado (${reason}) por otro worker activo.`);
+    return;
+  }
+
   if (!shouldStartWhatsapp && !allowWhenDisabled) return;
   if (recordatoriosSendInProgress || autoRecordatoriosRunInProgress) return;
   if (!isWhatsappReady() && !whatsappBootInProgress) return;
