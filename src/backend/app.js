@@ -1898,6 +1898,7 @@ const ensureManualVerificationAdminInboxNotification = async ({
 const notifyManualVerificationToWhatsappAdmin = async ({
   idOrden = null,
   source = "manual_verification",
+  manageWhatsappLifecycle = true,
 } = {}) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) {
@@ -1998,10 +1999,15 @@ const notifyManualVerificationToWhatsappAdmin = async ({
     referencia: referenciaText || "-",
   });
 
-  await ensureWhatsappClientReady({
-    reason: `manual_verification_alert:${source}`,
-    allowWhenDisabled: true,
-  });
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? `manual_verification_alert:${source}`
+        : "manual_verification_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
 
   let sendErr = null;
   try {
@@ -2017,13 +2023,15 @@ const notifyManualVerificationToWhatsappAdmin = async ({
   } catch (err) {
     sendErr = err;
   } finally {
-    try {
-      await shutdownWhatsappClient({
-        reason: `manual_verification_alert_completed:${source}`,
-        allowWhenDisabled: true,
-      });
-    } catch (shutdownErr) {
-      console.error("[manual_verification] whatsapp shutdown error", shutdownErr);
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: `manual_verification_alert_completed:${source}`,
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[manual_verification] whatsapp shutdown error", shutdownErr);
+      }
     }
   }
 
@@ -2483,6 +2491,7 @@ const processPendingManualVerificationAlerts = async () => {
     failed: 0,
   };
 
+  let managedWhatsappForRun = false;
   try {
     const fechaMin = getCaracasDateStr(-3);
     const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
@@ -2521,9 +2530,17 @@ const processPendingManualVerificationAlerts = async () => {
       }
 
       try {
+        if (!managedWhatsappForRun) {
+          await ensureWhatsappClientReady({
+            reason: "manual_verification_watcher_worker",
+            allowWhenDisabled: true,
+          });
+          managedWhatsappForRun = true;
+        }
         const notifyRes = await notifyManualVerificationToWhatsappAdmin({
           idOrden: ordenId,
           source: "manual_verification_watcher",
+          manageWhatsappLifecycle: false,
         });
         const notifCreated = notifyRes?.inbox_notification?.created === true;
         if (notifyRes?.reason === "already_notified") {
@@ -2553,6 +2570,16 @@ const processPendingManualVerificationAlerts = async () => {
     manualVerificationWatcherLastError = err?.message || "Error desconocido";
     throw err;
   } finally {
+    if (managedWhatsappForRun) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "manual_verification_watcher_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[manual_verification_watcher] whatsapp shutdown error", shutdownErr);
+      }
+    }
     manualVerificationWatcherLastRunAt = new Date().toISOString();
     manualVerificationWatcherInProgress = false;
   }

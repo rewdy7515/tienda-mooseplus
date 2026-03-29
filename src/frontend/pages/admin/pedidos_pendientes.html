@@ -593,7 +593,6 @@
                   : "";
                 const body = rows
                   .map((r) => {
-                    const isSpotify = String(r.id_plataforma || "") === "9";
                     const cuentaNuevaRaw = r.cuenta_nueva;
                     const cuentaNueva =
                       cuentaNuevaRaw === true ||
@@ -608,25 +607,21 @@
                           }</td>`
                       : "";
                     const correoText = r.correo || "-";
-                    const correoCell = isSpotify
-                      ? `
+                    const correoCell = `
                            <td>
                              <div class="correo-edit-wrap" data-venta="${r.id_venta}" data-correo="${correoText}">
                                <span class="copyable correo-text" data-clipboard="${correoText}">${correoText}</span>
                                <button type="button" class="btn-outline btn-edit-correo" title="Editar">✏️</button>
                              </div>
-                           </td>`
-                      : `<td class="copyable" data-clipboard="${correoText}">${correoText}</td>`;
+                           </td>`;
                     const claveText = r.clave || "-";
-                    const claveCell = isSpotify
-                      ? `
+                    const claveCell = `
                            <td>
                              <div class="correo-edit-wrap" data-venta="${r.id_venta}" data-clave="${claveText}">
                                <span class="copyable clave-text" data-clipboard="${claveText}">${claveText}</span>
                                <button type="button" class="btn-outline btn-edit-clave" title="Editar">✏️</button>
                              </div>
-                           </td>`
-                      : `<td class="copyable" data-clipboard="${r.clave || ""}">${r.clave || "-"}</td>`;
+                           </td>`;
                     const valorGiftCardCell = showValor
                       ? `<td>${escapeHtml(String(r.valor_tarjeta_de_regalo ?? "-"))}</td>`
                       : "";
