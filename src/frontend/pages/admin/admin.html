@@ -325,14 +325,6 @@
         const num = Number(value);
         return Number.isFinite(num) && num > 0 ? Math.trunc(num) : 0;
       };
-      const relationRow = (value) => (Array.isArray(value) ? value[0] || null : value || null);
-      const extractPlanNumber = (planRaw) => {
-        if (planRaw === null || planRaw === undefined) return null;
-        const asNumber = Number(planRaw);
-        if (Number.isFinite(asNumber)) return Math.trunc(asNumber);
-        const match = String(planRaw).match(/\d+/);
-        return match ? Number(match[0]) : null;
-      };
       const fetchPlatform1VentasDelMes = async ({ monthStart, nextMonthStart }) => {
         const allRows = [];
         const pageSize = 1000;
@@ -341,7 +333,7 @@
           const { data, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, precios:precios!ventas_id_precio_fkey!inner(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta_madre)",
+              "id_venta, id_perfil, id_cuenta, id_cuenta_miembro, precios:precios!ventas_id_precio_fkey!inner(id_plataforma)",
             )
             .gte("fecha_pago", monthStart)
             .lt("fecha_pago", nextMonthStart)
@@ -686,24 +678,57 @@
             ]);
             if (giftErr) throw giftErr;
             const ventasPlat1 = Array.isArray(ventasPlat1Result) ? ventasPlat1Result : [];
+            const perfilIds = ventasPlat1.map((row) => toPositiveInt(row?.id_perfil));
+            const cuentaIds = ventasPlat1.flatMap((row) => [
+              toPositiveInt(row?.id_cuenta_miembro),
+              toPositiveInt(row?.id_cuenta),
+            ]);
+            const [perfilesRows, cuentasRows] = await Promise.all([
+              fetchRowsByIds({
+                table: "perfiles",
+                idField: "id_perfil",
+                select: "id_perfil, perfil_hogar",
+                ids: perfilIds,
+              }),
+              fetchRowsByIds({
+                table: "cuentas",
+                idField: "id_cuenta",
+                select: "id_cuenta, venta_miembro, id_cuenta_madre",
+                ids: cuentaIds,
+              }),
+            ]);
+            const perfilById = (perfilesRows || []).reduce((acc, row) => {
+              acc[toPositiveInt(row?.id_perfil)] = row;
+              return acc;
+            }, {});
+            const cuentaById = (cuentasRows || []).reduce((acc, row) => {
+              acc[toPositiveInt(row?.id_cuenta)] = row;
+              return acc;
+            }, {});
             let plan1Count = 0;
             let plan2Count = 0;
             let plan2ConMadreCount = 0;
             for (const venta of ventasPlat1) {
-              const precio = relationRow(venta?.precios);
-              const plan = extractPlanNumber(precio?.plan);
-              if (plan === 1) {
-                plan1Count += 1;
+              const perfil = perfilById[toPositiveInt(venta?.id_perfil)] || null;
+              const perfilHogar = isTrue(perfil?.perfil_hogar);
+              const cuentaBase = cuentaById[toPositiveInt(venta?.id_cuenta)] || null;
+              const cuentaMiembro = cuentaById[toPositiveInt(venta?.id_cuenta_miembro)] || null;
+              const cuentasRelacionadas = [cuentaBase, cuentaMiembro].filter(Boolean);
+              const cuentaMiembroConMadre = cuentasRelacionadas.some(
+                (cuenta) =>
+                  isTrue(cuenta?.venta_miembro) && toPositiveInt(cuenta?.id_cuenta_madre) > 0,
+              );
+              const tieneMadre = cuentasRelacionadas.some(
+                (cuenta) => toPositiveInt(cuenta?.id_cuenta_madre) > 0,
+              );
+              const isPlan2 = perfilHogar || cuentaMiembroConMadre;
+              if (isPlan2) {
+                plan2Count += 1;
+                if (tieneMadre) plan2ConMadreCount += 1;
                 continue;
               }
-              if (plan === 2) {
-                plan2Count += 1;
-                const cuenta = relationRow(venta?.cuentas);
-                const cuentaMiembro = relationRow(venta?.cuentas_miembro);
-                const madreId =
-                  toPositiveInt(cuenta?.id_cuenta_madre) ||
-                  toPositiveInt(cuentaMiembro?.id_cuenta_madre);
-                if (madreId > 0) plan2ConMadreCount += 1;
+              if (perfil && !perfilHogar) {
+                plan1Count += 1;
               }
             }
             const basePines = Math.min(
@@ -712,7 +737,7 @@
               Math.floor(plan2ConMadreCount / 2),
             );
             const usados = giftCount ?? 0;
-            const pines = Math.max(0, basePines - usados);
+            const pines = basePines - usados;
             pinesPorComprarEl.textContent = `Pines por comprar: ${pines}`;
           }
         } catch (err) {
