@@ -268,10 +268,10 @@ CREATE TABLE public.ordenes (
   recargar_saldo boolean,
   hora_confirmacion time without time zone,
   checkout_finalizado boolean,
-  aviso_verificacion_manual boolean,
   marcado_pago boolean,
   monto_transferido real,
   monto_mayor boolean,
+  aviso_verificacion_manual boolean DEFAULT false,
   CONSTRAINT ordenes_pkey PRIMARY KEY (id_orden),
   CONSTRAINT ordenes_id_metodo_de_pago_fkey FOREIGN KEY (id_metodo_de_pago) REFERENCES public.metodos_de_pago(id_metodo_de_pago),
   CONSTRAINT ordenes_id_carrito_fkey FOREIGN KEY (id_carrito) REFERENCES public.carritos(id_carrito),
@@ -290,7 +290,6 @@ CREATE TABLE public.ordenes_items (
   id_venta bigint,
   CONSTRAINT ordenes_items_pkey PRIMARY KEY (id_item_orden),
   CONSTRAINT ordenes_items_id_cuenta_fkey FOREIGN KEY (id_cuenta) REFERENCES public.cuentas(id_cuenta),
-  CONSTRAINT ordenes_items_id_venta_fkey FOREIGN KEY (id_venta) REFERENCES public.ventas(id_venta),
   CONSTRAINT ordenes_items_id_plataforma_fkey FOREIGN KEY (id_plataforma) REFERENCES public.plataformas(id_plataforma),
   CONSTRAINT ordenes_items_id_orden_fkey FOREIGN KEY (id_orden) REFERENCES public.ordenes(id_orden)
 );
@@ -309,7 +308,7 @@ CREATE TABLE public.pagomoviles (
   dispositivo text,
   app text,
   hash text,
-  referencia bigint,
+  referencia bigint UNIQUE,
   fecha_pago time without time zone,
   monto_bs double precision,
   num_telefono text,
@@ -371,6 +370,7 @@ CREATE TABLE public.plataformas (
   id_descuento_mes_mayor bigint,
   id_descuento_cantidad_detal bigint,
   id_descuento_cantidad_mayor bigint,
+  indicaciones text,
   CONSTRAINT plataformas_pkey PRIMARY KEY (id_plataforma),
   CONSTRAINT plataformas_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.categorias(id_categoria)
 );
@@ -556,7 +556,7 @@ CREATE TABLE public.ventas (
   id_cuenta_miembro bigint,
   renovacion boolean,
   completa boolean,
-  cuenta_nueva boolean,
+  cuenta_nueva boolean DEFAULT false,
   nombre_cliente text,
   recordatorio_enviado boolean DEFAULT false,
   cuenta_pagada_admin boolean,
