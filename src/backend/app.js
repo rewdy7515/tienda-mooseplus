@@ -1963,17 +1963,6 @@ const notifyManualVerificationToWhatsappAdmin = async ({
       error: notifErr?.message || String(notifErr),
     };
   }
-  if (inboxNotifResult?.reason === "already_notified") {
-    return {
-      sent: false,
-      skipped: true,
-      reason: "already_notified",
-      id_orden: ordenId,
-      id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
-      inbox_notification: inboxNotifResult,
-    };
-  }
-
   if (process.env.VERCEL === "1") {
     return {
       sent: false,
@@ -2570,10 +2559,6 @@ const processPendingManualVerificationAlerts = async () => {
           manageWhatsappLifecycle: false,
         });
         const notifCreated = notifyRes?.inbox_notification?.created === true;
-        if (notifyRes?.reason === "already_notified") {
-          result.alreadyNotified += 1;
-          continue;
-        }
         if (notifCreated) result.notifCreated += 1;
         if (notifyRes?.sent) {
           result.sentWhatsapp += 1;
@@ -12695,6 +12680,7 @@ app.post("/api/checkout", async (req, res) => {
       pago_verificado: montoMayor ? false : bypassVerificacion && !requiereEntregaManual ? true : false,
       monto_completo: null,
       checkout_finalizado: true,
+      aviso_verificacion_manual: false,
     };
     let ordenId = null;
     if (Number.isFinite(parsedOrderId) && parsedOrderId > 0) {

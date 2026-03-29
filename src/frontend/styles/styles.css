@@ -57,7 +57,7 @@ main {
 }
 
 #btn-ordenes-header.has-pending-verification {
-  outline: 2px solid #39ff14;
+  outline: 2px solid #facc15;
   outline-offset: 2px;
 }
 
