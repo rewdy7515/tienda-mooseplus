@@ -2564,6 +2564,15 @@ const processPendingManualVerificationAlerts = async () => {
           result.sentWhatsapp += 1;
           continue;
         }
+        console.warn("[manual_verification_watcher] not sent", {
+          id_orden: ordenId,
+          reason: notifyRes?.reason || "unknown",
+          skipped: !!notifyRes?.skipped,
+          notif_created: notifCreated,
+          target_user: notifyRes?.id_usuario_destino || null,
+          phone: notifyRes?.phone || null,
+          error: notifyRes?.error || null,
+        });
         if (notifCreated) continue;
         result.failed += 1;
       } catch (notifyErr) {
