@@ -1970,6 +1970,17 @@ const notifyManualVerificationToWhatsappAdmin = async ({
     };
   }
 
+  if (process.env.VERCEL === "1") {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "whatsapp_deferred_to_persistent_worker",
+      id_orden: ordenId,
+      id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+      inbox_notification: inboxNotifResult,
+    };
+  }
+
   const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID);
   if (!targetPhone) {
     return {
