@@ -360,7 +360,9 @@
         const data = await fetchJson(`/api/whatsapp/qr?start=${autoStart ? "true" : "false"}`);
         if (data?.ready) {
           hideWhatsappQrPanel({ resetFlow: true });
-          setStatus("WhatsApp listo. Puedes enviar mensajes.");
+          if (autoStart || whatsappQrFlowRequested) {
+            setStatus("WhatsApp listo. Puedes enviar mensajes.");
+          }
           return true;
         }
         const hasQr = Boolean(String(data?.qrRaw || "").trim());
@@ -697,7 +699,7 @@
       btnGenerarRecordatorios?.addEventListener("click", loadRecordatorios);
       btnEnviarMensajes?.addEventListener("click", sendGeneratedMessages);
 
-      fetchAndRenderWhatsappQr({ autoStart: true }).catch(() => {});
+      fetchAndRenderWhatsappQr({ autoStart: false }).catch(() => {});
     </script>
   </body>
 </html>

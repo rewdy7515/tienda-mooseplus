@@ -187,10 +187,7 @@ const WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID = Math.max(
   1,
   Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID) || 20,
 );
-const WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID = Math.max(
-  1,
-  Number(process.env.WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID) || 23,
-);
+const WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID = 23;
 const WHATSAPP_MANUAL_VERIFICATION_ALERT_TITLE = "Verificación manual de pago";
 const WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED =
   process.env.WHATSAPP_MANUAL_VERIFICATION_WATCHER !== "false" && process.env.VERCEL !== "1";
@@ -2480,10 +2477,10 @@ const processPendingManualVerificationAlerts = async () => {
     const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, fecha, hora_orden, id_metodo_de_pago, marcado_pago, en_espera, pago_verificado, orden_cancelada",
+        "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, en_espera, pago_verificado, orden_cancelada",
       )
-      .eq("id_metodo_de_pago", 1)
       .eq("marcado_pago", true)
+      .eq("checkout_finalizado", true)
       .eq("en_espera", true)
       .eq("pago_verificado", false)
       .or("orden_cancelada.eq.false,orden_cancelada.is.null")
@@ -12696,26 +12693,23 @@ app.post("/api/checkout", async (req, res) => {
 
     if (requierePendiente) {
       if (requiereEntregaManual && Number.isFinite(ordenId) && ordenId > 0) {
-        setImmediate(() => {
-          notifyManualVerificationToWhatsappAdmin({
+        try {
+          const notifyResult = await notifyManualVerificationToWhatsappAdmin({
             idOrden: ordenId,
             source: "checkout_manual_payment_method",
-          })
-            .then((result) => {
-              console.log("[checkout] whatsapp verificacion manual", {
-                id_orden: ordenId,
-                sent: !!result?.sent,
-                skipped: !!result?.skipped,
-                reason: result?.reason || null,
-              });
-            })
-            .catch((notifyErr) => {
-              console.error("[checkout] whatsapp verificacion manual error", {
-                id_orden: ordenId,
-                error: notifyErr?.message || notifyErr,
-              });
-            });
-        });
+          });
+          console.log("[checkout] whatsapp verificacion manual", {
+            id_orden: ordenId,
+            sent: !!notifyResult?.sent,
+            skipped: !!notifyResult?.skipped,
+            reason: notifyResult?.reason || null,
+          });
+        } catch (notifyErr) {
+          console.error("[checkout] whatsapp verificacion manual error", {
+            id_orden: ordenId,
+            error: notifyErr?.message || notifyErr,
+          });
+        }
       }
       try {
         await supabaseAdmin

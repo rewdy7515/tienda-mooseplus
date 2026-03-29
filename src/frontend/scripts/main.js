@@ -192,6 +192,7 @@ let pushPermissionPromptBusy = false;
 let currentPushPromptUserId = null;
 let whatsappQrWarningPollTimer = null;
 let whatsappQrWarningActionInProgress = false;
+let whatsappQrWarningFlowRequested = false;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -292,7 +293,10 @@ const stopWhatsappQrWarningPolling = () => {
   whatsappQrWarningPollTimer = null;
 };
 
-const renderWhatsappQrWarning = (payload = null, { isSuperadmin = false } = {}) => {
+const renderWhatsappQrWarning = (
+  payload = null,
+  { isSuperadmin = false, flowRequested = false } = {},
+) => {
   if (!whatsappQrWarningWrap || !whatsappQrWarningMessageEl) return;
   if (!isSuperadmin) {
     hideWhatsappQrWarning();
@@ -301,6 +305,11 @@ const renderWhatsappQrWarning = (payload = null, { isSuperadmin = false } = {}) 
   const ready = payload?.ready === true;
   const hasQr = Boolean(String(payload?.qrRaw || "").trim());
   if (ready) {
+    whatsappQrWarningFlowRequested = false;
+    hideWhatsappQrWarning();
+    return;
+  }
+  if (!flowRequested) {
     hideWhatsappQrWarning();
     return;
   }
@@ -330,7 +339,10 @@ const loadWhatsappQrWarning = async ({ isSuperadmin = false } = {}) => {
   try {
     const resp = await fetchWhatsappQrStatus({ autoStart: false });
     if (resp?.error) throw new Error(resp.error);
-    renderWhatsappQrWarning(resp, { isSuperadmin: true });
+    renderWhatsappQrWarning(resp, {
+      isSuperadmin: true,
+      flowRequested: whatsappQrWarningFlowRequested,
+    });
   } catch (err) {
     console.error("whatsapp qr warning load error", err);
     hideWhatsappQrWarning();
@@ -353,6 +365,7 @@ const startWhatsappQrWarningPolling = ({ isSuperadmin = false } = {}) => {
 const startWhatsappFromHomeWarning = async () => {
   if (whatsappQrWarningActionInProgress) return;
   whatsappQrWarningActionInProgress = true;
+  whatsappQrWarningFlowRequested = true;
   if (whatsappQrWarningBtn) {
     whatsappQrWarningBtn.disabled = true;
     whatsappQrWarningBtn.textContent = WHATSAPP_QR_WARNING_LOADING_LABEL;
@@ -360,12 +373,18 @@ const startWhatsappFromHomeWarning = async () => {
   try {
     const resp = await fetchWhatsappQrStatus({ autoStart: true });
     if (resp?.error) throw new Error(resp.error);
-    renderWhatsappQrWarning(resp, { isSuperadmin: true });
+    renderWhatsappQrWarning(resp, {
+      isSuperadmin: true,
+      flowRequested: whatsappQrWarningFlowRequested,
+    });
     if (resp?.ready !== true) {
       window.location.href = "admin/recordatorios.html";
     }
   } catch (err) {
     console.error("whatsapp qr warning start error", err);
+    if (whatsappQrWarningWrap) {
+      whatsappQrWarningWrap.classList.remove("hidden");
+    }
     if (whatsappQrWarningMessageEl) {
       whatsappQrWarningMessageEl.textContent =
         "No se pudo iniciar WhatsApp. Intenta nuevamente.";
