@@ -106,6 +106,20 @@ const jsonParser = express.json({ limit: "25mb" });
 
 const shouldStartWhatsapp =
   process.env.ENABLE_WHATSAPP === "true" && process.env.VERCEL !== "1";
+const INTERNAL_WORKER_TRIGGER_TOKEN = String(process.env.INTERNAL_WORKER_TRIGGER_TOKEN || "")
+  .trim();
+
+const hasValidInternalWorkerTriggerToken = (req = {}) => {
+  if (!INTERNAL_WORKER_TRIGGER_TOKEN) return false;
+  const token =
+    String(
+      req.headers?.["x-worker-token"] ||
+      req.body?.worker_token ||
+      req.query?.worker_token ||
+      "",
+    ).trim();
+  return token.length > 0 && token === INTERNAL_WORKER_TRIGGER_TOKEN;
+};
 
 const clearCorsHeaders = (res) => {
   res.removeHeader("Access-Control-Allow-Origin");
@@ -2505,7 +2519,6 @@ const processPendingManualVerificationAlerts = async () => {
 
   let managedWhatsappForRun = false;
   try {
-    const fechaMin = getCaracasDateStr(-3);
     const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
       .from("ordenes")
       .select(
@@ -2513,10 +2526,8 @@ const processPendingManualVerificationAlerts = async () => {
       )
       .eq("marcado_pago", true)
       .eq("checkout_finalizado", true)
-      .eq("en_espera", true)
       .eq("pago_verificado", false)
       .or("orden_cancelada.eq.false,orden_cancelada.is.null")
-      .gte("fecha", fechaMin)
       .order("id_orden", { ascending: false })
       .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
     if (pendingErr) throw pendingErr;
@@ -12924,6 +12935,140 @@ app.post("/api/ordenes/notificar-verificacion-manual", async (req, res) => {
     return res
       .status(500)
       .json({ error: err?.message || "No se pudo enviar notificación de verificación manual" });
+  }
+});
+
+app.get("/api/ordenes/verificacion-manual/worker-status", async (req, res) => {
+  try {
+    const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
+    if (!hasWorkerToken) {
+      await requireAdminSession(req);
+    }
+    return res.json({
+      ok: true,
+      enabled: WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED,
+      intervalMs: WHATSAPP_MANUAL_VERIFICATION_WATCHER_INTERVAL_MS,
+      windowMs: WHATSAPP_MANUAL_VERIFICATION_WINDOW_MS,
+      batch: WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH,
+      inProgress: manualVerificationWatcherInProgress,
+      lastRunAt: manualVerificationWatcherLastRunAt,
+      lastResult: manualVerificationWatcherLastResult,
+      lastError: manualVerificationWatcherLastError,
+      usingWorkerToken: hasWorkerToken,
+      workerTokenConfigured: INTERNAL_WORKER_TRIGGER_TOKEN.length > 0,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudo consultar estado del worker manual" });
+  }
+});
+
+app.post("/api/ordenes/verificacion-manual/procesar", async (req, res) => {
+  try {
+    const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
+    if (!hasWorkerToken) {
+      await requireAdminSession(req);
+    }
+    const idOrden = Number(req.body?.id_orden);
+    const force = isTrue(req.body?.force) || isTrue(req.body?.forzar);
+    const source = String(req.body?.source || "").trim().slice(0, 80);
+
+    if (Number.isFinite(idOrden) && idOrden > 0) {
+      const triggerSource = source || (force ? "manual_trigger_force" : "manual_trigger_single");
+      if (!force) {
+        const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+          .from("ordenes")
+          .select(
+            "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada, aviso_verificacion_manual",
+          )
+          .eq("id_orden", idOrden)
+          .maybeSingle();
+        if (ordenErr) throw ordenErr;
+        if (!ordenRow?.id_orden) {
+          return res.status(404).json({ error: "Orden no encontrada" });
+        }
+        if (!isTrue(ordenRow?.marcado_pago) || !isTrue(ordenRow?.checkout_finalizado)) {
+          return res.json({
+            ok: true,
+            skipped: true,
+            reason: "order_not_ready_for_manual_verification",
+            id_orden: idOrden,
+          });
+        }
+        if (isTrue(ordenRow?.pago_verificado)) {
+          return res.json({
+            ok: true,
+            skipped: true,
+            reason: "order_already_verified",
+            id_orden: idOrden,
+          });
+        }
+        if (isTrue(ordenRow?.orden_cancelada)) {
+          return res.json({
+            ok: true,
+            skipped: true,
+            reason: "order_cancelled",
+            id_orden: idOrden,
+          });
+        }
+        if (isTrue(ordenRow?.aviso_verificacion_manual)) {
+          return res.json({
+            ok: true,
+            skipped: true,
+            reason: "already_flagged_manual_verification",
+            id_orden: idOrden,
+          });
+        }
+        const windowElapsed = hasManualVerificationWindowElapsed(ordenRow);
+        if (windowElapsed !== true) {
+          return res.json({
+            ok: true,
+            skipped: true,
+            reason: windowElapsed === null ? "missing_order_datetime" : "window_not_elapsed",
+            id_orden: idOrden,
+          });
+        }
+      }
+
+      const notifyResult = await notifyManualVerificationToWhatsappAdmin({
+        idOrden,
+        source: triggerSource,
+        manageWhatsappLifecycle: true,
+      });
+      return res.json({
+        ok: true,
+        mode: force ? "single_force" : "single",
+        id_orden: idOrden,
+        usingWorkerToken: hasWorkerToken,
+        ...notifyResult,
+      });
+    }
+
+    const batchResult = await processPendingManualVerificationAlerts();
+    return res.json({
+      ok: true,
+      mode: "batch",
+      usingWorkerToken: hasWorkerToken,
+      ...batchResult,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[ordenes/verificacion-manual/procesar] error", err);
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudo procesar verificación manual" });
   }
 });
 
