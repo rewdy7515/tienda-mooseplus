@@ -321,6 +321,41 @@
         const start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         return start.toISOString().slice(0, 10);
       };
+      const toPositiveInt = (value) => {
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? Math.trunc(num) : 0;
+      };
+      const relationRow = (value) => (Array.isArray(value) ? value[0] || null : value || null);
+      const extractPlanNumber = (planRaw) => {
+        if (planRaw === null || planRaw === undefined) return null;
+        const asNumber = Number(planRaw);
+        if (Number.isFinite(asNumber)) return Math.trunc(asNumber);
+        const match = String(planRaw).match(/\d+/);
+        return match ? Number(match[0]) : null;
+      };
+      const fetchPlatform1VentasDelMes = async ({ monthStart, nextMonthStart }) => {
+        const allRows = [];
+        const pageSize = 1000;
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
+            .from("ventas")
+            .select(
+              "id_venta, precios:precios!ventas_id_precio_fkey!inner(id_plataforma, plan), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta_madre)",
+            )
+            .gte("fecha_pago", monthStart)
+            .lt("fecha_pago", nextMonthStart)
+            .eq("precios.id_plataforma", 1)
+            .order("id_venta", { ascending: true })
+            .range(from, from + pageSize - 1);
+          if (error) throw error;
+          const rows = Array.isArray(data) ? data : [];
+          allRows.push(...rows);
+          if (rows.length < pageSize) break;
+          from += pageSize;
+        }
+        return allRows;
+      };
 
       const formatDDMMYYYY = (val) => {
         if (!val) return "-";
@@ -637,17 +672,10 @@
 
           if (pinesPorComprarEl) {
             const [
-              { count: netflixCount, error: nfErr },
+              ventasPlat1Result,
               { count: giftCount, error: giftErr },
             ] = await Promise.all([
-              supabase
-                .from("ventas")
-                .select("id_venta, precios:precios!ventas_id_precio_fkey(id_plataforma)", {
-                  count: "exact",
-                  head: true,
-                })
-                .gte("fecha_pago", monthStart)
-                .eq("precios.id_plataforma", 1),
+              fetchPlatform1VentasDelMes({ monthStart, nextMonthStart }),
               supabase
                 .from("tarjetas_de_regalo")
                 .select("id_tarjeta_de_regalo", { count: "exact", head: true })
@@ -656,9 +684,33 @@
                 .gte("fecha_compra", monthStart)
                 .lt("fecha_compra", nextMonthStart),
             ]);
-            if (nfErr) throw nfErr;
             if (giftErr) throw giftErr;
-            const basePines = Math.floor((netflixCount ?? 0) / 7);
+            const ventasPlat1 = Array.isArray(ventasPlat1Result) ? ventasPlat1Result : [];
+            let plan1Count = 0;
+            let plan2Count = 0;
+            let plan2ConMadreCount = 0;
+            for (const venta of ventasPlat1) {
+              const precio = relationRow(venta?.precios);
+              const plan = extractPlanNumber(precio?.plan);
+              if (plan === 1) {
+                plan1Count += 1;
+                continue;
+              }
+              if (plan === 2) {
+                plan2Count += 1;
+                const cuenta = relationRow(venta?.cuentas);
+                const cuentaMiembro = relationRow(venta?.cuentas_miembro);
+                const madreId =
+                  toPositiveInt(cuenta?.id_cuenta_madre) ||
+                  toPositiveInt(cuentaMiembro?.id_cuenta_madre);
+                if (madreId > 0) plan2ConMadreCount += 1;
+              }
+            }
+            const basePines = Math.min(
+              Math.floor(plan1Count / 4),
+              Math.floor(plan2Count / 3),
+              Math.floor(plan2ConMadreCount / 2),
+            );
             const usados = giftCount ?? 0;
             const pines = Math.max(0, basePines - usados);
             pinesPorComprarEl.textContent = `Pines por comprar: ${pines}`;
