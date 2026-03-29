@@ -1907,7 +1907,7 @@ const notifyManualVerificationToWhatsappAdmin = async ({
 
   const { data: ordenRow, error: ordenErr } = await supabaseAdmin
     .from("ordenes")
-    .select("id_orden, referencia, pago_verificado, orden_cancelada, id_metodo_de_pago")
+    .select("id_orden, referencia, pago_verificado, orden_cancelada, id_metodo_de_pago, aviso_verificacion_manual")
     .eq("id_orden", ordenId)
     .maybeSingle();
   if (ordenErr) throw ordenErr;
@@ -1919,6 +1919,9 @@ const notifyManualVerificationToWhatsappAdmin = async ({
   }
   if (isTrue(ordenRow?.orden_cancelada)) {
     return { sent: false, skipped: true, reason: "order_cancelled" };
+  }
+  if (isTrue(ordenRow?.aviso_verificacion_manual)) {
+    return { sent: false, skipped: true, reason: "already_flagged_manual_verification" };
   }
 
   const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
@@ -2046,6 +2049,26 @@ const notifyManualVerificationToWhatsappAdmin = async ({
       phone: targetPhone,
       inbox_notification: inboxNotifResult,
     };
+  }
+
+  try {
+    const { error: markErr } = await supabaseAdmin
+      .from("ordenes")
+      .update({ aviso_verificacion_manual: true })
+      .eq("id_orden", ordenId);
+    if (markErr) {
+      if (!isMissingColumnError(markErr, "aviso_verificacion_manual")) {
+        console.error("[manual_verification] no se pudo marcar aviso_verificacion_manual", {
+          id_orden: ordenId,
+          error: markErr?.message || markErr,
+        });
+      }
+    }
+  } catch (markCatchErr) {
+    console.error("[manual_verification] error marcando aviso_verificacion_manual", {
+      id_orden: ordenId,
+      error: markCatchErr?.message || markCatchErr,
+    });
   }
 
   return {
@@ -2497,7 +2520,7 @@ const processPendingManualVerificationAlerts = async () => {
     const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, en_espera, pago_verificado, orden_cancelada",
+        "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, en_espera, pago_verificado, orden_cancelada, aviso_verificacion_manual",
       )
       .eq("marcado_pago", true)
       .eq("checkout_finalizado", true)
@@ -2516,6 +2539,10 @@ const processPendingManualVerificationAlerts = async () => {
       const ordenId = toPositiveInt(ordenRow?.id_orden);
       if (!ordenId) {
         result.failed += 1;
+        continue;
+      }
+      if (isTrue(ordenRow?.aviso_verificacion_manual)) {
+        result.alreadyNotified += 1;
         continue;
       }
 
