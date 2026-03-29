@@ -7786,19 +7786,23 @@
 
           let plataformaMeta = {
             usa_pines: false,
+            por_pantalla: false,
             max_dig_pin: 4,
             num_max_dispositivos: 1,
             max_miembros: 1,
           };
-          if (shouldCreatePerfiles && cuentaBase.id_plataforma) {
+          if (cuentaBase.id_plataforma) {
             const { data: platInfo, error: platInfoErr } = await supabase
               .from("plataformas")
-              .select("usa_pines, max_dig_pin, num_max_dispositivos, max_miembros")
+              .select(
+                "usa_pines, por_pantalla, max_dig_pin, num_max_dispositivos, max_miembros",
+              )
               .eq("id_plataforma", cuentaBase.id_plataforma)
               .maybeSingle();
             if (platInfoErr) throw platInfoErr;
             plataformaMeta = {
               usa_pines: isTrue(platInfo?.usa_pines),
+              por_pantalla: isTrue(platInfo?.por_pantalla),
               max_dig_pin: Number(platInfo?.max_dig_pin) > 0 ? Number(platInfo.max_dig_pin) : 4,
               num_max_dispositivos:
                 Number(platInfo?.num_max_dispositivos) > 0
@@ -7902,6 +7906,23 @@
               }
               return acc;
             }, {});
+          }
+
+          const omitirTareasAutomaticas =
+            cuentaBase.venta_perfil === true && cuentaBase.venta_miembro === false;
+          if (
+            plataformaMeta.por_pantalla === true &&
+            !omitirTareasAutomaticas &&
+            nuevaCuentaId > 0
+          ) {
+            const tareasRows = [{ id_tarea: 2, cuenta: nuevaCuentaId }];
+            if (plataformaMeta.usa_pines === true) {
+              tareasRows.push({ id_tarea: 3, cuenta: nuevaCuentaId });
+            }
+            const { error: tareasErr } = await supabase
+              .from("tareas_asignadas")
+              .insert(tareasRows);
+            if (tareasErr) throw tareasErr;
           }
 
           const perfilMapOldToNew = Object.entries(oldPerfilNById).reduce((acc, [oldPerfilId, nPerfil]) => {

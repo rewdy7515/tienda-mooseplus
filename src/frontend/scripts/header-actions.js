@@ -546,7 +546,7 @@ if (!window.__headerActionsInit) {
     try {
       const { data: metodosRows, error: metodosErr } = await supabase
         .from("metodos_de_pago")
-        .select("id_metodo_de_pago, verificacion_automatica, pago_automatizado");
+        .select("id_metodo_de_pago, verificacion_automatica");
       if (metodosErr) throw metodosErr;
       const isExplicitFalse = (value) =>
         value === false ||
@@ -558,10 +558,7 @@ if (!window.__headerActionsInit) {
         .filter((row) => isExplicitFalse(row?.verificacion_automatica))
         .map((row) => Number(row?.id_metodo_de_pago))
         .filter((id) => Number.isFinite(id) && id > 0);
-      const metodosPagoNoAutomatizado = (metodosRows || [])
-        .filter((row) => isExplicitFalse(row?.pago_automatizado))
-        .map((row) => Number(row?.id_metodo_de_pago))
-        .filter((id) => Number.isFinite(id) && id > 0);
+      const metodosPagoNoAutomatizadoIds = metodosNoVerificacionAutomatica;
 
       let hasPendingVerification = false;
       if (metodosNoVerificacionAutomatica.length) {
@@ -578,11 +575,11 @@ if (!window.__headerActionsInit) {
       }
 
       let hasPendingManualPayment = false;
-      if (metodosPagoNoAutomatizado.length) {
+      if (metodosPagoNoAutomatizadoIds.length) {
         const { data: ordenesManualRows, error: ordenesManualErr } = await supabase
           .from("ordenes")
           .select("id_orden")
-          .in("id_metodo_de_pago", metodosPagoNoAutomatizado)
+          .in("id_metodo_de_pago", metodosPagoNoAutomatizadoIds)
           .eq("marcado_pago", true)
           .neq("pago_verificado", true)
           .neq("orden_cancelada", true)

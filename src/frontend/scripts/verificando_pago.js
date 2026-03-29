@@ -32,6 +32,7 @@ let orden = null;
 let pagosInsertChannel = null;
 let ordenUpdateChannel = null;
 let countdownTimer = null;
+let verifyPollTimer = null;
 let currentUserId = null;
 let processingOrder = false;
 let orderProcessed = false;
@@ -42,6 +43,10 @@ let currentRateBs = null;
 let countdownExpired = false;
 let manualVerificationNotified = false;
 const VERIFY_WINDOW_MS = 3 * 60 * 1000;
+const VERIFY_POLL_INTERVAL_MS = 12000;
+const CHANNEL_WARN_MIN_INTERVAL_MS = 20000;
+let lastPagosChannelWarnAt = 0;
+let lastOrdenChannelWarnAt = 0;
 const MANUAL_VERIFICATION_PENDING_MSG =
   "Pago no detectado, se envió una notificación a un admin para que verifique manualmente";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
@@ -49,6 +54,21 @@ const buildEntregaUrl = () => `entregar_servicios.html?id_orden=${encodeURICompo
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
+};
+
+const shouldLogChannelWarning = (kind = "") => {
+  const now = Date.now();
+  if (kind === "pagomoviles") {
+    if (now - lastPagosChannelWarnAt < CHANNEL_WARN_MIN_INTERVAL_MS) return false;
+    lastPagosChannelWarnAt = now;
+    return true;
+  }
+  if (kind === "orden") {
+    if (now - lastOrdenChannelWarnAt < CHANNEL_WARN_MIN_INTERVAL_MS) return false;
+    lastOrdenChannelWarnAt = now;
+    return true;
+  }
+  return true;
 };
 
 const notifyManualVerificationAdmin = async (source = "countdown_expired") => {
@@ -98,6 +118,10 @@ const handlePagoVerificado = () => {
   if (countdownTimer) {
     clearInterval(countdownTimer);
     countdownTimer = null;
+  }
+  if (verifyPollTimer) {
+    clearInterval(verifyPollTimer);
+    verifyPollTimer = null;
   }
   if (progressBar) progressBar.style.width = "0%";
   if (countdownEl) countdownEl.textContent = "0min 0seg";
@@ -179,6 +203,16 @@ const startCountdown = () => {
   if (countdownTimer) clearInterval(countdownTimer);
   updateCountdown();
   countdownTimer = setInterval(updateCountdown, 1000);
+};
+
+const startVerifyPolling = () => {
+  if (verifyPollTimer) clearInterval(verifyPollTimer);
+  verifyPollTimer = setInterval(() => {
+    if (orderProcessed || !orden?.id_orden || orden?.pago_verificado === true) return;
+    triggerVerify().catch((err) => {
+      console.warn("verificar pago polling error", err);
+    });
+  }, VERIFY_POLL_INTERVAL_MS);
 };
 
 const renderOrden = () => {
@@ -522,7 +556,9 @@ const startPagosInsertSubscription = () => {
     )
     .subscribe((status) => {
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        console.error("pagomoviles subscription status", status);
+        if (shouldLogChannelWarning("pagomoviles")) {
+          console.warn("pagomoviles subscription status", status);
+        }
       }
     });
 };
@@ -585,7 +621,9 @@ const startOrdenUpdateSubscription = () => {
     )
     .subscribe((status) => {
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        console.error("orden subscription status", status);
+        if (shouldLogChannelWarning("orden")) {
+          console.warn("orden subscription status", status);
+        }
       }
     });
 };
@@ -630,6 +668,7 @@ async function init() {
     }
     bindEdit();
     startCountdown();
+    startVerifyPolling();
     triggerVerify().catch((err) => {
       console.error("verificar pago inicial error", err);
     });
@@ -647,4 +686,5 @@ window.addEventListener("beforeunload", () => {
   stopPagosInsertSubscription();
   stopOrdenUpdateSubscription();
   if (countdownTimer) clearInterval(countdownTimer);
+  if (verifyPollTimer) clearInterval(verifyPollTimer);
 });
