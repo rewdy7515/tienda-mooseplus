@@ -451,7 +451,7 @@ async function autoCloseSpotifyReportsWhenVentaDelivered(reportes = [], idUsuari
     if (reportId && reportesToCloseById.has(reportId)) {
       entry.row.id_venta = entry.ventaId;
     }
-  });
+  }
 
   const { error: closeErr } = await supabase
     .from("reportes")
