@@ -1637,11 +1637,13 @@
         if (perfErr) throw perfErr;
 
         const perfilByMadre = new Map();
+        const perfilCountByMadre = new Map();
         (perfilesRows || []).forEach((p) => {
           const madreId = toPositiveId(p?.id_cuenta);
           const perfilId = toPositiveId(p?.id_perfil);
           if (!madreId || !perfilId) return;
           if (reemplazosBloqueados.perfiles.has(perfilId)) return;
+          perfilCountByMadre.set(madreId, (perfilCountByMadre.get(madreId) || 0) + 1);
           if (!perfilByMadre.has(madreId)) {
             perfilByMadre.set(madreId, {
               id_perfil: perfilId,
@@ -1654,9 +1656,16 @@
           .map((m) => {
             const perfil = perfilByMadre.get(m.id_cuenta);
             if (!perfil?.id_perfil) return null;
-            return { ...m, ...perfil };
+            const espacios_disponibles = Number(perfilCountByMadre.get(m.id_cuenta) || 0);
+            return { ...m, ...perfil, espacios_disponibles };
           })
-          .filter(Boolean);
+          .filter(Boolean)
+          .sort((a, b) => {
+            const freeA = Number(a?.espacios_disponibles || 0);
+            const freeB = Number(b?.espacios_disponibles || 0);
+            if (freeA !== freeB) return freeB - freeA;
+            return Number(a?.id_cuenta || 0) - Number(b?.id_cuenta || 0);
+          });
       };
 
       const applyCambioMadre = async ({
@@ -1673,17 +1682,20 @@
             .eq("id_perfil", currentPerfilId);
           if (oldPerfErr) throw oldPerfErr;
         }
+        const cuentaMiembroIdNum = toPositiveId(cuentaMiembroId);
         const { error: newPerfErr } = await supabase
           .from("perfiles")
-          .update({ ocupado: true, id_cuenta_miembro: cuentaMiembroId })
+          .update({ ocupado: true, id_cuenta_miembro: cuentaMiembroIdNum })
           .eq("id_perfil", nextPerfilId);
         if (newPerfErr) throw newPerfErr;
 
-        const { error: linkErr } = await supabase
-          .from("cuentas")
-          .update({ id_cuenta_madre: nextMadreId })
-          .eq("id_cuenta", cuentaMiembroId);
-        if (linkErr) throw linkErr;
+        if (cuentaMiembroIdNum) {
+          const { error: linkErr } = await supabase
+            .from("cuentas")
+            .update({ id_cuenta_madre: nextMadreId })
+            .eq("id_cuenta", cuentaMiembroIdNum);
+          if (linkErr) throw linkErr;
+        }
 
         const { error: ventaErr } = await supabase
           .from("ventas")
@@ -1707,12 +1719,12 @@
           );
           const nextMadreId = Number(optionBtn.dataset.madreId || "");
           const nextPerfilId = Number(optionBtn.dataset.perfilId || "");
-          if (!idVenta || !cuentaMiembroId || !nextMadreId || !nextPerfilId) return;
+          if (!idVenta || !nextMadreId || !nextPerfilId) return;
           try {
             optionBtn.disabled = true;
             await applyCambioMadre({
               idVenta,
-              cuentaMiembroId,
+              cuentaMiembroId: Number.isFinite(cuentaMiembroId) ? cuentaMiembroId : null,
               currentPerfilId: Number.isFinite(currentPerfilId) ? currentPerfilId : null,
               nextMadreId,
               nextPerfilId,
@@ -1757,7 +1769,9 @@
                     : `#${madre.id_perfil}`;
                 const regionTxt = madre.region ? ` · ${escapeHtml(madre.region)}` : "";
                 const correoTxt = madre.correo ? escapeHtml(madre.correo) : `Cuenta #${madre.id_cuenta}`;
-                return `<button type="button" class="madre-option-item" data-madre-id="${madre.id_cuenta}" data-perfil-id="${madre.id_perfil}">${correoTxt} · ${perfilLabel}${regionTxt}</button>`;
+                const slots = Number(madre.espacios_disponibles || 0);
+                const slotsTxt = ` · ${slots} espacio${slots === 1 ? "" : "s"}`;
+                return `<button type="button" class="madre-option-item" data-madre-id="${madre.id_cuenta}" data-perfil-id="${madre.id_perfil}">${correoTxt}${slotsTxt} · ${perfilLabel}${regionTxt}</button>`;
               })
               .join("");
           } catch (err) {

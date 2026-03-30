@@ -176,6 +176,15 @@ const getPlanLabelFromReporte = (row) => {
   return "Sin plan";
 };
 
+const getReportePlatformId = (row) => {
+  const platformId =
+    Number(row?.id_plataforma) ||
+    Number(row?.cuentas?.id_plataforma) ||
+    Number(row?.plataformas?.id_plataforma) ||
+    0;
+  return Number.isFinite(platformId) && platformId > 0 ? platformId : null;
+};
+
 const notifyReporteCerrado = async (row) => {
   const reportId = Number(row?.id_reporte);
   const targetUserId = Number(row?.id_usuario);
@@ -365,6 +374,113 @@ async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
   return ventaInfo;
 }
 
+async function reactivarVentaPendienteFromReporte(row) {
+  const platformId = getReportePlatformId(row);
+  if (platformId !== 9) {
+    return { ok: false, reason: "platform_not_supported" };
+  }
+
+  let ventaId = toPositiveId(row?.id_venta);
+  if (!ventaId) {
+    const ventaInfo = await findVentaAsociadaFromReporte(row);
+    ventaId = toPositiveId(ventaInfo?.id_venta);
+  }
+  if (!ventaId) {
+    return { ok: false, reason: "venta_not_found" };
+  }
+
+  const { error } = await supabase.from("ventas").update({ pendiente: true }).eq("id_venta", ventaId);
+  if (error) throw error;
+  row.id_venta = ventaId;
+  return { ok: true, id_venta: ventaId };
+}
+
+async function autoCloseSpotifyReportsWhenVentaDelivered(reportes = [], idUsuarioSesion = null) {
+  const baseTargets = (reportes || []).filter((row) => {
+    const reportId = toPositiveId(row?.id_reporte);
+    return reportId && getReportePlatformId(row) === 9;
+  });
+  if (!baseTargets.length) return { closed: 0 };
+
+  const targets = [];
+  for (const row of baseTargets) {
+    let ventaId = toPositiveId(row?.id_venta);
+    if (!ventaId) {
+      try {
+        const ventaInfo = await findVentaAsociadaFromReporte(row);
+        ventaId = toPositiveId(ventaInfo?.id_venta);
+        if (ventaId) row.id_venta = ventaId;
+      } catch (err) {
+        console.error("auto close spotify reporte: findVentaAsociada error", err);
+      }
+    }
+    if (ventaId) targets.push({ row, ventaId });
+  }
+  if (!targets.length) return { closed: 0 };
+
+  const ventaIds = Array.from(
+    new Set(targets.map((entry) => entry.ventaId).filter((value) => !!value)),
+  );
+  if (!ventaIds.length) return { closed: 0 };
+
+  const { data: ventasRows, error: ventasErr } = await supabase
+    .from("ventas")
+    .select("id_venta, pendiente")
+    .in("id_venta", ventaIds);
+  if (ventasErr) throw ventasErr;
+
+  const ventaPendienteMap = new Map(
+    (ventasRows || []).map((row) => [toPositiveId(row?.id_venta), isTrue(row?.pendiente)]),
+  );
+  const reportesToClose = targets
+    .filter((entry) => {
+      const ventaId = toPositiveId(entry?.ventaId);
+      return ventaId && ventaPendienteMap.has(ventaId) && ventaPendienteMap.get(ventaId) === false;
+    })
+    .map((entry) => entry.row);
+  if (!reportesToClose.length) return { closed: 0 };
+
+  const reportIds = reportesToClose
+    .map((row) => toPositiveId(row?.id_reporte))
+    .filter((value) => !!value);
+  if (!reportIds.length) return { closed: 0 };
+
+  const reportesToCloseById = new Set(reportIds);
+  for (const entry of targets) {
+    const reportId = toPositiveId(entry?.row?.id_reporte);
+    if (reportId && reportesToCloseById.has(reportId)) {
+      entry.row.id_venta = entry.ventaId;
+    }
+  });
+
+  const { error: closeErr } = await supabase
+    .from("reportes")
+    .update({
+      descripcion: "Cierre automático: venta entregada.",
+      descripcion_solucion: "Cierre automático: ventas.pendiente volvió a false.",
+      en_revision: false,
+      solucionado: true,
+      solucionado_por: toPositiveId(idUsuarioSesion),
+    })
+    .in("id_reporte", reportIds);
+  if (closeErr) throw closeErr;
+
+  for (const row of reportesToClose) {
+    try {
+      await clearVentaReportadoFlag(row, { id_venta: toPositiveId(row?.id_venta) });
+    } catch (err) {
+      console.error("auto close spotify reporte: clearVentaReportadoFlag error", err);
+    }
+    try {
+      await notifyReporteCerrado(row);
+    } catch (err) {
+      console.error("auto close spotify reporte: notifyReporteCerrado error", err);
+    }
+  }
+
+  return { closed: reportIds.length };
+}
+
 async function notifyDiasSumados({ row, ventaInfo, dias }) {
   const targetUserId = Number(ventaInfo?.id_usuario || row?.id_usuario);
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
@@ -546,6 +662,7 @@ const renderReportesList = (plataformas = []) => {
               const idFmt = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
               const cliente =
                 [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
+              const platformId = getReportePlatformId(r);
               const correo = r.cuentas?.correo || "-";
               const correoText = escapeHtml(correo);
               const correoCopyAttr = escapeHtml(correo);
@@ -560,13 +677,20 @@ const renderReportesList = (plataformas = []) => {
                   </span>`
                 : `${correoText}${inactivaDot}`;
               const motivo = getDescripcion(r);
+              const canReactivate = platformId === 9;
+              const motivoCell = canReactivate
+                ? `<div class="reporte-motivo-wrap">
+                    <span class="reporte-motivo-text" title="${escapeHtml(motivo)}">${escapeHtml(motivo)}</span>
+                    <button class="btn-outline btn-small btn-reactivar-venta" data-id="${r.id_reporte}" data-action="reactivar">Reactivar</button>
+                  </div>`
+                : escapeHtml(motivo);
               const fecha = formatDate(r.fecha_creacion || null);
               return `
                 <tr>
                   <td>${escapeHtml(idFmt)}</td>
                   <td>${escapeHtml(cliente)}</td>
                   <td>${correoCell}</td>
-                  <td>${escapeHtml(motivo)}</td>
+                  <td>${motivoCell}</td>
                   <td>${escapeHtml(fecha)}</td>
                   <td>
                     <div class="actions-inline">
@@ -875,6 +999,11 @@ async function init() {
         activos = (refreshed || []).filter((r) => r.en_revision !== false && r.solucionado === false);
       }
     }
+    const autoClosedResult = await autoCloseSpotifyReportsWhenVentaDelivered(activos, userId);
+    if ((autoClosedResult?.closed || 0) > 0) {
+      const refreshed = await loadReportes();
+      activos = (refreshed || []).filter((r) => r.en_revision !== false && r.solucionado === false);
+    }
     if (!activos.length) {
       if (statusEl) statusEl.textContent = "No hay reportes pendientes.";
       if (listEl) listEl.innerHTML = "";
@@ -941,6 +1070,32 @@ async function init() {
       const action = btn.dataset.action;
       if (action === "detalle") {
         openModal(row);
+        return;
+      }
+      if (action === "reactivar") {
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Reactivando...";
+        reactivarVentaPendienteFromReporte(row)
+          .then((result) => {
+            if (!result?.ok) {
+              if (result?.reason === "venta_not_found") {
+                alert("No se encontró la venta asociada para reactivar.");
+              } else {
+                alert("No se pudo reactivar esta venta.");
+              }
+              return;
+            }
+            alert(`Venta #${result.id_venta} reactivada.`);
+          })
+          .catch((err) => {
+            console.error("reactivar venta desde reporte error", err);
+            alert("No se pudo reactivar la venta.");
+          })
+          .finally(() => {
+            btn.disabled = false;
+            btn.textContent = originalText || "Reactivar";
+          });
       }
       // acción de cerrar reporte no implementada aquí
     });
