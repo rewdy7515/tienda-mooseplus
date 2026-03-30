@@ -184,20 +184,31 @@
         gap: 6px;
         position: relative;
       }
+      .table-base td.pp-acciones-cell {
+        position: relative;
+        overflow: visible;
+        white-space: normal;
+      }
+      .cuenta-table-wrap {
+        overflow-y: visible;
+      }
+      .cuenta-table-wrap .table-base {
+        overflow: visible;
+      }
       .btn-toggle-madres {
         min-width: 30px;
         padding: 6px 8px;
         font-weight: 700;
       }
       .madre-options {
-        position: absolute;
-        top: calc(100% + 6px);
-        right: 0;
+        position: fixed;
+        top: 0;
+        left: 0;
         min-width: 280px;
-        max-width: 360px;
+        max-width: min(420px, calc(100vw - 12px));
         max-height: 260px;
         overflow-y: auto;
-        z-index: 60;
+        z-index: 2147483647;
         background: #fff;
         border: 1px solid #d1d5db;
         border-radius: 8px;
@@ -322,6 +333,11 @@
       let proveedorFetchCounter = 0;
       let reemplazosCache = null;
       let reemplazosCachePromise = null;
+      const MADRE_DEBUG = true;
+      const logMadreDebug = (...args) => {
+        if (!MADRE_DEBUG) return;
+        console.log("[madres-debug]", ...args);
+      };
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -640,7 +656,7 @@
                     }
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${valorGiftCardCell}${tipoCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
-                    <td>
+                    <td class="pp-acciones-cell">
                       ${
                         r.asignado_a
                           ? `<span class="pedido-asignado">Asignado a: ${escapeHtml(getPedidoAsignadoLabel(r))}</span>`
@@ -651,8 +667,7 @@
                       ${
                         r.cuenta_madre
                           ? `<span class="madre-switch-wrap" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">
-                              <button class="btn-outline btn-cambiar-madre" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">Cambiar cuenta madre</button>
-                              <button type="button" class="btn-outline btn-toggle-madres" title="Ver cuentas madres disponibles" aria-label="Ver cuentas madres disponibles">▾</button>
+                              <button type="button" class="btn-outline btn-toggle-madres" title="Cuenta madre" aria-label="Cuenta madre">Cuenta madre ▾</button>
                               <div class="madre-options hidden"></div>
                             </span>`
                           : ""
@@ -1600,22 +1615,50 @@
       const closeMadreOptions = () => {
         document.querySelectorAll(".madre-options").forEach((el) => {
           el.classList.add("hidden");
+          el.style.removeProperty("top");
+          el.style.removeProperty("left");
+          el.style.removeProperty("width");
+          el.style.removeProperty("max-height");
         });
       };
 
+      const positionMadreOptions = (listEl, anchorEl) => {
+        if (!listEl || !anchorEl) return;
+        const rect = anchorEl.getBoundingClientRect();
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        const pad = 8;
+        const desiredWidth = Math.max(300, Math.min(420, Number(rect.width || 0) + 260));
+        const panelWidth = Math.max(240, Math.min(desiredWidth, vw - pad * 2));
+        let left = Math.round(rect.right - panelWidth);
+        if (left < pad) left = pad;
+        if (left + panelWidth > vw - pad) left = Math.max(pad, vw - panelWidth - pad);
+        const maxHeight = Math.max(160, Math.min(340, vh - pad * 2));
+        let top = Math.round(rect.bottom + 6);
+        if (top + maxHeight > vh - pad) {
+          const upTop = Math.round(rect.top - maxHeight - 6);
+          top = upTop >= pad ? upTop : Math.max(pad, vh - maxHeight - pad);
+        }
+        listEl.style.width = `${panelWidth}px`;
+        listEl.style.maxHeight = `${maxHeight}px`;
+        listEl.style.left = `${left}px`;
+        listEl.style.top = `${top}px`;
+      };
+
       const fetchMadresDisponibles = async (idPlataforma, currentMadreId = null) => {
-        const { data: reemplazosBloqueados, error: replErr } =
-          await loadReemplazosBloqueados(true);
-        if (replErr) throw replErr;
+        logMadreDebug("fetchMadresDisponibles:start", { idPlataforma, currentMadreId });
         const { data: madresRows, error: madreErr } = await supabase
           .from("cuentas")
           .select("id_cuenta, correo, region")
           .eq("id_plataforma", idPlataforma)
           .eq("cuenta_madre", true)
-          .or("inactiva.is.null,inactiva.eq.false")
+          .eq("inactiva", false)
           .order("id_cuenta", { ascending: true })
           .limit(300);
         if (madreErr) throw madreErr;
+        logMadreDebug("fetchMadresDisponibles:madresRows", {
+          total: Array.isArray(madresRows) ? madresRows.length : 0,
+        });
         const madresBase = (madresRows || [])
           .map((m) => ({
             id_cuenta: toPositiveId(m?.id_cuenta),
@@ -1623,18 +1666,23 @@
             region: String(m?.region || "").trim(),
           }))
           .filter((m) => !!m.id_cuenta)
-          .filter((m) => !reemplazosBloqueados.cuentas.has(m.id_cuenta))
           .filter((m) => !currentMadreId || Number(m.id_cuenta) !== Number(currentMadreId));
         const madreIds = madresBase.map((m) => m.id_cuenta);
-        if (!madreIds.length) return [];
+        if (!madreIds.length) {
+          logMadreDebug("fetchMadresDisponibles:noMadreIds");
+          return [];
+        }
         const { data: perfilesRows, error: perfErr } = await supabase
           .from("perfiles")
-          .select("id_perfil, id_cuenta, n_perfil")
+          .select("id_perfil, id_cuenta, n_perfil, ocupado")
           .in("id_cuenta", madreIds)
           .eq("ocupado", false)
           .order("n_perfil", { ascending: true })
           .limit(1200);
         if (perfErr) throw perfErr;
+        logMadreDebug("fetchMadresDisponibles:perfilesRows", {
+          total: Array.isArray(perfilesRows) ? perfilesRows.length : 0,
+        });
 
         const perfilByMadre = new Map();
         const perfilCountByMadre = new Map();
@@ -1642,7 +1690,7 @@
           const madreId = toPositiveId(p?.id_cuenta);
           const perfilId = toPositiveId(p?.id_perfil);
           if (!madreId || !perfilId) return;
-          if (reemplazosBloqueados.perfiles.has(perfilId)) return;
+          if (isTrue(p?.ocupado)) return;
           perfilCountByMadre.set(madreId, (perfilCountByMadre.get(madreId) || 0) + 1);
           if (!perfilByMadre.has(madreId)) {
             perfilByMadre.set(madreId, {
@@ -1652,7 +1700,7 @@
           }
         });
 
-        return madresBase
+        const result = madresBase
           .map((m) => {
             const perfil = perfilByMadre.get(m.id_cuenta);
             if (!perfil?.id_perfil) return null;
@@ -1666,15 +1714,113 @@
             if (freeA !== freeB) return freeB - freeA;
             return Number(a?.id_cuenta || 0) - Number(b?.id_cuenta || 0);
           });
+        logMadreDebug("fetchMadresDisponibles:result", {
+          total: result.length,
+          top: result.slice(0, 3),
+        });
+        return result;
+      };
+
+      const renderMadreOptions = (madresDisponibles = []) =>
+        (madresDisponibles || [])
+          .map((madre) => {
+            const perfilLabel =
+              Number.isFinite(Number(madre.n_perfil)) && Number(madre.n_perfil) > 0
+                ? `M${Number(madre.n_perfil)}`
+                : `#${madre.id_perfil}`;
+            const regionTxt = madre.region ? ` · ${escapeHtml(madre.region)}` : "";
+            const correoTxt = madre.correo ? escapeHtml(madre.correo) : `Cuenta #${madre.id_cuenta}`;
+            const slots = Number(madre.espacios_disponibles || 0);
+            const slotsTxt = ` · ${slots} espacio${slots === 1 ? "" : "s"}`;
+            return `<button type="button" class="madre-option-item" data-madre-id="${madre.id_cuenta}" data-perfil-id="${madre.id_perfil}">${correoTxt}${slotsTxt} · ${perfilLabel}${regionTxt}</button>`;
+          })
+          .join("");
+
+      const openMadreOptions = async ({ wrap, listEl, triggerBtn = null }) => {
+        if (!wrap || !listEl) return;
+        const anchorEl = triggerBtn || wrap.querySelector(".btn-toggle-madres");
+        const salePlatformId = Number(wrap.dataset.idPlataforma || "");
+        const idPlataforma = salePlatformId;
+        const currentMadreId = Number(wrap.dataset.idCuenta || "");
+        logMadreDebug("openMadreOptions:start", {
+          salePlatformId,
+          idPlataforma,
+          currentMadreId,
+          wrapDataset: { ...wrap.dataset },
+        });
+        try {
+          if (triggerBtn) triggerBtn.disabled = true;
+          if (!Number.isFinite(salePlatformId) || salePlatformId <= 0) {
+            listEl.innerHTML =
+              '<div class="madre-option-empty">No se pudo identificar la plataforma de esta venta.</div>';
+            listEl.classList.remove("hidden");
+            logMadreDebug("openMadreOptions:missingPlatformId");
+            return;
+          }
+          listEl.innerHTML = '<div class="madre-option-empty">Cargando cuentas madres...</div>';
+          listEl.classList.remove("hidden");
+          positionMadreOptions(listEl, anchorEl);
+          const madresDisponibles = await fetchMadresDisponibles(idPlataforma, currentMadreId);
+          if (!madresDisponibles.length) {
+            listEl.innerHTML = '<div class="madre-option-empty">No hay cuentas madres con espacios libres.</div>';
+            positionMadreOptions(listEl, anchorEl);
+            logMadreDebug("openMadreOptions:emptyResult");
+            return;
+          }
+          listEl.innerHTML = renderMadreOptions(madresDisponibles);
+          positionMadreOptions(listEl, anchorEl);
+          logMadreDebug("openMadreOptions:rendered", { total: madresDisponibles.length });
+        } catch (err) {
+          console.error("listar cuentas madre error", err);
+          logMadreDebug("openMadreOptions:error", {
+            message: err?.message || String(err || ""),
+            code: err?.code || null,
+          });
+          listEl.innerHTML = '<div class="madre-option-empty">No se pudo cargar la lista.</div>';
+          positionMadreOptions(listEl, anchorEl);
+        } finally {
+          if (triggerBtn) triggerBtn.disabled = false;
+        }
       };
 
       const applyCambioMadre = async ({
         idVenta,
         cuentaMiembroId,
         currentPerfilId,
+        salePlatformId,
         nextMadreId,
         nextPerfilId,
       }) => {
+        logMadreDebug("applyCambioMadre:start", {
+          idVenta,
+          cuentaMiembroId,
+          currentPerfilId,
+          salePlatformId,
+          nextMadreId,
+          nextPerfilId,
+        });
+        const salePlatformIdNum = Number(salePlatformId || "");
+        if (!Number.isFinite(salePlatformIdNum) || salePlatformIdNum <= 0) {
+          throw new Error("No se pudo identificar la plataforma de la venta.");
+        }
+        const { data: madreCuenta, error: madreCuentaErr } = await supabase
+          .from("cuentas")
+          .select("id_cuenta, id_plataforma, cuenta_madre, inactiva")
+          .eq("id_cuenta", nextMadreId)
+          .maybeSingle();
+        if (madreCuentaErr) throw madreCuentaErr;
+        if (!madreCuenta) {
+          throw new Error("La cuenta madre seleccionada no existe.");
+        }
+        if (!isTrue(madreCuenta?.cuenta_madre)) {
+          throw new Error("La cuenta seleccionada no es cuenta madre.");
+        }
+        if (madreCuenta?.inactiva !== false) {
+          throw new Error("La cuenta madre seleccionada está inactiva.");
+        }
+        if (Number(madreCuenta?.id_plataforma) !== salePlatformIdNum) {
+          throw new Error("La cuenta madre no pertenece a la plataforma de la venta.");
+        }
         if (currentPerfilId) {
           const { error: oldPerfErr } = await supabase
             .from("perfiles")
@@ -1702,21 +1848,29 @@
           .update({ id_cuenta: nextMadreId, id_perfil: nextPerfilId })
           .eq("id_venta", idVenta);
         if (ventaErr) throw ventaErr;
+        logMadreDebug("applyCambioMadre:ventaUpdated", {
+          idVenta,
+          id_cuenta: nextMadreId,
+          id_perfil: nextPerfilId,
+        });
       };
 
       tablasEl?.addEventListener("click", async (e) => {
+        const debugTarget = e.target?.closest?.(".btn-toggle-madres, .madre-option-item");
+        if (debugTarget) {
+          logMadreDebug("click:listenerB", {
+            className: debugTarget.className,
+            text: String(debugTarget.textContent || "").trim(),
+          });
+        }
         const optionBtn = e.target.closest(".madre-option-item[data-madre-id][data-perfil-id]");
         if (optionBtn) {
           const wrap = optionBtn.closest(".madre-switch-wrap");
-          const actionBtn = wrap?.querySelector(".btn-cambiar-madre");
-          if (!wrap || !actionBtn) return;
-          const idVenta = Number(wrap.dataset.venta || actionBtn.dataset.venta || "");
-          const cuentaMiembroId = Number(
-            wrap.dataset.idCuentaMiembro || actionBtn.dataset.idCuentaMiembro || "",
-          );
-          const currentPerfilId = Number(
-            wrap.dataset.idPerfil || actionBtn.dataset.idPerfil || "",
-          );
+          if (!wrap) return;
+          const idVenta = Number(wrap.dataset.venta || "");
+          const salePlatformId = Number(wrap.dataset.idPlataforma || "");
+          const cuentaMiembroId = Number(wrap.dataset.idCuentaMiembro || "");
+          const currentPerfilId = Number(wrap.dataset.idPerfil || "");
           const nextMadreId = Number(optionBtn.dataset.madreId || "");
           const nextPerfilId = Number(optionBtn.dataset.perfilId || "");
           if (!idVenta || !nextMadreId || !nextPerfilId) return;
@@ -1726,6 +1880,7 @@
               idVenta,
               cuentaMiembroId: Number.isFinite(cuentaMiembroId) ? cuentaMiembroId : null,
               currentPerfilId: Number.isFinite(currentPerfilId) ? currentPerfilId : null,
+              salePlatformId: Number.isFinite(salePlatformId) ? salePlatformId : null,
               nextMadreId,
               nextPerfilId,
             });
@@ -1743,51 +1898,21 @@
 
         const toggleBtn = e.target.closest(".btn-toggle-madres");
         if (toggleBtn) {
+          logMadreDebug("toggleBtn:clicked");
           const wrap = toggleBtn.closest(".madre-switch-wrap");
-          const actionBtn = wrap?.querySelector(".btn-cambiar-madre");
           const listEl = wrap?.querySelector(".madre-options");
-          if (!wrap || !actionBtn || !listEl) return;
-          const idPlataforma = Number(wrap.dataset.idPlataforma || actionBtn.dataset.idPlataforma || "");
-          const currentMadreId = Number(wrap.dataset.idCuenta || actionBtn.dataset.idCuenta || "");
-          if (!idPlataforma) return;
+          if (!wrap || !listEl) {
+            logMadreDebug("toggleBtn:missingElements", {
+              hasWrap: !!wrap,
+              hasListEl: !!listEl,
+            });
+            return;
+          }
           const alreadyOpen = !listEl.classList.contains("hidden");
+          logMadreDebug("toggleBtn:state", { alreadyOpen });
           closeMadreOptions();
           if (alreadyOpen) return;
-          try {
-            listEl.innerHTML = '<div class="madre-option-empty">Cargando cuentas madres...</div>';
-            listEl.classList.remove("hidden");
-            const madresDisponibles = await fetchMadresDisponibles(idPlataforma, currentMadreId);
-            if (!madresDisponibles.length) {
-              listEl.innerHTML = '<div class="madre-option-empty">No hay cuentas madres con espacios libres.</div>';
-              return;
-            }
-            listEl.innerHTML = madresDisponibles
-              .map((madre) => {
-                const perfilLabel =
-                  Number.isFinite(Number(madre.n_perfil)) && Number(madre.n_perfil) > 0
-                    ? `M${Number(madre.n_perfil)}`
-                    : `#${madre.id_perfil}`;
-                const regionTxt = madre.region ? ` · ${escapeHtml(madre.region)}` : "";
-                const correoTxt = madre.correo ? escapeHtml(madre.correo) : `Cuenta #${madre.id_cuenta}`;
-                const slots = Number(madre.espacios_disponibles || 0);
-                const slotsTxt = ` · ${slots} espacio${slots === 1 ? "" : "s"}`;
-                return `<button type="button" class="madre-option-item" data-madre-id="${madre.id_cuenta}" data-perfil-id="${madre.id_perfil}">${correoTxt}${slotsTxt} · ${perfilLabel}${regionTxt}</button>`;
-              })
-              .join("");
-          } catch (err) {
-            console.error("listar cuentas madre error", err);
-            listEl.innerHTML = '<div class="madre-option-empty">No se pudo cargar la lista.</div>';
-          }
-          return;
-        }
-
-        const btn = e.target.closest(".btn-cambiar-madre");
-        if (btn) {
-          const wrap = btn.closest(".madre-switch-wrap");
-          const listEl = wrap?.querySelector(".madre-options");
-          if (listEl) {
-            listEl.classList.toggle("hidden");
-          }
+          await openMadreOptions({ wrap, listEl, triggerBtn: toggleBtn });
           return;
         }
 
@@ -1795,6 +1920,19 @@
           closeMadreOptions();
         }
       });
+      tablasEl?.addEventListener(
+        "click",
+        (e) => {
+          const toggleBtn = e.target?.closest?.(".btn-toggle-madres");
+          if (!toggleBtn) return;
+          const wrap = toggleBtn.closest(".madre-switch-wrap");
+          logMadreDebug("click:capture", {
+            className: toggleBtn.className,
+            wrapDataset: wrap ? { ...wrap.dataset } : null,
+          });
+        },
+        true,
+      );
       document.addEventListener("click", (e) => {
         if (!e.target.closest(".madre-switch-wrap")) {
           closeMadreOptions();

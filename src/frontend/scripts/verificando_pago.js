@@ -33,17 +33,20 @@ let pagosInsertChannel = null;
 let ordenUpdateChannel = null;
 let countdownTimer = null;
 let verifyPollTimer = null;
+let ordenStatusPollTimer = null;
 let currentUserId = null;
 let processingOrder = false;
 let orderProcessed = false;
 let verifyRunning = false;
 let verifyPending = false;
+let ordenStatusPollingRunning = false;
 let cartMontoBs = null;
 let currentRateBs = null;
 let countdownExpired = false;
 let manualVerificationNotified = false;
 const VERIFY_WINDOW_MS = 3 * 60 * 1000;
 const VERIFY_POLL_INTERVAL_MS = 12000;
+const ORDEN_STATUS_POLL_INTERVAL_MS = 3000;
 const CHANNEL_WARN_MIN_INTERVAL_MS = 20000;
 let lastPagosChannelWarnAt = 0;
 let lastOrdenChannelWarnAt = 0;
@@ -51,6 +54,8 @@ const MANUAL_VERIFICATION_PENDING_MSG =
   "Pago no detectado, se envió una notificación a un admin para que verifique manualmente";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
 const buildEntregaUrl = () => `entregar_servicios.html?id_orden=${encodeURIComponent(orden?.id_orden || idOrden)}`;
+const ORDEN_SELECT_FIELDS =
+  "id_orden, id_carrito, id_usuario, referencia, total, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo";
 
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
@@ -87,9 +92,9 @@ const notifyManualVerificationAdmin = async (source = "countdown_expired") => {
 const showVerifiedFallbackView = () => {
   if (!verifCard) return;
   verifCard.innerHTML = `
-    <h2>¡Tu pago fue verificado!</h2>
-    <p class="verif-message">Gracias por tu compra</p>
-    <button type="button" class="btn-primary btn-view-services" id="btn-view-services">Ver servicios</button>
+    <h2>Pago verificado</h2>
+    <p class="verif-message">No se pudo redirigir automáticamente. Continúa con el botón.</p>
+    <button type="button" class="btn-primary btn-view-services" id="btn-view-services">Ir a entregar servicios</button>
   `;
   document.querySelector("#btn-view-services")?.addEventListener("click", () => {
     window.location.href = buildEntregaUrl();
@@ -105,7 +110,7 @@ const redirectToEntregaServicios = () => {
     }
   }, 1200);
   try {
-    window.location.href = targetUrl;
+    window.location.replace(targetUrl);
   } catch (_err) {
     showVerifiedFallbackView();
   }
@@ -122,6 +127,10 @@ const handlePagoVerificado = () => {
   if (verifyPollTimer) {
     clearInterval(verifyPollTimer);
     verifyPollTimer = null;
+  }
+  if (ordenStatusPollTimer) {
+    clearInterval(ordenStatusPollTimer);
+    ordenStatusPollTimer = null;
   }
   if (progressBar) progressBar.style.width = "0%";
   if (countdownEl) countdownEl.textContent = "0min 0seg";
@@ -213,6 +222,43 @@ const startVerifyPolling = () => {
       console.warn("verificar pago polling error", err);
     });
   }, VERIFY_POLL_INTERVAL_MS);
+};
+
+const pollOrdenStatus = async () => {
+  if (orderProcessed || !idOrden || ordenStatusPollingRunning) return;
+  ordenStatusPollingRunning = true;
+  try {
+    const { data, error } = await supabase
+      .from("ordenes")
+      .select(ORDEN_SELECT_FIELDS)
+      .eq("id_orden", idOrden)
+      .maybeSingle();
+    if (error || !data) return;
+    const wasVerified = orden?.pago_verificado === true;
+    orden = { ...(orden || {}), ...data };
+    renderRef();
+    renderOrden();
+    renderMonto();
+    if (!wasVerified && data.pago_verificado === true) {
+      handlePagoVerificado();
+    }
+  } catch (err) {
+    console.warn("orden status polling error", err);
+  } finally {
+    ordenStatusPollingRunning = false;
+  }
+};
+
+const startOrdenStatusPolling = () => {
+  if (ordenStatusPollTimer) clearInterval(ordenStatusPollTimer);
+  pollOrdenStatus().catch((err) => {
+    console.warn("orden status polling init error", err);
+  });
+  ordenStatusPollTimer = setInterval(() => {
+    pollOrdenStatus().catch((err) => {
+      console.warn("orden status polling tick error", err);
+    });
+  }, ORDEN_STATUS_POLL_INTERVAL_MS);
 };
 
 const renderOrden = () => {
@@ -638,9 +684,7 @@ async function init() {
     currentUserId = user?.id_usuario || null;
     const { data, error } = await supabase
       .from("ordenes")
-      .select(
-        "id_orden, id_carrito, id_usuario, referencia, total, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo"
-      )
+      .select(ORDEN_SELECT_FIELDS)
       .eq("id_orden", idOrden)
       .single();
     if (error) throw error;
@@ -669,6 +713,7 @@ async function init() {
     bindEdit();
     startCountdown();
     startVerifyPolling();
+    startOrdenStatusPolling();
     triggerVerify().catch((err) => {
       console.error("verificar pago inicial error", err);
     });
@@ -687,4 +732,5 @@ window.addEventListener("beforeunload", () => {
   stopOrdenUpdateSubscription();
   if (countdownTimer) clearInterval(countdownTimer);
   if (verifyPollTimer) clearInterval(verifyPollTimer);
+  if (ordenStatusPollTimer) clearInterval(ordenStatusPollTimer);
 });

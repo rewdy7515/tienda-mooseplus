@@ -4,7 +4,7 @@
   "main": "src/backend/app.js",
   "scripts": {
     "start": "node src/backend/app.js",
-    "dev": "nodemon src/backend/app.js",
+    "dev": "nodemon -L src/backend/app.js",
     "generate:web-push-keys": "node scripts/generate-web-push-keys.js"
   },
   "dependencies": {
