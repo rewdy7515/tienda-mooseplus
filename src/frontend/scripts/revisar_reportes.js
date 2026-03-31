@@ -581,16 +581,30 @@ const renderReportesList = (plataformas = []) => {
               const correo = r.cuentas?.correo || "-";
               const correoText = escapeHtml(correo);
               const correoCopyAttr = escapeHtml(correo);
+              const madreCorreo = normalizeCopyValue(r?.cuenta_madre_correo);
+              const madreCopyAttr = escapeHtml(madreCorreo);
               const inactivaDot = isTrue(r?.cuentas?.inactiva)
                 ? '<span class="reporte-inactiva-dot" title="Cuenta inactiva" aria-label="Cuenta inactiva"></span>'
                 : "";
               const correoCell = normalizeCopyValue(correo)
                 ? `<span class="correo-actions-inline">
-                    <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
-                    ${inactivaDot}
-                    <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
+                    <span class="correo-main-inline">
+                      <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
+                    </span>
+                    <span class="correo-admin-actions">
+                      <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
+                      ${
+                        madreCorreo
+                          ? `<button type="button" class="btn-outline btn-small btn-admin-inline btn-admin-madre-inline" data-open-admin-madre-correo="${madreCopyAttr}" title="Abrir cuenta madre en Admin Cuentas" aria-label="Abrir cuenta madre en Admin Cuentas">↗</button>`
+                          : ""
+                      }
+                      ${inactivaDot}
+                    </span>
                   </span>`
-                : `${correoText}${inactivaDot}`;
+                : `<span class="correo-actions-inline">
+                    <span class="correo-main-inline">${correoText}</span>
+                    <span class="correo-admin-actions">${inactivaDot}</span>
+                  </span>`;
               const motivo = getDescripcion(r);
               const canReactivate = platformId === 9;
               const motivoCell = canReactivate
@@ -711,7 +725,7 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
+      "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
@@ -720,23 +734,58 @@ async function loadReportes() {
   const ventaIds = Array.from(
     new Set(rows.map((row) => toPositiveId(row?.id_venta)).filter((value) => !!value)),
   );
-  if (!ventaIds.length) return rows;
-
-  const { data: ventasData, error: ventasErr } = await supabase
-    .from("ventas")
-    .select("id_venta, completa")
-    .in("id_venta", ventaIds);
-  if (ventasErr) {
-    console.error("load reportes ventas completa error", ventasErr);
-    return rows;
+  const ventaCompletaById = new Map();
+  if (ventaIds.length) {
+    const { data: ventasData, error: ventasErr } = await supabase
+      .from("ventas")
+      .select("id_venta, completa")
+      .in("id_venta", ventaIds);
+    if (ventasErr) {
+      console.error("load reportes ventas completa error", ventasErr);
+    } else {
+      (ventasData || []).forEach((venta) => {
+        ventaCompletaById.set(toPositiveId(venta?.id_venta), isTrue(venta?.completa));
+      });
+    }
   }
 
-  const ventaCompletaById = new Map(
-    (ventasData || []).map((venta) => [toPositiveId(venta?.id_venta), isTrue(venta?.completa)]),
-  );
   rows.forEach((row) => {
     const ventaId = toPositiveId(row?.id_venta);
     row.venta_completa = ventaId ? ventaCompletaById.get(ventaId) === true : false;
+  });
+
+  const cuentaIds = new Set();
+  rows.forEach((row) => {
+    const cuentaId = toPositiveId(row?.cuentas?.id_cuenta);
+    const cuentaMadreId = toPositiveId(row?.cuentas?.id_cuenta_madre);
+    if (cuentaId) cuentaIds.add(cuentaId);
+    if (cuentaMadreId) cuentaIds.add(cuentaMadreId);
+  });
+  const cuentasById = new Map();
+  if (cuentaIds.size) {
+    const { data: cuentasData, error: cuentasErr } = await supabase
+      .from("cuentas")
+      .select("id_cuenta, id_cuenta_madre, cuenta_madre, correo")
+      .in("id_cuenta", Array.from(cuentaIds));
+    if (cuentasErr) {
+      console.error("load reportes cuentas madre error", cuentasErr);
+    } else {
+      (cuentasData || []).forEach((cta) => {
+        const idCuenta = toPositiveId(cta?.id_cuenta);
+        if (idCuenta) cuentasById.set(idCuenta, cta);
+      });
+    }
+  }
+  rows.forEach((row) => {
+    const cuentaRow = row?.cuentas || {};
+    const cuentaId = toPositiveId(cuentaRow?.id_cuenta);
+    const cuentaMadreId = toPositiveId(cuentaRow?.id_cuenta_madre);
+    const madreId = cuentaMadreId || cuentaId || null;
+    const madreRow = madreId ? cuentasById.get(madreId) : null;
+    const madreCorreo = normalizeCopyValue(
+      madreRow?.correo || (cuentaMadreId ? "" : cuentaRow?.correo || ""),
+    );
+    row.cuenta_madre_correo = madreCorreo;
   });
 
   return rows;
@@ -976,6 +1025,14 @@ async function init() {
     if (statusEl) statusEl.textContent = "";
 
     listEl?.addEventListener("click", (e) => {
+      const openAdminMadreTarget = e.target.closest("[data-open-admin-madre-correo]");
+      if (openAdminMadreTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        openAdminCuentasByCorreo(openAdminMadreTarget.dataset.openAdminMadreCorreo || "");
+        return;
+      }
+
       const openAdminTarget = e.target.closest("[data-open-admin-correo]");
       if (openAdminTarget) {
         e.preventDefault();

@@ -132,8 +132,13 @@
         height: 8px;
         border-radius: 50%;
         background: #dc2626;
-        margin-left: 6px;
+        margin-left: 0;
         vertical-align: middle;
+      }
+      .correo-admin-actions .reporte-inactiva-dot {
+        order: 99;
+        margin-left: 2px;
+        flex: 0 0 auto;
       }
       .auto-reemplazo-toggle {
         margin: 8px 0 14px;
@@ -265,9 +270,32 @@
         gap: 8px;
       }
       .correo-actions-inline {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        min-width: 0;
+      }
+      .correo-main-inline {
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .correo-main-inline .copyable-field {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .correo-admin-actions {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        margin-left: auto;
+        flex: 0 0 auto;
       }
       .btn-copy-inline {
         white-space: nowrap;
@@ -300,6 +328,17 @@
       .btn-admin-inline {
         min-width: 34px;
         padding: 6px 8px;
+      }
+      .btn-admin-madre-inline {
+        background: #f97316;
+        border: 1px solid #f97316;
+        color: #fff;
+      }
+      .btn-admin-madre-inline:hover,
+      .btn-admin-madre-inline:focus-visible {
+        background: #ea580c;
+        border-color: #ea580c;
+        color: #fff;
       }
       #modal-correo {
         cursor: pointer;
