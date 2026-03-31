@@ -236,10 +236,6 @@ const WHATSAPP_REPORTES_GROUP_NAME = String(
 const WHATSAPP_REPORTES_GROUP_CHAT_ID = String(
   process.env.WHATSAPP_REPORTES_GROUP_CHAT_ID || "",
 ).trim();
-const WHATSAPP_REPORTES_NOTIFY_USER_ID = Math.max(
-  1,
-  Number(process.env.WHATSAPP_REPORTES_NOTIFY_USER_ID) || 23,
-);
 const WEB_PUSH_SUBSCRIPTIONS_TABLE = "web_push_subscriptions";
 const WEB_PUSH_DELIVERY_QUEUE_TABLE = "web_push_delivery_queue";
 const SANDBOX_GIFTCARD_ORDERS_TABLE = "sandbox_giftcard_orders";
@@ -1848,7 +1844,7 @@ const buildWhatsappReporteCreadoMessage = ({
   const clienteText = formatWhatsappReporteText(cliente, "-");
   const motivoText = formatWhatsappReporteText(motivo, "-");
 
-  return `Nuevo reporte #${reportId} 🚨
+  return `\`Reporte #${reportId} 🚨\`
 *${plataformaText}*
 Correo: ${correoText}
 Clave: ${claveText}
@@ -1907,110 +1903,43 @@ const sendReporteCreatedToWhatsappGroup = async ({
   }
 
   let groupChatId = null;
-  let fallbackPhone = null;
   let sendErr = null;
   try {
     const client = getWhatsappClient();
     groupChatId = await resolveWhatsappReportesGroupChatId({ client });
-    fallbackPhone = await resolveWhatsappPhoneForUser(WHATSAPP_REPORTES_NOTIFY_USER_ID);
-
-    const destinations = [];
-    if (groupChatId) {
-      destinations.push({
-        type: "group",
-        chatId: groupChatId,
-      });
-    }
-    if (fallbackPhone) {
-      destinations.push({
-        type: "fallback_user",
-        chatId: `${fallbackPhone}@c.us`,
-      });
-    }
-    const uniqueDestinations = Array.from(
-      new Map(
-        destinations
-          .filter((dest) => String(dest?.chatId || "").trim())
-          .map((dest) => [String(dest.chatId).trim(), dest]),
-      ).values(),
-    );
-
-    if (!uniqueDestinations.length) {
-      console.warn(
-        `[reportes:whatsapp] Sin destino para reporte #${reportId}. groupName=${WHATSAPP_REPORTES_GROUP_NAME || "-"} groupChatId=${groupChatId || "-"} fallbackUserId=${WHATSAPP_REPORTES_NOTIFY_USER_ID} fallbackPhone=${fallbackPhone || "-"}`,
-      );
+    if (!groupChatId) {
       return {
         sent: false,
         skipped: true,
         reason: "target_destinations_not_found",
-        groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
-        groupChatId: groupChatId || null,
-        fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
-        fallbackPhone: fallbackPhone || null,
-      };
-    }
-
-    const sendErrors = [];
-    let sentCount = 0;
-    console.log(
-      `[reportes:whatsapp] Enviando reporte #${reportId} a ${uniqueDestinations
-        .map((dest) => `${dest.type}:${dest.chatId}`)
-        .join(", ")}`,
-    );
-    for (const dest of uniqueDestinations) {
-      try {
-        await withTimeout(
-          client.sendMessage(dest.chatId, message, {
-            linkPreview: false,
-            waitUntilMsgSent: true,
-          }),
-          WHATSAPP_SEND_TIMEOUT_MS,
-          `Timeout enviando alerta de reporte a ${dest.type}`,
-        );
-        sentCount += 1;
-        console.log(
-          `[reportes:whatsapp] Enviado reporte #${reportId} destino=${dest.type}:${dest.chatId}`,
-        );
-      } catch (err) {
-        const errMessage = err?.message || String(err);
-        console.error(
-          `[reportes:whatsapp] Error enviando reporte #${reportId} destino=${dest.type}:${dest.chatId}: ${errMessage}`,
-        );
-        sendErrors.push({
-          type: dest.type,
-          chatId: dest.chatId,
-          error: errMessage,
-        });
-      }
-    }
-
-    if (!sentCount) {
-      return {
-        sent: false,
-        skipped: false,
-        reason: "whatsapp_send_error",
-        error: sendErrors[0]?.error || "No se pudo enviar el mensaje de reporte",
         id_reporte: reportId,
         groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
-        groupChatId: groupChatId || null,
-        fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
-        fallbackPhone: fallbackPhone || null,
-        sendErrors,
+        groupChatId: null,
       };
     }
+
+    console.log(
+      `[reportes:whatsapp] Enviando reporte #${reportId} al grupo ${groupChatId}`,
+    );
+    await withTimeout(
+      client.sendMessage(groupChatId, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de reporte al grupo",
+    );
+    console.log(
+      `[reportes:whatsapp] Enviado reporte #${reportId} destino=group:${groupChatId}`,
+    );
 
     return {
       sent: true,
       skipped: false,
-      reason: sendErrors.length ? "partial_send_error" : null,
+      reason: null,
       id_reporte: reportId,
       groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
       groupChatId: groupChatId || null,
-      fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
-      fallbackPhone: fallbackPhone || null,
-      sentCount,
-      totalTargets: uniqueDestinations.length,
-      sendErrors,
     };
   } catch (err) {
     sendErr = err;
@@ -2036,8 +1965,6 @@ const sendReporteCreatedToWhatsappGroup = async ({
       id_reporte: reportId,
       groupChatId: groupChatId || null,
       groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
-      fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
-      fallbackPhone: fallbackPhone || null,
     };
   }
 };
@@ -5833,7 +5760,7 @@ app.post("/api/whatsapp/reportes/notificar", async (req, res) => {
     if (result?.skipped && result?.reason === "target_destinations_not_found") {
       return res.status(503).json({
         error:
-          "No se encontró destino WhatsApp para reportes. Configura WHATSAPP_REPORTES_GROUP_CHAT_ID o el teléfono del usuario 23.",
+          "No se encontró el grupo WhatsApp para reportes. Configura WHATSAPP_REPORTES_GROUP_CHAT_ID o WHATSAPP_REPORTES_GROUP_NAME.",
         ...result,
       });
     }
