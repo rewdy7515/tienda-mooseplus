@@ -396,92 +396,6 @@ async function reactivarVentaPendienteFromReporte(row) {
   return { ok: true, id_venta: ventaId };
 }
 
-async function autoCloseSpotifyReportsWhenVentaDelivered(reportes = [], idUsuarioSesion = null) {
-  const baseTargets = (reportes || []).filter((row) => {
-    const reportId = toPositiveId(row?.id_reporte);
-    return reportId && getReportePlatformId(row) === 9;
-  });
-  if (!baseTargets.length) return { closed: 0 };
-
-  const targets = [];
-  for (const row of baseTargets) {
-    let ventaId = toPositiveId(row?.id_venta);
-    if (!ventaId) {
-      try {
-        const ventaInfo = await findVentaAsociadaFromReporte(row);
-        ventaId = toPositiveId(ventaInfo?.id_venta);
-        if (ventaId) row.id_venta = ventaId;
-      } catch (err) {
-        console.error("auto close spotify reporte: findVentaAsociada error", err);
-      }
-    }
-    if (ventaId) targets.push({ row, ventaId });
-  }
-  if (!targets.length) return { closed: 0 };
-
-  const ventaIds = Array.from(
-    new Set(targets.map((entry) => entry.ventaId).filter((value) => !!value)),
-  );
-  if (!ventaIds.length) return { closed: 0 };
-
-  const { data: ventasRows, error: ventasErr } = await supabase
-    .from("ventas")
-    .select("id_venta, pendiente")
-    .in("id_venta", ventaIds);
-  if (ventasErr) throw ventasErr;
-
-  const ventaPendienteMap = new Map(
-    (ventasRows || []).map((row) => [toPositiveId(row?.id_venta), isTrue(row?.pendiente)]),
-  );
-  const reportesToClose = targets
-    .filter((entry) => {
-      const ventaId = toPositiveId(entry?.ventaId);
-      return ventaId && ventaPendienteMap.has(ventaId) && ventaPendienteMap.get(ventaId) === false;
-    })
-    .map((entry) => entry.row);
-  if (!reportesToClose.length) return { closed: 0 };
-
-  const reportIds = reportesToClose
-    .map((row) => toPositiveId(row?.id_reporte))
-    .filter((value) => !!value);
-  if (!reportIds.length) return { closed: 0 };
-
-  const reportesToCloseById = new Set(reportIds);
-  for (const entry of targets) {
-    const reportId = toPositiveId(entry?.row?.id_reporte);
-    if (reportId && reportesToCloseById.has(reportId)) {
-      entry.row.id_venta = entry.ventaId;
-    }
-  }
-
-  const { error: closeErr } = await supabase
-    .from("reportes")
-    .update({
-      descripcion: "Cierre automático: venta entregada.",
-      descripcion_solucion: "Cierre automático: ventas.pendiente volvió a false.",
-      en_revision: false,
-      solucionado: true,
-      solucionado_por: toPositiveId(idUsuarioSesion),
-    })
-    .in("id_reporte", reportIds);
-  if (closeErr) throw closeErr;
-
-  for (const row of reportesToClose) {
-    try {
-      await clearVentaReportadoFlag(row, { id_venta: toPositiveId(row?.id_venta) });
-    } catch (err) {
-      console.error("auto close spotify reporte: clearVentaReportadoFlag error", err);
-    }
-    try {
-      await notifyReporteCerrado(row);
-    } catch (err) {
-      console.error("auto close spotify reporte: notifyReporteCerrado error", err);
-    }
-  }
-
-  return { closed: reportIds.length };
-}
-
 async function notifyDiasSumados({ row, ventaInfo, dias }) {
   const targetUserId = Number(ventaInfo?.id_usuario || row?.id_usuario);
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
@@ -1001,7 +915,7 @@ async function openModal(row) {
 
 async function init() {
   try {
-    const userId = requireSession();
+    requireSession();
     await ensureServerSession();
     const user = await loadCurrentUser();
     setSessionRoles(user || {});
@@ -1032,11 +946,6 @@ async function init() {
         const refreshed = await loadReportes();
         activos = (refreshed || []).filter((r) => r.en_revision !== false && r.solucionado === false);
       }
-    }
-    const autoClosedResult = await autoCloseSpotifyReportsWhenVentaDelivered(activos, userId);
-    if ((autoClosedResult?.closed || 0) > 0) {
-      const refreshed = await loadReportes();
-      activos = (refreshed || []).filter((r) => r.en_revision !== false && r.solucionado === false);
     }
     if (!activos.length) {
       if (statusEl) statusEl.textContent = "No hay reportes pendientes.";
