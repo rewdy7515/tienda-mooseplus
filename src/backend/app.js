@@ -269,6 +269,16 @@ const AUTO_GIFTCARD_PENDING_DELIVERY_BATCH = Math.max(
   1,
   Math.min(500, Number(process.env.AUTO_GIFTCARD_PENDING_DELIVERY_BATCH) || 120),
 );
+const WHATSAPP_REPORTES_WATCHER_ENABLED =
+  process.env.WHATSAPP_REPORTES_WATCHER !== "false" && process.env.VERCEL !== "1";
+const WHATSAPP_REPORTES_WATCHER_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.WHATSAPP_REPORTES_WATCHER_INTERVAL_MS) || 15000,
+);
+const WHATSAPP_REPORTES_WATCHER_BATCH = Math.max(
+  1,
+  Math.min(300, Number(process.env.WHATSAPP_REPORTES_WATCHER_BATCH) || 80),
+);
 const HOME_BANNERS_TABLE = "banners";
 const WEB_TRAFFIC_EVENTS_TABLE = "eventos_trafico_web";
 let nuevoServicioNotifQueueInProgress = false;
@@ -304,6 +314,17 @@ let manualVerificationWatcherLastResult = {
   failed: 0,
 };
 let manualVerificationWatcherLastError = null;
+let reportesWhatsappWatcherInProgress = false;
+let reportesWhatsappWatcherColumnMissing = false;
+let reportesWhatsappWatcherLastRunAt = null;
+let reportesWhatsappWatcherLastResult = {
+  scanned: 0,
+  sent: 0,
+  skipped: 0,
+  failed: 0,
+  markedSent: 0,
+};
+let reportesWhatsappWatcherLastError = null;
 const WEB_PUSH_IS_CONFIGURED =
   Boolean(String(webPushVapidPublicKey || "").trim()) &&
   Boolean(String(webPushVapidPrivateKey || "").trim());
@@ -2018,6 +2039,152 @@ const sendReporteCreatedToWhatsappGroup = async ({
       fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
       fallbackPhone: fallbackPhone || null,
     };
+  }
+};
+
+const markReporteWhatsappEnviado = async (idReporte, value = true) => {
+  const reportId = toPositiveInt(idReporte);
+  if (!reportId) return false;
+  const { error: updateErr } = await supabaseAdmin
+    .from("reportes")
+    .update({ enviado_whatsapp: value === true })
+    .eq("id_reporte", reportId);
+  if (updateErr) throw updateErr;
+  return true;
+};
+
+const processPendingReportesWhatsappAlerts = async () => {
+  if (!WHATSAPP_REPORTES_WATCHER_ENABLED || !shouldStartWhatsapp) {
+    return {
+      skipped: true,
+      reason: "disabled",
+      ...reportesWhatsappWatcherLastResult,
+    };
+  }
+  if (reportesWhatsappWatcherInProgress) {
+    return {
+      skipped: true,
+      reason: "in_progress",
+      ...reportesWhatsappWatcherLastResult,
+    };
+  }
+
+  reportesWhatsappWatcherInProgress = true;
+  const result = {
+    scanned: 0,
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    markedSent: 0,
+  };
+  let managedWhatsappForRun = false;
+
+  try {
+    const { data: reportRows, error: reportErr } = await supabaseAdmin
+      .from("reportes")
+      .select("id_reporte")
+      .or("enviado_whatsapp.eq.false,enviado_whatsapp.is.null")
+      .order("id_reporte", { ascending: true })
+      .limit(WHATSAPP_REPORTES_WATCHER_BATCH);
+    if (reportErr && isMissingColumnError(reportErr, "enviado_whatsapp")) {
+      if (!reportesWhatsappWatcherColumnMissing) {
+        console.warn(
+          "[reportes:whatsapp] Worker desactivado: falta columna reportes.enviado_whatsapp.",
+        );
+      }
+      reportesWhatsappWatcherColumnMissing = true;
+      reportesWhatsappWatcherLastError = null;
+      reportesWhatsappWatcherLastResult = result;
+      return {
+        skipped: true,
+        reason: "missing_enviado_whatsapp_column",
+        ...result,
+      };
+    }
+    if (reportErr) throw reportErr;
+    if (reportesWhatsappWatcherColumnMissing) {
+      console.log("[reportes:whatsapp] Columna reportes.enviado_whatsapp detectada nuevamente.");
+      reportesWhatsappWatcherColumnMissing = false;
+    }
+
+    const rows = Array.isArray(reportRows) ? reportRows : [];
+    if (!rows.length) {
+      reportesWhatsappWatcherLastError = null;
+      reportesWhatsappWatcherLastResult = result;
+      return { ...result };
+    }
+
+    for (const row of rows) {
+      const reportId = toPositiveInt(row?.id_reporte);
+      if (!reportId) continue;
+      result.scanned += 1;
+
+      try {
+        if (!managedWhatsappForRun) {
+          await ensureWhatsappClientReady({
+            reason: "reportes_watcher_worker",
+            allowWhenDisabled: true,
+          });
+          managedWhatsappForRun = true;
+        }
+
+        const reporte = await fetchReporteWhatsappContextById(reportId);
+        if (!reporte?.id_reporte) {
+          result.skipped += 1;
+          continue;
+        }
+
+        const sendRes = await sendReporteCreatedToWhatsappGroup({
+          reporte,
+          manageWhatsappLifecycle: false,
+        });
+        if (sendRes?.sent) {
+          result.sent += 1;
+          await markReporteWhatsappEnviado(reportId, true);
+          result.markedSent += 1;
+        } else {
+          result.skipped += 1;
+          console.warn("[reportes:whatsapp] Worker skip", {
+            id_reporte: reportId,
+            reason: sendRes?.reason || "unknown",
+            error: sendRes?.error || null,
+            groupChatId: sendRes?.groupChatId || null,
+            fallbackPhone: sendRes?.fallbackPhone || null,
+          });
+        }
+      } catch (itemErr) {
+        result.failed += 1;
+        console.error("[reportes:whatsapp] Worker item error", {
+          id_reporte: reportId,
+          error: itemErr?.message || itemErr,
+        });
+      }
+    }
+
+    reportesWhatsappWatcherLastError = null;
+    reportesWhatsappWatcherLastResult = result;
+    if (result.sent > 0 || result.failed > 0 || result.skipped > 0) {
+      console.log(
+        `[reportes:whatsapp] Worker resumen: scanned=${result.scanned}, sent=${result.sent}, markedSent=${result.markedSent}, skipped=${result.skipped}, failed=${result.failed}`,
+      );
+    }
+    return { ...result };
+  } catch (err) {
+    reportesWhatsappWatcherLastError = err?.message || "Error desconocido";
+    throw err;
+  } finally {
+    if (managedWhatsappForRun) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "reportes_watcher_worker_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[reportes:whatsapp] Worker shutdown error", shutdownErr);
+      }
+    }
+    reportesWhatsappWatcherLastRunAt = new Date().toISOString();
+    reportesWhatsappWatcherInProgress = false;
   }
 };
 
@@ -4132,6 +4299,22 @@ if (WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED) {
   });
 }
 
+if (WHATSAPP_REPORTES_WATCHER_ENABLED && shouldStartWhatsapp) {
+  console.log(
+    `[reportes:whatsapp] Worker de pendientes (enviado_whatsapp=false) activo (cada ${Math.round(
+      WHATSAPP_REPORTES_WATCHER_INTERVAL_MS / 1000,
+    )}s, batch ${WHATSAPP_REPORTES_WATCHER_BATCH}).`,
+  );
+  setInterval(() => {
+    processPendingReportesWhatsappAlerts().catch((err) => {
+      console.error("[reportes:whatsapp] Worker error", err);
+    });
+  }, WHATSAPP_REPORTES_WATCHER_INTERVAL_MS);
+  processPendingReportesWhatsappAlerts().catch((err) => {
+    console.error("[reportes:whatsapp] Worker init error", err);
+  });
+}
+
 if (WEB_PUSH_QUEUE_WORKER_ENABLED) {
   if (WEB_PUSH_IS_CONFIGURED) {
     console.log(
@@ -5626,7 +5809,22 @@ app.post("/api/whatsapp/reportes/notificar", async (req, res) => {
       manageWhatsappLifecycle: true,
     });
 
-    if (result?.sent) return res.json({ ok: true, ...result });
+    if (result?.sent) {
+      try {
+        await markReporteWhatsappEnviado(reportId, true);
+      } catch (markErr) {
+        if (isMissingColumnError(markErr, "enviado_whatsapp")) {
+          return res.status(500).json({
+            error: "Falta columna reportes.enviado_whatsapp. No se pudo marcar el reporte como enviado.",
+            sent: true,
+            markedSent: false,
+            id_reporte: reportId,
+          });
+        }
+        throw markErr;
+      }
+      return res.json({ ok: true, markedSent: true, ...result });
+    }
 
     if (result?.skipped && result?.reason === "target_destinations_not_found") {
       return res.status(503).json({
@@ -5649,6 +5847,36 @@ app.post("/api/whatsapp/reportes/notificar", async (req, res) => {
     return res.status(500).json({
       error: err?.message || "No se pudo notificar el reporte por WhatsApp",
     });
+  }
+});
+
+app.get("/api/whatsapp/reportes/worker-status", async (req, res) => {
+  try {
+    const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
+    if (!hasWorkerToken) {
+      await requireAdminSession(req);
+    }
+    return res.json({
+      ok: true,
+      enabled: WHATSAPP_REPORTES_WATCHER_ENABLED && shouldStartWhatsapp,
+      intervalMs: WHATSAPP_REPORTES_WATCHER_INTERVAL_MS,
+      batch: WHATSAPP_REPORTES_WATCHER_BATCH,
+      inProgress: reportesWhatsappWatcherInProgress,
+      columnMissing: reportesWhatsappWatcherColumnMissing,
+      lastRunAt: reportesWhatsappWatcherLastRunAt,
+      lastResult: reportesWhatsappWatcherLastResult,
+      lastError: reportesWhatsappWatcherLastError,
+      usingWorkerToken: hasWorkerToken,
+      workerTokenConfigured: INTERNAL_WORKER_TRIGGER_TOKEN.length > 0,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    return res.status(500).json({ error: err?.message || "No se pudo consultar estado del worker" });
   }
 });
 
