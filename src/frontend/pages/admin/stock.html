@@ -585,6 +585,8 @@
       };
 
       const PLAN_SORT_ORDER = {
+        "Plan 1": 1,
+        "Plan 2": 2,
         Acceso: 1,
         Perfil: 2,
         Hogar: 3,
@@ -669,7 +671,7 @@
         }
         const isNetflix = platId === 1;
         const isHogar = isNetflix && (isTrue(perfil?.perfil_hogar) || isTrue(cuenta?.venta_miembro));
-        if (isHogar) return "Hogar";
+        if (isNetflix) return isHogar ? "Plan 2" : "Plan 1";
         if (isTrue(platformInfo?.por_acceso)) return "Acceso";
         if (isTrue(cuenta?.venta_perfil)) return "Perfil";
         if (isTrue(cuenta?.venta_miembro)) return "Miembro";
@@ -712,16 +714,27 @@
         return map.get(key);
       };
 
+      const getRowLabel = (row = {}) => {
+        const platformName = String(row?.nombre_plataforma || "").trim();
+        const plan = String(row?.plan_label || "").trim();
+        if (toPositiveInt(row?.id_plataforma) === 1 && plan) {
+          return `${platformName} - ${plan}`;
+        }
+        return platformName;
+      };
+
       const aggregateByPlatform = (planRows = [], dayDivisor = 30) => {
         const map = new Map();
         planRows.forEach((row) => {
           const id = toPositiveInt(row?.id_plataforma);
           if (!id) return;
-          if (!map.has(id)) {
-            map.set(id, {
+          const groupKey = id === 1 ? `${id}::${String(row?.plan_label || "").trim()}` : String(id);
+          if (!map.has(groupKey)) {
+            map.set(groupKey, {
               id_plataforma: id,
               nombre_plataforma: row?.nombre_plataforma || `Plataforma ${id}`,
               color_1: row?.color_1 || "#94a3b8",
+              plan_label: id === 1 ? String(row?.plan_label || "").trim() : "",
               stock: 0,
               vencidos: 0,
               reemplazos: 0,
@@ -731,7 +744,7 @@
               estado: "critico",
             });
           }
-          const entry = map.get(id);
+          const entry = map.get(groupKey);
           entry.stock += Number(row?.stock || 0);
           entry.vencidos += Number(row?.vencidos || 0);
           entry.reemplazos += Number(row?.reemplazos || 0);
@@ -751,7 +764,7 @@
           };
         });
 
-        return rows.sort((a, b) => a.nombre_plataforma.localeCompare(b.nombre_plataforma, "es"));
+        return rows.sort((a, b) => getRowLabel(a).localeCompare(getRowLabel(b), "es"));
       };
 
       const buildSummaryItem = ({ name = "", value = 0, fill = 0, tone = "ok", suffix = "" } = {}) => {
@@ -789,7 +802,7 @@
           ? lowCoverage
               .map((row) =>
                 buildSummaryItem({
-                  name: row.nombre_plataforma,
+                  name: getRowLabel(row),
                   value: row.cobertura_dias,
                   fill: (Number(row.cobertura_dias || 0) / maxCoverage) * 100,
                   tone: "danger",
@@ -803,7 +816,7 @@
           ? mostExpired
               .map((row) =>
                 buildSummaryItem({
-                  name: row.nombre_plataforma,
+                  name: getRowLabel(row),
                   value: row.vencidos,
                   fill: (Number(row.vencidos || 0) / maxExpired) * 100,
                   tone: "warn",
@@ -816,7 +829,7 @@
           ? highRotation
               .map((row) =>
                 buildSummaryItem({
-                  name: row.nombre_plataforma,
+                  name: getRowLabel(row),
                   value: row.avg_diario,
                   fill: (Number(row.avg_diario || 0) / maxRotation) * 100,
                   tone: "ok",
@@ -838,28 +851,28 @@
         if (criticalCoverage.length) {
           lines.push(
             `<li class="critical">Cobertura critica (&lt; 3 dias): ${escapeHtml(
-              criticalCoverage.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+              criticalCoverage.slice(0, 6).map((r) => getRowLabel(r)).join(", "),
             )}${criticalCoverage.length > 6 ? "..." : ""}</li>`,
           );
         }
         if (lowStock.length) {
           lines.push(
             `<li>Stock bajo (<= 5): ${escapeHtml(
-              lowStock.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+              lowStock.slice(0, 6).map((r) => getRowLabel(r)).join(", "),
             )}${lowStock.length > 6 ? "..." : ""}</li>`,
           );
         }
         if (highExpired.length) {
           lines.push(
             `<li>Muchas cuentas vencidas (>= 5): ${escapeHtml(
-              highExpired.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+              highExpired.slice(0, 6).map((r) => getRowLabel(r)).join(", "),
             )}${highExpired.length > 6 ? "..." : ""}</li>`,
           );
         }
         if (highRotation.length) {
           lines.push(
             `<li>Alta rotacion (avg diario >= 1): ${escapeHtml(
-              highRotation.slice(0, 6).map((r) => r.nombre_plataforma).join(", "),
+              highRotation.slice(0, 6).map((r) => getRowLabel(r)).join(", "),
             )}${highRotation.length > 6 ? "..." : ""}</li>`,
           );
         }
@@ -889,7 +902,7 @@
 
       const compareValues = (a, b, key) => {
         if (key === "nombre") {
-          return String(a.nombre_plataforma || "").localeCompare(String(b.nombre_plataforma || ""), "es");
+          return getRowLabel(a).localeCompare(getRowLabel(b), "es");
         }
         if (key === "estado") {
           const rank = { critico: 1, medio: 2, estable: 3 };
@@ -925,7 +938,7 @@
                 <td>
                   <span class="platform-name">
                     <span class="platform-dot" style="--dot-color:${escapeHtml(row.color_1)}"></span>
-                    ${escapeHtml(row.nombre_plataforma)}
+                    ${escapeHtml(getRowLabel(row))}
                   </span>
                 </td>
                 <td>${intFmt.format(Number(row.stock || 0))}</td>
@@ -938,7 +951,7 @@
                 <td><span class="badge ${escapeHtml(badge)}">${escapeHtml(badge)}</span></td>
                 <td>
                   <button class="btn-outline btn-small mini-action" data-focus-platform="${escapeHtml(
-                    row.nombre_plataforma,
+                    getRowLabel(row),
                   )}">
                     Enfocar
                   </button>
@@ -955,7 +968,7 @@
                 <div class="mobile-head">
                   <h3 class="mobile-name">
                     <span class="platform-dot" style="--dot-color:${escapeHtml(row.color_1)}"></span>
-                    ${escapeHtml(row.nombre_plataforma)}
+                    ${escapeHtml(getRowLabel(row))}
                   </h3>
                   <span class="badge ${escapeHtml(row.estado)}">${escapeHtml(row.estado)}</span>
                 </div>
@@ -994,7 +1007,7 @@
         const statusFilter = String(statusFilterEl?.value || "all");
 
         const filtered = state.allRows.filter((row) => {
-          const bySearch = !search || String(row.nombre_plataforma || "").toLowerCase().includes(search);
+          const bySearch = !search || getRowLabel(row).toLowerCase().includes(search);
           const byStatus = statusFilter === "all" || row.estado === statusFilter;
           return bySearch && byStatus;
         });

@@ -8,6 +8,8 @@ import {
   fetchEntregadas,
   fetchPendingReminderNoPhoneClients,
   fetchWhatsappQrStatus,
+  fetchWhatsappPersistentWorkerStatus,
+  updateWhatsappPersistentWorkerStatus,
   fetchTestingFlag,
   updateTestingFlag,
   fetchP2PRate,
@@ -75,6 +77,9 @@ const homeBannersWrap = document.querySelector("#home-banners");
 const homeBannersViewport = document.querySelector(".home-banners-viewport");
 const homeBannersTrack = document.querySelector("#home-banners-track");
 const homeBannersDots = document.querySelector("#home-banners-dots");
+const whatsappHetznerToggleWrap = document.querySelector("#whatsapp-hetzner-toggle-wrap");
+const whatsappHetznerToggleInput = document.querySelector("#whatsapp-hetzner-toggle-input");
+const whatsappHetznerToggleStatus = document.querySelector("#whatsapp-hetzner-toggle-status");
 const HOME_BANNERS_SLIDE_INTERVAL_MS = 5000;
 const HOME_BANNERS_DESIGN_WIDTH = 1650;
 const HOME_BANNERS_DESIGN_HEIGHT = 828;
@@ -193,6 +198,7 @@ let currentPushPromptUserId = null;
 let whatsappQrWarningPollTimer = null;
 let whatsappQrWarningActionInProgress = false;
 let whatsappQrWarningFlowRequested = false;
+let whatsappHetznerToggleBusy = false;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -403,6 +409,71 @@ whatsappQrWarningBtn?.addEventListener("click", () => {
     console.error("whatsapp qr warning start unhandled error", err);
   });
 });
+
+const setWhatsappHetznerToggleStatus = (message = "", isError = false) => {
+  if (!whatsappHetznerToggleStatus) return;
+  whatsappHetznerToggleStatus.textContent = message;
+  whatsappHetznerToggleStatus.style.color = isError ? "#b91c1c" : "#475569";
+};
+
+const initWhatsappHetznerToggle = async ({ isSuperadmin = false } = {}) => {
+  if (!whatsappHetznerToggleWrap || !whatsappHetznerToggleInput) return;
+  if (!isSuperadmin) {
+    whatsappHetznerToggleWrap.classList.add("hidden");
+    whatsappHetznerToggleInput.checked = false;
+    whatsappHetznerToggleInput.disabled = true;
+    setWhatsappHetznerToggleStatus("");
+    return;
+  }
+
+  whatsappHetznerToggleWrap.classList.remove("hidden");
+  whatsappHetznerToggleInput.disabled = true;
+  setWhatsappHetznerToggleStatus("Cargando estado...");
+  try {
+    const statusResp = await fetchWhatsappPersistentWorkerStatus();
+    if (statusResp?.error) throw new Error(statusResp.error);
+    whatsappHetznerToggleInput.checked = statusResp?.enabled === true;
+    setWhatsappHetznerToggleStatus(
+      statusResp?.enabled === true
+        ? "Bot persistente activo en Hetzner."
+        : "Bot bajo demanda. Solo se iniciará cuando un flujo lo requiera.",
+    );
+  } catch (err) {
+    console.error("whatsapp hetzner toggle load error", err);
+    whatsappHetznerToggleInput.checked = false;
+    setWhatsappHetznerToggleStatus("No se pudo cargar el estado del bot.", true);
+  } finally {
+    whatsappHetznerToggleInput.disabled = false;
+  }
+
+  if (whatsappHetznerToggleInput.dataset.bound === "1") return;
+  whatsappHetznerToggleInput.dataset.bound = "1";
+  whatsappHetznerToggleInput.addEventListener("change", async () => {
+    if (whatsappHetznerToggleBusy) return;
+    const nextValue = whatsappHetznerToggleInput.checked === true;
+    const prevValue = !nextValue;
+    whatsappHetznerToggleBusy = true;
+    whatsappHetznerToggleInput.disabled = true;
+    setWhatsappHetznerToggleStatus("Actualizando...");
+    try {
+      const updateResp = await updateWhatsappPersistentWorkerStatus(nextValue);
+      if (updateResp?.error) throw new Error(updateResp.error);
+      whatsappHetznerToggleInput.checked = updateResp?.enabled === true;
+      setWhatsappHetznerToggleStatus(
+        updateResp?.enabled === true
+          ? "Bot persistente activo en Hetzner."
+          : "Bot bajo demanda. Solo se iniciará cuando un flujo lo requiera.",
+      );
+    } catch (err) {
+      console.error("whatsapp hetzner toggle update error", err);
+      whatsappHetznerToggleInput.checked = prevValue;
+      setWhatsappHetznerToggleStatus("No se pudo actualizar el estado del bot.", true);
+    } finally {
+      whatsappHetznerToggleBusy = false;
+      whatsappHetznerToggleInput.disabled = false;
+    }
+  });
+};
 
 const hidePushPermissionPrompt = () => {
   pushPermissionWrap?.classList.add("hidden");
@@ -2272,6 +2343,7 @@ async function init() {
       }
     }
     renderTasaMarkupInput({ isSuper });
+    await initWhatsappHetznerToggle({ isSuperadmin: isSuper });
     await loadWhatsappQrWarning({ isSuperadmin: isSuper });
     startWhatsappQrWarningPolling({ isSuperadmin: isSuper });
     if (adminLink) {

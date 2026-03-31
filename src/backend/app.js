@@ -156,6 +156,7 @@ const WHATSAPP_READY_TIMEOUT_MS = Math.max(
   Number(process.env.WHATSAPP_READY_TIMEOUT_MS) || 120000,
 );
 const WHATSAPP_RESET_HOUR = 0;
+const WHATSAPP_HETZNER_PERSISTENT_CFG_KEY = "whatsapp_hetzner_persistent_worker";
 let lastAutoRecordatoriosRunDate = null;
 let autoRecordatoriosRetryPending = false;
 let autoRecordatoriosRunInProgress = false;
@@ -165,6 +166,8 @@ let recordatoriosEnviadosDate = null;
 let autoRecordatoriosSchedulerStarted = false;
 let autoRecordatoriosIntervalId = null;
 let whatsappBootInProgress = false;
+let whatsappHetznerPersistentWorkerEnabled = false;
+let whatsappHetznerPersistentWorkerLoaded = false;
 let lastAutoRecordatoriosState = {
   date: null,
   status: "idle",
@@ -1433,6 +1436,7 @@ const ensureWhatsappClientStarted = async ({
 const shutdownWhatsappClient = async ({
   reason = "unspecified",
   allowWhenDisabled = false,
+  force = false,
 } = {}) => {
   const reasonText = String(reason || "").toLowerCase();
   const isPendingSpotifyShutdown =
@@ -1458,17 +1462,23 @@ const shutdownWhatsappClient = async ({
     pendingSpotifyAlertsInProgress || manualVerificationWatcherInProgress || nuevoServicioNotifQueueInProgress;
 
   if (
-    (isPendingSpotifyShutdown && pendingConflicts) ||
-    (isManualVerificationShutdown && manualConflicts) ||
-    (isNuevoServicioShutdown && nuevoServicioConflicts) ||
-    (isRecordatoriosShutdown && recordatoriosConflicts)
+    !force &&
+    ((isPendingSpotifyShutdown && pendingConflicts) ||
+      (isManualVerificationShutdown && manualConflicts) ||
+      (isNuevoServicioShutdown && nuevoServicioConflicts) ||
+      (isRecordatoriosShutdown && recordatoriosConflicts))
   ) {
     console.log(`[WhatsApp] Omitiendo apagado (${reason}) por otro worker activo.`);
     return;
   }
 
+  if (!force && whatsappHetznerPersistentWorkerEnabled) {
+    console.log(`[WhatsApp] Omitiendo apagado (${reason}) por modo persistente activo.`);
+    return;
+  }
+
   if (!shouldStartWhatsapp && !allowWhenDisabled) return;
-  if (recordatoriosSendInProgress || autoRecordatoriosRunInProgress) return;
+  if (!force && (recordatoriosSendInProgress || autoRecordatoriosRunInProgress)) return;
   if (!isWhatsappReady() && !whatsappBootInProgress) return;
   console.log(`[WhatsApp] Apagando cliente (${reason}).`);
   await stopWhatsappClient();
@@ -1578,6 +1588,53 @@ const waitForWhatsappQrOrReady = async ({
     ready: isWhatsappReady(),
     qrState: getWhatsappQrState(),
   };
+};
+
+const loadWhatsappHetznerPersistentWorkerEnabled = async ({ refresh = false } = {}) => {
+  if (whatsappHetznerPersistentWorkerLoaded && !refresh) {
+    return whatsappHetznerPersistentWorkerEnabled;
+  }
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("configuracion_sistema")
+      .select("valor_bool")
+      .eq("clave", WHATSAPP_HETZNER_PERSISTENT_CFG_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    whatsappHetznerPersistentWorkerEnabled = data?.valor_bool === true;
+    whatsappHetznerPersistentWorkerLoaded = true;
+  } catch (err) {
+    const code = String(err?.code || "").trim();
+    if (code !== "42P01" && code !== "42703") {
+      console.error("[whatsapp:persistent] load config error", err);
+    }
+    whatsappHetznerPersistentWorkerEnabled = false;
+    whatsappHetznerPersistentWorkerLoaded = true;
+  }
+  return whatsappHetznerPersistentWorkerEnabled;
+};
+
+const saveWhatsappHetznerPersistentWorkerEnabled = async (enabled) => {
+  const next = enabled === true;
+  try {
+    const { error } = await supabaseAdmin.from("configuracion_sistema").upsert(
+      [{
+        clave: WHATSAPP_HETZNER_PERSISTENT_CFG_KEY,
+        valor_bool: next,
+        actualizado_en: new Date().toISOString(),
+      }],
+      {
+        onConflict: "clave",
+      },
+    );
+    if (error) throw error;
+    whatsappHetznerPersistentWorkerEnabled = next;
+    whatsappHetznerPersistentWorkerLoaded = true;
+  } catch (err) {
+    console.error("[whatsapp:persistent] save config error", err);
+    throw err;
+  }
+  return whatsappHetznerPersistentWorkerEnabled;
 };
 
 const buildWhatsappErrorLog = (err) => {
@@ -3733,6 +3790,24 @@ const startAutoWhatsappRecordatoriosScheduler = () => {
   triggerAutoWhatsappRecordatoriosCheck("init");
 };
 
+if (shouldStartWhatsapp) {
+  loadWhatsappHetznerPersistentWorkerEnabled()
+    .then(async (enabled) => {
+      if (!enabled) return;
+      try {
+        await ensureWhatsappClientStarted({
+          reason: "persistent_worker_bootstrap",
+          allowWhenDisabled: true,
+        });
+      } catch (err) {
+        console.error("[whatsapp:persistent] bootstrap start error", err);
+      }
+    })
+    .catch((err) => {
+      console.error("[whatsapp:persistent] bootstrap config error", err);
+    });
+}
+
 if (shouldStartWhatsapp && WHATSAPP_AUTO_RECORDATORIOS_ENABLED) {
   startAutoWhatsappRecordatoriosScheduler();
   onWhatsappReady(() => {
@@ -5036,6 +5111,69 @@ app.get("/api/whatsapp/status", (req, res) => {
     qrRaw: ready ? null : qrState?.raw || null,
     qrUpdatedAt: qrState?.updatedAt || null,
   });
+});
+
+app.get("/api/whatsapp/persistent-worker", async (req, res) => {
+  try {
+    await requireSuperadminSession(req);
+    const enabled = await loadWhatsappHetznerPersistentWorkerEnabled({ refresh: true });
+    return res.json({
+      ok: true,
+      enabled,
+      ready: isWhatsappReady(),
+      active: isWhatsappClientActive(),
+      booting: whatsappBootInProgress,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    return res.status(500).json({
+      error: err?.message || "No se pudo consultar el estado persistente de WhatsApp",
+    });
+  }
+});
+
+app.post("/api/whatsapp/persistent-worker", async (req, res) => {
+  try {
+    await requireSuperadminSession(req);
+    const enabled = req.body?.enabled === true;
+    await saveWhatsappHetznerPersistentWorkerEnabled(enabled);
+
+    if (enabled) {
+      await ensureWhatsappClientStarted({
+        reason: "persistent_worker_toggle_on",
+        allowWhenDisabled: true,
+      });
+    } else {
+      await shutdownWhatsappClient({
+        reason: "persistent_worker_toggle_off",
+        allowWhenDisabled: true,
+        force: true,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      enabled: whatsappHetznerPersistentWorkerEnabled,
+      ready: isWhatsappReady(),
+      active: isWhatsappClientActive(),
+      booting: whatsappBootInProgress,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    return res.status(500).json({
+      error: err?.message || "No se pudo actualizar el modo persistente de WhatsApp",
+    });
+  }
 });
 
 app.get("/api/whatsapp/qr", async (req, res) => {
@@ -7142,6 +7280,7 @@ const processOrderFromItems = async ({
     const isCuentaCompletaRenov =
       isCuentaCompletaByFlags(cuentaVenta) ||
       (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
+    const isVentaCompletaRenov = isTrue(ventaAnt?.completa);
     const fechaBaseSrc = ventaAnt?.fecha_corte || isoHoy;
     const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
     const updatePayload = {
@@ -7159,7 +7298,7 @@ const processOrderFromItems = async ({
     if (isSuspendidaAnt) {
       updatePayload.cuenta_nueva = false;
     }
-    if (isCuentaCompletaRenov) {
+    if (isCuentaCompletaRenov || isVentaCompletaRenov) {
       updatePayload.cuenta_pagada_admin = false;
     }
     return supabaseAdmin

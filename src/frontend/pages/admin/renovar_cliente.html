@@ -1858,7 +1858,7 @@
               meses_contratados: it.meses || 1,
               suspendido: false,
             };
-            if (isCuentaCompletaItem) {
+            if (isCuentaCompletaItem || !!costoRenovacionProveedorSel) {
               updatePayload.cuenta_pagada_admin = false;
             }
             updatePayload.pendiente = isSuspendido && entregaInmediata;
@@ -2139,7 +2139,7 @@
             meses_contratados: meses,
             suspendido: false,
           };
-          if (esCuentaCompleta) {
+          if (esCuentaCompleta || !!costoRenovacionProveedor) {
             updatePayload.cuenta_pagada_admin = false;
           }
           updatePayload.pendiente = isSuspendido && entregaInmediata;

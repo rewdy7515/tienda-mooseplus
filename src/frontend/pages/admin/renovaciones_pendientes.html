@@ -345,6 +345,7 @@
             .select(
               "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, fecha_corte, pendiente, suspendido, completa, usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, id_proveedor, inactiva, completa)",
             )
+            .eq("completa", true)
             .eq("cuenta_pagada_admin", false)
             .order("id_venta", { ascending: false });
           if (ventasErr) throw ventasErr;
@@ -360,8 +361,7 @@
             if (!sourceAccount) return;
             if (isTrue(sourceAccount.inactiva)) return;
             const completaVenta = isTrue(venta?.completa);
-            const completaCuenta = isTrue(sourceAccount.completa);
-            if (!completaVenta && !completaCuenta) return;
+            if (!completaVenta) return;
             const idPlataforma = Number(sourceAccount.id_plataforma || 0);
             if (!idPlataforma) return;
             const idProveedor = Number(sourceAccount.id_proveedor || 0) || null;

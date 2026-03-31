@@ -1609,6 +1609,61 @@ export async function fetchWhatsappQrStatus({ autoStart = false } = {}) {
   }
 }
 
+export async function fetchWhatsappPersistentWorkerStatus() {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/whatsapp/persistent-worker`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return {
+        error: message || "No se pudo consultar el modo persistente de WhatsApp",
+        status: res.status,
+      };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("fetchWhatsappPersistentWorkerStatus error", err);
+    return { error: err.message };
+  }
+}
+
+export async function updateWhatsappPersistentWorkerStatus(enabled) {
+  await ensureServerSession();
+  try {
+    const res = await fetch(`${API_BASE}/api/whatsapp/persistent-worker`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ enabled: enabled === true }),
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      return {
+        error: message || "No se pudo actualizar el modo persistente de WhatsApp",
+        status: res.status,
+      };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("updateWhatsappPersistentWorkerStatus error", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchP2PRate() {
   const startedAt = getDebugNow();
   logApiDebug("fetchP2PRate:start", {});
