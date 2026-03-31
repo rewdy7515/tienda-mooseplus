@@ -2083,8 +2083,8 @@ const processPendingReportesWhatsappAlerts = async () => {
     const { data: reportRows, error: reportErr } = await supabaseAdmin
       .from("reportes")
       .select("id_reporte")
-      .or("enviado_whatsapp.eq.false,enviado_whatsapp.is.null")
-      .order("id_reporte", { ascending: true })
+      .not("enviado_whatsapp", "is", true)
+      .order("id_reporte", { ascending: false })
       .limit(WHATSAPP_REPORTES_WATCHER_BATCH);
     if (reportErr && isMissingColumnError(reportErr, "enviado_whatsapp")) {
       if (!reportesWhatsappWatcherColumnMissing) {
@@ -4313,6 +4313,10 @@ if (WHATSAPP_REPORTES_WATCHER_ENABLED && shouldStartWhatsapp) {
   processPendingReportesWhatsappAlerts().catch((err) => {
     console.error("[reportes:whatsapp] Worker init error", err);
   });
+} else {
+  console.warn(
+    `[reportes:whatsapp] Worker desactivado al iniciar. watcher=${WHATSAPP_REPORTES_WATCHER_ENABLED} shouldStartWhatsapp=${shouldStartWhatsapp} ENABLE_WHATSAPP=${String(process.env.ENABLE_WHATSAPP || "").trim()}`,
+  );
 }
 
 if (WEB_PUSH_QUEUE_WORKER_ENABLED) {
@@ -5859,6 +5863,9 @@ app.get("/api/whatsapp/reportes/worker-status", async (req, res) => {
     return res.json({
       ok: true,
       enabled: WHATSAPP_REPORTES_WATCHER_ENABLED && shouldStartWhatsapp,
+      watcherEnabledConfig: WHATSAPP_REPORTES_WATCHER_ENABLED,
+      shouldStartWhatsapp,
+      enableWhatsappEnv: String(process.env.ENABLE_WHATSAPP || "").trim() || null,
       intervalMs: WHATSAPP_REPORTES_WATCHER_INTERVAL_MS,
       batch: WHATSAPP_REPORTES_WATCHER_BATCH,
       inProgress: reportesWhatsappWatcherInProgress,
@@ -5877,6 +5884,79 @@ app.get("/api/whatsapp/reportes/worker-status", async (req, res) => {
       return res.status(403).json({ error: "Solo admin/superadmin" });
     }
     return res.status(500).json({ error: err?.message || "No se pudo consultar estado del worker" });
+  }
+});
+
+app.post("/api/whatsapp/reportes/procesar", async (req, res) => {
+  try {
+    const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
+    if (!hasWorkerToken) {
+      await requireAdminSession(req);
+    }
+    const reportId = toPositiveInt(req.body?.id_reporte ?? req.body?.idReporte);
+    if (!reportId) {
+      const result = await processPendingReportesWhatsappAlerts();
+      return res.json({ ok: true, ...result });
+    }
+
+    const reporte = await fetchReporteWhatsappContextById(reportId);
+    if (!reporte?.id_reporte) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    const { data: reporteStateRow, error: reporteStateErr } = await supabaseAdmin
+      .from("reportes")
+      .select("enviado_whatsapp")
+      .eq("id_reporte", reportId)
+      .maybeSingle();
+    if (reporteStateErr && isMissingColumnError(reporteStateErr, "enviado_whatsapp")) {
+      return res.status(500).json({
+        error: "Falta columna reportes.enviado_whatsapp.",
+      });
+    }
+    if (reporteStateErr) throw reporteStateErr;
+
+    const alreadySent = reporteStateRow?.enviado_whatsapp === true;
+    const force = isTrue(req.body?.force) || isTrue(req.body?.forzar);
+    if (alreadySent && !force) {
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: "already_marked_whatsapp_sent",
+        id_reporte: reportId,
+      });
+    }
+
+    const result = await sendReporteCreatedToWhatsappGroup({
+      reporte,
+      manageWhatsappLifecycle: true,
+    });
+    if (!result?.sent) {
+      if (result?.skipped) return res.status(202).json({ ok: false, ...result });
+      return res.status(500).json({
+        error: result?.error || "No se pudo enviar el reporte por WhatsApp",
+        ...result,
+      });
+    }
+
+    await markReporteWhatsappEnviado(reportId, true);
+    return res.json({
+      ok: true,
+      markedSent: true,
+      id_reporte: reportId,
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[whatsapp/reportes/procesar] error", err);
+    return res.status(500).json({
+      error: err?.message || "No se pudo procesar reportes pendientes por WhatsApp",
+    });
   }
 });
 
