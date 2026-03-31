@@ -592,13 +592,13 @@ const renderReportesList = (plataformas = []) => {
                       <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
                     </span>
                     <span class="correo-admin-actions">
+                      ${inactivaDot}
                       <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
                       ${
                         madreCorreo
                           ? `<button type="button" class="btn-outline btn-small btn-admin-inline btn-admin-madre-inline" data-open-admin-madre-correo="${madreCopyAttr}" title="Abrir cuenta madre en Admin Cuentas" aria-label="Abrir cuenta madre en Admin Cuentas">↗</button>`
                           : ""
                       }
-                      ${inactivaDot}
                     </span>
                   </span>`
                 : `<span class="correo-actions-inline">

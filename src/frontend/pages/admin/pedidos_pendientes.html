@@ -77,6 +77,10 @@
         background: #dbeafe;
         color: #1e3a8a;
       }
+      .tipo-reportado {
+        background: #fee2e2;
+        color: #991b1b;
+      }
       .pedido-asignado {
         display: inline-flex;
         align-items: center;
@@ -615,8 +619,16 @@
                       cuentaNuevaRaw === "true" ||
                       cuentaNuevaRaw === 1 ||
                       cuentaNuevaRaw === "1";
+                    const reportadoRaw = r.reportado;
+                    const reportado =
+                      reportadoRaw === true ||
+                      reportadoRaw === "true" ||
+                      reportadoRaw === 1 ||
+                      reportadoRaw === "1";
                     const tipoCell = showTipo
-                      ? cuentaNuevaRaw == null
+                      ? reportado
+                        ? `<td class="tipo-cell tipo-reportado">Reportado</td>`
+                        : cuentaNuevaRaw == null
                         ? `<td></td>`
                         : `<td class="tipo-cell ${cuentaNueva ? "tipo-nueva" : "tipo-existe"}">${
                             cuentaNueva ? "Cuenta Nueva" : "Ya existe"
