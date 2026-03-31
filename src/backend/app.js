@@ -2167,7 +2167,7 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
     const { data, error: ventaErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, precios(id_plataforma)",
+        "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, precios(id_plataforma)",
       )
       .eq("id_venta", ventaId)
       .maybeSingle();
@@ -2213,11 +2213,7 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   if (!message) {
     return { sent: false, skipped: true, reason: "missing_member_credentials" };
   }
-
-  const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID);
-  if (!targetPhone) {
-    return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
-  }
+  const routeToReportesGroup = isTrue(ventaRow?.reportado);
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
   if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
@@ -2231,6 +2227,50 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
 
   try {
     const client = getWhatsappClient();
+    if (routeToReportesGroup) {
+      const groupChatId = await resolveWhatsappReportesGroupChatId({ client });
+      if (!groupChatId) {
+        return {
+          sent: false,
+          skipped: true,
+          reason: "target_reportes_group_not_found",
+          id_venta: ventaId,
+          groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
+          groupChatId: null,
+        };
+      }
+
+      await withTimeout(
+        client.sendMessage(groupChatId, message, {
+          linkPreview: false,
+          waitUntilMsgSent: true,
+        }),
+        WHATSAPP_SEND_TIMEOUT_MS,
+        "Timeout enviando alerta de pedido pendiente al grupo de reportes",
+      );
+
+      const { error: avisoErr } = await supabaseAdmin
+        .from("ventas")
+        .update({ aviso_admin: true })
+        .eq("id_venta", ventaId);
+      if (avisoErr) throw avisoErr;
+
+      return {
+        sent: true,
+        skipped: false,
+        reason: null,
+        id_venta: ventaId,
+        destino: "reportes_group",
+        groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
+        groupChatId,
+      };
+    }
+
+    const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID);
+    if (!targetPhone) {
+      return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
+    }
+
     await withTimeout(
       client.sendMessage(`${targetPhone}@c.us`, message, {
         linkPreview: false,
@@ -2789,8 +2829,8 @@ const processPendingSpotifyAdminAlerts = async () => {
     while (true) {
       let query = supabaseAdmin
         .from("ventas")
-        .select(
-          "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, precios!inner(id_plataforma)",
+      .select(
+          "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, precios!inner(id_plataforma)",
         )
         .eq("pendiente", true)
         .eq("precios.id_plataforma", 9)
