@@ -1439,6 +1439,9 @@ const shutdownWhatsappClient = async ({
   force = false,
 } = {}) => {
   const reasonText = String(reason || "").toLowerCase();
+  if (!force && whatsappHetznerPersistentWorkerEnabled) {
+    return;
+  }
   const isPendingSpotifyShutdown =
     reasonText.includes("pending_spotify_orders_worker") ||
     reasonText.includes("pending_spotify_order");
@@ -1469,11 +1472,6 @@ const shutdownWhatsappClient = async ({
       (isRecordatoriosShutdown && recordatoriosConflicts))
   ) {
     console.log(`[WhatsApp] Omitiendo apagado (${reason}) por otro worker activo.`);
-    return;
-  }
-
-  if (!force && whatsappHetznerPersistentWorkerEnabled) {
-    console.log(`[WhatsApp] Omitiendo apagado (${reason}) por modo persistente activo.`);
     return;
   }
 
