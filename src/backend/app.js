@@ -5588,7 +5588,15 @@ app.get("/api/whatsapp/recordatorios/pending-no-phone", async (req, res) => {
 
 app.post("/api/whatsapp/reportes/notificar", async (req, res) => {
   try {
-    const sessionUserId = await getSessionUsuario(req);
+    let sessionUserId = null;
+    try {
+      sessionUserId = await getSessionUsuario(req);
+    } catch (authErr) {
+      if (authErr?.code !== AUTH_REQUIRED && authErr?.message !== AUTH_REQUIRED) throw authErr;
+      const bearerToken = getBearerTokenFromRequest(req);
+      if (!bearerToken) throw authErr;
+      sessionUserId = await resolveUsuarioFromAuthToken(bearerToken);
+    }
     const reportId = toPositiveInt(req.body?.id_reporte ?? req.body?.idReporte);
     if (!reportId) {
       return res.status(400).json({ error: "id_reporte invalido" });

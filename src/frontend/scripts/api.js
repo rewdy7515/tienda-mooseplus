@@ -1692,9 +1692,14 @@ export async function notifyReporteCreatedWhatsapp(idReporte) {
     return { error: "id_reporte invalido" };
   }
   try {
+    const headers = { "Content-Type": "application/json" };
+    const accessToken = getRememberedAccessToken();
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
     const res = await fetch(`${API_BASE}/api/whatsapp/reportes/notificar`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       credentials: "include",
       body: JSON.stringify({ id_reporte: reportId }),
     });
