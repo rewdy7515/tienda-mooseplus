@@ -91,6 +91,25 @@ const logApiDebug = (_step, _details = {}) => {};
 
 const warnApiDebug = (_step, _details = {}) => {};
 
+const readResponseBodySafe = async (res) => {
+  if (!res) return { text: "", data: null };
+  let text = "";
+  try {
+    text = await res.text();
+  } catch (_err) {
+    text = "";
+  }
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_err) {
+      data = null;
+    }
+  }
+  return { text, data };
+};
+
 const normalizeAccessToken = (value = "") => {
   const token = String(value || "").trim();
   return token || "";
@@ -1590,19 +1609,15 @@ export async function fetchWhatsappQrStatus({ autoStart = false } = {}) {
       credentials: "include",
     });
     if (!res.ok) {
-      let message = "";
-      try {
-        const data = await res.json();
-        message = data?.error || "";
-      } catch (_err) {
-        message = (await res.text()) || "";
-      }
+      const { text, data } = await readResponseBodySafe(res);
+      const message = String(data?.error || text || "").trim();
       return {
         error: message || "No se pudo consultar el estado de WhatsApp",
         status: res.status,
       };
     }
-    return res.json();
+    const { data } = await readResponseBodySafe(res);
+    return data || {};
   } catch (err) {
     console.error("fetchWhatsappQrStatus error", err);
     return { error: err.message };
@@ -1616,19 +1631,22 @@ export async function fetchWhatsappPersistentWorkerStatus() {
       credentials: "include",
     });
     if (!res.ok) {
-      let message = "";
-      try {
-        const data = await res.json();
-        message = data?.error || "";
-      } catch (_err) {
-        message = (await res.text()) || "";
+      const { text, data } = await readResponseBodySafe(res);
+      const message = String(data?.error || text || "").trim();
+      if (res.status === 404) {
+        return {
+          unsupported: true,
+          error: "",
+          status: res.status,
+        };
       }
       return {
         error: message || "No se pudo consultar el modo persistente de WhatsApp",
         status: res.status,
       };
     }
-    return res.json();
+    const { data } = await readResponseBodySafe(res);
+    return data || {};
   } catch (err) {
     console.error("fetchWhatsappPersistentWorkerStatus error", err);
     return { error: err.message };
@@ -1645,19 +1663,22 @@ export async function updateWhatsappPersistentWorkerStatus(enabled) {
       body: JSON.stringify({ enabled: enabled === true }),
     });
     if (!res.ok) {
-      let message = "";
-      try {
-        const data = await res.json();
-        message = data?.error || "";
-      } catch (_err) {
-        message = (await res.text()) || "";
+      const { text, data } = await readResponseBodySafe(res);
+      const message = String(data?.error || text || "").trim();
+      if (res.status === 404) {
+        return {
+          unsupported: true,
+          error: "",
+          status: res.status,
+        };
       }
       return {
         error: message || "No se pudo actualizar el modo persistente de WhatsApp",
         status: res.status,
       };
     }
-    return res.json();
+    const { data } = await readResponseBodySafe(res);
+    return data || {};
   } catch (err) {
     console.error("updateWhatsappPersistentWorkerStatus error", err);
     return { error: err.message };

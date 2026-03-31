@@ -80,6 +80,14 @@ const homeBannersDots = document.querySelector("#home-banners-dots");
 const whatsappHetznerToggleWrap = document.querySelector("#whatsapp-hetzner-toggle-wrap");
 const whatsappHetznerToggleInput = document.querySelector("#whatsapp-hetzner-toggle-input");
 const whatsappHetznerToggleStatus = document.querySelector("#whatsapp-hetzner-toggle-status");
+const whatsappToggleConfirmModal = document.querySelector("#whatsapp-toggle-confirm-modal");
+const whatsappToggleConfirmMessageEl = document.querySelector("#whatsapp-toggle-confirm-message");
+const whatsappToggleConfirmYesBtn = document.querySelector("#whatsapp-toggle-confirm-yes");
+const whatsappToggleConfirmNoBtn = document.querySelector("#whatsapp-toggle-confirm-no");
+const whatsappToggleConfirmCloseBtn = document.querySelector("#whatsapp-toggle-confirm-close");
+const whatsappToggleConfirmBackdrop = document.querySelector(
+  "#whatsapp-toggle-confirm-modal [data-whatsapp-toggle-close]",
+);
 const HOME_BANNERS_SLIDE_INTERVAL_MS = 5000;
 const HOME_BANNERS_DESIGN_WIDTH = 1650;
 const HOME_BANNERS_DESIGN_HEIGHT = 828;
@@ -199,6 +207,7 @@ let whatsappQrWarningPollTimer = null;
 let whatsappQrWarningActionInProgress = false;
 let whatsappQrWarningFlowRequested = false;
 let whatsappHetznerToggleBusy = false;
+let whatsappToggleConfirmResolver = null;
 
 const getCaracasNow = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -413,8 +422,52 @@ whatsappQrWarningBtn?.addEventListener("click", () => {
 const setWhatsappHetznerToggleStatus = (message = "", isError = false) => {
   if (!whatsappHetznerToggleStatus) return;
   whatsappHetznerToggleStatus.textContent = message;
-  whatsappHetznerToggleStatus.style.color = isError ? "#b91c1c" : "#475569";
+  whatsappHetznerToggleStatus.style.color = isError ? "#b91c1c" : "#0f172a";
 };
+
+const closeWhatsappToggleConfirmModal = (value = false) => {
+  if (!whatsappToggleConfirmModal) return;
+  whatsappToggleConfirmModal.classList.add("hidden");
+  whatsappToggleConfirmModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+  if (typeof whatsappToggleConfirmResolver === "function") {
+    const resolver = whatsappToggleConfirmResolver;
+    whatsappToggleConfirmResolver = null;
+    resolver(value === true);
+  }
+};
+
+const askWhatsappToggleConfirmation = (nextValue) => {
+  if (!whatsappToggleConfirmModal || !whatsappToggleConfirmMessageEl) {
+    return Promise.resolve(false);
+  }
+  if (whatsappToggleConfirmResolver) {
+    return Promise.resolve(false);
+  }
+  whatsappToggleConfirmMessageEl.textContent =
+    nextValue === true
+      ? "¿Quieres activar el bot de whatsapp?"
+      : "¿Quieres desactivar el bot de whatsapp?";
+  whatsappToggleConfirmModal.classList.remove("hidden");
+  whatsappToggleConfirmModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  return new Promise((resolve) => {
+    whatsappToggleConfirmResolver = resolve;
+  });
+};
+
+whatsappToggleConfirmYesBtn?.addEventListener("click", () => {
+  closeWhatsappToggleConfirmModal(true);
+});
+whatsappToggleConfirmNoBtn?.addEventListener("click", () => {
+  closeWhatsappToggleConfirmModal(false);
+});
+whatsappToggleConfirmCloseBtn?.addEventListener("click", () => {
+  closeWhatsappToggleConfirmModal(false);
+});
+whatsappToggleConfirmBackdrop?.addEventListener("click", () => {
+  closeWhatsappToggleConfirmModal(false);
+});
 
 const initWhatsappHetznerToggle = async ({ isSuperadmin = false } = {}) => {
   if (!whatsappHetznerToggleWrap || !whatsappHetznerToggleInput) return;
@@ -431,6 +484,15 @@ const initWhatsappHetznerToggle = async ({ isSuperadmin = false } = {}) => {
   setWhatsappHetznerToggleStatus("Cargando estado...");
   try {
     const statusResp = await fetchWhatsappPersistentWorkerStatus();
+    if (statusResp?.unsupported) {
+      whatsappHetznerToggleInput.checked = false;
+      whatsappHetznerToggleInput.disabled = true;
+      setWhatsappHetznerToggleStatus(
+        "Toggle no disponible: actualiza el backend para exponer /api/whatsapp/persistent-worker.",
+        true,
+      );
+      return;
+    }
     if (statusResp?.error) throw new Error(statusResp.error);
     whatsappHetznerToggleInput.checked = statusResp?.enabled === true;
     setWhatsappHetznerToggleStatus(
@@ -452,11 +514,29 @@ const initWhatsappHetznerToggle = async ({ isSuperadmin = false } = {}) => {
     if (whatsappHetznerToggleBusy) return;
     const nextValue = whatsappHetznerToggleInput.checked === true;
     const prevValue = !nextValue;
+    const confirmed = await askWhatsappToggleConfirmation(nextValue);
+    if (!confirmed) {
+      whatsappHetznerToggleInput.checked = prevValue;
+      setWhatsappHetznerToggleStatus(
+        prevValue
+          ? "Bot persistente activo en Hetzner."
+          : "Bot bajo demanda. Solo se iniciará cuando un flujo lo requiera.",
+      );
+      return;
+    }
     whatsappHetznerToggleBusy = true;
     whatsappHetznerToggleInput.disabled = true;
     setWhatsappHetznerToggleStatus("Actualizando...");
     try {
       const updateResp = await updateWhatsappPersistentWorkerStatus(nextValue);
+      if (updateResp?.unsupported) {
+        whatsappHetznerToggleInput.checked = prevValue;
+        setWhatsappHetznerToggleStatus(
+          "Toggle no disponible: actualiza el backend para exponer /api/whatsapp/persistent-worker.",
+          true,
+        );
+        return;
+      }
       if (updateResp?.error) throw new Error(updateResp.error);
       whatsappHetznerToggleInput.checked = updateResp?.enabled === true;
       setWhatsappHetznerToggleStatus(

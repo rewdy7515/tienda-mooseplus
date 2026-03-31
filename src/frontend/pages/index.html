@@ -376,6 +376,33 @@
       </div>
     </div>
 
+    <div id="whatsapp-toggle-confirm-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-whatsapp-toggle-close></div>
+      <div class="modal-card whatsapp-toggle-confirm-card" role="dialog" aria-modal="true">
+        <button
+          type="button"
+          id="whatsapp-toggle-confirm-close"
+          class="modal-close"
+          aria-label="Cerrar"
+        >
+          ×
+        </button>
+        <div class="modal-body whatsapp-toggle-confirm-body">
+          <p id="whatsapp-toggle-confirm-message" class="whatsapp-toggle-confirm-message">
+            ¿Quieres activar el bot de whatsapp?
+          </p>
+          <div class="whatsapp-toggle-confirm-actions">
+            <button type="button" id="whatsapp-toggle-confirm-yes" class="btn-primary">
+              Sí
+            </button>
+            <button type="button" id="whatsapp-toggle-confirm-no" class="btn-outline">
+              No
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="../scripts/main.js"></script>
   </body>
 </html>
