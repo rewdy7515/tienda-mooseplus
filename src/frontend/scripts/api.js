@@ -1685,6 +1685,34 @@ export async function updateWhatsappPersistentWorkerStatus(enabled) {
   }
 }
 
+export async function notifyReporteCreatedWhatsapp(idReporte) {
+  await ensureServerSession();
+  const reportId = Number(idReporte);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return { error: "id_reporte invalido" };
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/whatsapp/reportes/notificar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ id_reporte: reportId }),
+    });
+    const { text, data } = await readResponseBodySafe(res);
+    if (!res.ok) {
+      const message = String(data?.error || text || "").trim();
+      return {
+        error: message || "No se pudo notificar el reporte por WhatsApp",
+        status: res.status,
+      };
+    }
+    return data || { ok: true };
+  } catch (err) {
+    console.error("notifyReporteCreatedWhatsapp error", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchP2PRate() {
   const startedAt = getDebugNow();
   logApiDebug("fetchP2PRate:start", {});

@@ -8,6 +8,7 @@ import {
 import {
   clearServerSession,
   loadCurrentUser,
+  notifyReporteCreatedWhatsapp,
   supabase,
   uploadComprobantes,
 } from "./api.js";
@@ -1279,13 +1280,18 @@ async function handleSubmit(e) {
         fecha_creacion: caracasNow.fecha,
         hora_creacion: caracasNow.hora,
       };
-      const { error: insertAutoErr } = await supabase.from("reportes").insert([payloadAuto]);
+      const { data: insertAutoData, error: insertAutoErr } = await supabase
+        .from("reportes")
+        .insert([payloadAuto])
+        .select("id_reporte")
+        .maybeSingle();
       if (insertAutoErr) {
         console.error("insert reporte auto solucionado error", insertAutoErr);
         alert("Se reemplazó el servicio, pero no se pudo guardar el reporte.");
         window.location.href = "./report.html";
         return;
       }
+      const reporteAutoId = Number(insertAutoData?.id_reporte) || null;
       if (ventaAsociadaId) {
         await supabase.from("ventas").update({ reportado: true }).eq("id_venta", ventaAsociadaId);
       }
@@ -1300,6 +1306,16 @@ async function handleSubmit(e) {
         });
       } catch (pendErr) {
         console.error("mark venta pendiente by reporte rule error", pendErr);
+      }
+      if (reporteAutoId) {
+        try {
+          const notifyRes = await notifyReporteCreatedWhatsapp(reporteAutoId);
+          if (notifyRes?.error) {
+            console.error("notificar reporte whatsapp error", notifyRes);
+          }
+        } catch (notifyErr) {
+          console.error("notificar reporte whatsapp error", notifyErr);
+        }
       }
       alert("Servicio reemplazado automáticamente.");
       window.location.href = "./report.html";
@@ -1324,12 +1340,17 @@ async function handleSubmit(e) {
       hora_creacion: caracasNow.hora,
     };
 
-    const { error } = await supabase.from("reportes").insert([payload]);
-    if (error) {
-      console.error("insert reporte error", error);
+    const { data: insertData, error: insertErr } = await supabase
+      .from("reportes")
+      .insert([payload])
+      .select("id_reporte")
+      .maybeSingle();
+    if (insertErr) {
+      console.error("insert reporte error", insertErr);
       alert("No se pudo enviar el reporte. Intenta nuevamente.");
       return;
     }
+    const reporteId = Number(insertData?.id_reporte) || null;
     if (ventaAsociadaId) {
       await supabase.from("ventas").update({ reportado: true }).eq("id_venta", ventaAsociadaId);
     }
@@ -1344,6 +1365,16 @@ async function handleSubmit(e) {
       });
     } catch (pendErr) {
       console.error("mark venta pendiente by reporte rule error", pendErr);
+    }
+    if (reporteId) {
+      try {
+        const notifyRes = await notifyReporteCreatedWhatsapp(reporteId);
+        if (notifyRes?.error) {
+          console.error("notificar reporte whatsapp error", notifyRes);
+        }
+      } catch (notifyErr) {
+        console.error("notificar reporte whatsapp error", notifyErr);
+      }
     }
     alert("Reporte enviado correctamente.");
     window.location.href = "./report.html";

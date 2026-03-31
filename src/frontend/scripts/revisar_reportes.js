@@ -50,6 +50,7 @@ const toggleAutoReemplazoWrapEl = document.querySelector("#auto-reemplazo-toggle
 const toggleAutoReemplazoEl = document.querySelector("#toggle-auto-reemplazo");
 const modal = document.querySelector("#modal-detalle");
 const modalPlatTitle = document.querySelector("#modal-plat-title");
+const modalPlatSubtitle = document.querySelector("#modal-plat-subtitle");
 const modalCorreo = document.querySelector("#modal-correo");
 const modalFechaCorte = document.querySelector("#modal-fecha-corte");
 const modalClave = document.querySelector("#modal-clave");
@@ -800,7 +801,31 @@ async function loadReportes() {
     )
     .eq("solucionado", false);
   if (error) throw error;
-  return data || [];
+  const rows = data || [];
+
+  const ventaIds = Array.from(
+    new Set(rows.map((row) => toPositiveId(row?.id_venta)).filter((value) => !!value)),
+  );
+  if (!ventaIds.length) return rows;
+
+  const { data: ventasData, error: ventasErr } = await supabase
+    .from("ventas")
+    .select("id_venta, completa")
+    .in("id_venta", ventaIds);
+  if (ventasErr) {
+    console.error("load reportes ventas completa error", ventasErr);
+    return rows;
+  }
+
+  const ventaCompletaById = new Map(
+    (ventasData || []).map((venta) => [toPositiveId(venta?.id_venta), isTrue(venta?.completa)]),
+  );
+  rows.forEach((row) => {
+    const ventaId = toPositiveId(row?.id_venta);
+    row.venta_completa = ventaId ? ventaCompletaById.get(ventaId) === true : false;
+  });
+
+  return rows;
 }
 
 const resetImageFrame = () => {
@@ -875,6 +900,10 @@ function closeModal() {
   resetImageFrame();
   currentImageDownloadUrl = "";
   currentImageDownloadName = "";
+  if (modalPlatSubtitle) {
+    modalPlatSubtitle.textContent = "";
+    modalPlatSubtitle.classList.add("hidden");
+  }
   currentRow = null;
   cambioClave = false;
   cambioPin = false;
@@ -885,8 +914,13 @@ async function openModal(row) {
   const platName = row.plataformas?.nombre || "-";
   const platColor = normalizeHexColor(row.plataformas?.color_1) || "#111";
   const platLink = normalizePlatformLink(row.plataformas?.link_pagina);
+  const isCuentaCompleta = isTrue(row?.ventas?.completa) || row?.venta_completa === true;
   modalPlatTitle.textContent = platName;
   modalPlatTitle.style.color = platColor;
+  if (modalPlatSubtitle) {
+    modalPlatSubtitle.textContent = isCuentaCompleta ? "Cuenta completa" : "";
+    modalPlatSubtitle.classList.toggle("hidden", !isCuentaCompleta);
+  }
   if (platLink) {
     modalPlatTitle.classList.add("is-link");
     modalPlatTitle.dataset.href = platLink;

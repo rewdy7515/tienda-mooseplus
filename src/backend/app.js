@@ -230,6 +230,16 @@ const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH = Math.max(
   1,
   Math.min(200, Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH) || 80),
 );
+const WHATSAPP_REPORTES_GROUP_NAME = String(
+  process.env.WHATSAPP_REPORTES_GROUP_NAME || "Reportes moose+",
+).trim();
+const WHATSAPP_REPORTES_GROUP_CHAT_ID = String(
+  process.env.WHATSAPP_REPORTES_GROUP_CHAT_ID || "",
+).trim();
+const WHATSAPP_REPORTES_NOTIFY_USER_ID = Math.max(
+  1,
+  Number(process.env.WHATSAPP_REPORTES_NOTIFY_USER_ID) || 23,
+);
 const WEB_PUSH_SUBSCRIPTIONS_TABLE = "web_push_subscriptions";
 const WEB_PUSH_DELIVERY_QUEUE_TABLE = "web_push_delivery_queue";
 const SANDBOX_GIFTCARD_ORDERS_TABLE = "sandbox_giftcard_orders";
@@ -1758,6 +1768,257 @@ const normalizePerfilText = (perfilRaw) => {
   if (/^m\d+$/i.test(perfil)) return `M${perfil.replace(/^m/i, "")}`;
   if (/^\d+$/.test(perfil)) return `M${perfil}`;
   return perfil;
+};
+
+const normalizeWhatsappGroupChatId = (rawChatId = "") => {
+  const raw = String(rawChatId || "").trim();
+  if (!raw) return "";
+  if (/@g\.us$/i.test(raw)) return raw;
+  if (raw.includes("@")) return "";
+  const compact = raw.replace(/\s+/g, "");
+  if (!/^[0-9-]+$/.test(compact)) return "";
+  return `${compact}@g.us`;
+};
+
+const formatWhatsappReporteText = (value = "", fallback = "-") => {
+  const text = String(value || "").trim();
+  return text || fallback;
+};
+
+const resolveWhatsappReportesGroupChatId = async ({ client = null } = {}) => {
+  const configuredChatId = normalizeWhatsappGroupChatId(WHATSAPP_REPORTES_GROUP_CHAT_ID);
+  if (configuredChatId) return configuredChatId;
+
+  const groupName = String(WHATSAPP_REPORTES_GROUP_NAME || "").trim();
+  if (!groupName) return null;
+
+  const waClient = client || getWhatsappClient();
+  if (!waClient || typeof waClient.getChats !== "function") return null;
+
+  const targetName = groupName.toLowerCase();
+  const chats = await waClient.getChats();
+  const match = (chats || []).find((chat) => {
+    if (!isTrue(chat?.isGroup)) return false;
+    const name = String(chat?.name || "").trim().toLowerCase();
+    return name === targetName;
+  });
+  if (!match) return null;
+
+  const serializedId = String(match?.id?._serialized || "").trim();
+  if (serializedId) return serializedId;
+
+  const stringId = String(match?.id || "").trim();
+  if (/@g\.us$/i.test(stringId)) return stringId;
+  return normalizeWhatsappGroupChatId(stringId);
+};
+
+const buildWhatsappReporteCreadoMessage = ({
+  idReporte = null,
+  plataforma = "",
+  correo = "",
+  clave = "",
+  cliente = "",
+  motivo = "",
+} = {}) => {
+  const reportId = toPositiveInt(idReporte) || idReporte || "-";
+  const plataformaText = formatWhatsappReporteText(plataforma, "Sin plataforma");
+  const correoText = formatWhatsappReporteText(correo, "-");
+  const claveText = formatWhatsappReporteText(clave, "-");
+  const clienteText = formatWhatsappReporteText(cliente, "-");
+  const motivoText = formatWhatsappReporteText(motivo, "-");
+
+  return `Nuevo reporte #${reportId} 🚨
+*${plataformaText}*
+Correo: ${correoText}
+Clave: ${claveText}
+
+Cliente: ${clienteText}
+Motivo: ${motivoText}`;
+};
+
+const fetchReporteWhatsappContextById = async (idReporte) => {
+  const reportId = toPositiveInt(idReporte);
+  if (!reportId) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("reportes")
+    .select(
+      "id_reporte, id_usuario, descripcion, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
+    )
+    .eq("id_reporte", reportId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+};
+
+const sendReporteCreatedToWhatsappGroup = async ({
+  reporte = null,
+  manageWhatsappLifecycle = true,
+} = {}) => {
+  const reportId = toPositiveInt(reporte?.id_reporte);
+  if (!reportId) {
+    return { sent: false, skipped: true, reason: "invalid_report" };
+  }
+
+  const nombre = String(reporte?.usuarios?.nombre || "").trim();
+  const apellido = String(reporte?.usuarios?.apellido || "").trim();
+  const cliente = [nombre, apellido].filter(Boolean).join(" ").trim();
+  const motivo =
+    String(reporte?.reporte_tipos?.titulo || "").trim() || String(reporte?.descripcion || "").trim();
+
+  const message = buildWhatsappReporteCreadoMessage({
+    idReporte: reportId,
+    plataforma: reporte?.plataformas?.nombre,
+    correo: reporte?.cuentas?.correo,
+    clave: reporte?.cuentas?.clave,
+    cliente: cliente || `Usuario ${toPositiveInt(reporte?.id_usuario) || "-"}`,
+    motivo,
+  });
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? "report_created_group_alert"
+        : "report_created_group_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  let groupChatId = null;
+  let fallbackPhone = null;
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    groupChatId = await resolveWhatsappReportesGroupChatId({ client });
+    fallbackPhone = await resolveWhatsappPhoneForUser(WHATSAPP_REPORTES_NOTIFY_USER_ID);
+
+    const destinations = [];
+    if (groupChatId) {
+      destinations.push({
+        type: "group",
+        chatId: groupChatId,
+      });
+    }
+    if (fallbackPhone) {
+      destinations.push({
+        type: "fallback_user",
+        chatId: `${fallbackPhone}@c.us`,
+      });
+    }
+    const uniqueDestinations = Array.from(
+      new Map(
+        destinations
+          .filter((dest) => String(dest?.chatId || "").trim())
+          .map((dest) => [String(dest.chatId).trim(), dest]),
+      ).values(),
+    );
+
+    if (!uniqueDestinations.length) {
+      console.warn(
+        `[reportes:whatsapp] Sin destino para reporte #${reportId}. groupName=${WHATSAPP_REPORTES_GROUP_NAME || "-"} groupChatId=${groupChatId || "-"} fallbackUserId=${WHATSAPP_REPORTES_NOTIFY_USER_ID} fallbackPhone=${fallbackPhone || "-"}`,
+      );
+      return {
+        sent: false,
+        skipped: true,
+        reason: "target_destinations_not_found",
+        groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
+        groupChatId: groupChatId || null,
+        fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
+        fallbackPhone: fallbackPhone || null,
+      };
+    }
+
+    const sendErrors = [];
+    let sentCount = 0;
+    console.log(
+      `[reportes:whatsapp] Enviando reporte #${reportId} a ${uniqueDestinations
+        .map((dest) => `${dest.type}:${dest.chatId}`)
+        .join(", ")}`,
+    );
+    for (const dest of uniqueDestinations) {
+      try {
+        await withTimeout(
+          client.sendMessage(dest.chatId, message, {
+            linkPreview: false,
+            waitUntilMsgSent: true,
+          }),
+          WHATSAPP_SEND_TIMEOUT_MS,
+          `Timeout enviando alerta de reporte a ${dest.type}`,
+        );
+        sentCount += 1;
+        console.log(
+          `[reportes:whatsapp] Enviado reporte #${reportId} destino=${dest.type}:${dest.chatId}`,
+        );
+      } catch (err) {
+        const errMessage = err?.message || String(err);
+        console.error(
+          `[reportes:whatsapp] Error enviando reporte #${reportId} destino=${dest.type}:${dest.chatId}: ${errMessage}`,
+        );
+        sendErrors.push({
+          type: dest.type,
+          chatId: dest.chatId,
+          error: errMessage,
+        });
+      }
+    }
+
+    if (!sentCount) {
+      return {
+        sent: false,
+        skipped: false,
+        reason: "whatsapp_send_error",
+        error: sendErrors[0]?.error || "No se pudo enviar el mensaje de reporte",
+        id_reporte: reportId,
+        groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
+        groupChatId: groupChatId || null,
+        fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
+        fallbackPhone: fallbackPhone || null,
+        sendErrors,
+      };
+    }
+
+    return {
+      sent: true,
+      skipped: false,
+      reason: sendErrors.length ? "partial_send_error" : null,
+      id_reporte: reportId,
+      groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
+      groupChatId: groupChatId || null,
+      fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
+      fallbackPhone: fallbackPhone || null,
+      sentCount,
+      totalTargets: uniqueDestinations.length,
+      sendErrors,
+    };
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "report_created_group_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[reportes:whatsapp] shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_reporte: reportId,
+      groupChatId: groupChatId || null,
+      groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
+      fallbackUserId: WHATSAPP_REPORTES_NOTIFY_USER_ID,
+      fallbackPhone: fallbackPhone || null,
+    };
+  }
 };
 
 const buildWhatsappPendingOrderAdminMessage = ({
@@ -5321,6 +5582,64 @@ app.get("/api/whatsapp/recordatorios/pending-no-phone", async (req, res) => {
     }
     return res.status(500).json({
       error: err?.message || "No se pudo calcular clientes sin teléfono para recordatorios",
+    });
+  }
+});
+
+app.post("/api/whatsapp/reportes/notificar", async (req, res) => {
+  try {
+    const sessionUserId = await getSessionUsuario(req);
+    const reportId = toPositiveInt(req.body?.id_reporte ?? req.body?.idReporte);
+    if (!reportId) {
+      return res.status(400).json({ error: "id_reporte invalido" });
+    }
+
+    const reporte = await fetchReporteWhatsappContextById(reportId);
+    if (!reporte?.id_reporte) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    const reportOwnerId = toPositiveInt(reporte?.id_usuario);
+    if (reportOwnerId && reportOwnerId !== sessionUserId) {
+      const { data: permRow, error: permErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("permiso_admin, permiso_superadmin")
+        .eq("id_usuario", sessionUserId)
+        .maybeSingle();
+      if (permErr) throw permErr;
+      const isAdmin = isTrue(permRow?.permiso_admin) || isTrue(permRow?.permiso_superadmin);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "No autorizado para notificar este reporte" });
+      }
+    }
+
+    const result = await sendReporteCreatedToWhatsappGroup({
+      reporte,
+      manageWhatsappLifecycle: true,
+    });
+
+    if (result?.sent) return res.json({ ok: true, ...result });
+
+    if (result?.skipped && result?.reason === "target_destinations_not_found") {
+      return res.status(503).json({
+        error:
+          "No se encontró destino WhatsApp para reportes. Configura WHATSAPP_REPORTES_GROUP_CHAT_ID o el teléfono del usuario 23.",
+        ...result,
+      });
+    }
+    if (result?.skipped) return res.status(202).json({ ok: false, ...result });
+
+    return res.status(500).json({
+      error: result?.error || "No se pudo enviar el reporte por WhatsApp",
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[whatsapp/reportes/notificar] error", err);
+    return res.status(500).json({
+      error: err?.message || "No se pudo notificar el reporte por WhatsApp",
     });
   }
 });
