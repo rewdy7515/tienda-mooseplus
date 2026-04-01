@@ -1,0 +1,10 @@
+git add .
+git commit -m "Actualizacion: ahora un admin puede reportar las cuentas de los clientes"
+git push origin main
+
+
+
+cd /var/www/tienda-mooseplus-main
+git pull origin main
+pm2 restart mooseplus --update-env
+

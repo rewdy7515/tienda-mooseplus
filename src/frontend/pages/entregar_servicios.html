@@ -138,9 +138,9 @@
         border-color: #f2d27a;
       }
       .entrega-action-badge.is-delivered {
-        background: #e2f7ea;
-        color: #166534;
-        border-color: #9fd8b2;
+        background: #dbeefe;
+        color: #1e4f7a;
+        border-color: #a9cfee;
       }
       .giftcard-tools {
         display: flex;
@@ -1211,7 +1211,7 @@
           btn.classList.add("hidden");
           const status = document.createElement("span");
           status.className = "entrega-action-badge is-delivered";
-          status.textContent = "Servicio entregado";
+          status.textContent = "Servicio procesandose";
           btn.parentElement?.appendChild(status);
           alert("Datos enviados.");
         } catch (err) {

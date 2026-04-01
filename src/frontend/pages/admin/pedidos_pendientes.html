@@ -169,6 +169,11 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .badge-processing {
+        background: #dbeefe;
+        color: #1e4f7a;
+        border: 1px solid #a9cfee;
+      }
       .pp-platform-title {
         display: inline-block;
         margin: 0;
@@ -1153,8 +1158,8 @@
           }
           const pinValue = String(resp?.pin || "Pendiente").trim() || "Pendiente";
           const status = document.createElement("span");
-          status.className = "badge badge-green";
-          status.textContent = "Servicio entregado";
+          status.className = "badge badge-processing";
+          status.textContent = "Servicio procesandose";
           const pinBadge = document.createElement("span");
           pinBadge.className = "badge copyable";
           pinBadge.dataset.clipboard = pinValue;
@@ -1463,8 +1468,8 @@
         await notifyVentaDeliveredWhatsappBestEffort(idVenta);
 
         const status = document.createElement("span");
-        status.className = "badge badge-green";
-        status.textContent = "Servicio entregado";
+        status.className = "badge badge-processing";
+        status.textContent = "Servicio procesandose";
         const copyBtn = document.createElement("button");
         copyBtn.type = "button";
         copyBtn.className = "btn-outline btn-copy-row";
