@@ -2213,8 +2213,6 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   if (!message) {
     return { sent: false, skipped: true, reason: "missing_member_credentials" };
   }
-  const routeToReportesGroup = isTrue(ventaRow?.reportado);
-
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
   if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
     await ensureWhatsappClientReady({
@@ -2227,45 +2225,6 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
 
   try {
     const client = getWhatsappClient();
-    if (routeToReportesGroup) {
-      const groupChatId = await resolveWhatsappReportesGroupChatId({ client });
-      if (!groupChatId) {
-        return {
-          sent: false,
-          skipped: true,
-          reason: "target_reportes_group_not_found",
-          id_venta: ventaId,
-          groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
-          groupChatId: null,
-        };
-      }
-
-      await withTimeout(
-        client.sendMessage(groupChatId, message, {
-          linkPreview: false,
-          waitUntilMsgSent: true,
-        }),
-        WHATSAPP_SEND_TIMEOUT_MS,
-        "Timeout enviando alerta de pedido pendiente al grupo de reportes",
-      );
-
-      const { error: avisoErr } = await supabaseAdmin
-        .from("ventas")
-        .update({ aviso_admin: true })
-        .eq("id_venta", ventaId);
-      if (avisoErr) throw avisoErr;
-
-      return {
-        sent: true,
-        skipped: false,
-        reason: null,
-        id_venta: ventaId,
-        destino: "reportes_group",
-        groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
-        groupChatId,
-      };
-    }
-
     const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID);
     if (!targetPhone) {
       return { sent: false, skipped: true, reason: "target_admin_phone_missing" };

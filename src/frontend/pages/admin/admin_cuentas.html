@@ -3349,6 +3349,81 @@
           }
           return;
         }
+        const editFechaBtn = e.target.closest(".btn-edit-fecha");
+        if (editFechaBtn) {
+          const row = editFechaBtn.closest("tr");
+          const input = row?.querySelector(".fecha-input");
+          const span = row?.querySelector(".fecha-text");
+          const saveBtn = row?.querySelector('.btn-save-edit[data-type="fecha"]');
+          const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="fecha"]');
+          if (input) {
+            input.classList.remove("hidden");
+            input.classList.add("show");
+            input.dataset.original = input.value || "";
+            input.focus();
+          }
+          if (span) span.classList.add("hidden");
+          if (saveBtn) saveBtn.classList.remove("hidden");
+          if (cancelBtn) cancelBtn.classList.remove("hidden");
+          if (saveBtn || cancelBtn) editFechaBtn.classList.add("hidden");
+          return;
+        }
+        const cancelFechaBtn = e.target.closest('.btn-cancel-edit[data-type="fecha"]');
+        if (cancelFechaBtn) {
+          const row = cancelFechaBtn.closest("tr");
+          const input = row?.querySelector(".fecha-input");
+          const span = row?.querySelector(".fecha-text");
+          const editBtn = row?.querySelector(".btn-edit-fecha");
+          const saveBtn = row?.querySelector('.btn-save-edit[data-type="fecha"]');
+          if (input) {
+            input.value = input.dataset.original || input.value;
+            input.classList.add("hidden");
+            input.classList.remove("show");
+          }
+          if (span) span.classList.remove("hidden");
+          if (editBtn) editBtn.classList.remove("hidden");
+          if (saveBtn) saveBtn.classList.add("hidden");
+          cancelFechaBtn.classList.add("hidden");
+          return;
+        }
+        const saveFechaBtn = e.target.closest('.btn-save-edit[data-type="fecha"]');
+        if (saveFechaBtn) {
+          const row = saveFechaBtn.closest("tr");
+          const input = row?.querySelector(".fecha-input");
+          const span = row?.querySelector(".fecha-text");
+          const editBtn = row?.querySelector(".btn-edit-fecha");
+          const cancelBtn = row?.querySelector('.btn-cancel-edit[data-type="fecha"]');
+          const ventaId =
+            saveFechaBtn.dataset.venta || input?.dataset.venta || editBtn?.dataset.venta;
+          const newDate = String(input?.value || "").trim();
+          if (!ventaId || !newDate) return;
+          try {
+            const { error } = await supabase
+              .from("ventas")
+              .update({ fecha_corte: newDate })
+              .eq("id_venta", ventaId);
+            if (error) throw error;
+            if (span) {
+              span.textContent = formatDDMMYYYY(newDate) || newDate;
+              span.classList.remove("hidden");
+            }
+            if (input) {
+              input.classList.add("hidden");
+              input.classList.remove("show");
+            }
+            if (editBtn) editBtn.classList.remove("hidden");
+            if (cancelBtn) cancelBtn.classList.add("hidden");
+            saveFechaBtn.classList.add("hidden");
+            const replBtn = row?.querySelector(".btn-reemplazar-row");
+            if (replBtn) {
+              replBtn.dataset.fecha = newDate;
+            }
+          } catch (err) {
+            console.error("update fecha corte cliente view error", err);
+            alert("No se pudo actualizar la fecha.");
+          }
+          return;
+        }
         const reactBtn = e.target.closest(".btn-reactivar-venta");
         if (reactBtn) {
           const ventaId = reactBtn.dataset.idventa || reactBtn.dataset.idVenta || "";
