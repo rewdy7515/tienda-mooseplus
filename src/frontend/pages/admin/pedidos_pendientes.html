@@ -306,6 +306,7 @@
         clearServerSession,
         entregarGiftCardPendiente,
         notifyVentaDeliveredWhatsapp,
+        notifyReporteSolvedWhatsapp,
       } from "../../scripts/api.js";
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
@@ -516,6 +517,95 @@
             error: message,
           };
         }
+      };
+      const notifyReporteSolvedWhatsappBestEffort = async (idReporte) => {
+        const reportId = toPositiveId(idReporte);
+        if (!reportId) return { ok: false, skipped: true, reason: "invalid_report" };
+        try {
+          const waResult = await notifyReporteSolvedWhatsapp(reportId);
+          if (waResult?.error) {
+            console.warn("[pedidos_pendientes] whatsapp reporte solucionado error", {
+              id_reporte: reportId,
+              error: waResult.error,
+              status: waResult.status || null,
+            });
+            return { ok: false, error: waResult.error, status: waResult.status || null };
+          }
+          if (waResult?.sent === true || waResult?.ok === true) {
+            return { ok: true, sent: true };
+          }
+          return { ok: false, skipped: true, reason: waResult?.reason || "not_sent" };
+        } catch (err) {
+          const message = err?.message || String(err);
+          console.warn("[pedidos_pendientes] whatsapp reporte solucionado exception", {
+            id_reporte: reportId,
+            error: message,
+          });
+          return { ok: false, error: message };
+        }
+      };
+      const closeReportesByEntregadaReportada = async ({
+        idVenta = null,
+        idUsuario = null,
+        idCuenta = null,
+        idCuentaMiembro = null,
+        idPerfil = null,
+      } = {}) => {
+        const ventaId = toPositiveId(idVenta);
+        if (!ventaId) return [];
+        const reportIds = new Set();
+        const addReportIds = (rows = []) => {
+          (rows || []).forEach((row) => {
+            const idReporte = toPositiveId(row?.id_reporte);
+            if (idReporte) reportIds.add(idReporte);
+          });
+        };
+
+        const { data: byVentaRows, error: byVentaErr } = await supabase
+          .from("reportes")
+          .select("id_reporte")
+          .eq("id_venta", ventaId)
+          .eq("solucionado", false);
+        if (byVentaErr) throw byVentaErr;
+        addReportIds(byVentaRows);
+
+        if (!reportIds.size) {
+          const usuarioId = toPositiveId(idUsuario);
+          const cuentaIds = [toPositiveId(idCuenta), toPositiveId(idCuentaMiembro)].filter(Boolean);
+          const perfilIdNum = toPositiveId(idPerfil);
+          if (usuarioId && cuentaIds.length) {
+            let query = supabase
+              .from("reportes")
+              .select("id_reporte")
+              .eq("id_usuario", usuarioId)
+              .eq("solucionado", false);
+            if (cuentaIds.length === 1) {
+              query = query.eq("id_cuenta", cuentaIds[0]);
+            } else {
+              query = query.in("id_cuenta", cuentaIds);
+            }
+            if (perfilIdNum) {
+              query = query.eq("id_perfil", perfilIdNum);
+            }
+            const { data: fallbackRows, error: fallbackErr } = await query;
+            if (fallbackErr) throw fallbackErr;
+            addReportIds(fallbackRows);
+          }
+        }
+
+        const ids = Array.from(reportIds);
+        if (!ids.length) return [];
+
+        const { error: closeErr } = await supabase
+          .from("reportes")
+          .update({
+            en_revision: false,
+            solucionado: true,
+            descripcion_solucion: "Servicio entregado desde pedidos pendientes",
+          })
+          .in("id_reporte", ids);
+        if (closeErr) throw closeErr;
+        return ids;
       };
 
       const getPedidoAsignadoLabel = (venta = {}) => {
@@ -1051,6 +1141,7 @@
         const idPlataformaNum = Number(idPlataforma);
         const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
         const forceCuentaCompleta = idPlataformaNum === 11;
+        const wasReportado = btn?.dataset?.reportado === "true";
         const cuentaMadreFlag =
           btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
         const requireMadreActiva = idPlataformaNum === 9;
@@ -1328,8 +1419,31 @@
         if (ventaSinFechaCorte) {
           updateVenta.fecha_corte = nextIso;
         }
+        if (wasReportado) {
+          updateVenta.reportado = false;
+        }
         const { error: updErr } = await supabase.from("ventas").update(updateVenta).eq("id_venta", idVenta);
         if (updErr) throw updErr;
+
+        if (wasReportado) {
+          try {
+            const closedReportIds = await closeReportesByEntregadaReportada({
+              idVenta,
+              idUsuario,
+              idCuenta: existingMadreId,
+              idCuentaMiembro: existingCuentaMiembroId,
+              idPerfil: existingPerfilId,
+            });
+            for (const reportId of closedReportIds) {
+              await notifyReporteSolvedWhatsappBestEffort(reportId);
+            }
+          } catch (closeRepErr) {
+            console.error("[pedidos_pendientes] cierre automatico de reportes error", {
+              id_venta: idVenta,
+              error: closeRepErr?.message || closeRepErr,
+            });
+          }
+        }
 
         if (Number.isFinite(costoActivacion) && costoActivacion >= 0 && Number.isFinite(proveedorId) && proveedorId > 0) {
           const { error: histErr } = await supabase.from("historial_ventas").insert({
