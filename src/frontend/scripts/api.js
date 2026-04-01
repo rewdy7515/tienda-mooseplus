@@ -1718,6 +1718,39 @@ export async function notifyReporteCreatedWhatsapp(idReporte) {
   }
 }
 
+export async function notifyReporteSolvedWhatsapp(idReporte) {
+  await ensureServerSession();
+  const reportId = Number(idReporte);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return { error: "id_reporte invalido" };
+  }
+  try {
+    const headers = { "Content-Type": "application/json" };
+    const accessToken = getRememberedAccessToken();
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+    const res = await fetch(`${API_BASE}/api/whatsapp/reportes/notificar-solucion`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ id_reporte: reportId }),
+    });
+    const { text, data } = await readResponseBodySafe(res);
+    if (!res.ok) {
+      const message = String(data?.error || text || "").trim();
+      return {
+        error: message || "No se pudo notificar la solución del reporte por WhatsApp",
+        status: res.status,
+      };
+    }
+    return data || { ok: true };
+  } catch (err) {
+    console.error("notifyReporteSolvedWhatsapp error", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchP2PRate() {
   const startedAt = getDebugNow();
   logApiDebug("fetchP2PRate:start", {});

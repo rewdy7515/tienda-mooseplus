@@ -1853,6 +1853,20 @@ Cliente: ${clienteText}
 Motivo: ${motivoText}`;
 };
 
+const buildWhatsappReporteSolucionadoMessage = ({
+  idReporte = null,
+  plataforma = "",
+  correo = "",
+} = {}) => {
+  const reportId = toPositiveInt(idReporte) || idReporte || "-";
+  const plataformaText = formatWhatsappReporteText(plataforma, "Sin plataforma");
+  const correoText = formatWhatsappReporteText(correo, "-");
+  return `\`Reporte #${reportId}\`
+*${plataformaText}*
+Correo: ${correoText}
+Estado: solucionado ✅`;
+};
+
 const fetchReporteWhatsappContextById = async (idReporte) => {
   const reportId = toPositiveInt(idReporte);
   if (!reportId) return null;
@@ -1860,7 +1874,7 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
   const { data, error } = await supabaseAdmin
     .from("reportes")
     .select(
-      "id_reporte, id_usuario, descripcion, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
+      "id_reporte, id_usuario, descripcion, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
     )
     .eq("id_reporte", reportId)
     .maybeSingle();
@@ -1967,6 +1981,99 @@ const sendReporteCreatedToWhatsappGroup = async ({
       groupName: WHATSAPP_REPORTES_GROUP_NAME || null,
     };
   }
+};
+
+const sendReporteSolvedToWhatsappOwner = async ({
+  reporte = null,
+  manageWhatsappLifecycle = true,
+} = {}) => {
+  const reportId = toPositiveInt(reporte?.id_reporte);
+  const targetUserId = toPositiveInt(reporte?.id_usuario);
+  if (!reportId) {
+    return { sent: false, skipped: true, reason: "invalid_report" };
+  }
+  if (!targetUserId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_target_user",
+      id_reporte: reportId,
+    };
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "target_user_phone_missing",
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const message = buildWhatsappReporteSolucionadoMessage({
+    idReporte: reportId,
+    plataforma: reporte?.plataformas?.nombre,
+    correo: reporte?.cuentas?.correo,
+  });
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? "report_solved_user_alert"
+        : "report_solved_user_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de reporte solucionado",
+    );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "report_solved_user_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[reportes:whatsapp] solucionado shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+      phone: targetPhone,
+    };
+  }
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_reporte: reportId,
+    id_usuario_destino: targetUserId,
+    phone: targetPhone,
+  };
 };
 
 const markReporteWhatsappEnviado = async (idReporte, value = true) => {
@@ -5780,6 +5887,63 @@ app.post("/api/whatsapp/reportes/notificar", async (req, res) => {
   }
 });
 
+app.post("/api/whatsapp/reportes/notificar-solucion", async (req, res) => {
+  try {
+    let sessionUserId = null;
+    try {
+      sessionUserId = await getSessionUsuario(req);
+    } catch (authErr) {
+      if (authErr?.code !== AUTH_REQUIRED && authErr?.message !== AUTH_REQUIRED) throw authErr;
+      const bearerToken = getBearerTokenFromRequest(req);
+      if (!bearerToken) throw authErr;
+      sessionUserId = await resolveUsuarioFromAuthToken(bearerToken);
+    }
+    const reportId = toPositiveInt(req.body?.id_reporte ?? req.body?.idReporte);
+    if (!reportId) {
+      return res.status(400).json({ error: "id_reporte invalido" });
+    }
+
+    const reporte = await fetchReporteWhatsappContextById(reportId);
+    if (!reporte?.id_reporte) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    const reportOwnerId = toPositiveInt(reporte?.id_usuario);
+    if (reportOwnerId && reportOwnerId !== sessionUserId) {
+      const { data: permRow, error: permErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("permiso_admin, permiso_superadmin")
+        .eq("id_usuario", sessionUserId)
+        .maybeSingle();
+      if (permErr) throw permErr;
+      const isAdmin = isTrue(permRow?.permiso_admin) || isTrue(permRow?.permiso_superadmin);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "No autorizado para notificar este reporte" });
+      }
+    }
+
+    const result = await sendReporteSolvedToWhatsappOwner({
+      reporte,
+      manageWhatsappLifecycle: true,
+    });
+
+    if (result?.skipped) return res.status(202).json({ ok: false, ...result });
+    if (result?.sent) return res.json({ ok: true, ...result });
+    return res.status(500).json({
+      error: result?.error || "No se pudo enviar el reporte solucionado por WhatsApp",
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[whatsapp/reportes/notificar-solucion] error", err);
+    return res.status(500).json({
+      error: err?.message || "No se pudo notificar la solución del reporte por WhatsApp",
+    });
+  }
+});
+
 app.get("/api/whatsapp/reportes/worker-status", async (req, res) => {
   try {
     const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
@@ -6954,6 +7118,24 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
           })
           .eq("id_reporte", reporteAbierto.id_reporte);
         if (repErr) throw repErr;
+        try {
+          const reporteCtx = await fetchReporteWhatsappContextById(reporteAbierto.id_reporte);
+          if (reporteCtx?.id_reporte && reporteCtx?.solucionado === true) {
+            const waSolvedRes = await sendReporteSolvedToWhatsappOwner({
+              reporte: reporteCtx,
+              manageWhatsappLifecycle: true,
+            });
+            if (!waSolvedRes?.sent) {
+              console.warn("[autoAssignReportedPendingVentas] whatsapp solucionado skipped", {
+                id_reporte: reporteAbierto.id_reporte,
+                reason: waSolvedRes?.reason || "unknown",
+                error: waSolvedRes?.error || null,
+              });
+            }
+          }
+        } catch (waSolvedErr) {
+          console.error("[autoAssignReportedPendingVentas] whatsapp solucionado error", waSolvedErr);
+        }
       }
 
       summary.resolved += 1;

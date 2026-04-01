@@ -845,7 +845,7 @@
             }
           }
 
-          setStatus("Cuenta agregada correctamente.");
+          setStatus(`Cuenta agregada correctamente: ${correo}`);
         } catch (err) {
           console.error("agregar cuenta error", err);
           setStatus("No se pudo agregar la cuenta.");

@@ -5,7 +5,13 @@ import {
   getSessionRoles,
   attachLogoHome,
 } from "./session.js";
-import { clearServerSession, loadCurrentUser, supabase, ensureServerSession } from "./api.js";
+import {
+  clearServerSession,
+  loadCurrentUser,
+  supabase,
+  ensureServerSession,
+  notifyReporteSolvedWhatsapp,
+} from "./api.js";
 import { formatDDMMYYYY } from "./date-format.js";
 import { pickNotificationUserIds } from "./notification-templates.js";
 import { copyTextNotify } from "./copy-toast.js";
@@ -437,6 +443,25 @@ async function notifyReemplazoReporte({ row, plataforma, correoViejo, correoNuev
   if (error) throw error;
 }
 
+async function notifyReporteSolvedWhatsappBestEffort(idReporte) {
+  const reportId = toPositiveId(idReporte);
+  if (!reportId) return { ok: false, skipped: true, reason: "invalid_report" };
+  try {
+    const waResult = await notifyReporteSolvedWhatsapp(reportId);
+    if (waResult?.error) {
+      console.error("whatsapp reporte solucionado error", waResult);
+      return { ok: false, error: waResult.error, status: waResult.status || null };
+    }
+    if (waResult?.sent === true || waResult?.ok === true) {
+      return { ok: true, sent: true };
+    }
+    return { ok: false, skipped: true, reason: waResult?.reason || "not_sent" };
+  } catch (err) {
+    console.error("whatsapp reporte solucionado exception", err);
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 async function loadAutoReemplazoConfig() {
   const { data, error } = await supabase
     .from("configuracion_sistema")
@@ -583,16 +608,20 @@ const renderReportesList = (plataformas = []) => {
               const correoCopyAttr = escapeHtml(correo);
               const madreCorreo = normalizeCopyValue(r?.cuenta_madre_correo);
               const madreCopyAttr = escapeHtml(madreCorreo);
-              const inactivaDot = isTrue(r?.cuentas?.inactiva)
+              const cuentaInactiva = isTrue(r?.cuentas?.inactiva);
+              const cuentaActivaTrasReemplazo = isTrue(r?._reemplazo_activo) && !cuentaInactiva;
+              const estadoCuentaDot = cuentaInactiva
                 ? '<span class="reporte-inactiva-dot" title="Cuenta inactiva" aria-label="Cuenta inactiva"></span>'
-                : "";
+                : cuentaActivaTrasReemplazo
+                  ? '<span class="reporte-activa-dot" title="Cuenta activa tras reemplazo" aria-label="Cuenta activa tras reemplazo"></span>'
+                  : "";
               const correoCell = normalizeCopyValue(correo)
                 ? `<span class="correo-actions-inline">
                     <span class="correo-main-inline">
                       <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
                     </span>
                     <span class="correo-admin-actions">
-                      ${inactivaDot}
+                      ${estadoCuentaDot}
                       <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
                       ${
                         madreCorreo
@@ -603,7 +632,7 @@ const renderReportesList = (plataformas = []) => {
                   </span>`
                 : `<span class="correo-actions-inline">
                     <span class="correo-main-inline">${correoText}</span>
-                    <span class="correo-admin-actions">${inactivaDot}</span>
+                    <span class="correo-admin-actions">${estadoCuentaDot}</span>
                   </span>`;
               const motivo = getDescripcion(r);
               const canReactivate = platformId === 9;
@@ -672,6 +701,36 @@ const renderReportesList = (plataformas = []) => {
       `;
     })
     .join("");
+};
+
+const buildPlataformasFromRows = (rows = []) => {
+  const porPlat = new Map();
+  (rows || []).forEach((r) => {
+    const id = r.id_plataforma || r.cuentas?.id_plataforma || r.plataformas?.id_plataforma;
+    const nombre = r.plataformas?.nombre || "Plataforma";
+    const buttonColor = r.plataformas?.color_1 || null;
+    const headerColor = r.plataformas?.color_2 || null;
+    if (!id) return;
+    if (!porPlat.has(id)) {
+      porPlat.set(id, { id, nombre, buttonColor, headerColor, items: [] });
+    }
+    porPlat.get(id).items.push(r);
+  });
+  return Array.from(porPlat.values());
+};
+
+const rerenderActivosDesdeMap = () => {
+  const activos = Array.from(reportesById.values()).filter(
+    (r) => r?.en_revision !== false && r?.solucionado === false,
+  );
+  if (!activos.length) {
+    if (listEl) listEl.innerHTML = "";
+    if (statusEl) statusEl.textContent = "No hay reportes pendientes.";
+    return;
+  }
+  const plataformas = buildPlataformasFromRows(activos);
+  renderReportesList(plataformas);
+  if (statusEl) statusEl.textContent = "";
 };
 
 const removeReporteRowFromUI = (reportIdRaw) => {
@@ -1007,20 +1066,7 @@ async function init() {
       if (r?.id_reporte) reportesById.set(String(r.id_reporte), r);
     });
 
-    const porPlat = new Map();
-    activos.forEach((r) => {
-      const id = r.id_plataforma || r.cuentas?.id_plataforma || r.plataformas?.id_plataforma;
-      const nombre = r.plataformas?.nombre || "Plataforma";
-      const buttonColor = r.plataformas?.color_1 || null;
-      const headerColor = r.plataformas?.color_2 || null;
-      if (!id) return;
-      if (!porPlat.has(id)) {
-        porPlat.set(id, { id, nombre, buttonColor, headerColor, items: [] });
-      }
-      porPlat.get(id).items.push(r);
-    });
-
-    const plataformas = Array.from(porPlat.values());
+    const plataformas = buildPlataformasFromRows(activos);
     renderReportesList(plataformas);
     if (statusEl) statusEl.textContent = "";
 
@@ -1257,6 +1303,15 @@ async function guardarCambios() {
       .eq("id_reporte", currentRow.id_reporte);
     if (error) throw error;
 
+    const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort(currentRow.id_reporte);
+    if (!waSolvedRes?.ok) {
+      console.warn("reporte cerrado sin WhatsApp de solucion", {
+        id_reporte: currentRow.id_reporte,
+        reason: waSolvedRes?.reason || null,
+        error: waSolvedRes?.error || null,
+      });
+    }
+
     try {
       const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow);
       if (fechaRes.applied && fechaRes.dias >= 1) {
@@ -1329,65 +1384,45 @@ async function reemplazarServicio(options = {}) {
       return { ok: false, reason: "missing_data" };
     }
 
-    const findVentaAsociada = async (withUserFilter) => {
-      let query = supabase
-        .from("ventas")
-        .select("id_venta, id_usuario, fecha_corte, id_precio")
-        .eq("id_cuenta", cuentaId)
-        .order("id_venta", { ascending: false })
-        .limit(1);
-      if (withUserFilter && selectedRow?.id_usuario) {
-        query = query.eq("id_usuario", selectedRow.id_usuario);
-      }
-      if (rowPerfil?.id_perfil) {
-        query = query.eq("id_perfil", rowPerfil.id_perfil);
-      } else {
-        query = query.is("id_perfil", null);
-      }
-      const { data, error } = await query;
-      return { data: data || [], error };
-    };
-
-    let { data: ventasData, error: ventaErr } = await findVentaAsociada(true);
-    if (!ventasData.length) {
-      const fallback = await findVentaAsociada(false);
-      ventasData = fallback.data;
-      ventaErr = fallback.error;
-    }
-    if (!ventasData.length && !rowPerfil?.id_perfil) {
-      let fallbackAny = supabase
-        .from("ventas")
-        .select("id_venta, id_usuario, fecha_corte, id_precio")
-        .eq("id_cuenta", cuentaId)
-        .order("id_venta", { ascending: false })
-        .limit(1);
-      if (selectedRow?.id_usuario) {
-        fallbackAny = fallbackAny.eq("id_usuario", selectedRow.id_usuario);
-      }
-      const { data, error } = await fallbackAny;
-      ventasData = data || [];
-      ventaErr = error;
-      if (!ventasData.length) {
-        const finalFallback = await supabase
-          .from("ventas")
-          .select("id_venta, id_usuario, fecha_corte, id_precio")
-          .eq("id_cuenta", cuentaId)
-          .order("id_venta", { ascending: false })
-          .limit(1);
-        ventasData = finalFallback.data || [];
-        ventaErr = finalFallback.error;
-      }
-    }
-    if (ventaErr || !ventasData?.length) {
+    const ventaAsociada = await findVentaAsociadaFromReporte(selectedRow);
+    const ventaAsociadaId = toPositiveId(ventaAsociada?.id_venta);
+    if (!ventaAsociadaId) {
       notify("No se encontró la venta asociada.");
       return { ok: false, reason: "venta_not_found" };
     }
-    const ventaInfo = ventasData[0];
+
+    const { data: ventaInfo, error: ventaErr } = await supabase
+      .from("ventas")
+      .select("id_venta, id_usuario, fecha_corte, id_precio, id_cuenta, id_cuenta_miembro, id_perfil")
+      .eq("id_venta", ventaAsociadaId)
+      .maybeSingle();
+    if (ventaErr || !ventaInfo?.id_venta) {
+      notify("No se encontró la venta asociada.");
+      return { ok: false, reason: "venta_not_found" };
+    }
+
     const ventaId = ventaInfo.id_venta;
 
     const ventaPerfil = isTrue(selectedRow.cuentas?.venta_perfil);
     const ventaMiembro = isTrue(selectedRow.cuentas?.venta_miembro);
     const perfilHogar = rowPerfil?.hogar === true;
+    const cuentaMadreActualId =
+      toPositiveId(ventaInfo?.id_cuenta) ||
+      toPositiveId(selectedRow?.cuentas?.id_cuenta_madre) ||
+      null;
+    const cuentaMiembroVentaId = toPositiveId(ventaInfo?.id_cuenta_miembro);
+
+    let cuentaMadreActualInactiva = false;
+    if (cuentaMadreActualId) {
+      const { data: cuentaMadreActual, error: cuentaMadreActualErr } = await supabase
+        .from("cuentas")
+        .select("id_cuenta, inactiva")
+        .eq("id_cuenta", cuentaMadreActualId)
+        .maybeSingle();
+      if (cuentaMadreActualErr) throw cuentaMadreActualErr;
+      cuentaMadreActualInactiva = isTrue(cuentaMadreActual?.inactiva);
+    }
+    const forceCambiarCuentaMadre = !!cuentaMiembroVentaId && cuentaMadreActualInactiva;
 
     const loadReemplazosBloqueados = async () => {
       const { data, error } = await supabase.from("reemplazos").select("id_cuenta, id_perfil");
@@ -1412,6 +1447,34 @@ async function reemplazarServicio(options = {}) {
           "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, correo, clave)",
         )
         .eq("cuentas.id_plataforma", platId)
+        .eq("ocupado", false)
+        .order("id_perfil", { ascending: true });
+      if (isHogar === true) {
+        query = query.eq("perfil_hogar", true);
+      } else {
+        query = query.or("perfil_hogar.is.null,perfil_hogar.eq.false");
+      }
+      query = query.or("inactiva.is.null,inactiva.eq.false", {
+        foreignTable: "cuentas",
+      });
+      if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+      const { data, error } = await query;
+      if (error) return { error };
+      const libre = (data || []).find((perfil) => {
+        const perfilId = toPositiveId(perfil?.id_perfil);
+        return !!perfilId && !reemplazosBloqueados.perfiles.has(perfilId);
+      });
+      return { data: libre || null };
+    };
+
+    const findPerfilLibreCuentaMadre = async (platId, isHogar, excludeCuenta) => {
+      let query = supabase
+        .from("perfiles")
+        .select(
+          "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_cuenta, id_plataforma, cuenta_madre, inactiva, correo, clave)",
+        )
+        .eq("cuentas.id_plataforma", platId)
+        .eq("cuentas.cuenta_madre", true)
         .eq("ocupado", false)
         .order("id_perfil", { ascending: true });
       if (isHogar === true) {
@@ -1475,7 +1538,28 @@ async function reemplazarServicio(options = {}) {
     let nuevoCuenta = null;
     let nuevoPerfil = null;
     let dataDestino = {};
+    let asignadoDesdeCuentaMadre = false;
     const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
+
+    const tryAsignarPerfilCuentaMadre = async (isHogar) => {
+      const { data: perfilDestino, error: perfilErr } = await findPerfilLibreCuentaMadre(
+        plataformaId,
+        isHogar,
+        cuentaMadreActualId || cuentaId,
+      );
+      if (perfilErr) throw perfilErr;
+      if (!perfilDestino) return false;
+      nuevoPerfil = perfilDestino.id_perfil;
+      nuevoCuenta = perfilDestino.id_cuenta;
+      dataDestino = {
+        correo: perfilDestino.cuentas?.correo || "",
+        clave: perfilDestino.cuentas?.clave || "",
+        pin: perfilDestino.pin,
+        n_perfil: perfilDestino.n_perfil,
+      };
+      asignadoDesdeCuentaMadre = true;
+      return true;
+    };
 
     const tryAsignarPerfil = async (isHogar) => {
       const { data: perfilDestino, error: perfilErr } = await findPerfilLibre(
@@ -1513,15 +1597,26 @@ async function reemplazarServicio(options = {}) {
     };
 
     let assigned = false;
-    if (rowPerfil?.id_perfil) {
-      assigned = await tryAsignarPerfil(perfilHogar);
-      if (!assigned && isPlanMiembroEquivalente) {
-        assigned = await tryAsignarCuentaMiembro();
+    if (forceCambiarCuentaMadre) {
+      assigned = await tryAsignarPerfilCuentaMadre(perfilHogar);
+      if (!assigned && perfilHogar !== true) {
+        assigned = await tryAsignarPerfilCuentaMadre(true);
       }
-    } else if (ventaMiembro && !ventaPerfil) {
-      assigned = await tryAsignarCuentaMiembro();
       if (!assigned) {
-        assigned = await tryAsignarPerfil(true);
+        notify("Sin stock de cuentas madre activas.");
+        return { ok: false, reason: "sin_stock_cuenta_madre" };
+      }
+    } else {
+      if (rowPerfil?.id_perfil) {
+        assigned = await tryAsignarPerfil(perfilHogar);
+        if (!assigned && isPlanMiembroEquivalente) {
+          assigned = await tryAsignarCuentaMiembro();
+        }
+      } else if (ventaMiembro && !ventaPerfil) {
+        assigned = await tryAsignarCuentaMiembro();
+        if (!assigned) {
+          assigned = await tryAsignarPerfil(true);
+        }
       }
     }
 
@@ -1557,8 +1652,13 @@ async function reemplazarServicio(options = {}) {
       })
       .eq("id_venta", ventaId);
     if (updVentaErr) throw updVentaErr;
-
-    await clearVentaReportadoFlag(selectedRow, ventaInfo);
+    if (asignadoDesdeCuentaMadre && cuentaMiembroVentaId && nuevoCuenta) {
+      const { error: updMiembroErr } = await supabase
+        .from("cuentas")
+        .update({ id_cuenta_madre: nuevoCuenta, inactiva: false })
+        .eq("id_cuenta", cuentaMiembroVentaId);
+      if (updMiembroErr) throw updMiembroErr;
+    }
 
     const perfilAnteriorId = toPositiveId(rowPerfil?.id_perfil);
     let perfilTieneOtraVenta = false;
@@ -1611,25 +1711,30 @@ async function reemplazarServicio(options = {}) {
       });
     }
 
-    const descripcionSolucion = "Servicio reemplazado";
-    const { error: repErr } = await supabase
-      .from("reportes")
-      .update({
-        descripcion: descripcionSolucion,
-        descripcion_solucion: descripcionSolucion,
-        en_revision: false,
-        solucionado: true,
-        solucionado_por: idUsuarioSesion,
-      })
-      .eq("id_reporte", selectedRow.id_reporte);
-    if (repErr) throw repErr;
+    const { data: ventaEstadoRow, error: ventaEstadoErr } = await supabase
+      .from("ventas")
+      .select("pendiente")
+      .eq("id_venta", ventaId)
+      .maybeSingle();
+    if (ventaEstadoErr) throw ventaEstadoErr;
+    const mantenerReporteAbiertoPlat9 =
+      Number(plataformaId) === 9 && ventaEstadoRow?.pendiente !== false;
 
     let diasSumados = 0;
-    try {
-      const fechaRes = await applyDiasExtraToVentaFechaCorte(selectedRow, ventaInfo);
-      diasSumados = Number(fechaRes?.dias || 0);
-    } catch (diasErr) {
-      console.error("sumar dias fecha_corte en reemplazo error", diasErr);
+    if (!mantenerReporteAbiertoPlat9) {
+      try {
+        const fechaRes = await applyDiasExtraToVentaFechaCorte(selectedRow, ventaInfo);
+        diasSumados = Number(fechaRes?.dias || 0);
+      } catch (diasErr) {
+        console.error("sumar dias fecha_corte en reemplazo error", diasErr);
+      }
+      await clearVentaReportadoFlag(selectedRow, ventaInfo);
+    } else {
+      const { error: keepReportadoErr } = await supabase
+        .from("ventas")
+        .update({ reportado: true })
+        .eq("id_venta", ventaId);
+      if (keepReportadoErr) throw keepReportadoErr;
     }
 
     try {
@@ -1651,6 +1756,57 @@ async function reemplazarServicio(options = {}) {
       }
     } catch (nErr) {
       console.error("notificacion servicio_reemplazado error", nErr);
+    }
+
+    if (mantenerReporteAbiertoPlat9) {
+      const { error: keepOpenRepErr } = await supabase
+        .from("reportes")
+        .update({
+          en_revision: true,
+          solucionado: false,
+          solucionado_por: null,
+          descripcion_solucion: null,
+        })
+        .eq("id_reporte", selectedRow.id_reporte);
+      if (keepOpenRepErr) throw keepOpenRepErr;
+
+      if (selectedRow?.cuentas && typeof selectedRow.cuentas === "object") {
+        selectedRow.cuentas.inactiva = false;
+      }
+      if (dataDestino?.correo) {
+        selectedRow.cuenta_madre_correo = dataDestino.correo;
+      }
+      selectedRow._reemplazo_activo = true;
+      if (selectedRow?.id_reporte) {
+        reportesById.set(String(selectedRow.id_reporte), selectedRow);
+      }
+      rerenderActivosDesdeMap();
+
+      notify("Reemplazo realizado. El reporte seguirá abierto hasta que pendiente sea false.");
+      if (shouldCloseModal) closeModal();
+      return { ok: true, kept_open: true };
+    }
+
+    const descripcionSolucion = "Servicio reemplazado";
+    const { error: repErr } = await supabase
+      .from("reportes")
+      .update({
+        descripcion: descripcionSolucion,
+        descripcion_solucion: descripcionSolucion,
+        en_revision: false,
+        solucionado: true,
+        solucionado_por: idUsuarioSesion,
+      })
+      .eq("id_reporte", selectedRow.id_reporte);
+    if (repErr) throw repErr;
+
+    const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort(selectedRow.id_reporte);
+    if (!waSolvedRes?.ok) {
+      console.warn("reemplazo cerrado sin WhatsApp de solucion", {
+        id_reporte: selectedRow.id_reporte,
+        reason: waSolvedRes?.reason || null,
+        error: waSolvedRes?.error || null,
+      });
     }
 
     try {
