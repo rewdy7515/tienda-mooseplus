@@ -351,7 +351,7 @@ async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
     const ids = Array.from(ventaIds);
     const { error } = await supabase
       .from("ventas")
-      .update({ reportado: false })
+      .update({ reportado: false, aviso_admin: true })
       .in("id_venta", ids);
     if (error) throw error;
     return ventaInfo || { id_venta: ids[0] };
@@ -362,7 +362,7 @@ async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
 
   let fallbackQuery = supabase
     .from("ventas")
-    .update({ reportado: false })
+    .update({ reportado: false, aviso_admin: true })
     .eq("reportado", true)
     .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`);
 

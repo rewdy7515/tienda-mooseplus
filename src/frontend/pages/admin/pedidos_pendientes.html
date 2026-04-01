@@ -1426,6 +1426,7 @@
         }
         if (wasReportado) {
           updateVenta.reportado = false;
+          updateVenta.aviso_admin = true;
         }
         const { error: updErr } = await supabase.from("ventas").update(updateVenta).eq("id_venta", idVenta);
         if (updErr) throw updErr;

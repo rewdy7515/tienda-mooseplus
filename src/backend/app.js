@@ -290,6 +290,7 @@ let nuevoServicioNotifQueueLastResult = {
 let nuevoServicioNotifQueueLastError = null;
 let pendingSpotifyAlertsInProgress = false;
 let pendingSpotifyAlertsAvisoAdminMissing = false;
+let deliveredOrderWhatsappAvisoPagoMissing = false;
 let pendingSpotifyAlertsLastRunAt = null;
 let pendingSpotifyAlertsLastResult = {
   fetched: 0,
@@ -1883,7 +1884,7 @@ const buildWhatsappOrdenEntregadaMessage = ({ idOrden = null, detalleOrdenUrl = 
   const ordenId = toPositiveInt(idOrden) || idOrden || "-";
   const detalleUrl = String(detalleOrdenUrl || "").trim() || buildPublicSiteUrl();
   return `\`Orden #${ordenId}\`
-estado: entregado ✅
+estado: pago verificado ✅
 
 Puedes verificar la orden por:
 ${detalleUrl}`;
@@ -2167,10 +2168,58 @@ const sendReporteSolvedToWhatsappOwner = async ({
   };
 };
 
+const markOrderPaymentVerificationWhatsappNotified = async (idOrden, value = true) => {
+  const ordenId = toPositiveInt(idOrden);
+  if (!ordenId) return false;
+  try {
+    const { error: markErr } = await supabaseAdmin
+      .from("ordenes")
+      .update({ aviso_verificacion_pago: value === true })
+      .eq("id_orden", ordenId);
+    if (markErr) {
+      if (isMissingColumnError(markErr, "aviso_verificacion_pago")) {
+        if (!deliveredOrderWhatsappAvisoPagoMissing) {
+          console.warn(
+            "[WhatsApp] Falta la columna ordenes.aviso_verificacion_pago. El aviso de pago verificado al cliente se omite hasta crearla.",
+          );
+        }
+        deliveredOrderWhatsappAvisoPagoMissing = true;
+        return false;
+      }
+      console.error("[ventas:whatsapp] no se pudo marcar aviso_verificacion_pago", {
+        id_orden: ordenId,
+        error: markErr?.message || markErr,
+      });
+      return false;
+    }
+    if (deliveredOrderWhatsappAvisoPagoMissing) {
+      console.log("[WhatsApp] Columna ordenes.aviso_verificacion_pago detectada nuevamente.");
+      deliveredOrderWhatsappAvisoPagoMissing = false;
+    }
+    return true;
+  } catch (markCatchErr) {
+    if (isMissingColumnError(markCatchErr, "aviso_verificacion_pago")) {
+      if (!deliveredOrderWhatsappAvisoPagoMissing) {
+        console.warn(
+          "[WhatsApp] Falta la columna ordenes.aviso_verificacion_pago. El aviso de pago verificado al cliente se omite hasta crearla.",
+        );
+      }
+      deliveredOrderWhatsappAvisoPagoMissing = true;
+      return false;
+    }
+    console.error("[ventas:whatsapp] error marcando aviso_verificacion_pago", {
+      id_orden: ordenId,
+      error: markCatchErr?.message || markCatchErr,
+    });
+    return false;
+  }
+};
+
 const sendVentaEntregadaToWhatsappOwner = async ({
   idVenta = null,
   venta = null,
   manageWhatsappLifecycle = true,
+  verifiedByAdmin = false,
 } = {}) => {
   const ventaId = toPositiveInt(idVenta || venta?.id_venta);
   if (!ventaId) {
@@ -2220,6 +2269,110 @@ const sendVentaEntregadaToWhatsappOwner = async ({
     };
   }
 
+  const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+    .from("ordenes")
+    .select(
+      "id_orden, fecha, hora_orden, pago_verificado, id_metodo_de_pago, aviso_verificacion_pago",
+    )
+    .eq("id_orden", ordenId)
+    .maybeSingle();
+  if (ordenErr && isMissingColumnError(ordenErr, "aviso_verificacion_pago")) {
+    if (!deliveredOrderWhatsappAvisoPagoMissing) {
+      console.warn(
+        "[WhatsApp] Falta la columna ordenes.aviso_verificacion_pago. El aviso de pago verificado al cliente se omite hasta crearla.",
+      );
+    }
+    deliveredOrderWhatsappAvisoPagoMissing = true;
+    return {
+      sent: false,
+      skipped: true,
+      reason: "missing_aviso_verificacion_pago_column",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+  if (ordenErr) throw ordenErr;
+  if (deliveredOrderWhatsappAvisoPagoMissing) {
+    console.log("[WhatsApp] Columna ordenes.aviso_verificacion_pago detectada nuevamente.");
+    deliveredOrderWhatsappAvisoPagoMissing = false;
+  }
+  if (!ordenRow?.id_orden) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "order_not_found",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const verificationWindowElapsed = hasManualVerificationWindowElapsed(ordenRow);
+  if (!isTrue(ordenRow?.pago_verificado)) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "order_payment_not_verified",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+  if (isTrue(ordenRow?.aviso_verificacion_pago)) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "order_payment_already_notified",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  let metodoVerificacionAutomatica = null;
+  const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
+  if (metodoPagoId) {
+    const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
+      .from("metodos_de_pago")
+      .select("verificacion_automatica")
+      .eq("id_metodo_de_pago", metodoPagoId)
+      .maybeSingle();
+    if (metodoPagoErr) throw metodoPagoErr;
+    metodoVerificacionAutomatica = metodoPagoRow?.verificacion_automatica;
+  }
+
+  const manualAdminNoAutoMethod =
+    verifiedByAdmin === true && metodoVerificacionAutomatica === false;
+  const autoVerifiedBeforeWindow =
+    verifiedByAdmin !== true &&
+    metodoVerificacionAutomatica === true &&
+    verificationWindowElapsed === false;
+  if (autoVerifiedBeforeWindow) {
+    await markOrderPaymentVerificationWhatsappNotified(ordenId, true);
+    return {
+      sent: false,
+      skipped: true,
+      reason: "auto_verified_before_window",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+  if (!manualAdminNoAutoMethod && verificationWindowElapsed !== true) {
+    return {
+      sent: false,
+      skipped: true,
+      reason:
+        verificationWindowElapsed === false
+          ? "order_verification_window_not_elapsed"
+          : "order_verification_window_unknown",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
   const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
   if (!targetPhone) {
     return {
@@ -2254,7 +2407,7 @@ const sendVentaEntregadaToWhatsappOwner = async ({
         waitUntilMsgSent: true,
       }),
       WHATSAPP_SEND_TIMEOUT_MS,
-      "Timeout enviando alerta de orden entregada",
+      "Timeout enviando alerta de pago verificado",
     );
   } catch (err) {
     sendErr = err;
@@ -2284,6 +2437,8 @@ const sendVentaEntregadaToWhatsappOwner = async ({
     };
   }
 
+  await markOrderPaymentVerificationWhatsappNotified(ordenId, true);
+
   return {
     sent: true,
     skipped: false,
@@ -2293,6 +2448,43 @@ const sendVentaEntregadaToWhatsappOwner = async ({
     id_usuario_destino: targetUserId,
     phone: targetPhone,
   };
+};
+
+const notifyVentaEntregadaAfterOrderVerified = async ({
+  idOrden = null,
+  manageWhatsappLifecycle = true,
+  verifiedByAdmin = false,
+} = {}) => {
+  const ordenId = toPositiveInt(idOrden);
+  if (!ordenId) {
+    return { sent: false, skipped: true, reason: "invalid_order" };
+  }
+
+  const { data: ventasRows, error: ventasErr } = await supabaseAdmin
+    .from("ventas")
+    .select("id_venta, pendiente, reportado")
+    .eq("id_orden", ordenId)
+    .eq("pendiente", false)
+    .order("id_venta", { ascending: true })
+    .limit(120);
+  if (ventasErr) throw ventasErr;
+
+  const ventaTarget = (ventasRows || []).find((row) => !isTrue(row?.reportado));
+  const ventaId = toPositiveInt(ventaTarget?.id_venta);
+  if (!ventaId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "no_delivered_non_reported_sale",
+      id_orden: ordenId,
+    };
+  }
+
+  return sendVentaEntregadaToWhatsappOwner({
+    idVenta: ventaId,
+    manageWhatsappLifecycle,
+    verifiedByAdmin,
+  });
 };
 
 const markReporteWhatsappEnviado = async (idReporte, value = true) => {
@@ -4969,6 +5161,24 @@ const autoProcessMatchedOrder = async (match = {}) => {
       })
       .eq("id_orden", idOrden);
     if (updOrdErr) throw updOrdErr;
+    try {
+      const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
+        idOrden,
+        manageWhatsappLifecycle: true,
+      });
+      if (!waDeliveredRes?.sent) {
+        console.log("[autoProcessMatchedOrder] whatsapp orden entregada post-verificacion skipped", {
+          id_orden: idOrden,
+          reason: waDeliveredRes?.reason || "unknown",
+          error: waDeliveredRes?.error || null,
+        });
+      }
+    } catch (waDeliveredErr) {
+      console.error("[autoProcessMatchedOrder] whatsapp orden entregada post-verificacion error", {
+        id_orden: idOrden,
+        error: waDeliveredErr?.message || waDeliveredErr,
+      });
+    }
     return {
       processed: true,
       reason: "orden_ya_procesada",
@@ -5064,6 +5274,24 @@ const autoProcessMatchedOrder = async (match = {}) => {
     })
     .eq("id_orden", idOrden);
   if (updOrdErr) throw updOrdErr;
+  try {
+    const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
+      idOrden,
+      manageWhatsappLifecycle: true,
+    });
+    if (!waDeliveredRes?.sent) {
+      console.log("[autoProcessMatchedOrder] whatsapp orden entregada post-procesado skipped", {
+        id_orden: idOrden,
+        reason: waDeliveredRes?.reason || "unknown",
+        error: waDeliveredRes?.error || null,
+      });
+    }
+  } catch (waDeliveredErr) {
+    console.error("[autoProcessMatchedOrder] whatsapp orden entregada post-procesado error", {
+      id_orden: idOrden,
+      error: waDeliveredErr?.message || waDeliveredErr,
+    });
+  }
 
   return {
     processed: true,
@@ -6178,6 +6406,7 @@ app.post("/api/whatsapp/ventas/notificar-entregada", async (req, res) => {
     const result = await sendVentaEntregadaToWhatsappOwner({
       idVenta: ventaId,
       manageWhatsappLifecycle: true,
+      verifiedByAdmin: true,
     });
     if (result?.sent) return res.json({ ok: true, ...result });
     if (result?.skipped) return res.status(202).json({ ok: false, ...result });
@@ -7314,6 +7543,7 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         id_perfil: nuevoPerfilId || null,
         pendiente: false,
         reportado: false,
+        aviso_admin: true,
       };
       if (oldCuentaMiembroId) {
         updateVenta.id_cuenta_miembro = null;
@@ -13886,6 +14116,7 @@ app.post("/api/checkout", async (req, res) => {
       monto_completo: null,
       checkout_finalizado: true,
       aviso_verificacion_manual: false,
+      aviso_verificacion_pago: montoMayor ? false : bypassVerificacion && !requiereEntregaManual ? true : false,
     };
     let ordenId = null;
     if (Number.isFinite(parsedOrderId) && parsedOrderId > 0) {
@@ -14391,6 +14622,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     const ordenAdminId = Number.isFinite(Number(orden?.id_admin)) ? Number(orden.id_admin) : null;
     const canAssignDeliverAdmin = sessionIsSuper && sessionAdminId && !ordenAdminId;
     const idAdminEntrega = canAssignDeliverAdmin ? sessionAdminId : ordenAdminId;
+    const verifiedByAdminInThisProcess = Boolean(sessionIsSuper || isOrderAdmin || canAssignDeliverAdmin);
     if (
       idUsuarioSesion &&
       orden?.id_usuario &&
@@ -14429,6 +14661,27 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       }
       console.log("[ordenes/procesar] ya procesada", { id_orden: idOrden, ventas: ventasExist.length });
       await syncPagoMovilCredito();
+      if (ordenPatch.pago_verificado === true) {
+        try {
+          const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
+            idOrden,
+            manageWhatsappLifecycle: true,
+            verifiedByAdmin: verifiedByAdminInThisProcess,
+          });
+          if (!waDeliveredRes?.sent) {
+            console.log("[ordenes/procesar] whatsapp pago verificado skipped", {
+              id_orden: idOrden,
+              reason: waDeliveredRes?.reason || "unknown",
+              error: waDeliveredRes?.error || null,
+            });
+          }
+        } catch (waDeliveredErr) {
+          console.error("[ordenes/procesar] whatsapp pago verificado error", {
+            id_orden: idOrden,
+            error: waDeliveredErr?.message || waDeliveredErr,
+          });
+        }
+      }
       return res.json({
         ok: true,
         id_orden: idOrden,
@@ -14524,6 +14777,25 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       .eq("id_orden", idOrden);
 
     await syncPagoMovilCredito();
+    try {
+      const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
+        idOrden,
+        manageWhatsappLifecycle: true,
+        verifiedByAdmin: verifiedByAdminInThisProcess,
+      });
+      if (!waDeliveredRes?.sent) {
+        console.log("[ordenes/procesar] whatsapp pago verificado post-procesado skipped", {
+          id_orden: idOrden,
+          reason: waDeliveredRes?.reason || "unknown",
+          error: waDeliveredRes?.error || null,
+        });
+      }
+    } catch (waDeliveredErr) {
+      console.error("[ordenes/procesar] whatsapp pago verificado post-procesado error", {
+        id_orden: idOrden,
+        error: waDeliveredErr?.message || waDeliveredErr,
+      });
+    }
 
     res.json({
       ok: true,
