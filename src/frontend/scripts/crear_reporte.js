@@ -68,10 +68,12 @@ let tiposReporteCatalog = [];
 let correosSugerenciasVisibles = [];
 const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
 const queryParams = new URLSearchParams(window.location.search);
-const prefillPlataforma = queryParams.get("plataforma");
-const prefillCuenta = queryParams.get("cuenta");
-const prefillPerfil = queryParams.get("perfil");
-const prefillCorreo = queryParams.get("correo");
+let prefillPlataforma = queryParams.get("plataforma");
+let prefillCuenta = queryParams.get("cuenta");
+let prefillPerfil = queryParams.get("perfil");
+let prefillCorreo = queryParams.get("correo");
+const prefillUsuario = queryParams.get("usuario");
+const prefillVenta = queryParams.get("venta");
 const normalizeMotivo = (val) =>
   String(val || "")
     .normalize("NFD")
@@ -97,6 +99,17 @@ const asInt = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const toPositiveId = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.trunc(parsed);
+};
+
+let sessionUserId = null;
+let isSessionSuperadmin = false;
+let reportTargetUserId = null;
+let forcedVentaContext = null;
+
 const getPlataformaMeta = (plataformaId = selectedPlataformaId) => {
   const key = String(plataformaId || "").trim();
   if (!key) return null;
@@ -105,6 +118,79 @@ const getPlataformaMeta = (plataformaId = selectedPlataformaId) => {
 
 const isPlataformaPorAcceso = (plataformaId = selectedPlataformaId) =>
   isTrue(getPlataformaMeta(plataformaId)?.por_acceso);
+
+const getReportTargetUserId = () => {
+  const target = toPositiveId(reportTargetUserId);
+  if (target) return target;
+  const sessionId = toPositiveId(sessionUserId || requireSession());
+  return sessionId;
+};
+
+const isMissingAdminReporteColumnError = (error) =>
+  String(error?.message || "")
+    .toLowerCase()
+    .includes("id_admin_reporte");
+
+const insertReporteWithAdmin = async (payload, { adminReporterId = null } = {}) => {
+  const basePayload = { ...payload };
+  const reporterId = toPositiveId(adminReporterId);
+  const withAdminPayload = reporterId
+    ? { ...basePayload, id_admin_reporte: reporterId }
+    : basePayload;
+
+  let response = await supabase
+    .from("reportes")
+    .insert([withAdminPayload])
+    .select("id_reporte")
+    .maybeSingle();
+
+  if (response?.error && reporterId && isMissingAdminReporteColumnError(response.error)) {
+    response = await supabase
+      .from("reportes")
+      .insert([basePayload])
+      .select("id_reporte")
+      .maybeSingle();
+  }
+  return response;
+};
+
+async function loadVentaPrefillContext(rawVentaId) {
+  const ventaId = toPositiveId(rawVentaId);
+  if (!ventaId) return null;
+  const { data, error } = await supabase
+    .from("ventas")
+    .select(
+      "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil, reportado, correo_miembro, precios:precios(id_plataforma), cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, id_plataforma), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, id_plataforma)",
+    )
+    .eq("id_venta", ventaId)
+    .maybeSingle();
+  if (error) {
+    console.error("load venta prefill context error", error);
+    return null;
+  }
+  if (!data) return null;
+  const cuentaId =
+    toPositiveId(data?.id_cuenta_miembro) || toPositiveId(data?.id_cuenta) || null;
+  const plataformaId = toPositiveId(
+    data?.precios?.id_plataforma ||
+      data?.cuentas_miembro?.id_plataforma ||
+      data?.cuentas?.id_plataforma,
+  );
+  const correo =
+    String(data?.correo_miembro || "").trim() ||
+    String(data?.cuentas_miembro?.correo || "").trim() ||
+    String(data?.cuentas?.correo || "").trim() ||
+    "";
+  return {
+    id_venta: ventaId,
+    id_usuario: toPositiveId(data?.id_usuario),
+    id_cuenta: cuentaId,
+    id_perfil: toPositiveId(data?.id_perfil),
+    id_plataforma: plataformaId,
+    correo,
+    reportado: isTrue(data?.reportado),
+  };
+}
 
 async function isAutoReemplazoCuentaInactivaEnabled() {
   try {
@@ -237,7 +323,7 @@ const resolveCuentaIdByCorreoRobusto = async (correoRaw) => {
 
   const correo = String(correoRaw || "").trim();
   const plataformaId = Number(selectedPlataformaId);
-  const userId = requireSession();
+  const userId = getReportTargetUserId();
   if (!correo || !Number.isFinite(plataformaId) || plataformaId <= 0 || !userId) {
     return null;
   }
@@ -599,6 +685,10 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
 async function init() {
   try {
     const user = await loadCurrentUser();
+    sessionUserId = toPositiveId(user?.id_usuario) || toPositiveId(requireSession());
+    reportTargetUserId = sessionUserId;
+    isSessionSuperadmin = isTrue(user?.permiso_superadmin);
+
     if (user && usernameEl) {
       const fullName = [user.nombre, user.apellido]
         .filter(Boolean)
@@ -613,6 +703,37 @@ async function init() {
       isTrue(sessionRoles?.permiso_superadmin) ||
       isTrue(user?.permiso_admin) ||
       isTrue(user?.permiso_superadmin);
+    isSessionSuperadmin =
+      isSessionSuperadmin ||
+      isTrue(sessionRoles?.permiso_superadmin) ||
+      isTrue(user?.permiso_superadmin);
+
+    if (isSessionSuperadmin) {
+      const queryUserId = toPositiveId(prefillUsuario);
+      if (queryUserId) {
+        reportTargetUserId = queryUserId;
+      }
+      const ventaContext = await loadVentaPrefillContext(prefillVenta);
+      if (ventaContext?.id_venta) {
+        forcedVentaContext = ventaContext;
+        if (ventaContext.id_usuario) {
+          reportTargetUserId = ventaContext.id_usuario;
+        }
+        if (ventaContext.id_plataforma) {
+          prefillPlataforma = String(ventaContext.id_plataforma);
+        }
+        if (ventaContext.id_cuenta) {
+          prefillCuenta = String(ventaContext.id_cuenta);
+        }
+        if (ventaContext.id_perfil) {
+          prefillPerfil = String(ventaContext.id_perfil);
+        }
+        if (ventaContext.correo) {
+          prefillCorreo = ventaContext.correo;
+        }
+      }
+    }
+
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);
       adminLink.style.display = isAdmin ? "block" : "none";
@@ -634,7 +755,7 @@ async function init() {
 
 async function cargarPlataformas() {
   if (!selectPlataforma) return;
-  const userId = requireSession();
+  const userId = getReportTargetUserId();
   const { data, error } = await supabase
     .from("ventas")
     .select(
@@ -697,7 +818,7 @@ async function cargarPlataformas() {
 
 async function cargarCorreos() {
   if (!inputCorreoCuenta) return;
-  const userId = requireSession();
+  const userId = getReportTargetUserId();
   const { data, error } = await supabase
     .from("ventas")
     .select(
@@ -924,7 +1045,7 @@ async function cargarPerfilesPorCorreo(cuentaId) {
     return;
   }
 
-  const userId = requireSession();
+  const userId = getReportTargetUserId();
   // Busca ventas del usuario con ese id_cuenta e id_perfil asignado
   const { data, error } = await supabase
     .from("ventas")
@@ -1170,7 +1291,9 @@ async function handleSubmit(e) {
   const submitBtn = form?.querySelector("button[type='submit']");
   submitBtn && (submitBtn.disabled = true);
   try {
-    const id_usuario = requireSession();
+    const sessionId = toPositiveId(sessionUserId || requireSession());
+    const reportUserId = getReportTargetUserId();
+    const adminReporterId = isSessionSuperadmin ? sessionId : null;
     const id_plataforma = selectedPlataformaId ? Number(selectedPlataformaId) : null;
     if (!selectedCuentaId) {
       const cuentaFromInput = await resolveCuentaIdByCorreoRobusto(
@@ -1181,7 +1304,7 @@ async function handleSubmit(e) {
       }
     }
     if (!selectedCuentaId) {
-      alert("Selecciona un correo válido de tu cuenta.");
+      alert("Selecciona un correo válido de la cuenta.");
       inputCorreoCuenta?.focus();
       submitBtn && (submitBtn.disabled = false);
       return;
@@ -1189,16 +1312,20 @@ async function handleSubmit(e) {
     const id_cuenta = selectedCuentaId ? Number(selectedCuentaId) : null;
     const id_perfil = selectedPerfilId ? Number(selectedPerfilId) : null;
     const ventaAsociada = await findVentaAsociadaParaReporte({
-      idUsuario: id_usuario,
+      idUsuario: reportUserId,
       idCuenta: id_cuenta,
       idPerfil: id_perfil,
     });
-    if (isTrue(ventaAsociada?.reportado)) {
+    const ventaYaReportada =
+      (forcedVentaContext?.id_venta && isTrue(forcedVentaContext?.reportado)) ||
+      isTrue(ventaAsociada?.reportado);
+    if (ventaYaReportada) {
       alert("Ya hay un reporte activo de esta venta");
       submitBtn && (submitBtn.disabled = false);
       return;
     }
-    const ventaAsociadaId = Number(ventaAsociada?.id_venta) || null;
+    const ventaAsociadaId =
+      toPositiveId(forcedVentaContext?.id_venta) || toPositiveId(ventaAsociada?.id_venta) || null;
     const motivoOption = selectMotivo?.selectedOptions?.[0] || null;
     const motivoTipoRaw = String(motivoOption?.value || "").trim();
     const motivoLabel = (motivoOption?.dataset?.titulo || motivoOption?.textContent || "").trim();
@@ -1236,7 +1363,7 @@ async function handleSubmit(e) {
       imagenResuelta = true;
       if (file && file.type?.startsWith("image/")) {
         try {
-          imagenPath = await uploadEvidence(file, id_usuario);
+          imagenPath = await uploadEvidence(file, reportUserId || sessionId);
         } catch (uploadErr) {
           console.error("upload reporte imagen error", uploadErr);
           imagenPath = null;
@@ -1251,7 +1378,7 @@ async function handleSubmit(e) {
     const autoReemplazoEnabled = await isAutoReemplazoCuentaInactivaEnabled();
     const autoReplaceResult = autoReemplazoEnabled
       ? await intentarReemplazoAutomaticoCuentaInactiva({
-          idUsuario: id_usuario,
+          idUsuario: reportUserId,
           idCuenta: id_cuenta,
           idPerfil: id_perfil,
           idPlataforma: id_plataforma,
@@ -1265,7 +1392,7 @@ async function handleSubmit(e) {
         ? `Reemplazo automático por cuenta inactiva: ${correoNuevoAuto}`
         : "Reemplazo automático por cuenta inactiva";
       const payloadAuto = {
-        id_usuario,
+        id_usuario: reportUserId,
         id_plataforma,
         id_cuenta,
         id_perfil,
@@ -1279,11 +1406,10 @@ async function handleSubmit(e) {
         fecha_creacion: caracasNow.fecha,
         hora_creacion: caracasNow.hora,
       };
-      const { data: insertAutoData, error: insertAutoErr } = await supabase
-        .from("reportes")
-        .insert([payloadAuto])
-        .select("id_reporte")
-        .maybeSingle();
+      const { data: insertAutoData, error: insertAutoErr } = await insertReporteWithAdmin(
+        payloadAuto,
+        { adminReporterId },
+      );
       if (insertAutoErr) {
         console.error("insert reporte auto solucionado error", insertAutoErr);
         alert("Se reemplazó el servicio, pero no se pudo guardar el reporte.");
@@ -1296,7 +1422,7 @@ async function handleSubmit(e) {
       try {
         await markVentaPendienteByReporteRule({
           ventaId: ventaAsociadaId,
-          idUsuario: id_usuario,
+          idUsuario: reportUserId,
           idCuenta: id_cuenta,
           idPerfil: id_perfil,
           idPlataforma: id_plataforma,
@@ -1314,7 +1440,7 @@ async function handleSubmit(e) {
     const caracasNow = getCaracasDateTime();
 
     const payload = {
-      id_usuario,
+      id_usuario: reportUserId,
       id_plataforma,
       id_cuenta,
       id_perfil,
@@ -1328,11 +1454,9 @@ async function handleSubmit(e) {
       hora_creacion: caracasNow.hora,
     };
 
-    const { data: insertData, error: insertErr } = await supabase
-      .from("reportes")
-      .insert([payload])
-      .select("id_reporte")
-      .maybeSingle();
+    const { data: insertData, error: insertErr } = await insertReporteWithAdmin(payload, {
+      adminReporterId,
+    });
     if (insertErr) {
       console.error("insert reporte error", insertErr);
       alert("No se pudo enviar el reporte. Intenta nuevamente.");
@@ -1344,7 +1468,7 @@ async function handleSubmit(e) {
     try {
       await markVentaPendienteByReporteRule({
         ventaId: ventaAsociadaId,
-        idUsuario: id_usuario,
+        idUsuario: reportUserId,
         idCuenta: id_cuenta,
         idPerfil: id_perfil,
         idPlataforma: id_plataforma,

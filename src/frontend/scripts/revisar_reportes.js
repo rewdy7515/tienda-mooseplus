@@ -725,7 +725,7 @@ async function loadReportes() {
   const { data, error } = await supabase
     .from("reportes")
     .select(
-      "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
+      "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
     )
     .eq("solucionado", false);
   if (error) throw error;
@@ -1452,6 +1452,26 @@ async function reemplazarServicio(options = {}) {
       return { data: libre || null };
     };
 
+    const findCuentaCompletaLibre = async (platId, excludeCuenta) => {
+      let query = supabase
+        .from("cuentas")
+        .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
+        .eq("id_plataforma", platId)
+        .eq("venta_perfil", false)
+        .eq("venta_miembro", false)
+        .or("ocupado.is.null,ocupado.eq.false")
+        .order("id_cuenta", { ascending: true });
+      query = query.or("inactiva.is.null,inactiva.eq.false");
+      if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
+      const { data, error } = await query;
+      if (error) return { error };
+      const libre = (data || []).find((cuenta) => {
+        const cuentaId = toPositiveId(cuenta?.id_cuenta);
+        return !!cuentaId && !reemplazosBloqueados.cuentas.has(cuentaId);
+      });
+      return { data: libre || null };
+    };
+
     let nuevoCuenta = null;
     let nuevoPerfil = null;
     let dataDestino = {};
@@ -1502,6 +1522,23 @@ async function reemplazarServicio(options = {}) {
       assigned = await tryAsignarCuentaMiembro();
       if (!assigned) {
         assigned = await tryAsignarPerfil(true);
+      }
+    }
+
+    if (!assigned && !(ventaMiembro && !ventaPerfil) && !rowPerfil?.id_perfil) {
+      const { data: cuentaCompletaDestino, error: cuentaCompletaErr } = await findCuentaCompletaLibre(
+        plataformaId,
+        cuentaId,
+      );
+      if (cuentaCompletaErr) throw cuentaCompletaErr;
+      if (cuentaCompletaDestino) {
+        nuevoPerfil = null;
+        nuevoCuenta = cuentaCompletaDestino.id_cuenta;
+        dataDestino = {
+          correo: cuentaCompletaDestino.correo || "",
+          clave: cuentaCompletaDestino.clave || "",
+        };
+        assigned = true;
       }
     }
 

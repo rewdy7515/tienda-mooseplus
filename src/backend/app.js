@@ -6718,7 +6718,6 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         perfiles:perfiles(id_perfil, n_perfil, perfil_hogar)
       `
     )
-    .eq("pendiente", true)
     .eq("reportado", true)
     .order("id_venta", { ascending: true })
     .limit(250);

@@ -1467,6 +1467,39 @@
           .replace(/"/g, "&quot;")
           .replace(/'/g, "&#39;");
 
+      const buildReportarVentaButton = ({
+        idVenta,
+        idUsuario = null,
+        idCuenta = null,
+        idPerfil = null,
+        idPlataforma = null,
+        correo = "",
+      } = {}) => {
+        const ventaId = toPositiveId(idVenta);
+        if (!ventaId) return "";
+        const attrs = [
+          `data-idventa="${escapeHtml(String(ventaId))}"`,
+          toPositiveId(idUsuario)
+            ? `data-idusuario="${escapeHtml(String(toPositiveId(idUsuario)))}"`
+            : "",
+          toPositiveId(idCuenta)
+            ? `data-idcuenta="${escapeHtml(String(toPositiveId(idCuenta)))}"`
+            : "",
+          toPositiveId(idPerfil)
+            ? `data-idperfil="${escapeHtml(String(toPositiveId(idPerfil)))}"`
+            : "",
+          toPositiveId(idPlataforma)
+            ? `data-idplataforma="${escapeHtml(String(toPositiveId(idPlataforma)))}"`
+            : "",
+          String(correo || "").trim()
+            ? `data-correo="${escapeHtml(String(correo || "").trim())}"`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<button type="button" class="btn-outline btn-reportar-venta" ${attrs}>Reportar</button>`;
+      };
+
       const renderProveedorSugs = (wrap, items, forceHide = false) => {
         const sugs = wrap?.querySelector(".proveedor-sugs");
         if (!sugs) return;
@@ -2188,7 +2221,10 @@
           pin,
           fecha_corte,
           id_venta,
+          id_usuario,
           id_perfil,
+          id_plataforma,
+          correo,
           venta_perfil = false,
           venta_miembro = false,
           platFlags = {},
@@ -2230,6 +2266,14 @@
                 data-cliente="${clienteNombreEncoded}"
                 ${replState.disabledAttr}${replState.titleAttr}
               >Reemplazar</button>
+              ${buildReportarVentaButton({
+                idVenta: id_venta,
+                idUsuario: id_usuario,
+                idCuenta: cuentaRelacionadaId,
+                idPerfil: id_perfil,
+                idPlataforma: id_plataforma,
+                correo,
+              })}
               <button
                 type="button"
                 class="btn-outline btn-ver-cuenta"
@@ -2284,13 +2328,17 @@
           const cuentaRelacionadaId =
             venta.id_cuenta || venta.id_cuenta_miembro || null;
           let platFlags = { showPerfil: true, showPin: true };
+          let cuentaPlataformaId = null;
+          let cuentaRow = null;
           if (cuentaRelacionadaId) {
-            const { data: cuentaRow, error: cuentaErr } = await supabase
+            const { data: cuentaData, error: cuentaErr } = await supabase
               .from("cuentas")
-              .select("id_plataforma")
+              .select("id_plataforma, correo")
               .eq("id_cuenta", cuentaRelacionadaId)
               .maybeSingle();
             if (cuentaErr) throw cuentaErr;
+            cuentaRow = cuentaData || null;
+            cuentaPlataformaId = toPositiveId(cuentaRow?.id_plataforma);
             if (cuentaRow?.id_plataforma) {
               const { data: platRow, error: platErr } = await supabase
                 .from("plataformas")
@@ -2335,6 +2383,9 @@
             id_cuenta: cuentaRelacionadaId,
             id_perfil: venta.id_perfil,
             id_venta: venta.id_venta,
+            id_usuario: venta.id_usuario || null,
+            id_plataforma: cuentaPlataformaId,
+            correo: cuentaRow?.correo || "",
             platFlags,
           });
           return true;
@@ -2924,6 +2975,14 @@
                     data-idventa="${r.id_venta ?? ""}"
                     data-cliente="${clienteSeleccionadoEncoded}"
                   >Reemplazar</button>
+                  ${buildReportarVentaButton({
+                    idVenta: r.id_venta,
+                    idUsuario: r.id_usuario,
+                    idCuenta: r.id_cuenta,
+                    idPerfil: r.id_perfil,
+                    idPlataforma: r.id_plataforma,
+                    correo: r.correo,
+                  })}
                   <button class="btn-copy" data-copy="${encodeURIComponent(
                     buildServiceCopyText({
                       plataforma: platName,
@@ -3102,6 +3161,7 @@
               : cuenta.clave || "";
             grouped[platName].rows.push({
               id_venta: v.id_venta,
+              id_usuario: v.id_usuario || null,
               id_cuenta: v.id_cuenta,
               id_perfil: v.id_perfil,
               correo: correoVenta,
@@ -3312,6 +3372,25 @@
           openReemplazoConfirmModal(replBtn);
           return;
         }
+        const reportBtn = e.target.closest(".btn-reportar-venta");
+        if (reportBtn) {
+          const ventaId = toPositiveId(reportBtn.dataset.idventa);
+          if (!ventaId) return;
+          const params = new URLSearchParams({ venta: String(ventaId), admin: "1" });
+          const optionalMap = {
+            usuario: reportBtn.dataset.idusuario,
+            cuenta: reportBtn.dataset.idcuenta,
+            perfil: reportBtn.dataset.idperfil,
+            plataforma: reportBtn.dataset.idplataforma,
+            correo: reportBtn.dataset.correo,
+          };
+          Object.entries(optionalMap).forEach(([key, value]) => {
+            const normalized = String(value || "").trim();
+            if (normalized) params.set(key, normalized);
+          });
+          window.location.href = `../reportes/crear_reporte.html?${params.toString()}`;
+          return;
+        }
         const btn = e.target.closest(".btn-copy");
         const delBtn = e.target.closest(".btn-delete");
         if (btn) {
@@ -3405,6 +3484,25 @@
       });
 
       ventaResultadoEl?.addEventListener("click", (e) => {
+        const reportBtn = e.target.closest(".btn-reportar-venta");
+        if (reportBtn) {
+          const ventaId = toPositiveId(reportBtn.dataset.idventa);
+          if (!ventaId) return;
+          const params = new URLSearchParams({ venta: String(ventaId), admin: "1" });
+          const optionalMap = {
+            usuario: reportBtn.dataset.idusuario,
+            cuenta: reportBtn.dataset.idcuenta,
+            perfil: reportBtn.dataset.idperfil,
+            plataforma: reportBtn.dataset.idplataforma,
+            correo: reportBtn.dataset.correo,
+          };
+          Object.entries(optionalMap).forEach(([key, value]) => {
+            const normalized = String(value || "").trim();
+            if (normalized) params.set(key, normalized);
+          });
+          window.location.href = `../reportes/crear_reporte.html?${params.toString()}`;
+          return;
+        }
         const replBtn = e.target.closest(".btn-reemplazar-row");
         if (replBtn) {
           openReemplazoConfirmModal(replBtn);
@@ -3658,6 +3756,7 @@
               info.usuariosCuenta?.[v.id_usuario] ||
               (v.id_usuario ? `Usuario ${v.id_usuario}` : "-"),
             id_venta: v.id_venta,
+            id_usuario: v.id_usuario || null,
             fecha_corte: v.fecha_corte || "",
             fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
             suspendido: v.suspendido === true,
@@ -3689,6 +3788,7 @@
                 info.usuariosCuenta?.[v.id_usuario] ||
                 (v.id_usuario ? `Usuario ${v.id_usuario}` : "-"),
               id_venta: v.id_venta || null,
+              id_usuario: v.id_usuario || null,
               fecha_corte: v.fecha_corte || "",
               fecha_corte_fmt: formatDDMMYYYY(v.fecha_corte) || "",
               suspendido: v.suspendido === true,
@@ -3905,6 +4005,14 @@
                   data-idventa="${p.id_venta || ""}"
                   data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>
+                  ${buildReportarVentaButton({
+                    idVenta: p.id_venta,
+                    idUsuario: p.id_usuario,
+                    idCuenta: currentCuentaId,
+                    idPerfil: p.id_perfil,
+                    idPlataforma: info.plataformaId,
+                    correo: info.correo,
+                  })}
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
                     info.isPlat9 && info.venta_miembro === true && p.id_venta
@@ -3978,6 +4086,14 @@
                   data-idventa="${p.id_venta || ""}"
                   data-cliente="${clienteNombreEncoded}"
                 >Reemplazar</button>
+                  ${buildReportarVentaButton({
+                    idVenta: p.id_venta,
+                    idUsuario: p.id_usuario,
+                    idCuenta: currentCuentaId,
+                    idPerfil: p.id_perfil,
+                    idPlataforma: info.plataformaId,
+                    correo: info.correo,
+                  })}
                   <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>
                   ${
                     isEmptySlot && !isSuperadmin
@@ -4380,6 +4496,12 @@
                               data-venta-perfil="${m.venta_perfil ? "true" : "false"}"
                               data-cliente="${clienteNombreEncoded}"
                             >Reemplazar</button>
+                            ${buildReportarVentaButton({
+                              idVenta: m.id_venta,
+                              idCuenta: m.id_cuenta,
+                              idPlataforma: m.id_plataforma ?? info.plataformaId,
+                              correo: m.correo,
+                            })}
                             <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}" ${hasVenta ? "" : "disabled"}>Copiar</button>
                             ${
                               info.isPlat9 &&
@@ -4719,6 +4841,7 @@
                 n_raw: p.n_perfil,
                 ocupadoPor: enReemplazos ? "Reemplazado" : ocupadoCell,
                 id_venta: ventasMap[p.id_perfil]?.id_venta || null,
+                id_usuario: ventasMap[p.id_perfil]?.id_usuario || null,
                 fecha_corte: ventasMap[p.id_perfil]?.fecha_corte || "",
                 fecha_corte_fmt:
                   formatDDMMYYYY(ventasMap[p.id_perfil]?.fecha_corte) || "",
@@ -4746,6 +4869,7 @@
                   cliente,
                   correo: ventaInfo.correo_miembro || "",
                   clave: ventaInfo.clave_miembro || "",
+                  id_usuario: ventaInfo.id_usuario || null,
                   fecha_corte: ventaInfo.fecha_corte || "",
                   suspendido: ventaInfo.suspendido === true,
                   pendiente: isTrue(ventaInfo.pendiente),
@@ -7577,6 +7701,29 @@
             await copyTextNotify(pinVal);
           }
           modalPin?.classList.remove("hidden");
+          return;
+        }
+
+        const btnReportar = e.target.closest(".btn-reportar-venta");
+        if (btnReportar) {
+          const ventaId = toPositiveId(btnReportar.dataset.idventa);
+          if (!ventaId) {
+            alert("No se encontró la venta asociada para reportar.");
+            return;
+          }
+          const params = new URLSearchParams({ venta: String(ventaId), admin: "1" });
+          const optionalMap = {
+            usuario: btnReportar.dataset.idusuario,
+            cuenta: btnReportar.dataset.idcuenta,
+            perfil: btnReportar.dataset.idperfil,
+            plataforma: btnReportar.dataset.idplataforma,
+            correo: btnReportar.dataset.correo,
+          };
+          Object.entries(optionalMap).forEach(([key, value]) => {
+            const normalized = String(value || "").trim();
+            if (normalized) params.set(key, normalized);
+          });
+          window.location.href = `../reportes/crear_reporte.html?${params.toString()}`;
           return;
         }
 
