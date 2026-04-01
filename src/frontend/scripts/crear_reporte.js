@@ -641,12 +641,14 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     if (occCuentaErr) console.error("auto reemplazo ocupar cuenta error", occCuentaErr);
   }
 
-  await supabase.from("reemplazos").insert({
-    id_cuenta: idCuenta,
-    id_perfil: idPerfil || null,
-    id_sub_cuenta: null,
-    id_venta: ventaInfo.id_venta,
-  });
+  if (Number(plataformaId) !== 9) {
+    await supabase.from("reemplazos").insert({
+      id_cuenta: idCuenta,
+      id_perfil: idPerfil || null,
+      id_sub_cuenta: null,
+      id_venta: ventaInfo.id_venta,
+    });
+  }
 
   try {
     const userIds = pickNotificationUserIds("servicio_reemplazado", {

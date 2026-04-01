@@ -747,7 +747,14 @@ const buildPlataformasFromRows = (rows = []) => {
     }
     porPlat.get(id).items.push(r);
   });
-  return Array.from(porPlat.values());
+  return Array.from(porPlat.values()).map((plataforma) => {
+    const sortedItems = [...(plataforma.items || [])].sort((a, b) => {
+      const aId = toPositiveId(a?.id_reporte) || Number.MAX_SAFE_INTEGER;
+      const bId = toPositiveId(b?.id_reporte) || Number.MAX_SAFE_INTEGER;
+      return aId - bId;
+    });
+    return { ...plataforma, items: sortedItems };
+  });
 };
 
 const rerenderActivosDesdeMap = () => {
@@ -1745,7 +1752,8 @@ async function reemplazarServicio(options = {}) {
       if (occCuentaErr) console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
     }
 
-    const debeRegistrarReemplazo = !(perfilAnteriorId && perfilTieneOtraVenta);
+    const debeRegistrarReemplazo =
+      Number(plataformaId) !== 9 && !(perfilAnteriorId && perfilTieneOtraVenta);
     if (debeRegistrarReemplazo) {
       await supabase.from("reemplazos").insert({
         id_cuenta: cuentaId,

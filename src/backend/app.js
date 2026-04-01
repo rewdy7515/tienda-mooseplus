@@ -7368,7 +7368,7 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         }
       }
 
-      if (oldCuentaId || oldPerfilId) {
+      if (Number(plataformaId) !== 9 && (oldCuentaId || oldPerfilId)) {
         const { error: replErr } = await supabaseAdmin
           .from("reemplazos")
           .insert({
