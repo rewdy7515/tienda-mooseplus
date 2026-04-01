@@ -2685,7 +2685,7 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
     const { data, error: ventaErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, precios(id_plataforma)",
+        "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, completa, precios(id_plataforma)",
       )
       .eq("id_venta", ventaId)
       .maybeSingle();
@@ -2721,6 +2721,9 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   }
   if (isTrue(ventaRow?.reportado)) {
     return { sent: false, skipped: true, reason: "sale_reported" };
+  }
+  if (isTrue(ventaRow?.completa)) {
+    return { sent: false, skipped: true, reason: "sale_complete" };
   }
   if (isTrue(ventaRow?.aviso_admin)) {
     return { sent: false, skipped: true, reason: "already_notified_admin" };
@@ -3310,10 +3313,11 @@ const processPendingSpotifyAdminAlerts = async () => {
       let query = supabaseAdmin
         .from("ventas")
       .select(
-          "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, precios!inner(id_plataforma)",
+          "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, completa, precios!inner(id_plataforma)",
         )
         .eq("pendiente", false)
         .not("reportado", "is", true)
+        .not("completa", "is", true)
         .eq("precios.id_plataforma", 9)
         .not("correo_miembro", "is", null)
         .not("clave_miembro", "is", null)
