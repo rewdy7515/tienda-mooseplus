@@ -933,6 +933,7 @@
         clearServerSession,
         loadCurrentUser,
         supabase,
+        notifyReporteSolvedWhatsapp,
       } from "../../scripts/api.js";
       import { buildServiceCopyText } from "../../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
@@ -1297,6 +1298,51 @@
         const parsed = Number(value);
         if (!Number.isFinite(parsed) || parsed <= 0) return null;
         return Math.trunc(parsed);
+      };
+      const notifyReporteSolvedWhatsappBestEffort = async ({
+        idReporte = null,
+        idVenta = null,
+        pendingState = undefined,
+      } = {}) => {
+        const reportId = toPositiveId(idReporte);
+        if (!reportId) return { ok: false, skipped: true, reason: "invalid_report" };
+        try {
+          let pendingValue = pendingState;
+          if (pendingValue === undefined) {
+            const ventaId = toPositiveId(idVenta);
+            if (!ventaId) return { ok: false, skipped: true, reason: "venta_not_found" };
+            const { data: ventaRow, error: ventaErr } = await supabase
+              .from("ventas")
+              .select("id_venta, pendiente")
+              .eq("id_venta", ventaId)
+              .maybeSingle();
+            if (ventaErr) {
+              console.error("[admin_cuentas] whatsapp reporte solucionado venta lookup error", ventaErr);
+              return {
+                ok: false,
+                skipped: true,
+                reason: "venta_lookup_error",
+                error: ventaErr.message,
+              };
+            }
+            pendingValue = ventaRow?.pendiente;
+          }
+          if (pendingValue !== false) {
+            return { ok: false, skipped: true, reason: "venta_pending_flag_not_false" };
+          }
+          const waResult = await notifyReporteSolvedWhatsapp(reportId);
+          if (waResult?.error) {
+            console.error("[admin_cuentas] whatsapp reporte solucionado error", waResult);
+            return { ok: false, error: waResult.error, status: waResult.status || null };
+          }
+          if (waResult?.sent === true || waResult?.ok === true) {
+            return { ok: true, sent: true };
+          }
+          return { ok: false, skipped: true, reason: waResult?.reason || "not_sent" };
+        } catch (err) {
+          console.error("[admin_cuentas] whatsapp reporte solucionado exception", err);
+          return { ok: false, error: err?.message || String(err) };
+        }
       };
       const loadReemplazosCache = async (force = false) => {
         if (force) {
@@ -8524,21 +8570,44 @@
               addToReemplazosCache({ idCuenta: cuentaId, idPerfil: perfilId || null });
             }
 
-            const { error: updReporteErr } = await supabase
-              .from("reportes")
-              .update({
-                en_revision: false,
-                solucionado: true,
-                solucionado_por: actorUserId || null,
-                descripcion_solucion: "Reemplazo automático por cuenta inactiva",
-              })
-              .eq("id_reporte", reporteId);
-            if (updReporteErr) throw updReporteErr;
+	            const { error: updReporteErr } = await supabase
+	              .from("reportes")
+	              .update({
+	                en_revision: false,
+	                solucionado: true,
+	                solucionado_por: actorUserId || null,
+	                descripcion_solucion: "Reemplazo automático por cuenta inactiva",
+	              })
+	              .eq("id_reporte", reporteId);
+	            if (updReporteErr) throw updReporteErr;
+	            try {
+	              const { data: ventaEstadoRow, error: ventaEstadoErr } = await supabase
+	                .from("ventas")
+	                .select("pendiente")
+	                .eq("id_venta", ventaInfo.id_venta)
+	                .maybeSingle();
+	              if (ventaEstadoErr) throw ventaEstadoErr;
+	              const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort({
+	                idReporte: reporteId,
+	                idVenta: ventaInfo.id_venta,
+	                pendingState: ventaEstadoRow?.pendiente,
+	              });
+	              if (!waSolvedRes?.ok) {
+	                console.warn("[admin_cuentas] reporte cerrado sin WhatsApp de solucion", {
+	                  id_reporte: reporteId,
+	                  id_venta: ventaInfo.id_venta,
+	                  reason: waSolvedRes?.reason || null,
+	                  error: waSolvedRes?.error || null,
+	                });
+	              }
+	            } catch (waSolvedErr) {
+	              console.error("[admin_cuentas] whatsapp reporte solucionado auto reemplazo error", waSolvedErr);
+	            }
 
-            try {
-              const userIds = pickNotificationUserIds("servicio_reemplazado", {
-                ventaUserId: ventaInfo.id_usuario || ventaUserId,
-              });
+	            try {
+	              const userIds = pickNotificationUserIds("servicio_reemplazado", {
+	                ventaUserId: ventaInfo.id_usuario || ventaUserId,
+	              });
               if (userIds.length) {
                 const notif = buildNotificationPayload(
                   "servicio_reemplazado",

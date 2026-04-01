@@ -1867,6 +1867,28 @@ Correo: ${correoText}
 Estado: solucionado ✅`;
 };
 
+const buildWhatsappOrderDetailUrl = (idOrden = null) => {
+  const ordenId = toPositiveInt(idOrden);
+  if (!ordenId) return "";
+  try {
+    const url = new URL("/detalle_ordenes.html", buildPublicSiteUrl());
+    url.searchParams.set("id_orden", String(ordenId));
+    return url.toString();
+  } catch (_err) {
+    return `${buildPublicSiteUrl()}/detalle_ordenes.html?id_orden=${encodeURIComponent(String(ordenId))}`;
+  }
+};
+
+const buildWhatsappOrdenEntregadaMessage = ({ idOrden = null, detalleOrdenUrl = "" } = {}) => {
+  const ordenId = toPositiveInt(idOrden) || idOrden || "-";
+  const detalleUrl = String(detalleOrdenUrl || "").trim() || buildPublicSiteUrl();
+  return `\`Orden #${ordenId}\`
+estado: entregado ✅
+
+Puedes verificar la orden por:
+${detalleUrl}`;
+};
+
 const fetchReporteWhatsappContextById = async (idReporte) => {
   const reportId = toPositiveInt(idReporte);
   if (!reportId) return null;
@@ -1874,12 +1896,59 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
   const { data, error } = await supabaseAdmin
     .from("reportes")
     .select(
-      "id_reporte, id_usuario, descripcion, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
+      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, descripcion, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
     )
     .eq("id_reporte", reportId)
     .maybeSingle();
   if (error) throw error;
   return data || null;
+};
+
+const findVentaAsociadaFromReporteForWhatsapp = async (reporte = null) => {
+  const ventaIdDirecta = toPositiveInt(reporte?.id_venta);
+  if (ventaIdDirecta) {
+    const { data: ventaDirecta, error: ventaDirectaErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, pendiente")
+      .eq("id_venta", ventaIdDirecta)
+      .maybeSingle();
+    if (ventaDirectaErr) throw ventaDirectaErr;
+    if (ventaDirecta?.id_venta) return ventaDirecta;
+  }
+
+  const cuentaId = toPositiveInt(reporte?.id_cuenta);
+  if (!cuentaId) return null;
+  const perfilId = toPositiveInt(reporte?.id_perfil);
+  const withPerfil = !!perfilId;
+  const userId = toPositiveInt(reporte?.id_usuario);
+
+  const findWithFilter = async (withUserFilter = true, strictPerfil = true) => {
+    let query = supabaseAdmin
+      .from("ventas")
+      .select("id_venta, pendiente")
+      .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`)
+      .order("id_venta", { ascending: false })
+      .limit(1);
+    if (withUserFilter && userId) query = query.eq("id_usuario", userId);
+    if (withPerfil) {
+      if (strictPerfil) query = query.eq("id_perfil", perfilId);
+    } else {
+      query = query.is("id_perfil", null);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return data?.[0] || null;
+  };
+
+  let venta = await findWithFilter(true, true);
+  if (venta) return venta;
+  venta = await findWithFilter(false, true);
+  if (venta) return venta;
+  if (!withPerfil) return null;
+  venta = await findWithFilter(true, false);
+  if (venta) return venta;
+  venta = await findWithFilter(false, false);
+  return venta || null;
 };
 
 const sendReporteCreatedToWhatsappGroup = async ({
@@ -2001,6 +2070,28 @@ const sendReporteSolvedToWhatsappOwner = async ({
     };
   }
 
+  const ventaAsociada = await findVentaAsociadaFromReporteForWhatsapp(reporte);
+  const ventaAsociadaId = toPositiveInt(ventaAsociada?.id_venta);
+  if (!ventaAsociadaId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "associated_sale_not_found",
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+  if (ventaAsociada?.pendiente !== false) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "associated_sale_pending_flag_not_false",
+      id_reporte: reportId,
+      id_venta: ventaAsociadaId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
   const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
   if (!targetPhone) {
     return {
@@ -2071,6 +2162,134 @@ const sendReporteSolvedToWhatsappOwner = async ({
     skipped: false,
     reason: null,
     id_reporte: reportId,
+    id_usuario_destino: targetUserId,
+    phone: targetPhone,
+  };
+};
+
+const sendVentaEntregadaToWhatsappOwner = async ({
+  idVenta = null,
+  venta = null,
+  manageWhatsappLifecycle = true,
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta || venta?.id_venta);
+  if (!ventaId) {
+    return { sent: false, skipped: true, reason: "invalid_sale" };
+  }
+
+  let ventaRow = null;
+  const snapshotVentaId = toPositiveInt(venta?.id_venta);
+  if (snapshotVentaId && snapshotVentaId === ventaId) {
+    ventaRow = venta;
+  } else {
+    const { data, error } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, id_usuario, id_orden, pendiente, reportado")
+      .eq("id_venta", ventaId)
+      .maybeSingle();
+    if (error) throw error;
+    ventaRow = data || null;
+  }
+  if (!ventaRow?.id_venta) {
+    return { sent: false, skipped: true, reason: "sale_not_found", id_venta: ventaId };
+  }
+  if (isTrue(ventaRow?.pendiente)) {
+    return { sent: false, skipped: true, reason: "sale_still_pending", id_venta: ventaId };
+  }
+  if (isTrue(ventaRow?.reportado)) {
+    return { sent: false, skipped: true, reason: "sale_reported", id_venta: ventaId };
+  }
+
+  const targetUserId = toPositiveInt(ventaRow?.id_usuario);
+  const ordenId = toPositiveInt(ventaRow?.id_orden);
+  if (!targetUserId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_target_user",
+      id_venta: ventaId,
+    };
+  }
+  if (!ordenId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_order",
+      id_venta: ventaId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "target_user_phone_missing",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const message = buildWhatsappOrdenEntregadaMessage({
+    idOrden: ordenId,
+    detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
+  });
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle ? "sale_delivered_user_alert" : "sale_delivered_user_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de orden entregada",
+    );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "sale_delivered_user_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[ventas:whatsapp] entregada shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+      phone: targetPhone,
+    };
+  }
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_venta: ventaId,
+    id_orden: ordenId,
     id_usuario_destino: targetUserId,
     phone: targetPhone,
   };
@@ -2305,8 +2524,11 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   if (platId !== 9) {
     return { sent: false, skipped: true, reason: "not_spotify_sale" };
   }
-  if (!isTrue(ventaRow?.pendiente)) {
-    return { sent: false, skipped: true, reason: "sale_not_pending" };
+  if (ventaRow?.pendiente !== false) {
+    return { sent: false, skipped: true, reason: "sale_pending_flag_not_false" };
+  }
+  if (isTrue(ventaRow?.reportado)) {
+    return { sent: false, skipped: true, reason: "sale_reported" };
   }
   if (isTrue(ventaRow?.aviso_admin)) {
     return { sent: false, skipped: true, reason: "already_notified_admin" };
@@ -2898,7 +3120,8 @@ const processPendingSpotifyAdminAlerts = async () => {
       .select(
           "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, precios!inner(id_plataforma)",
         )
-        .eq("pendiente", true)
+        .eq("pendiente", false)
+        .not("reportado", "is", true)
         .eq("precios.id_plataforma", 9)
         .not("correo_miembro", "is", null)
         .not("clave_miembro", "is", null)
@@ -5944,6 +6167,38 @@ app.post("/api/whatsapp/reportes/notificar-solucion", async (req, res) => {
   }
 });
 
+app.post("/api/whatsapp/ventas/notificar-entregada", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const ventaId = toPositiveInt(req.body?.id_venta ?? req.body?.idVenta);
+    if (!ventaId) {
+      return res.status(400).json({ error: "id_venta inválido" });
+    }
+
+    const result = await sendVentaEntregadaToWhatsappOwner({
+      idVenta: ventaId,
+      manageWhatsappLifecycle: true,
+    });
+    if (result?.sent) return res.json({ ok: true, ...result });
+    if (result?.skipped) return res.status(202).json({ ok: false, ...result });
+    return res.status(500).json({
+      error: result?.error || "No se pudo enviar la notificación de orden entregada por WhatsApp",
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[whatsapp/ventas/notificar-entregada] error", err);
+    return res.status(500).json({
+      error: err?.message || "No se pudo notificar la orden entregada por WhatsApp",
+    });
+  }
+});
+
 app.get("/api/whatsapp/reportes/worker-status", async (req, res) => {
   try {
     const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
@@ -7068,6 +7323,24 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         .update(updateVenta)
         .eq("id_venta", ventaId);
       if (updVentaErr) throw updVentaErr;
+      try {
+        const waDeliveredRes = await sendVentaEntregadaToWhatsappOwner({
+          idVenta: ventaId,
+          manageWhatsappLifecycle: true,
+        });
+        if (!waDeliveredRes?.sent) {
+          console.warn("[autoAssignReportedPendingVentas] whatsapp orden entregada skipped", {
+            id_venta: ventaId,
+            reason: waDeliveredRes?.reason || "unknown",
+            error: waDeliveredRes?.error || null,
+          });
+        }
+      } catch (waDeliveredErr) {
+        console.error("[autoAssignReportedPendingVentas] whatsapp orden entregada error", {
+          id_venta: ventaId,
+          error: waDeliveredErr?.message || waDeliveredErr,
+        });
+      }
 
       if (nuevoPerfilId) {
         const { error: occPerfilErr } = await supabaseAdmin

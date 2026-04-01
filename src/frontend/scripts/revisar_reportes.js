@@ -443,10 +443,39 @@ async function notifyReemplazoReporte({ row, plataforma, correoViejo, correoNuev
   if (error) throw error;
 }
 
-async function notifyReporteSolvedWhatsappBestEffort(idReporte) {
+async function notifyReporteSolvedWhatsappBestEffort(
+  idReporte,
+  { row = null, ventaId = null, pendingState = undefined } = {},
+) {
   const reportId = toPositiveId(idReporte);
   if (!reportId) return { ok: false, skipped: true, reason: "invalid_report" };
   try {
+    let pendingValue = pendingState;
+    if (pendingValue === undefined) {
+      let resolvedVentaId = toPositiveId(ventaId);
+      if (!resolvedVentaId && row) {
+        const ventaInfo = await findVentaAsociadaFromReporte(row);
+        resolvedVentaId = toPositiveId(ventaInfo?.id_venta);
+      }
+      if (!resolvedVentaId) {
+        return { ok: false, skipped: true, reason: "venta_not_found" };
+      }
+      const { data: ventaRow, error: ventaErr } = await supabase
+        .from("ventas")
+        .select("id_venta, pendiente")
+        .eq("id_venta", resolvedVentaId)
+        .maybeSingle();
+      if (ventaErr) {
+        console.error("whatsapp reporte solucionado venta lookup error", ventaErr);
+        return { ok: false, skipped: true, reason: "venta_lookup_error", error: ventaErr.message };
+      }
+      pendingValue = ventaRow?.pendiente;
+    }
+
+    if (pendingValue !== false) {
+      return { ok: false, skipped: true, reason: "venta_pending_flag_not_false" };
+    }
+
     const waResult = await notifyReporteSolvedWhatsapp(reportId);
     if (waResult?.error) {
       console.error("whatsapp reporte solucionado error", waResult);
@@ -608,8 +637,10 @@ const renderReportesList = (plataformas = []) => {
               const correoCopyAttr = escapeHtml(correo);
               const madreCorreo = normalizeCopyValue(r?.cuenta_madre_correo);
               const madreCopyAttr = escapeHtml(madreCorreo);
-              const cuentaInactiva = isTrue(r?.cuentas?.inactiva);
-              const cuentaActivaTrasReemplazo = isTrue(r?._reemplazo_activo) && !cuentaInactiva;
+              const cuentaInactiva = isTrue(r?.cuenta_inactiva_resuelta);
+              const cuentaTieneMadre = isTrue(r?.cuenta_tiene_madre);
+              const cuentaActivaTrasReemplazo =
+                (isTrue(r?._reemplazo_activo) || cuentaTieneMadre) && !cuentaInactiva;
               const estadoCuentaDot = cuentaInactiva
                 ? '<span class="reporte-inactiva-dot" title="Cuenta inactiva" aria-label="Cuenta inactiva"></span>'
                 : cuentaActivaTrasReemplazo
@@ -824,7 +855,7 @@ async function loadReportes() {
   if (cuentaIds.size) {
     const { data: cuentasData, error: cuentasErr } = await supabase
       .from("cuentas")
-      .select("id_cuenta, id_cuenta_madre, cuenta_madre, correo")
+      .select("id_cuenta, id_cuenta_madre, cuenta_madre, correo, inactiva")
       .in("id_cuenta", Array.from(cuentaIds));
     if (cuentasErr) {
       console.error("load reportes cuentas madre error", cuentasErr);
@@ -839,12 +870,23 @@ async function loadReportes() {
     const cuentaRow = row?.cuentas || {};
     const cuentaId = toPositiveId(cuentaRow?.id_cuenta);
     const cuentaMadreId = toPositiveId(cuentaRow?.id_cuenta_madre);
-    const madreId = cuentaMadreId || cuentaId || null;
+    const cuentaEsMadre = isTrue(cuentaRow?.cuenta_madre);
+    const madreId = cuentaMadreId || (cuentaEsMadre ? cuentaId : null);
     const madreRow = madreId ? cuentasById.get(madreId) : null;
+    const cuentaBaseInactiva = isTrue(cuentaRow?.inactiva);
+    const madreInactiva =
+      madreRow && Object.prototype.hasOwnProperty.call(madreRow, "inactiva")
+        ? isTrue(madreRow?.inactiva)
+        : null;
+    const cuentaInactivaResuelta =
+      madreInactiva === null ? cuentaBaseInactiva : madreInactiva;
     const madreCorreo = normalizeCopyValue(
       madreRow?.correo || (cuentaMadreId ? "" : cuentaRow?.correo || ""),
     );
     row.cuenta_madre_correo = madreCorreo;
+    row.cuenta_madre_inactiva = madreInactiva;
+    row.cuenta_tiene_madre = !!madreId;
+    row.cuenta_inactiva_resuelta = cuentaInactivaResuelta;
   });
 
   return rows;
@@ -1303,7 +1345,9 @@ async function guardarCambios() {
       .eq("id_reporte", currentRow.id_reporte);
     if (error) throw error;
 
-    const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort(currentRow.id_reporte);
+    const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort(currentRow.id_reporte, {
+      row: currentRow,
+    });
     if (!waSolvedRes?.ok) {
       console.warn("reporte cerrado sin WhatsApp de solucion", {
         id_reporte: currentRow.id_reporte,
@@ -1776,6 +1820,9 @@ async function reemplazarServicio(options = {}) {
       if (dataDestino?.correo) {
         selectedRow.cuenta_madre_correo = dataDestino.correo;
       }
+      selectedRow.cuenta_madre_inactiva = false;
+      selectedRow.cuenta_inactiva_resuelta = false;
+      selectedRow.cuenta_tiene_madre = true;
       selectedRow._reemplazo_activo = true;
       if (selectedRow?.id_reporte) {
         reportesById.set(String(selectedRow.id_reporte), selectedRow);
@@ -1800,7 +1847,11 @@ async function reemplazarServicio(options = {}) {
       .eq("id_reporte", selectedRow.id_reporte);
     if (repErr) throw repErr;
 
-    const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort(selectedRow.id_reporte);
+    const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort(selectedRow.id_reporte, {
+      row: selectedRow,
+      ventaId,
+      pendingState: ventaEstadoRow?.pendiente,
+    });
     if (!waSolvedRes?.ok) {
       console.warn("reemplazo cerrado sin WhatsApp de solucion", {
         id_reporte: selectedRow.id_reporte,
@@ -1828,7 +1879,7 @@ async function reemplazarServicio(options = {}) {
 
 async function autoReplaceInactiveReportes(reportes = []) {
   if (!autoReemplazoCuentaInactivaEnabled) return false;
-  const targets = (reportes || []).filter((r) => isTrue(r?.cuentas?.inactiva));
+  const targets = (reportes || []).filter((r) => isTrue(r?.cuenta_inactiva_resuelta));
   if (!targets.length) return false;
 
   for (const row of targets) {

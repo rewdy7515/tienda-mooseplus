@@ -1751,6 +1751,39 @@ export async function notifyReporteSolvedWhatsapp(idReporte) {
   }
 }
 
+export async function notifyVentaDeliveredWhatsapp(idVenta) {
+  await ensureServerSession();
+  const ventaId = Number(idVenta);
+  if (!Number.isFinite(ventaId) || ventaId <= 0) {
+    return { error: "id_venta invalido" };
+  }
+  try {
+    const headers = { "Content-Type": "application/json" };
+    const accessToken = getRememberedAccessToken();
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+    const res = await fetch(`${API_BASE}/api/whatsapp/ventas/notificar-entregada`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ id_venta: ventaId }),
+    });
+    const { text, data } = await readResponseBodySafe(res);
+    if (!res.ok) {
+      const message = String(data?.error || text || "").trim();
+      return {
+        error: message || "No se pudo notificar la orden entregada por WhatsApp",
+        status: res.status,
+      };
+    }
+    return data || { ok: true };
+  } catch (err) {
+    console.error("notifyVentaDeliveredWhatsapp error", err);
+    return { error: err.message };
+  }
+}
+
 export async function fetchP2PRate() {
   const startedAt = getDebugNow();
   logApiDebug("fetchP2PRate:start", {});

@@ -305,6 +305,7 @@
         loadCurrentUser,
         clearServerSession,
         entregarGiftCardPendiente,
+        notifyVentaDeliveredWhatsapp,
       } from "../../scripts/api.js";
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
@@ -467,6 +468,54 @@
         const m = String(date.getMonth() + 1).padStart(2, "0");
         const d = String(date.getDate()).padStart(2, "0");
         return `${y}-${m}-${d}`;
+      };
+      const notifyVentaDeliveredWhatsappBestEffort = async (idVenta) => {
+        const ventaId = toPositiveId(idVenta);
+        if (!ventaId) return { sent: false, skipped: true, reason: "invalid_sale" };
+        try {
+          const waResult = await notifyVentaDeliveredWhatsapp(ventaId);
+          if (waResult?.error) {
+            console.warn("[pedidos_pendientes] whatsapp orden entregada error", {
+              id_venta: ventaId,
+              error: waResult.error,
+              status: waResult.status || null,
+            });
+            return {
+              sent: false,
+              skipped: false,
+              reason: "request_error",
+              error: waResult.error,
+            };
+          }
+          if (waResult?.sent) {
+            return { sent: true, skipped: false, reason: null, ...waResult };
+          }
+          if (waResult?.ok === false) {
+            console.warn("[pedidos_pendientes] whatsapp orden entregada skipped", {
+              id_venta: ventaId,
+              reason: waResult?.reason || "unknown",
+            });
+            return {
+              sent: false,
+              skipped: true,
+              reason: waResult?.reason || "unknown",
+              ...waResult,
+            };
+          }
+          return { sent: true, skipped: false, reason: null, ...waResult };
+        } catch (err) {
+          const message = err?.message || String(err);
+          console.warn("[pedidos_pendientes] whatsapp orden entregada exception", {
+            id_venta: ventaId,
+            error: message,
+          });
+          return {
+            sent: false,
+            skipped: false,
+            reason: "exception",
+            error: message,
+          };
+        }
       };
 
       const getPedidoAsignadoLabel = (venta = {}) => {
@@ -1297,6 +1346,7 @@
           });
           if (histErr) throw histErr;
         }
+        await notifyVentaDeliveredWhatsappBestEffort(idVenta);
 
         const status = document.createElement("span");
         status.className = "badge badge-green";
