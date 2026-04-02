@@ -1906,11 +1906,13 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
 };
 
 const findVentaAsociadaFromReporteForWhatsapp = async (reporte = null) => {
+  const ventaSelectForWhatsapp =
+    "id_venta, pendiente, correo_miembro, clave_miembro, cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave)";
   const ventaIdDirecta = toPositiveInt(reporte?.id_venta);
   if (ventaIdDirecta) {
     const { data: ventaDirecta, error: ventaDirectaErr } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta, pendiente")
+      .select(ventaSelectForWhatsapp)
       .eq("id_venta", ventaIdDirecta)
       .maybeSingle();
     if (ventaDirectaErr) throw ventaDirectaErr;
@@ -1926,7 +1928,7 @@ const findVentaAsociadaFromReporteForWhatsapp = async (reporte = null) => {
   const findWithFilter = async (withUserFilter = true, strictPerfil = true) => {
     let query = supabaseAdmin
       .from("ventas")
-      .select("id_venta, pendiente")
+      .select(ventaSelectForWhatsapp)
       .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`)
       .order("id_venta", { ascending: false })
       .limit(1);
@@ -1952,6 +1954,28 @@ const findVentaAsociadaFromReporteForWhatsapp = async (reporte = null) => {
   return venta || null;
 };
 
+const getVentaCorreoMiembroForWhatsapp = (venta = null) => {
+  const correoVenta = String(venta?.correo_miembro || "").trim();
+  if (correoVenta) return correoVenta;
+  const cuentaMiembro = Array.isArray(venta?.cuentas_miembro)
+    ? venta.cuentas_miembro[0] || null
+    : venta?.cuentas_miembro || null;
+  const correoCuentaMiembro = String(cuentaMiembro?.correo || "").trim();
+  if (correoCuentaMiembro) return correoCuentaMiembro;
+  return "";
+};
+
+const getVentaClaveMiembroForWhatsapp = (venta = null) => {
+  const claveVenta = String(venta?.clave_miembro || "").trim();
+  if (claveVenta) return claveVenta;
+  const cuentaMiembro = Array.isArray(venta?.cuentas_miembro)
+    ? venta.cuentas_miembro[0] || null
+    : venta?.cuentas_miembro || null;
+  const claveCuentaMiembro = String(cuentaMiembro?.clave || "").trim();
+  if (claveCuentaMiembro) return claveCuentaMiembro;
+  return "";
+};
+
 const sendReporteCreatedToWhatsappGroup = async ({
   reporte = null,
   manageWhatsappLifecycle = true,
@@ -1966,12 +1990,13 @@ const sendReporteCreatedToWhatsappGroup = async ({
   const cliente = [nombre, apellido].filter(Boolean).join(" ").trim();
   const motivo =
     String(reporte?.reporte_tipos?.titulo || "").trim() || String(reporte?.descripcion || "").trim();
+  const ventaAsociada = await findVentaAsociadaFromReporteForWhatsapp(reporte);
 
   const message = buildWhatsappReporteCreadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
-    correo: reporte?.cuentas?.correo,
-    clave: reporte?.cuentas?.clave,
+    correo: getVentaCorreoMiembroForWhatsapp(ventaAsociada) || "-",
+    clave: getVentaClaveMiembroForWhatsapp(ventaAsociada) || "-",
     cliente: cliente || `Usuario ${toPositiveInt(reporte?.id_usuario) || "-"}`,
     motivo,
   });
@@ -2107,7 +2132,7 @@ const sendReporteSolvedToWhatsappOwner = async ({
   const message = buildWhatsappReporteSolucionadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
-    correo: reporte?.cuentas?.correo,
+    correo: getVentaCorreoMiembroForWhatsapp(ventaAsociada) || "-",
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
@@ -2241,9 +2266,6 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   }
   if (!ventaRow?.id_venta) {
     return { sent: false, skipped: true, reason: "sale_not_found", id_venta: ventaId };
-  }
-  if (isTrue(ventaRow?.pendiente)) {
-    return { sent: false, skipped: true, reason: "sale_still_pending", id_venta: ventaId };
   }
   if (isTrue(ventaRow?.reportado)) {
     return { sent: false, skipped: true, reason: "sale_reported", id_venta: ventaId };
@@ -2464,12 +2486,13 @@ const notifyVentaEntregadaAfterOrderVerified = async ({
     .from("ventas")
     .select("id_venta, pendiente, reportado")
     .eq("id_orden", ordenId)
-    .eq("pendiente", false)
     .order("id_venta", { ascending: true })
     .limit(120);
   if (ventasErr) throw ventasErr;
 
-  const ventaTarget = (ventasRows || []).find((row) => !isTrue(row?.reportado));
+  const ventasNoReportadas = (ventasRows || []).filter((row) => !isTrue(row?.reportado));
+  const ventaTarget =
+    ventasNoReportadas.find((row) => row?.pendiente === false) || ventasNoReportadas[0] || null;
   const ventaId = toPositiveInt(ventaTarget?.id_venta);
   if (!ventaId) {
     return {
@@ -14665,7 +14688,9 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       }
       console.log("[ordenes/procesar] ya procesada", { id_orden: idOrden, ventas: ventasExist.length });
       await syncPagoMovilCredito();
-      if (ordenPatch.pago_verificado === true) {
+      const shouldNotifyPagoVerificado =
+        ordenPatch.pago_verificado === true || isTrue(orden?.pago_verificado);
+      if (shouldNotifyPagoVerificado) {
         try {
           const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
             idOrden,

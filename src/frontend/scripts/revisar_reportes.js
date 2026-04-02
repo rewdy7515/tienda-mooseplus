@@ -1444,7 +1444,9 @@ async function reemplazarServicio(options = {}) {
 
     const { data: ventaInfo, error: ventaErr } = await supabase
       .from("ventas")
-      .select("id_venta, id_usuario, fecha_corte, id_precio, id_cuenta, id_cuenta_miembro, id_perfil")
+      .select(
+        "id_venta, id_usuario, fecha_corte, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, correo_miembro, cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo)",
+      )
       .eq("id_venta", ventaAsociadaId)
       .maybeSingle();
     if (ventaErr || !ventaInfo?.id_venta) {
@@ -1589,6 +1591,7 @@ async function reemplazarServicio(options = {}) {
     let nuevoCuenta = null;
     let nuevoPerfil = null;
     let dataDestino = {};
+    let destinoEsCuentaMiembro = false;
     let asignadoDesdeCuentaMadre = false;
     const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
 
@@ -1608,6 +1611,7 @@ async function reemplazarServicio(options = {}) {
         pin: perfilDestino.pin,
         n_perfil: perfilDestino.n_perfil,
       };
+      destinoEsCuentaMiembro = false;
       asignadoDesdeCuentaMadre = true;
       return true;
     };
@@ -1628,6 +1632,7 @@ async function reemplazarServicio(options = {}) {
         pin: perfilDestino.pin,
         n_perfil: perfilDestino.n_perfil,
       };
+      destinoEsCuentaMiembro = false;
       return true;
     };
 
@@ -1644,6 +1649,7 @@ async function reemplazarServicio(options = {}) {
         correo: cuentaDestino.correo || "",
         clave: cuentaDestino.clave || "",
       };
+      destinoEsCuentaMiembro = true;
       return true;
     };
 
@@ -1684,6 +1690,7 @@ async function reemplazarServicio(options = {}) {
           correo: cuentaCompletaDestino.correo || "",
           clave: cuentaCompletaDestino.clave || "",
         };
+        destinoEsCuentaMiembro = false;
         assigned = true;
       }
     }
@@ -1793,7 +1800,27 @@ async function reemplazarServicio(options = {}) {
       const userIds = pickNotificationUserIds("servicio_reemplazado", {
         ventaUserId: ventaInfo?.id_usuario,
       });
-      if (userIds.length) {
+      const normalizeCorreo = (value) => String(value || "").trim().toLowerCase();
+      let correoViejoNotif = selectedRow.cuentas?.correo || "";
+      let correoNuevoNotif = dataDestino.correo || "";
+      let shouldNotifyReemplazo = true;
+      if (Number(plataformaId) === 9) {
+        const oldMemberCorreo = String(
+          ventaInfo?.correo_miembro ||
+            ventaInfo?.cuentas_miembro?.correo ||
+            selectedRow?.cuentas?.correo ||
+            "",
+        ).trim();
+        const newMemberCorreo = destinoEsCuentaMiembro ? String(dataDestino?.correo || "").trim() : "";
+        const oldMemberNorm = normalizeCorreo(oldMemberCorreo);
+        const newMemberNorm = normalizeCorreo(newMemberCorreo);
+        shouldNotifyReemplazo = Boolean(
+          destinoEsCuentaMiembro && oldMemberNorm && newMemberNorm && oldMemberNorm !== newMemberNorm,
+        );
+        correoViejoNotif = oldMemberCorreo;
+        correoNuevoNotif = newMemberCorreo;
+      }
+      if (userIds.length && shouldNotifyReemplazo) {
         await notifyReemplazoReporte({
           row: { ...selectedRow, id_usuario: userIds[0] },
           plataforma: formatPlataformaReemplazo({
@@ -1801,8 +1828,8 @@ async function reemplazarServicio(options = {}) {
             idPrecio: ventaInfo?.id_precio ?? null,
             perfilHogar: rowPerfil?.hogar === true,
           }),
-          correoViejo: selectedRow.cuentas?.correo || "",
-          correoNuevo: dataDestino.correo || "",
+          correoViejo: correoViejoNotif,
+          correoNuevo: correoNuevoNotif,
           dias: diasSumados,
         });
       }

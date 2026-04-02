@@ -520,7 +520,7 @@ const verifyPago = async () => {
     }
     await supabase
       .from("ordenes")
-      .update({ pago_verificado: true, monto_completo: true, orden_cancelada: false })
+      .update({ monto_completo: true, orden_cancelada: false })
       .eq("id_orden", orden.id_orden);
   }
 
