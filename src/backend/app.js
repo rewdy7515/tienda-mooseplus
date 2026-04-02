@@ -200,10 +200,6 @@ const NUEVO_SERVICIO_NOTIF_QUEUE_BATCH = Math.max(
   Math.min(50, Number(process.env.NUEVO_SERVICIO_NOTIF_QUEUE_BATCH) || 20),
 );
 const NUEVO_SERVICIO_NOTIF_QUEUE_TABLE = "eventos_notificacion_nuevo_servicio";
-const WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID = Math.max(
-  1,
-  Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID) || 20,
-);
 const WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID = 23;
 const WHATSAPP_MANUAL_VERIFICATION_ALERT_TITLE = "Verificación manual de pago";
 const WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED =
@@ -230,6 +226,12 @@ const WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH = Math.max(
   1,
   Math.min(200, Number(process.env.WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH) || 80),
 );
+const WHATSAPP_PEDIDOS_PENDIENTES_GROUP_NAME = String(
+  process.env.WHATSAPP_PEDIDOS_PENDIENTES_GROUP_NAME || "Pedidos Pendientes Moose+",
+).trim();
+const WHATSAPP_PEDIDOS_PENDIENTES_GROUP_CHAT_ID = String(
+  process.env.WHATSAPP_PEDIDOS_PENDIENTES_GROUP_CHAT_ID || "",
+).trim();
 const WHATSAPP_REPORTES_GROUP_NAME = String(
   process.env.WHATSAPP_REPORTES_GROUP_NAME || "Reportes moose+",
 ).trim();
@@ -1830,6 +1832,33 @@ const resolveWhatsappReportesGroupChatId = async ({ client = null } = {}) => {
   return normalizeWhatsappGroupChatId(stringId);
 };
 
+const resolveWhatsappPedidosPendientesGroupChatId = async ({ client = null } = {}) => {
+  const configuredChatId = normalizeWhatsappGroupChatId(WHATSAPP_PEDIDOS_PENDIENTES_GROUP_CHAT_ID);
+  if (configuredChatId) return configuredChatId;
+
+  const groupName = String(WHATSAPP_PEDIDOS_PENDIENTES_GROUP_NAME || "").trim();
+  if (!groupName) return null;
+
+  const waClient = client || getWhatsappClient();
+  if (!waClient || typeof waClient.getChats !== "function") return null;
+
+  const targetName = groupName.toLowerCase();
+  const chats = await waClient.getChats();
+  const match = (chats || []).find((chat) => {
+    if (!isTrue(chat?.isGroup)) return false;
+    const name = String(chat?.name || "").trim().toLowerCase();
+    return name === targetName;
+  });
+  if (!match) return null;
+
+  const serializedId = String(match?.id?._serialized || "").trim();
+  if (serializedId) return serializedId;
+
+  const stringId = String(match?.id || "").trim();
+  if (/@g\.us$/i.test(stringId)) return stringId;
+  return normalizeWhatsappGroupChatId(stringId);
+};
+
 const buildWhatsappReporteCreadoMessage = ({
   idReporte = null,
   plataforma = "",
@@ -2656,20 +2685,17 @@ const processPendingReportesWhatsappAlerts = async () => {
   }
 };
 
-const buildWhatsappPendingOrderAdminMessage = ({
-  correoMiembro = "",
-  claveMiembro = "",
-  cuentaNueva = null,
+const buildWhatsappPendingOrderGroupMessage = ({
+  idVenta = null,
+  plataforma = "",
+  cliente = "",
 } = {}) => {
-  const correo = String(correoMiembro || "").trim();
-  const clave = String(claveMiembro || "").trim();
-  if (!correo || !clave) return "";
-  const tipoCuenta = cuentaNueva === false ? "existente" : "nueva";
-  return `*PEDIDO PENDIENTE*
-Spotify - ${tipoCuenta}
-
-*Correo:* ${correo}
-*Clave:* ${clave}`;
+  const ventaId = toPositiveInt(idVenta) || idVenta || "-";
+  const plataformaText = formatWhatsappReporteText(plataforma, "Sin plataforma");
+  const clienteText = formatWhatsappReporteText(cliente, "-");
+  return `\`Pedido pendiente #${ventaId}\`
+*${plataformaText}*
+Cliente: ${clienteText}`;
 };
 
 const resolveWhatsappPhoneForUser = async (idUsuario) => {
@@ -2695,27 +2721,44 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   if (!ventaId) {
     return { sent: false, skipped: true, reason: "invalid_sale" };
   }
-  const plataformaHint = Number(idPlataformaHint);
-  if (Number.isFinite(plataformaHint) && plataformaHint > 0 && plataformaHint !== 9) {
-    return { sent: false, skipped: true, reason: "not_spotify_platform" };
-  }
-
-  let ventaRow = null;
+  const plataformaHint = toPositiveInt(idPlataformaHint);
   const snapshotVentaId = toPositiveInt(ventaSnapshot?.id_venta);
-  if (snapshotVentaId && snapshotVentaId === ventaId) {
-    ventaRow = ventaSnapshot;
-  } else {
+  const snapshotPrecio = Array.isArray(ventaSnapshot?.precios)
+    ? ventaSnapshot.precios[0] || null
+    : ventaSnapshot?.precios || null;
+  const snapshotPlataforma = Array.isArray(snapshotPrecio?.plataformas)
+    ? snapshotPrecio.plataformas[0] || null
+    : snapshotPrecio?.plataformas || null;
+  const snapshotUsuario = Array.isArray(ventaSnapshot?.usuarios)
+    ? ventaSnapshot.usuarios[0] || null
+    : ventaSnapshot?.usuarios || null;
+  const snapshotClienteNombre = [snapshotUsuario?.nombre, snapshotUsuario?.apellido]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const snapshotPlataformaNombre = String(snapshotPlataforma?.nombre || "").trim();
+  const hasSnapshotDetails =
+    snapshotVentaId === ventaId &&
+    Object.prototype.hasOwnProperty.call(ventaSnapshot || {}, "pendiente") &&
+    Object.prototype.hasOwnProperty.call(ventaSnapshot || {}, "reportado") &&
+    Object.prototype.hasOwnProperty.call(ventaSnapshot || {}, "aviso_admin") &&
+    Object.prototype.hasOwnProperty.call(ventaSnapshot || {}, "id_usuario") &&
+    !!snapshotClienteNombre &&
+    (!!snapshotPlataformaNombre || plataformaHint > 0);
+
+  let ventaRow = hasSnapshotDetails ? ventaSnapshot : null;
+  if (!ventaRow) {
     const { data, error: ventaErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, completa, precios(id_plataforma)",
+        "id_venta, id_usuario, pendiente, aviso_admin, reportado, precios:precios(id_plataforma, plataformas:plataformas(nombre)), usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido)",
       )
       .eq("id_venta", ventaId)
       .maybeSingle();
     if (ventaErr && isMissingColumnError(ventaErr, "aviso_admin")) {
       if (!pendingSpotifyAlertsAvisoAdminMissing) {
         console.warn(
-          "[WhatsApp] Falta la columna ventas.aviso_admin. El aviso de pedidos Spotify pendientes se omite hasta crearla.",
+          "[WhatsApp] Falta la columna ventas.aviso_admin. El aviso de pedidos pendientes se omite hasta crearla.",
         );
       }
       pendingSpotifyAlertsAvisoAdminMissing = true;
@@ -2731,54 +2774,58 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
   if (!ventaRow?.id_venta) {
     return { sent: false, skipped: true, reason: "sale_not_found" };
   }
-
-  const nestedPrecio = Array.isArray(ventaRow?.precios)
-    ? ventaRow.precios[0] || null
-    : ventaRow?.precios || null;
-  const platId = Number(nestedPrecio?.id_plataforma || ventaRow?.id_plataforma || 0);
-  if (platId !== 9) {
-    return { sent: false, skipped: true, reason: "not_spotify_sale" };
-  }
-  if (ventaRow?.pendiente !== false) {
-    return { sent: false, skipped: true, reason: "sale_pending_flag_not_false" };
+  if (!isTrue(ventaRow?.pendiente)) {
+    return { sent: false, skipped: true, reason: "sale_not_pending" };
   }
   if (isTrue(ventaRow?.reportado)) {
     return { sent: false, skipped: true, reason: "sale_reported" };
   }
-  if (isTrue(ventaRow?.completa)) {
-    return { sent: false, skipped: true, reason: "sale_complete" };
-  }
   if (isTrue(ventaRow?.aviso_admin)) {
-    return { sent: false, skipped: true, reason: "already_notified_admin" };
+    return { sent: false, skipped: true, reason: "already_notified_pending_group" };
   }
 
-  const message = buildWhatsappPendingOrderAdminMessage({
-    correoMiembro: ventaRow?.correo_miembro,
-    claveMiembro: ventaRow?.clave_miembro,
-    cuentaNueva: ventaRow?.cuenta_nueva,
+  const nestedPrecio = Array.isArray(ventaRow?.precios)
+    ? ventaRow.precios[0] || null
+    : ventaRow?.precios || null;
+  const nestedPlataforma = Array.isArray(nestedPrecio?.plataformas)
+    ? nestedPrecio.plataformas[0] || null
+    : nestedPrecio?.plataformas || null;
+  const usuarioRow = Array.isArray(ventaRow?.usuarios)
+    ? ventaRow.usuarios[0] || null
+    : ventaRow?.usuarios || null;
+
+  const plataformaId = toPositiveInt(nestedPrecio?.id_plataforma) || plataformaHint;
+  const plataformaNombre =
+    String(nestedPlataforma?.nombre || "").trim() ||
+    (plataformaId ? `Plataforma ${plataformaId}` : "Plataforma");
+  const clienteNombre =
+    [usuarioRow?.nombre, usuarioRow?.apellido].filter(Boolean).join(" ").trim() ||
+    `Usuario ${toPositiveInt(ventaRow?.id_usuario) || "-"}`;
+
+  const message = buildWhatsappPendingOrderGroupMessage({
+    idVenta: ventaId,
+    plataforma: plataformaNombre,
+    cliente: clienteNombre,
   });
-  if (!message) {
-    return { sent: false, skipped: true, reason: "missing_member_credentials" };
-  }
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
   if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
     await ensureWhatsappClientReady({
       reason: shouldManageWhatsappLifecycle
-        ? "pending_spotify_order_alert"
-        : "pending_spotify_order_alert_batch",
+        ? "pending_order_group_alert"
+        : "pending_order_group_alert_batch",
       allowWhenDisabled: true,
     });
   }
 
   try {
     const client = getWhatsappClient();
-    const targetPhone = await resolveWhatsappPhoneForUser(WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID);
-    if (!targetPhone) {
-      return { sent: false, skipped: true, reason: "target_admin_phone_missing" };
+    const groupChatId = await resolveWhatsappPedidosPendientesGroupChatId({ client });
+    if (!groupChatId) {
+      return { sent: false, skipped: true, reason: "pending_orders_group_not_found" };
     }
 
     await withTimeout(
-      client.sendMessage(`${targetPhone}@c.us`, message, {
+      client.sendMessage(groupChatId, message, {
         linkPreview: false,
         waitUntilMsgSent: true,
       }),
@@ -2797,13 +2844,13 @@ const maybeSendPendingSpotifyOrderToWhatsapp = async ({
       skipped: false,
       reason: null,
       id_venta: ventaId,
-      id_usuario_destino: WHATSAPP_PEDIDO_PENDIENTE_NOTIFY_USER_ID,
-      phone: targetPhone,
+      groupChatId,
+      groupName: WHATSAPP_PEDIDOS_PENDIENTES_GROUP_NAME || null,
     };
   } finally {
     if (shouldManageWhatsappLifecycle) {
       await shutdownWhatsappClient({
-        reason: "pending_spotify_order_alert_completed",
+        reason: "pending_order_group_alert_completed",
         allowWhenDisabled: true,
       });
     }
@@ -3335,15 +3382,11 @@ const processPendingSpotifyAdminAlerts = async () => {
     while (true) {
       let query = supabaseAdmin
         .from("ventas")
-      .select(
-          "id_venta, pendiente, cuenta_nueva, correo_miembro, clave_miembro, aviso_admin, reportado, completa, precios!inner(id_plataforma)",
+        .select(
+          "id_venta, id_usuario, pendiente, aviso_admin, reportado, precios:precios!inner(id_plataforma, plataformas:plataformas(nombre)), usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido)",
         )
-        .eq("pendiente", false)
+        .eq("pendiente", true)
         .not("reportado", "is", true)
-        .not("completa", "is", true)
-        .eq("precios.id_plataforma", 9)
-        .not("correo_miembro", "is", null)
-        .not("clave_miembro", "is", null)
         .or("aviso_admin.eq.false,aviso_admin.is.null")
         .order("id_venta", { ascending: true })
         .limit(WHATSAPP_PEDIDO_PENDIENTE_WATCHER_BATCH);
@@ -3392,18 +3435,6 @@ const processPendingSpotifyAdminAlerts = async () => {
           continue;
         }
 
-        const hasMessageData = Boolean(
-          buildWhatsappPendingOrderAdminMessage({
-            correoMiembro: venta?.correo_miembro,
-            claveMiembro: venta?.clave_miembro,
-            cuentaNueva: venta?.cuenta_nueva,
-          }),
-        );
-        if (!hasMessageData) {
-          result.skipped += 1;
-          continue;
-        }
-
         try {
           if (!managedWhatsappForRun) {
             await ensureWhatsappClientReady({
@@ -3415,7 +3446,11 @@ const processPendingSpotifyAdminAlerts = async () => {
 
           const sendRes = await maybeSendPendingSpotifyOrderToWhatsapp({
             idVenta,
-            idPlataformaHint: 9,
+            idPlataformaHint: toPositiveInt(
+              Array.isArray(venta?.precios)
+                ? venta?.precios?.[0]?.id_plataforma
+                : venta?.precios?.id_plataforma,
+            ),
             manageWhatsappLifecycle: false,
             ventaSnapshot: venta,
           });

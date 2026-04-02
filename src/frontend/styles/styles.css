@@ -681,25 +681,57 @@ main {
 
 .cart-layout {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+}
+
+.cart-left,
+.cart-right {
+  width: 100%;
+  min-width: 0;
+}
+
+.cart-main-table-wrap,
+.cart-summary-table-wrap {
+  width: 100%;
+  min-width: 0;
 }
 
 .cart-table-scroll {
-  overflow: visible;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: 0;
 }
 
+.cart-left .cart-page-table {
+  width: 100%;
+  min-width: 760px;
+}
+
 .cart-right .cart-summary-table {
-  width: auto;
+  width: 100%;
   min-width: 0;
-  display: inline-table;
-  margin-left: auto;
+  display: table;
+  margin: 0;
+  table-layout: fixed;
 }
 
 .cart-summary-table.table-base {
-  width: auto !important;
+  width: 100% !important;
   min-width: 0 !important;
+  table-layout: fixed;
+}
+
+.cart-summary-table.table-base th,
+.cart-summary-table.table-base td {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .cart-pay-wrap {
@@ -715,7 +747,7 @@ main {
 
 @media (min-width: 1200px) {
   .cart-layout {
-    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
     align-items: start;
   }
 

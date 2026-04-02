@@ -396,7 +396,10 @@ async function reactivarVentaPendienteFromReporte(row) {
     return { ok: false, reason: "venta_not_found" };
   }
 
-  const { error } = await supabase.from("ventas").update({ pendiente: true }).eq("id_venta", ventaId);
+  const { error } = await supabase
+    .from("ventas")
+    .update({ pendiente: true, aviso_admin: false })
+    .eq("id_venta", ventaId);
   if (error) throw error;
   row.id_venta = ventaId;
   return { ok: true, id_venta: ventaId };

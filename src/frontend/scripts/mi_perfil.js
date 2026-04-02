@@ -14,6 +14,7 @@ const EMPTY_AVATAR_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQA
 const DEFAULT_BG_COLOR = AVATAR_RANDOM_COLORS[0] || "#ffa4a4";
 const AVATAR_PALETTE_COLORS = AVATAR_RANDOM_COLORS;
 const DEFAULT_MODAL_COLOR = AVATAR_PALETTE_COLORS[0];
+const DEFAULT_DIAL_CODE = "58";
 
 const statusEl = document.querySelector("#perfil-status");
 const cardEl = document.querySelector("#perfil-card");
@@ -200,7 +201,9 @@ const setTelefonoFromUser = (value) => {
 
 const getTelefonoDigitsForSave = () => {
   const localDigits = normalizePhoneDigits(telefonoInputEl?.value || "");
-  const dialDigits = normalizePhoneDigits(telefonoIti?.getSelectedCountryData?.()?.dialCode || "");
+  const dialDigits = normalizePhoneDigits(
+    telefonoIti?.getSelectedCountryData?.()?.dialCode || DEFAULT_DIAL_CODE,
+  );
   if (localDigits && dialDigits) return normalizePhoneByDialCode(localDigits, dialDigits);
   if (localDigits) return localDigits;
 
@@ -238,7 +241,6 @@ const initTelefonoInput = () => {
       const cleaned = placeholder.replace(/^0+/, "").trim();
       return cleaned || placeholder;
     },
-    utilsScript: "https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/utils.js",
   });
 
   telefonoIti.promise?.then(() => {

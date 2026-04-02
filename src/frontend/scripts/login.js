@@ -195,13 +195,20 @@ function getResetRedirectUrl() {
   return new URL("restablecer_clave.html", window.location.href).toString();
 }
 
-async function requireCaptchaToken() {
+async function requireCaptchaToken({ allowMissingProvider = false } = {}) {
   const ctrl = captchaController || (captchaInitPromise ? await captchaInitPromise : null);
   if (!ctrl || !ctrl.enabled) {
+    if (allowMissingProvider) {
+      warnLoginDebug("captcha.unavailable_provider", {
+        online: navigator.onLine,
+        provider: ctrl?.provider || "",
+      });
+      return "";
+    }
     setStatus("Captcha no disponible. Recarga la página e intenta de nuevo.", true);
     return null;
   }
-  return ctrl.ensureToken();
+  return ctrl.ensureToken() || null;
 }
 
 async function handleForgotPassword(event) {
@@ -216,8 +223,8 @@ async function handleForgotPassword(event) {
     return;
   }
 
-  const captchaToken = await requireCaptchaToken();
-  if (!captchaToken) return;
+  const captchaToken = await requireCaptchaToken({ allowMissingProvider: true });
+  if (captchaToken === null) return;
 
   forgotLoading = true;
   if (forgotBtn) {
@@ -226,10 +233,13 @@ async function handleForgotPassword(event) {
     forgotBtn.style.pointerEvents = "none";
   }
   try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const resetOptions = {
       redirectTo: getResetRedirectUrl(),
-      captchaToken,
-    });
+    };
+    if (captchaToken) {
+      resetOptions.captchaToken = captchaToken;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, resetOptions);
     if (error) throw error;
     setStatus("Te enviamos un enlace para restablecer tu contraseña.", false);
   } catch (err) {
@@ -273,10 +283,10 @@ async function handleLogin(event) {
 
   const captchaToken = await traceLoginStep(
     "captcha.ensureToken",
-    () => requireCaptchaToken(),
+    () => requireCaptchaToken({ allowMissingProvider: true }),
     { slowMs: 10000 },
   );
-  if (!captchaToken) return;
+  if (captchaToken === null) return;
   logLoginDebug("captcha.ensureToken:ready", {
     tokenLength: String(captchaToken || "").length,
   });
@@ -306,7 +316,14 @@ async function handleLogin(event) {
         return;
       }
       if (isCaptchaAuthFailure(authErr)) {
-        setStatus("No se pudo validar el captcha. Recarga la página e intenta de nuevo.", true);
+        if (captchaToken) {
+          setStatus("No se pudo validar el captcha. Recarga la página e intenta de nuevo.", true);
+        } else {
+          setStatus(
+            "Tu red está bloqueando el proveedor captcha. Intenta con otra red o desactiva bloqueadores.",
+            true,
+          );
+        }
         return;
       }
       if (msg.includes("email not confirmed")) {

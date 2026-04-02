@@ -880,25 +880,27 @@ const renderCart = () => {
   const canUseSaldo = userSaldo > 0;
   itemsEl.innerHTML = `
     <div class="cart-layout">
-      <div class="cart-left">
+      <section class="cart-left" aria-label="Resumen de items en carrito">
         <div class="cart-items-cards">
           ${cards}
         </div>
-        <div class="cart-table-scroll">
-          <table class="table-base cart-page-table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Precio</th>
-                <th>Meses</th>
-                <th>Cantidad</th>
-                <th>Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows}
-            </tbody>
-          </table>
+        <div class="cart-main-table-wrap">
+          <div class="cart-table-scroll">
+            <table class="table-base cart-page-table">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Precio</th>
+                  <th>Meses</th>
+                  <th>Cantidad</th>
+                  <th>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
         </div>
         <div class="cart-actions-inline">
           <label class="cart-saldo-toggle ${canUseSaldo ? (showSaldoRow ? "is-active" : "") : "is-disabled"}" title="${canUseSaldo ? "Aplicar saldo al total" : "No tienes saldo disponible"}">
@@ -907,52 +909,54 @@ const renderCart = () => {
           </label>
           <button type="button" class="btn-cart-main" data-cart-action="refresh">Actualizar carrito</button>
         </div>
-      </div>
-      <div class="cart-right">
-        <table class="table-base cart-page-table cart-summary-table">
-          <tbody>
-            <tr class="cart-total-row">
-              <td class="cart-cell-center">Subtotal</td>
-              <td class="cart-cell-center"><span data-summary="subtotal">$${subtotalMostrar.toFixed(2)}</span></td>
-            </tr>
-            <tr class="cart-total-row cart-total-discount">
-              <td class="cart-cell-center">Descuentos aplicados</td>
-              <td class="cart-cell-center"><span data-summary="descuento">-$${descuentoMostrar.toFixed(2)}</span></td>
-            </tr>
-            ${saldoRow}
-            <tr class="cart-total-row cart-total-final">
-              <td class="cart-cell-center">Total</td>
-              <td class="cart-cell-center"><span data-summary="total">$${totalMostrar.toFixed(2)}</span></td>
-            </tr>
-            <tr class="cart-total-row cart-total-bs">
-              <td class="cart-cell-center cart-total-bs-cell">
-                <div class="cart-total-bs-wrap">
-                  <button
-                    type="button"
-                    class="cart-total-help-btn"
-                    data-cart-action="toggle-rate-info"
-                    aria-label="Mostrar referencia de la tasa"
-                    aria-expanded="false"
-                  >
-                    ?
-                  </button>
-                  <span>Total Bs.</span>
-                  <div class="cart-total-help-popover hidden" data-summary="rate-info">
-                    <p><strong>Referencia de la tasa</strong>: binance</p>
-                    <p>
-                      Nuestra tasa de referencia está basada en Binance, ya que como proveedores
-                      también pagamos las membresías a esa tasa. Esto nos permite mantener y
-                      asegurar la continuidad de nuestro servicio.
-                    </p>
-                    <p>Gracias por su comprensión</p>
+      </section>
+      <aside class="cart-right" aria-label="Montos finales del carrito">
+        <div class="cart-summary-table-wrap">
+          <table class="table-base cart-page-table cart-summary-table">
+            <tbody>
+              <tr class="cart-total-row">
+                <td class="cart-cell-center">Subtotal</td>
+                <td class="cart-cell-center"><span data-summary="subtotal">$${subtotalMostrar.toFixed(2)}</span></td>
+              </tr>
+              <tr class="cart-total-row cart-total-discount">
+                <td class="cart-cell-center">Descuentos aplicados</td>
+                <td class="cart-cell-center"><span data-summary="descuento">-$${descuentoMostrar.toFixed(2)}</span></td>
+              </tr>
+              ${saldoRow}
+              <tr class="cart-total-row cart-total-final">
+                <td class="cart-cell-center">Total</td>
+                <td class="cart-cell-center"><span data-summary="total">$${totalMostrar.toFixed(2)}</span></td>
+              </tr>
+              <tr class="cart-total-row cart-total-bs">
+                <td class="cart-cell-center cart-total-bs-cell">
+                  <div class="cart-total-bs-wrap">
+                    <button
+                      type="button"
+                      class="cart-total-help-btn"
+                      data-cart-action="toggle-rate-info"
+                      aria-label="Mostrar referencia de la tasa"
+                      aria-expanded="false"
+                    >
+                      ?
+                    </button>
+                    <span>Total Bs.</span>
+                    <div class="cart-total-help-popover hidden" data-summary="rate-info">
+                      <p><strong>Referencia de la tasa</strong>: binance</p>
+                      <p>
+                        Nuestra tasa de referencia está basada en Binance, ya que como proveedores
+                        también pagamos las membresías a esa tasa. Esto nos permite mantener y
+                        asegurar la continuidad de nuestro servicio.
+                      </p>
+                      <p>Gracias por su comprensión</p>
+                    </div>
                   </div>
-                </div>
-              </td>
-              <td class="cart-cell-center"><span data-summary="total-bs">${formatBsAmount(totalBsMostrar)}</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                </td>
+                <td class="cart-cell-center"><span data-summary="total-bs">${formatBsAmount(totalBsMostrar)}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </aside>
     </div>
   `;
   placePayButton();

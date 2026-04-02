@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0?bundle&no-check&sourcemap=0";
+import { createClient } from "./vendor/supabase-global.js";
 import { clearSession, requireSession } from "./session.js";
 
 const supabase = createClient(

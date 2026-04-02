@@ -759,6 +759,7 @@
             .select("id_cuenta, correo, clave, fecha_corte")
             .eq("id_plataforma", 9)
             .eq("cuenta_madre", true)
+            .eq("inactiva", false)
             .order("fecha_corte", { ascending: true });
           if (error) throw error;
           spotifyTable.innerHTML = "";
@@ -832,6 +833,7 @@
             .from("cuentas")
             .select("correo, clave, fecha_corte")
             .eq("id_plataforma", 1)
+            .eq("inactiva", false)
             .not("fecha_corte", "is", null)
             .gte("fecha_corte", today)
             .order("fecha_corte", { ascending: true });

@@ -56,6 +56,7 @@ const signupSuccessPreviewMode =
   new URLSearchParams(window.location.search || "").get("preview_success") === "1";
 let signupTokenContext = null;
 const SIGNUP_CONFIRM_REDIRECT_URL = "https://mooseplus.com/login.html";
+const DEFAULT_DIAL_CODE = "58";
 
 function getLoginPageUrl() {
   const params = new URLSearchParams();
@@ -207,7 +208,7 @@ function translateSignupError(err) {
     return "Debes confirmar tu correo antes de continuar.";
   }
   if (msg.includes("captcha") || msg.includes("challenge")) {
-    return "No se pudo validar el captcha. Intenta nuevamente.";
+    return "No se pudo validar el captcha. Si usas bloqueadores o VPN, desactívalos o prueba otra red.";
   }
   if (msg.includes("invalid email")) {
     return "El correo no es válido.";
@@ -317,7 +318,7 @@ async function handleSubmit(e) {
 
   const nombre = fields.nombre.value.trim();
   const apellido = fields.apellido.value.trim();
-  const phoneDial = iti?.getSelectedCountryData?.()?.dialCode;
+  const phoneDial = iti?.getSelectedCountryData?.()?.dialCode || DEFAULT_DIAL_CODE;
   const phoneDialDigits = normalizePhoneDigits(phoneDial || "");
   const telefonoRawDigits = String(fields.telefono.value || "").replace(/\D+/g, "");
   const telefonoRawNational =
@@ -387,12 +388,16 @@ async function handleSubmit(e) {
   if (hasError) return;
 
   const ctrl = captchaController || (captchaInitPromise ? await captchaInitPromise : null);
+  let captchaToken = "";
   if (!ctrl || !ctrl.enabled) {
-    setStatus("Captcha no disponible. Recarga la página e intenta de nuevo.", true);
-    return;
+    console.warn("[signup] captcha provider unavailable, continuing without captcha token", {
+      online: navigator.onLine,
+      provider: ctrl?.provider || "",
+    });
+  } else {
+    captchaToken = ctrl.ensureToken() || "";
+    if (!captchaToken) return;
   }
-  const captchaToken = ctrl.ensureToken();
-  if (!captchaToken) return;
 
   setLoading(true);
 
@@ -409,22 +414,26 @@ async function handleSubmit(e) {
 
     const phoneDigits = normalizePhoneByDialCode(telefono, phoneDialDigits) || telefono;
 
+    const signupOptions = {
+      emailRedirectTo: getSignupEmailRedirectUrl(),
+      data: {
+        display_name: `${nombre} ${apellido}`.trim(),
+        nombre,
+        apellido,
+        telefono: phoneDigits,
+        phone: phoneDigits,
+        signup_registration_token: tokenFlow ? signupToken : undefined,
+      },
+    };
+    if (captchaToken) {
+      signupOptions.captchaToken = captchaToken;
+    }
+
     // 1) Registrar en Auth de Supabase
     const { data: authSignupData, error: authErr } = await supabase.auth.signUp({
       email: correo.trim(),
       password: clave,
-      options: {
-        emailRedirectTo: getSignupEmailRedirectUrl(),
-        data: {
-          display_name: `${nombre} ${apellido}`.trim(),
-          nombre,
-          apellido,
-          telefono: phoneDigits,
-          phone: phoneDigits,
-          signup_registration_token: tokenFlow ? signupToken : undefined,
-        },
-        captchaToken,
-      },
+      options: signupOptions,
     });
     if (authErr) {
       console.error("[signup] signUp error", {
@@ -512,7 +521,6 @@ function init() {
         const cleaned = placeholder.replace(/^0+/, "").trim();
         return cleaned || placeholder;
       },
-      utilsScript: "https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.6/build/js/utils.js",
     });
 
     const computePlaceholderInfo = () => {
