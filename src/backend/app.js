@@ -1919,6 +1919,23 @@ Puedes verificar la orden por:
 ${detalleUrl}`;
 };
 
+const buildWhatsappVentaEntregadaMessage = ({
+  idVenta = null,
+  idOrden = null,
+  detalleOrdenUrl = "",
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta) || idVenta || "-";
+  const ordenId = toPositiveInt(idOrden);
+  const detalleUrl =
+    String(detalleOrdenUrl || "").trim() ||
+    (ordenId ? buildWhatsappOrderDetailUrl(ordenId) : buildPublicSiteUrl());
+  return `Venta #${ventaId}
+estado: servicio entrgado ✅
+
+Puedes verificar la orden por:
+${detalleUrl}`;
+};
+
 const fetchReporteWhatsappContextById = async (idReporte) => {
   const reportId = toPositiveInt(idReporte);
   if (!reportId) return null;
@@ -2489,6 +2506,137 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   }
 
   await markOrderPaymentVerificationWhatsappNotified(ordenId, true);
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_venta: ventaId,
+    id_orden: ordenId,
+    id_usuario_destino: targetUserId,
+    phone: targetPhone,
+  };
+};
+
+const sendVentaServicioEntregadaToWhatsappOwner = async ({
+  idVenta = null,
+  venta = null,
+  manageWhatsappLifecycle = true,
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta || venta?.id_venta);
+  if (!ventaId) {
+    return { sent: false, skipped: true, reason: "invalid_sale" };
+  }
+
+  let ventaRow = null;
+  const snapshotVentaId = toPositiveInt(venta?.id_venta);
+  if (snapshotVentaId && snapshotVentaId === ventaId) {
+    ventaRow = venta;
+  } else {
+    const { data, error } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, id_usuario, id_orden, pendiente, reportado")
+      .eq("id_venta", ventaId)
+      .maybeSingle();
+    if (error) throw error;
+    ventaRow = data || null;
+  }
+  if (!ventaRow?.id_venta) {
+    return { sent: false, skipped: true, reason: "sale_not_found", id_venta: ventaId };
+  }
+  if (isTrue(ventaRow?.reportado)) {
+    return { sent: false, skipped: true, reason: "sale_reported", id_venta: ventaId };
+  }
+  if (ventaRow?.pendiente !== false) {
+    return { sent: false, skipped: true, reason: "sale_still_pending", id_venta: ventaId };
+  }
+
+  const targetUserId = toPositiveInt(ventaRow?.id_usuario);
+  const ordenId = toPositiveInt(ventaRow?.id_orden);
+  if (!targetUserId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_target_user",
+      id_venta: ventaId,
+    };
+  }
+  if (!ordenId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_order",
+      id_venta: ventaId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "target_user_phone_missing",
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const message = buildWhatsappVentaEntregadaMessage({
+    idVenta: ventaId,
+    idOrden: ordenId,
+    detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
+  });
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? "sale_service_delivered_user_alert"
+        : "sale_service_delivered_user_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de servicio entregado",
+    );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "sale_service_delivered_user_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[ventas:whatsapp] servicio entregado shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+      phone: targetPhone,
+    };
+  }
 
   return {
     sent: true,
@@ -6465,10 +6613,9 @@ app.post("/api/whatsapp/ventas/notificar-entregada", async (req, res) => {
       return res.status(400).json({ error: "id_venta inválido" });
     }
 
-    const result = await sendVentaEntregadaToWhatsappOwner({
+    const result = await sendVentaServicioEntregadaToWhatsappOwner({
       idVenta: ventaId,
       manageWhatsappLifecycle: true,
-      verifiedByAdmin: true,
     });
     if (result?.sent) return res.json({ ok: true, ...result });
     if (result?.skipped) return res.status(202).json({ ok: false, ...result });
@@ -7616,7 +7763,7 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         .eq("id_venta", ventaId);
       if (updVentaErr) throw updVentaErr;
       try {
-        const waDeliveredRes = await sendVentaEntregadaToWhatsappOwner({
+        const waDeliveredRes = await sendVentaServicioEntregadaToWhatsappOwner({
           idVenta: ventaId,
           manageWhatsappLifecycle: true,
         });
