@@ -2175,10 +2175,22 @@ const sendReporteSolvedToWhatsappOwner = async ({
     };
   }
 
+  const correoMiembro = getVentaCorreoMiembroForWhatsapp(ventaAsociada);
+  if (!correoMiembro) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "associated_sale_member_email_missing",
+      id_reporte: reportId,
+      id_venta: ventaAsociadaId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
   const message = buildWhatsappReporteSolucionadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
-    correo: getVentaCorreoMiembroForWhatsapp(ventaAsociada) || "-",
+    correo: correoMiembro,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;

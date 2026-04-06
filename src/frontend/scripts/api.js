@@ -55,6 +55,7 @@ const API_BASE = (() => {
 let authRecoveryInProgress = false;
 let clientErrorReporterInit = false;
 let traficoWebTrackerInit = false;
+let ensureServerSessionInFlight = null;
 
 const CLIENT_ERROR_MAX_REPORTS_PER_PAGE = 40;
 const CLIENT_ERROR_DEDUP_WINDOW_MS = 15000;
@@ -65,8 +66,11 @@ const TRAFICO_WEB_SESSION_IDLE_MS = 30 * 60 * 1000;
 const API_DEBUG_PREFIX = "[api-debug]";
 const AUTH_ACCESS_TOKEN_BRIDGE_KEY = "auth_access_token_bridge_v1";
 const AUTH_ACCESS_TOKEN_BRIDGE_TTL_MS = 5 * 60 * 1000;
+const AUTH_SESSION_FAILURE_COOLDOWN_MS = 12000;
 let cachedAuthAccessToken = "";
 let authStateBridgeInit = false;
+let authSessionFailureCooldownUntil = 0;
+let authSessionFailureMessage = "";
 
 const trimText = (value, max = 2000) => {
   const txt = String(value ?? "");
@@ -664,7 +668,14 @@ const TRANSIENT_NETWORK_ERROR_FRAGMENTS = [
   "networkerror",
   "load failed",
   "timeout",
+  "timed out",
   "econnreset",
+  "enotfound",
+  "dns",
+  "hostname could not be found",
+  "server with the specified hostname could not be found",
+  "name or service not known",
+  "name not resolved",
   "err_network",
 ];
 
@@ -686,6 +697,34 @@ const getFriendlyApiErrorMessage = (err, fallbackMessage = "") => {
   }
   const message = String(err?.message || err || "").trim();
   return message || String(fallbackMessage || "Ocurrió un error inesperado.");
+};
+
+const getAuthSessionCooldownRemainingMs = () =>
+  Math.max(0, Number(authSessionFailureCooldownUntil || 0) - Date.now());
+
+const clearAuthSessionFailureCooldown = () => {
+  authSessionFailureCooldownUntil = 0;
+  authSessionFailureMessage = "";
+};
+
+const isAuthGetSessionTransientError = (err) => {
+  if (!err) return false;
+  const code = String(err?.code || "").trim().toUpperCase();
+  if (code === "AUTH_GET_SESSION_TIMEOUT") return true;
+  if (isTransientNetworkError(err)) return true;
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes("auth.getsession timeout") ||
+    msg.includes("getsession timeout") ||
+    msg.includes("tiempo de espera excedido")
+  );
+};
+
+const rememberAuthSessionTransientFailure = (err, fallbackMessage = "") => {
+  if (!isAuthGetSessionTransientError(err)) return;
+  authSessionFailureCooldownUntil = Date.now() + AUTH_SESSION_FAILURE_COOLDOWN_MS;
+  authSessionFailureMessage = getFriendlyApiErrorMessage(err, fallbackMessage);
 };
 
 const fetchWithRetry = async (url, options = {}, retryOptions = {}) => {
@@ -1904,6 +1943,7 @@ export async function startSession(_idUsuario) {
   const options =
     _idUsuario && typeof _idUsuario === "object" && !Array.isArray(_idUsuario) ? _idUsuario : {};
   const startedAt = getDebugNow();
+  const fallbackSessionErrorMessage = "No se pudo validar la sesión por un problema de conexión.";
   logApiDebug("startSession:start", {
     apiBase: API_BASE,
     path: typeof window !== "undefined" ? window.location.pathname : "",
@@ -1925,22 +1965,60 @@ export async function startSession(_idUsuario) {
     }
 
     if (!accessToken) {
+      const cooldownRemainingMs = getAuthSessionCooldownRemainingMs();
+      if (cooldownRemainingMs > 0) {
+        warnApiDebug("startSession:authSessionCooldown", {
+          ms: getElapsedMs(startedAt),
+          cooldownRemainingMs,
+        });
+        return {
+          error: authSessionFailureMessage || fallbackSessionErrorMessage,
+        };
+      }
+
       const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 6000);
       let timeoutId = null;
-      const sessionResult = await Promise.race([
-        supabase.auth.getSession(),
-        new Promise((_, reject) => {
-          timeoutId = window.setTimeout(() => {
-            const timeoutErr = new Error("Supabase auth.getSession timeout");
-            timeoutErr.code = "AUTH_GET_SESSION_TIMEOUT";
-            reject(timeoutErr);
-          }, timeoutMs);
-        }),
-      ]).finally(() => {
-        if (timeoutId) window.clearTimeout(timeoutId);
-      });
-      const { data: sessionData, error: sessionErr } = sessionResult;
+      let sessionResult = null;
+      try {
+        sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise((_, reject) => {
+            timeoutId = window.setTimeout(() => {
+              const timeoutErr = new Error("Supabase auth.getSession timeout");
+              timeoutErr.code = "AUTH_GET_SESSION_TIMEOUT";
+              reject(timeoutErr);
+            }, timeoutMs);
+          }),
+        ]).finally(() => {
+          if (timeoutId) window.clearTimeout(timeoutId);
+        });
+      } catch (sessionRuntimeErr) {
+        rememberAuthSessionTransientFailure(sessionRuntimeErr, fallbackSessionErrorMessage);
+        if (isAuthGetSessionTransientError(sessionRuntimeErr)) {
+          warnApiDebug("startSession:getSession:transientFailure", {
+            ms: getElapsedMs(startedAt),
+            timeoutMs,
+            ...summarizeError(sessionRuntimeErr),
+          });
+          return {
+            error: getFriendlyApiErrorMessage(sessionRuntimeErr, fallbackSessionErrorMessage),
+          };
+        }
+        throw sessionRuntimeErr;
+      }
+
+      const { data: sessionData, error: sessionErr } = sessionResult || {};
       if (sessionErr) {
+        rememberAuthSessionTransientFailure(sessionErr, fallbackSessionErrorMessage);
+        if (isAuthGetSessionTransientError(sessionErr)) {
+          warnApiDebug("startSession:getSession:transientResponse", {
+            ms: getElapsedMs(startedAt),
+            ...summarizeError(sessionErr),
+          });
+          return {
+            error: getFriendlyApiErrorMessage(sessionErr, fallbackSessionErrorMessage),
+          };
+        }
         console.error("startSession getSession error", sessionErr);
         console.error(`${API_DEBUG_PREFIX} startSession:getSession:error`, {
           ms: getElapsedMs(startedAt),
@@ -1952,6 +2030,9 @@ export async function startSession(_idUsuario) {
         sessionData?.session?.access_token || "",
         "startSession:getSession",
       );
+      if (accessToken) {
+        clearAuthSessionFailureCooldown();
+      }
       logApiDebug("startSession:getSession:done", {
         ms: getElapsedMs(startedAt),
         hasSession: Boolean(sessionData?.session),
@@ -1994,6 +2075,7 @@ export async function startSession(_idUsuario) {
       return { error: text || "No se pudo establecer la sesión" };
     }
     const payload = await res.json();
+    clearAuthSessionFailureCooldown();
     logApiDebug("startSession:done", {
       ms: getElapsedMs(startedAt),
       requestMs: getElapsedMs(requestStartedAt),
@@ -2001,16 +2083,14 @@ export async function startSession(_idUsuario) {
     });
     return payload;
   } catch (err) {
+    rememberAuthSessionTransientFailure(err, fallbackSessionErrorMessage);
     console.error("startSession error", err);
     console.error(`${API_DEBUG_PREFIX} startSession:error`, {
       ms: getElapsedMs(startedAt),
       ...summarizeError(err),
     });
     return {
-      error: getFriendlyApiErrorMessage(
-        err,
-        "No se pudo validar la sesión por un problema de conexión.",
-      ),
+      error: getFriendlyApiErrorMessage(err, fallbackSessionErrorMessage),
     };
   }
 }
@@ -2063,53 +2143,66 @@ async function handleFatalAuthSessionError(reason = "") {
 }
 
 export async function ensureServerSession() {
-  const startedAt = getDebugNow();
-  const id = requireSession();
-  logApiDebug("ensureServerSession:start", {
-    sessionUserId: id,
-  });
-  if (!id) {
-    if (!isAnonymousAllowedPath()) {
-      await handleFatalAuthSessionError("session_user_id ausente");
+  if (ensureServerSessionInFlight) return ensureServerSessionInFlight;
+
+  const currentRun = (async () => {
+    const startedAt = getDebugNow();
+    const id = requireSession();
+    logApiDebug("ensureServerSession:start", {
+      sessionUserId: id,
+    });
+    if (!id) {
+      if (!isAnonymousAllowedPath()) {
+        await handleFatalAuthSessionError("session_user_id ausente");
+      }
+      throw new Error("Sesión no disponible");
     }
-    throw new Error("Sesión no disponible");
-  }
-  const result = await startSession(id);
-  if (result?.error) {
-    warnApiDebug("ensureServerSession:failed", {
+    const result = await startSession(id);
+    if (result?.error) {
+      warnApiDebug("ensureServerSession:failed", {
+        ms: getElapsedMs(startedAt),
+        sessionUserId: id,
+        error: result.error,
+      });
+      if (isRecoverableAuthBridgeError(result.error)) {
+        const fallbackUser = await fetchCurrentUserServer({
+          allowFallback: true,
+        });
+        if (fallbackUser?.id_usuario) {
+          logApiDebug("ensureServerSession:recoverWithServerCookie", {
+            ms: getElapsedMs(startedAt),
+            sessionUserId: id,
+            id_usuario: Number(fallbackUser.id_usuario) || null,
+          });
+          return {
+            ok: true,
+            id_usuario: Number(fallbackUser.id_usuario) || null,
+            user: fallbackUser,
+            recovered: true,
+          };
+        }
+      }
+      if (isAuthFatalErrorMessage(result.error)) {
+        await handleFatalAuthSessionError(result.error);
+      }
+      throw new Error(result.error);
+    }
+    logApiDebug("ensureServerSession:done", {
       ms: getElapsedMs(startedAt),
       sessionUserId: id,
-      error: result.error,
+      id_usuario: Number(result?.id_usuario) || null,
     });
-    if (isRecoverableAuthBridgeError(result.error)) {
-      const fallbackUser = await fetchCurrentUserServer({
-        allowFallback: true,
-      });
-      if (fallbackUser?.id_usuario) {
-        logApiDebug("ensureServerSession:recoverWithServerCookie", {
-          ms: getElapsedMs(startedAt),
-          sessionUserId: id,
-          id_usuario: Number(fallbackUser.id_usuario) || null,
-        });
-        return {
-          ok: true,
-          id_usuario: Number(fallbackUser.id_usuario) || null,
-          user: fallbackUser,
-          recovered: true,
-        };
-      }
+    return result;
+  })();
+
+  ensureServerSessionInFlight = currentRun;
+  try {
+    return await currentRun;
+  } finally {
+    if (ensureServerSessionInFlight === currentRun) {
+      ensureServerSessionInFlight = null;
     }
-    if (isAuthFatalErrorMessage(result.error)) {
-      await handleFatalAuthSessionError(result.error);
-    }
-    throw new Error(result.error);
   }
-  logApiDebug("ensureServerSession:done", {
-    ms: getElapsedMs(startedAt),
-    sessionUserId: id,
-    id_usuario: Number(result?.id_usuario) || null,
-  });
-  return result;
 }
 
 export async function fetchCurrentUserServer(options = {}) {

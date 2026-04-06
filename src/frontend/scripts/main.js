@@ -2370,15 +2370,6 @@ async function init() {
       console.warn("applyLoaderAvatar inicial timeout/error", err);
     }
 
-    try {
-      const { data, error } = await withTimeout(supabase.auth.getSession(), 5000);
-      if (error) {
-        console.warn("[auth] getSession error", error);
-      }
-    } catch (err) {
-      console.warn("[auth] getSession exception", err);
-    }
-
     const currentUser = await loadCurrentUser();
     await applyLoaderAvatar(currentUser || null, currentUser?.id_usuario || requireSession());
     const btnAssign = document.querySelector("#btn-assign-client");

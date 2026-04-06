@@ -82,6 +82,7 @@ const btnReemplazar = document.querySelector("#btn-reemplazar");
 const modalResumenClose = document.querySelector(".modal-resumen-close");
 const checkOtro = document.querySelector("#check-otro");
 const resumenOtroText = document.querySelector("#resumen-otro-text");
+const checkAgregarDias = document.querySelector("#check-agregar-dias");
 const checkSuscripcion = document.querySelector("#check-suscripcion");
 const checkPerfiles = document.querySelector("#check-perfiles");
 const checkIngreso = document.querySelector("#check-ingreso");
@@ -99,6 +100,20 @@ const reportesById = new Map();
 const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
 
 const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
+const normalizeIsoDateOnly = (value) => {
+  const match = String(value || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
+const isFechaCorteOnOrBeforeToday = (fechaCorteRaw) => {
+  const fechaCorteIso = normalizeIsoDateOnly(fechaCorteRaw);
+  if (!fechaCorteIso) return false;
+  const hoyIso = getCaracasDateISO();
+  if (!hoyIso) return false;
+  return fechaCorteIso <= hoyIso;
+};
 
 const normalizeHexColor = (value) => {
   const raw = String(value || "").trim();
@@ -644,10 +659,15 @@ const renderReportesList = (plataformas = []) => {
               const cuentaTieneMadre = isTrue(r?.cuenta_tiene_madre);
               const cuentaActivaTrasReemplazo =
                 (isTrue(r?._reemplazo_activo) || cuentaTieneMadre) && !cuentaInactiva;
+              const fechaCorteVencida = isTrue(r?.cuenta_fecha_corte_vencida);
+              const activaDotTitle = fechaCorteVencida
+                ? "Cuenta activa tras reemplazo (fecha de corte vencida)"
+                : "Cuenta activa tras reemplazo";
+              const activaDotExtraClass = fechaCorteVencida ? " reporte-activa-dot-warning" : "";
               const estadoCuentaDot = cuentaInactiva
                 ? '<span class="reporte-inactiva-dot" title="Cuenta inactiva" aria-label="Cuenta inactiva"></span>'
                 : cuentaActivaTrasReemplazo
-                  ? '<span class="reporte-activa-dot" title="Cuenta activa tras reemplazo" aria-label="Cuenta activa tras reemplazo"></span>'
+                  ? `<span class="reporte-activa-dot${activaDotExtraClass}" title="${escapeHtml(activaDotTitle)}" aria-label="${escapeHtml(activaDotTitle)}"></span>`
                   : "";
               const correoCell = normalizeCopyValue(correo)
                 ? `<span class="correo-actions-inline">
@@ -865,7 +885,7 @@ async function loadReportes() {
   if (cuentaIds.size) {
     const { data: cuentasData, error: cuentasErr } = await supabase
       .from("cuentas")
-      .select("id_cuenta, id_cuenta_madre, cuenta_madre, correo, inactiva")
+      .select("id_cuenta, id_cuenta_madre, cuenta_madre, correo, inactiva, fecha_corte")
       .in("id_cuenta", Array.from(cuentaIds));
     if (cuentasErr) {
       console.error("load reportes cuentas madre error", cuentasErr);
@@ -897,6 +917,11 @@ async function loadReportes() {
     row.cuenta_madre_inactiva = madreInactiva;
     row.cuenta_tiene_madre = !!madreId;
     row.cuenta_inactiva_resuelta = cuentaInactivaResuelta;
+    const fechaCorteCuentaBase = normalizeIsoDateOnly(cuentaRow?.fecha_corte || "");
+    const fechaCorteMadre = normalizeIsoDateOnly(madreRow?.fecha_corte || "");
+    const fechaCorteResuelta = fechaCorteMadre || fechaCorteCuentaBase || "";
+    row.cuenta_fecha_corte_resuelta = fechaCorteResuelta;
+    row.cuenta_fecha_corte_vencida = isFechaCorteOnOrBeforeToday(fechaCorteResuelta);
   });
 
   return rows;
@@ -1222,6 +1247,7 @@ async function init() {
         resumenPinText.textContent = showPin ? `${oldPin || "(vacío)"} -> ${nuevoPin || "(vacío)"}` : "";
 
       modalResumen?.classList.remove("hidden");
+      if (checkAgregarDias) checkAgregarDias.checked = true;
     });
 
     modalResumen?.addEventListener("click", (e) => {
@@ -1366,17 +1392,19 @@ async function guardarCambios() {
       });
     }
 
-    try {
-      const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow);
-      if (fechaRes.applied && fechaRes.dias >= 1) {
-        await notifyDiasSumados({
-          row: currentRow,
-          ventaInfo: fechaRes.venta,
-          dias: fechaRes.dias,
-        });
+    if (checkAgregarDias?.checked !== false) {
+      try {
+        const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow);
+        if (fechaRes.applied && fechaRes.dias >= 1) {
+          await notifyDiasSumados({
+            row: currentRow,
+            ventaInfo: fechaRes.venta,
+            dias: fechaRes.dias,
+          });
+        }
+      } catch (diasErr) {
+        console.error("sumar dias fecha_corte reporte cerrado error", diasErr);
       }
-    } catch (diasErr) {
-      console.error("sumar dias fecha_corte reporte cerrado error", diasErr);
     }
 
     await clearVentaReportadoFlag(currentRow);
