@@ -222,7 +222,11 @@
       let qrRendererPromise = null;
       let whatsappQrPollTimer = null;
       let whatsappQrFlowRequested = false;
+      let whatsappQrFetchInFlight = null;
       let ensureServerSessionPromise = null;
+      const WHATSAPP_QR_POLL_INTERVAL_MS = 1500;
+      const WHATSAPP_QR_START_BOOTSTRAP_ATTEMPTS = 3;
+      const WHATSAPP_QR_START_BOOTSTRAP_DELAY_MS = 600;
 
       const ensureBackendSession = async ({ force = false } = {}) => {
         if (!force && ensureServerSessionPromise) {
@@ -352,29 +356,37 @@
         if (whatsappQrPollTimer) return;
         whatsappQrPollTimer = setInterval(() => {
           fetchAndRenderWhatsappQr({ autoStart: whatsappQrFlowRequested }).catch(() => {});
-        }, 5000);
+        }, WHATSAPP_QR_POLL_INTERVAL_MS);
       };
 
       const fetchAndRenderWhatsappQr = async ({ autoStart = true } = {}) => {
         if (autoStart) whatsappQrFlowRequested = true;
-        const data = await fetchJson(`/api/whatsapp/qr?start=${autoStart ? "true" : "false"}`);
-        if (data?.ready) {
-          hideWhatsappQrPanel({ resetFlow: true });
-          if (autoStart || whatsappQrFlowRequested) {
-            setStatus("WhatsApp listo. Puedes enviar mensajes.");
+        if (whatsappQrFetchInFlight) return whatsappQrFetchInFlight;
+        whatsappQrFetchInFlight = (async () => {
+          const data = await fetchJson(`/api/whatsapp/qr?start=${autoStart ? "true" : "false"}`);
+          if (data?.ready) {
+            hideWhatsappQrPanel({ resetFlow: true });
+            if (autoStart || whatsappQrFlowRequested) {
+              setStatus("WhatsApp listo. Puedes enviar mensajes.");
+            }
+            return true;
           }
-          return true;
-        }
-        const hasQr = Boolean(String(data?.qrRaw || "").trim());
-        const isActive = data?.active === true;
-        const isBooting = data?.booting === true;
-        if (!autoStart && !whatsappQrFlowRequested && !hasQr && !isBooting && !isActive) {
-          hideWhatsappQrPanel({ resetFlow: false });
+          const hasQr = Boolean(String(data?.qrRaw || "").trim());
+          const isActive = data?.active === true;
+          const isBooting = data?.booting === true;
+          if (!autoStart && !whatsappQrFlowRequested && !hasQr && !isBooting && !isActive) {
+            hideWhatsappQrPanel({ resetFlow: false });
+            return false;
+          }
+          await renderWhatsappQr(data?.qrRaw || "");
+          ensureWhatsappQrPolling();
           return false;
+        })();
+        try {
+          return await whatsappQrFetchInFlight;
+        } finally {
+          whatsappQrFetchInFlight = null;
         }
-        await renderWhatsappQr(data?.qrRaw || "");
-        ensureWhatsappQrPolling();
-        return false;
       };
 
       const escapeHtml = (value) =>
@@ -627,7 +639,6 @@
       };
 
       const sendGeneratedMessages = async () => {
-        hideWhatsappQrPanel();
         const targetUserIds = getPendingTargetUserIds(generatedItems);
         if (!targetUserIds.length) {
           setStatus("No hay mensajes pendientes enviables.", true);
@@ -640,7 +651,16 @@
         setStatus("Verificando sesión de WhatsApp en Hetzner...");
 
         try {
-          const whatsappReady = await fetchAndRenderWhatsappQr({ autoStart: true });
+          let whatsappReady = false;
+          for (let i = 0; i < WHATSAPP_QR_START_BOOTSTRAP_ATTEMPTS; i += 1) {
+            whatsappReady = await fetchAndRenderWhatsappQr({ autoStart: true });
+            if (whatsappReady) break;
+            if (i < WHATSAPP_QR_START_BOOTSTRAP_ATTEMPTS - 1) {
+              await new Promise((resolve) =>
+                window.setTimeout(resolve, WHATSAPP_QR_START_BOOTSTRAP_DELAY_MS),
+              );
+            }
+          }
           if (!whatsappReady) {
             setStatus(
               "WhatsApp no tiene sesión iniciada. Escanea el QR y luego presiona \"Enviar mensajes\" nuevamente.",
@@ -699,6 +719,7 @@
       btnGenerarRecordatorios?.addEventListener("click", loadRecordatorios);
       btnEnviarMensajes?.addEventListener("click", sendGeneratedMessages);
 
+      ensureQrRenderer().catch(() => {});
       fetchAndRenderWhatsappQr({ autoStart: false }).catch(() => {});
     </script>
   </body>

@@ -81,6 +81,18 @@
         background: #fee2e2;
         color: #991b1b;
       }
+      .tipo-pantalla {
+        background: #e0e7ff;
+        color: #312e81;
+      }
+      .tipo-acceso {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .tipo-cuenta-completa {
+        background: #dcfce7;
+        color: #166534;
+      }
       .pedido-asignado {
         display: inline-flex;
         align-items: center;
@@ -716,12 +728,23 @@
       const renderSection = (title, grouped) => {
         const entries = Object.entries(grouped);
         if (!entries.length) return "";
+        const getTipoSolicitudLabel = (row) => {
+          if (isTrue(row?.completa)) return "Cuenta completa";
+          if (isTrue(row?.por_acceso)) return "Acceso";
+          if (isTrue(row?.por_pantalla)) return "Pantalla";
+          return "-";
+        };
+        const getTipoSolicitudClass = (label) => {
+          if (label === "Cuenta completa") return "tipo-cuenta-completa";
+          if (label === "Acceso") return "tipo-acceso";
+          if (label === "Pantalla") return "tipo-pantalla";
+          return "";
+        };
         const content = entries
           .map(([_, payload]) => {
             const headerStyle = payload.color_1 ? ` style="--table-header-bg:${payload.color_1};"` : "";
             const isEntregaInmediata = payload.entrega_inmediata === true;
             const showClave = payload.clave_cliente === true;
-            const showTipo = String(payload.id_plataforma || "") === "9";
             const showValor = payload.tarjeta_de_regalo === true;
             const platformHref = toExternalHref(payload.link_pagina);
             const platformName = escapeHtml(payload.nombre || "Plataforma");
@@ -757,27 +780,10 @@
                   : "";
                 const body = rows
                   .map((r) => {
-                    const cuentaNuevaRaw = r.cuenta_nueva;
-                    const cuentaNueva =
-                      cuentaNuevaRaw === true ||
-                      cuentaNuevaRaw === "true" ||
-                      cuentaNuevaRaw === 1 ||
-                      cuentaNuevaRaw === "1";
-                    const reportadoRaw = r.reportado;
-                    const reportado =
-                      reportadoRaw === true ||
-                      reportadoRaw === "true" ||
-                      reportadoRaw === 1 ||
-                      reportadoRaw === "1";
-                    const tipoCell = showTipo
-                      ? reportado
-                        ? `<td class="tipo-cell tipo-reportado">Reportado</td>`
-                        : cuentaNuevaRaw == null
-                        ? `<td></td>`
-                        : `<td class="tipo-cell ${cuentaNueva ? "tipo-nueva" : "tipo-existe"}">${
-                            cuentaNueva ? "Cuenta Nueva" : "Ya existe"
-                          }</td>`
-                      : "";
+                    const tipoSolicitudLabel = getTipoSolicitudLabel(r);
+                    const tipoCell = `<td class="tipo-cell ${getTipoSolicitudClass(
+                      tipoSolicitudLabel,
+                    )}">${tipoSolicitudLabel}</td>`;
                     const correoText = r.correo || "-";
                     const correoCell = `
                            <td>
@@ -805,12 +811,12 @@
                       isEntregaInmediata
                         ? `<td>${r.fecha_pago || "-"}</td>`
                         : `<td>${r.servicio || "-"}</td>
-                           ${valorGiftCardCell}
                            ${tipoCell}
+                           ${valorGiftCardCell}
                            ${correoCell}
                            ${showClave ? claveCell : ""}`
                     }
-                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${valorGiftCardCell}${tipoCell}` : ""}
+                    ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}${valorGiftCardCell}` : ""}
                     <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
                     <td class="pp-acciones-cell">
                       ${
@@ -850,15 +856,15 @@
                                  <th>Cliente</th>
                                  <th>Fecha de pago</th>
                                  <th>Servicio solicitado</th>
+                                 <th>Tipo</th>
                                  ${showValor ? "<th>Valor</th>" : ""}
-                                 ${showTipo ? "<th>Tipo</th>" : ""}
                                  <th>Fecha de pedido</th>
                                  <th>Acción</th>`
                               : `<th>ID venta</th>
                                  <th>Cliente</th>
                                  <th>Servicio solicitado</th>
+                                 <th>Tipo</th>
                                  ${showValor ? "<th>Valor</th>" : ""}
-                                 ${showTipo ? "<th>Tipo</th>" : ""}
                                  <th>Correo</th>
                                  ${showClave ? "<th>Clave</th>" : ""}
                                  <th>Fecha de pedido</th>

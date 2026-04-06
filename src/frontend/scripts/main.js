@@ -1967,8 +1967,47 @@ const loadStockSummary = async (canLogStock = false) => {
     if (!canLogStock) return;
     console.error(...args);
   };
+  const todayCaracas = getCaracasDateStr(0);
+  const toPositiveInt = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0;
+  };
+  const normalizeIsoDateOnly = (value) => {
+    const m = String(value || "")
+      .trim()
+      .match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return "";
+    return `${m[1]}-${m[2]}-${m[3]}`;
+  };
+  const isVentaActivaParaStock = (row) => {
+    const pendiente = isTrue(row?.pendiente);
+    const suspendido = isTrue(row?.suspendido);
+    const fechaCorteIso = normalizeIsoDateOnly(row?.fecha_corte);
+    const vigente = Boolean(fechaCorteIso && fechaCorteIso >= todayCaracas);
+    return pendiente || suspendido || vigente;
+  };
+  const fetchVentasActivasStock = async () => {
+    const rows = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("ventas")
+        .select("id_venta, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, pendiente, suspendido")
+        .or(`pendiente.eq.true,suspendido.eq.true,fecha_corte.gte.${todayCaracas}`)
+        .order("id_venta", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) return { data: null, error };
+      const chunk = Array.isArray(data) ? data : [];
+      rows.push(...chunk);
+      if (chunk.length < pageSize) break;
+      from += pageSize;
+    }
+    return { data: rows, error: null };
+  };
 
   const [
+    { data: ventasActivasStock, error: ventasErr },
     { data: perfiles, error: perfErr },
     { data: cuentasMiembro, error: ctaErr },
     { data: cuentasVentaMiembro, error: ctaMiembroErr },
@@ -1976,10 +2015,11 @@ const loadStockSummary = async (canLogStock = false) => {
     { data: giftPins, error: giftPinsErr },
     { data: giftPlatforms, error: giftPlatErr },
   ] = await Promise.all([
+    fetchVentasActivasStock(),
     supabase
       .from("perfiles")
       .select(
-        "id_perfil, n_perfil, ocupado, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey(id_plataforma, inactiva, venta_perfil, correo, plataformas(nombre))"
+        "id_perfil, id_cuenta, n_perfil, ocupado, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey(id_plataforma, inactiva, venta_perfil, correo, plataformas(nombre))"
       )
       .eq("ocupado", false)
       .eq("cuentas.venta_perfil", true)
@@ -2017,13 +2057,48 @@ const loadStockSummary = async (canLogStock = false) => {
       .select("id_plataforma")
       .eq("tarjeta_de_regalo", true),
   ]);
-  if (perfErr || ctaErr || ctaMiembroErr || compErr || giftPinsErr || giftPlatErr) {
+  if (ventasErr || perfErr || ctaErr || ctaMiembroErr || compErr || giftPinsErr || giftPlatErr) {
     logStockError(
       "stock summary error",
-      perfErr || ctaErr || ctaMiembroErr || compErr || giftPinsErr || giftPlatErr
+      ventasErr || perfErr || ctaErr || ctaMiembroErr || compErr || giftPinsErr || giftPlatErr
     );
     return {};
   }
+  const cuentasEnUso = new Set();
+  const perfilesEnUso = new Set();
+  (ventasActivasStock || []).forEach((venta) => {
+    if (!isVentaActivaParaStock(venta)) return;
+    const idCuenta = toPositiveInt(venta?.id_cuenta);
+    const idCuentaMiembro = toPositiveInt(venta?.id_cuenta_miembro);
+    const idPerfil = toPositiveInt(venta?.id_perfil);
+    if (idCuenta) cuentasEnUso.add(idCuenta);
+    if (idCuentaMiembro) cuentasEnUso.add(idCuentaMiembro);
+    if (idPerfil) perfilesEnUso.add(idPerfil);
+  });
+  const perfilesLibresStock = (perfiles || []).filter((p) => {
+    const idPerfil = toPositiveInt(p?.id_perfil);
+    const idCuentaPerfil = toPositiveInt(p?.id_cuenta || p?.cuentas?.id_cuenta);
+    if (idPerfil && perfilesEnUso.has(idPerfil)) return false;
+    if (idCuentaPerfil && cuentasEnUso.has(idCuentaPerfil)) return false;
+    return true;
+  });
+  const cuentasMiembroLibresStock = (cuentasMiembro || []).filter((c) => {
+    const idCuenta = toPositiveInt(c?.id_cuenta);
+    return !(idCuenta && cuentasEnUso.has(idCuenta));
+  });
+  const cuentasVentaMiembroLibresStock = (cuentasVentaMiembro || []).filter((c) => {
+    const idCuenta = toPositiveInt(c?.id_cuenta);
+    return !(idCuenta && cuentasEnUso.has(idCuenta));
+  });
+  const cuentasCompletasLibresStock = (cuentasCompletas || []).filter((c) => {
+    const idCuenta = toPositiveInt(c?.id_cuenta);
+    return !(idCuenta && cuentasEnUso.has(idCuenta));
+  });
+
+  logStock("[stock] ids ocupados por ventas activas:", {
+    cuentas: cuentasEnUso.size,
+    perfiles: perfilesEnUso.size,
+  });
   let stockObj = {};
   let netflixPlan1 = 0;
   let netflixPlan2 = 0;
@@ -2032,7 +2107,7 @@ const loadStockSummary = async (canLogStock = false) => {
   const libresPlan1Perf = [];
   const libresPlan2Perf = [];
   const libresPorPlataforma = {};
-  (perfiles || []).forEach((p) => {
+  perfilesLibresStock.forEach((p) => {
     const platId = p.cuentas?.id_plataforma;
     const correoCuenta = p.cuentas?.correo || "";
     const platNombre =
@@ -2070,15 +2145,15 @@ const loadStockSummary = async (canLogStock = false) => {
     }
   });
 
-  if (cuentasMiembro?.length) {
-    netflixPlan2 += cuentasMiembro.length;
-    stockObj[1] = (stockObj[1] || 0) + cuentasMiembro.length;
-    cuentasMiembro.forEach((c) => {
+  if (cuentasMiembroLibresStock.length) {
+    netflixPlan2 += cuentasMiembroLibresStock.length;
+    stockObj[1] = (stockObj[1] || 0) + cuentasMiembroLibresStock.length;
+    cuentasMiembroLibresStock.forEach((c) => {
       if (c.correo) libresPlan2Correos.push(c.correo);
     });
   }
 
-  const cuentasCompletasFiltradas = (cuentasCompletas || []).filter(
+  const cuentasCompletasFiltradas = cuentasCompletasLibresStock.filter(
     (c) => c?.venta_perfil === false && c?.venta_miembro === false && c?.inactiva === false
   );
   const completasCount = {};
@@ -2091,7 +2166,7 @@ const loadStockSummary = async (canLogStock = false) => {
   });
 
   const ventaMiembroSummary = {};
-  (cuentasVentaMiembro || []).forEach((c) => {
+  cuentasVentaMiembroLibresStock.forEach((c) => {
     const platId = Number(c?.id_plataforma);
     if (!Number.isFinite(platId) || platId <= 0) return;
     if (!ventaMiembroSummary[platId]) {

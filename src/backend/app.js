@@ -155,6 +155,18 @@ const WHATSAPP_READY_TIMEOUT_MS = Math.max(
   15000,
   Number(process.env.WHATSAPP_READY_TIMEOUT_MS) || 120000,
 );
+const WHATSAPP_QR_WAIT_TIMEOUT_MS = Math.max(
+  1200,
+  Number(process.env.WHATSAPP_QR_WAIT_TIMEOUT_MS) || 3000,
+);
+const WHATSAPP_QR_WAIT_POLL_MS = Math.max(
+  120,
+  Number(process.env.WHATSAPP_QR_WAIT_POLL_MS) || 250,
+);
+const WHATSAPP_PERSISTENT_SYNC_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.WHATSAPP_PERSISTENT_SYNC_INTERVAL_MS) || 60000,
+);
 const WHATSAPP_RESET_HOUR = 0;
 const WHATSAPP_HETZNER_PERSISTENT_CFG_KEY = "whatsapp_hetzner_persistent_worker";
 let lastAutoRecordatoriosRunDate = null;
@@ -168,6 +180,8 @@ let autoRecordatoriosIntervalId = null;
 let whatsappBootInProgress = false;
 let whatsappHetznerPersistentWorkerEnabled = false;
 let whatsappHetznerPersistentWorkerLoaded = false;
+let whatsappPersistentWorkerSyncInProgress = false;
+let whatsappPersistentWorkerSyncIntervalId = null;
 let lastAutoRecordatoriosState = {
   date: null,
   status: "idle",
@@ -1441,6 +1455,7 @@ const randomWhatsappDelayMs = () => {
 const ensureWhatsappClientStarted = async ({
   reason = "unspecified",
   allowWhenDisabled = false,
+  waitForInitialize = true,
 } = {}) => {
   if (!shouldStartWhatsapp && !allowWhenDisabled) {
     const err = new Error("WhatsApp deshabilitado");
@@ -1450,11 +1465,26 @@ const ensureWhatsappClientStarted = async ({
   if (isWhatsappReady()) return true;
   if (whatsappBootInProgress) return false;
 
-  whatsappBootInProgress = true;
-  try {
+  const bootTask = async () => {
     console.log(`[WhatsApp] Iniciando cliente (${reason}).`);
     await startWhatsappClient();
     return isWhatsappReady();
+  };
+
+  whatsappBootInProgress = true;
+  if (waitForInitialize === false) {
+    void bootTask()
+      .catch((err) => {
+        console.error(`[WhatsApp] init error (${reason}):`, err);
+      })
+      .finally(() => {
+        whatsappBootInProgress = false;
+      });
+    return false;
+  }
+
+  try {
+    return await bootTask();
   } catch (err) {
     console.error(`[WhatsApp] init error (${reason}):`, err);
     throw err;
@@ -1597,8 +1627,8 @@ const sleepMs = (ms = 0) =>
   });
 
 const waitForWhatsappQrOrReady = async ({
-  timeoutMs = 9000,
-  pollMs = 350,
+  timeoutMs = WHATSAPP_QR_WAIT_TIMEOUT_MS,
+  pollMs = WHATSAPP_QR_WAIT_POLL_MS,
 } = {}) => {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -1633,13 +1663,40 @@ const loadWhatsappHetznerPersistentWorkerEnabled = async ({ refresh = false } = 
     whatsappHetznerPersistentWorkerLoaded = true;
   } catch (err) {
     const code = String(err?.code || "").trim();
-    if (code !== "42P01" && code !== "42703") {
+    const schemaMissing = code === "42P01" || code === "42703";
+    if (!schemaMissing) {
       console.error("[whatsapp:persistent] load config error", err);
+      // Error transitorio (por ejemplo Supabase pausado). No marcamos "loaded"
+      // para permitir nuevos intentos automáticos cuando vuelva la conexión.
+      whatsappHetznerPersistentWorkerLoaded = false;
+      return whatsappHetznerPersistentWorkerEnabled;
     }
+    // Si faltan tabla/columna, dejamos fallback estable en false.
     whatsappHetznerPersistentWorkerEnabled = false;
     whatsappHetznerPersistentWorkerLoaded = true;
   }
   return whatsappHetznerPersistentWorkerEnabled;
+};
+
+const syncWhatsappPersistentWorkerState = async (reason = "sync") => {
+  if (!shouldStartWhatsapp) return;
+  if (whatsappPersistentWorkerSyncInProgress) return;
+  whatsappPersistentWorkerSyncInProgress = true;
+  try {
+    const enabled = await loadWhatsappHetznerPersistentWorkerEnabled({ refresh: true });
+    if (!enabled) return;
+    if (!isWhatsappReady() && !whatsappBootInProgress) {
+      await ensureWhatsappClientStarted({
+        reason: `persistent_worker_${reason}`,
+        allowWhenDisabled: true,
+        waitForInitialize: false,
+      });
+    }
+  } catch (err) {
+    console.error("[whatsapp:persistent] sync error", err);
+  } finally {
+    whatsappPersistentWorkerSyncInProgress = false;
+  }
 };
 
 const saveWhatsappHetznerPersistentWorkerEnabled = async (enabled) => {
@@ -1930,7 +1987,7 @@ const buildWhatsappVentaEntregadaMessage = ({
     String(detalleOrdenUrl || "").trim() ||
     (ordenId ? buildWhatsappOrderDetailUrl(ordenId) : buildPublicSiteUrl());
   return `Venta #${ventaId}
-estado: servicio entrgado ✅
+estado: servicio entregado ✅
 
 Puedes verificar la orden por:
 ${detalleUrl}`;
@@ -4887,21 +4944,12 @@ const startAutoWhatsappRecordatoriosScheduler = () => {
 };
 
 if (shouldStartWhatsapp) {
-  loadWhatsappHetznerPersistentWorkerEnabled()
-    .then(async (enabled) => {
-      if (!enabled) return;
-      try {
-        await ensureWhatsappClientStarted({
-          reason: "persistent_worker_bootstrap",
-          allowWhenDisabled: true,
-        });
-      } catch (err) {
-        console.error("[whatsapp:persistent] bootstrap start error", err);
-      }
-    })
-    .catch((err) => {
-      console.error("[whatsapp:persistent] bootstrap config error", err);
-    });
+  syncWhatsappPersistentWorkerState("bootstrap");
+  if (!whatsappPersistentWorkerSyncIntervalId) {
+    whatsappPersistentWorkerSyncIntervalId = setInterval(() => {
+      syncWhatsappPersistentWorkerState("interval");
+    }, WHATSAPP_PERSISTENT_SYNC_INTERVAL_MS);
+  }
 }
 
 if (shouldStartWhatsapp && WHATSAPP_AUTO_RECORDATORIOS_ENABLED) {
@@ -6257,6 +6305,9 @@ app.get("/api/whatsapp/status", (req, res) => {
   const qrState = getWhatsappQrState();
   const ready = isWhatsappReady();
   res.json({
+    enabledByEnv: shouldStartWhatsapp,
+    persistentWorkerEnabled: whatsappHetznerPersistentWorkerEnabled,
+    persistentWorkerLoaded: whatsappHetznerPersistentWorkerLoaded,
     ready,
     active: isWhatsappClientActive(),
     booting: whatsappBootInProgress,
@@ -6336,6 +6387,7 @@ app.get("/api/whatsapp/qr", async (req, res) => {
       await ensureWhatsappClientStarted({
         reason: "manual_qr_request",
         allowWhenDisabled: true,
+        waitForInitialize: false,
       });
     }
     let qrState = getWhatsappQrState();

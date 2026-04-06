@@ -83,6 +83,7 @@ const modalResumenClose = document.querySelector(".modal-resumen-close");
 const checkOtro = document.querySelector("#check-otro");
 const resumenOtroText = document.querySelector("#resumen-otro-text");
 const checkAgregarDias = document.querySelector("#check-agregar-dias");
+const checkAgregarDiasLabel = checkAgregarDias?.closest("label") || null;
 const checkSuscripcion = document.querySelector("#check-suscripcion");
 const checkPerfiles = document.querySelector("#check-perfiles");
 const checkIngreso = document.querySelector("#check-ingreso");
@@ -207,14 +208,17 @@ const getReportePlatformId = (row) => {
   return Number.isFinite(platformId) && platformId > 0 ? platformId : null;
 };
 
-const notifyReporteCerrado = async (row) => {
+const notifyReporteCerrado = async (row, options = {}) => {
   const reportId = Number(row?.id_reporte);
   const targetUserId = Number(row?.id_usuario);
   if (!Number.isFinite(reportId) || !Number.isFinite(targetUserId)) return;
+  const diasAgregadosRaw = Number(options?.diasAgregados || 0);
+  const diasAgregados = Number.isFinite(diasAgregadosRaw) ? Math.max(0, Math.trunc(diasAgregadosRaw)) : 0;
+  const diasMsg = diasAgregados > 0 ? `<br>Se sumó ${diasAgregados} dias a tu fecha de pago.` : "";
   const fecha = getCaracasDateISO();
   const payload = {
     titulo: `Reporte ${reportId} cerrado.`,
-    mensaje: '<a href="reportes/report.html" class="link-inline">Más detalles</a>',
+    mensaje: `<a href="reportes/report.html" class="link-inline">Más detalles</a>.${diasMsg}`,
     fecha,
     leido: false,
     id_usuario: targetUserId,
@@ -229,32 +233,27 @@ const parseDateParts = (isoDate = "") => {
   return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
 };
 
-const parseTimeParts = (timeRaw = "") => {
-  const m = String(timeRaw || "")
-    .trim()
-    .match(/^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
-  if (!m) return { hour: 0, minute: 0, second: 0 };
-  return {
-    hour: Number(m[1]) || 0,
-    minute: Number(m[2]) || 0,
-    second: Number(m[3]) || 0,
-  };
+const diffIsoDatesInDays = (fromIso, toIso) => {
+  const from = parseDateParts(fromIso);
+  const to = parseDateParts(toIso);
+  if (!from || !to) return 0;
+  const fromUtc = Date.UTC(from.year, from.month - 1, from.day, 0, 0, 0, 0);
+  const toUtc = Date.UTC(to.year, to.month - 1, to.day, 0, 0, 0, 0);
+  if (toUtc <= fromUtc) return 0;
+  return Math.floor((toUtc - fromUtc) / 86400000);
 };
 
-const toUtcFromCaracasLocal = (dateIso, timeRaw) => {
-  const d = parseDateParts(dateIso);
-  if (!d) return null;
-  const t = parseTimeParts(timeRaw);
-  // Venezuela UTC-4 (sin DST). Convertimos "local Caracas" -> UTC.
-  return Date.UTC(d.year, d.month - 1, d.day, t.hour + 4, t.minute, t.second, 0);
+const isReporteCreadoHoyCaracas = (row) => {
+  const fechaReporteIso = normalizeIsoDateOnly(row?.fecha_creacion);
+  const hoyIso = getCaracasDateISO();
+  return Boolean(fechaReporteIso && hoyIso && fechaReporteIso === hoyIso);
 };
 
 const calcDiasDiferenciaReporte = (row) => {
-  const createdUtcMs = toUtcFromCaracasLocal(row?.fecha_creacion, row?.hora_creacion);
-  if (!Number.isFinite(createdUtcMs)) return 0;
-  const nowUtcMs = Date.now();
-  if (nowUtcMs <= createdUtcMs) return 0;
-  return Math.floor((nowUtcMs - createdUtcMs) / 86400000);
+  const fechaReporteIso = normalizeIsoDateOnly(row?.fecha_creacion);
+  const fechaSolucionIso = getCaracasDateISO();
+  if (!fechaReporteIso || !fechaSolucionIso) return 0;
+  return diffIsoDatesInDays(fechaReporteIso, fechaSolucionIso);
 };
 
 const addDaysToIsoDate = (dateIso, days) => {
@@ -449,9 +448,10 @@ async function notifyReemplazoReporte({ row, plataforma, correoViejo, correoNuev
     ? `<a href="inventario.html?correo=${encodeURIComponent(correoNuevoTxt)}" class="link-inline">${correoNuevoSafe}</a>`
     : "-";
   const diasInt = Number.isFinite(Number(dias)) ? Math.max(0, Number(dias)) : 0;
+  const diasMsg = diasInt > 0 ? `<br><br>Se sumó ${diasInt} dias a tu fecha de pago.` : "";
   const payload = {
     titulo: "Servicio reemplazado",
-    mensaje: `Tu servicio de <strong>${plataformaTxt}</strong> pasó de ${correoViejoSafe} a:<br>Correo: ${correoLink}<br><br>Se sumó ${diasInt} dias a tu fecha de pago.<br>Presiona el correo para ver los datos de la cuenta.`,
+    mensaje: `Tu servicio de <strong>${plataformaTxt}</strong> pasó de ${correoViejoSafe} a:<br>Correo: ${correoLink}${diasMsg}<br>Presiona el correo para ver los datos de la cuenta.`,
     fecha,
     leido: false,
     id_usuario: targetUserId,
@@ -1247,7 +1247,12 @@ async function init() {
         resumenPinText.textContent = showPin ? `${oldPin || "(vacío)"} -> ${nuevoPin || "(vacío)"}` : "";
 
       modalResumen?.classList.remove("hidden");
-      if (checkAgregarDias) checkAgregarDias.checked = true;
+      const reporteCreadoHoy = isReporteCreadoHoyCaracas(currentRow);
+      if (checkAgregarDiasLabel) checkAgregarDiasLabel.classList.toggle("hidden", reporteCreadoHoy);
+      if (checkAgregarDias) {
+        checkAgregarDias.disabled = reporteCreadoHoy;
+        checkAgregarDias.checked = !reporteCreadoHoy;
+      }
     });
 
     modalResumen?.addEventListener("click", (e) => {
@@ -1392,15 +1397,13 @@ async function guardarCambios() {
       });
     }
 
-    if (checkAgregarDias?.checked !== false) {
+    let diasAgregados = 0;
+    const shouldAgregarDias = checkAgregarDias ? checkAgregarDias.checked === true : true;
+    if (shouldAgregarDias) {
       try {
         const fechaRes = await applyDiasExtraToVentaFechaCorte(currentRow);
         if (fechaRes.applied && fechaRes.dias >= 1) {
-          await notifyDiasSumados({
-            row: currentRow,
-            ventaInfo: fechaRes.venta,
-            dias: fechaRes.dias,
-          });
+          diasAgregados = Number(fechaRes.dias) || 0;
         }
       } catch (diasErr) {
         console.error("sumar dias fecha_corte reporte cerrado error", diasErr);
@@ -1410,7 +1413,7 @@ async function guardarCambios() {
     await clearVentaReportadoFlag(currentRow);
 
     try {
-      await notifyReporteCerrado(currentRow);
+      await notifyReporteCerrado(currentRow, { diasAgregados });
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }
@@ -1927,7 +1930,7 @@ async function reemplazarServicio(options = {}) {
     }
 
     try {
-      await notifyReporteCerrado(selectedRow);
+      await notifyReporteCerrado(selectedRow, { diasAgregados: diasSumados });
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }
