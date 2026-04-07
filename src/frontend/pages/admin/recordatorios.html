@@ -245,6 +245,12 @@
         statusEl.textContent = msg || "";
         statusEl.style.color = isError ? "#b91c1c" : "";
       };
+      const formatMinutes = (ms) => {
+        const parsed = Number(ms);
+        if (!Number.isFinite(parsed) || parsed <= 0) return "0 min";
+        const minutes = Math.max(1, Math.round(parsed / 60000));
+        return `${minutes} min`;
+      };
 
       const copyToClipboard = async (text) => {
         try {
@@ -693,6 +699,17 @@
           );
         } catch (err) {
           console.error("recordatorios enviar error", err);
+          const lockInfo = err?.body?.lock || null;
+          if (Number(err?.status || 0) === 409 && lockInfo) {
+            const sourceTxt = String(lockInfo?.source || "desconocido");
+            const modeTxt = String(lockInfo?.mode || "pending");
+            const ageTxt = formatMinutes(lockInfo?.ageMs);
+            const idleTxt = formatMinutes(lockInfo?.idleMs);
+            setStatus(
+              `Ya hay un envío en progreso (${sourceTxt}/${modeTxt}). Activo desde hace ${ageTxt} (sin avance hace ${idleTxt}).`,
+              true,
+            );
+          }
           const errText = String(err?.message || err?.body?.error || "").toLowerCase();
           const isWhatsappNotReady =
             Number(err?.status || 0) === 503 &&
@@ -709,7 +726,9 @@
             ? bodyItems
             : applyGlobalPendingReason(generatedItems, err?.message || "No se pudo enviar");
           renderGeneratedState(fallbackItems);
-          setStatus(err?.message || "No se pudieron enviar los recordatorios.", true);
+          if (!(Number(err?.status || 0) === 409 && lockInfo)) {
+            setStatus(err?.message || "No se pudieron enviar los recordatorios.", true);
+          }
         } finally {
           if (btnGenerarRecordatorios) btnGenerarRecordatorios.disabled = false;
           updateSendButtonState();

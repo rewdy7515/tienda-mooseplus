@@ -163,6 +163,10 @@ const WHATSAPP_QR_WAIT_POLL_MS = Math.max(
   120,
   Number(process.env.WHATSAPP_QR_WAIT_POLL_MS) || 250,
 );
+const WHATSAPP_RECORDATORIOS_LOCK_STALE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.WHATSAPP_RECORDATORIOS_LOCK_STALE_MS) || 20 * 60 * 1000,
+);
 const WHATSAPP_PERSISTENT_SYNC_INTERVAL_MS = Math.max(
   15000,
   Number(process.env.WHATSAPP_PERSISTENT_SYNC_INTERVAL_MS) || 60000,
@@ -173,6 +177,19 @@ let lastAutoRecordatoriosRunDate = null;
 let autoRecordatoriosRetryPending = false;
 let autoRecordatoriosRunInProgress = false;
 let recordatoriosSendInProgress = false;
+let recordatoriosSendLockMeta = {
+  source: null,
+  startedAt: null,
+  heartbeatAt: null,
+  mode: null,
+  total: 0,
+  processed: 0,
+  sent: 0,
+  failed: 0,
+  skippedNoPhone: 0,
+  skippedInvalidPhone: 0,
+  lastCliente: null,
+};
 let recordatoriosEnviados = false;
 let recordatoriosEnviadosDate = null;
 let autoRecordatoriosSchedulerStarted = false;
@@ -2010,7 +2027,7 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
 
 const findVentaAsociadaFromReporteForWhatsapp = async (reporte = null) => {
   const ventaSelectForWhatsapp =
-    "id_venta, pendiente, correo_miembro, clave_miembro, cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave)";
+    "id_venta, pendiente, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(correo, clave), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave)";
   const ventaIdDirecta = toPositiveInt(reporte?.id_venta);
   if (ventaIdDirecta) {
     const { data: ventaDirecta, error: ventaDirectaErr } = await supabaseAdmin
@@ -2079,6 +2096,20 @@ const getVentaClaveMiembroForWhatsapp = (venta = null) => {
   return "";
 };
 
+const getVentaCorreoCuentaPrincipalForWhatsapp = (venta = null) => {
+  const cuentaPrincipal = Array.isArray(venta?.cuentas) ? venta.cuentas[0] || null : venta?.cuentas || null;
+  const correoCuenta = String(cuentaPrincipal?.correo || "").trim();
+  if (correoCuenta) return correoCuenta;
+  return "";
+};
+
+const getVentaClaveCuentaPrincipalForWhatsapp = (venta = null) => {
+  const cuentaPrincipal = Array.isArray(venta?.cuentas) ? venta.cuentas[0] || null : venta?.cuentas || null;
+  const claveCuenta = String(cuentaPrincipal?.clave || "").trim();
+  if (claveCuenta) return claveCuenta;
+  return "";
+};
+
 const sendReporteCreatedToWhatsappGroup = async ({
   reporte = null,
   manageWhatsappLifecycle = true,
@@ -2098,8 +2129,8 @@ const sendReporteCreatedToWhatsappGroup = async ({
   const message = buildWhatsappReporteCreadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
-    correo: getVentaCorreoMiembroForWhatsapp(ventaAsociada) || "-",
-    clave: getVentaClaveMiembroForWhatsapp(ventaAsociada) || "-",
+    correo: getVentaCorreoCuentaPrincipalForWhatsapp(ventaAsociada) || "-",
+    clave: getVentaClaveCuentaPrincipalForWhatsapp(ventaAsociada) || "-",
     cliente: cliente || `Usuario ${toPositiveInt(reporte?.id_usuario) || "-"}`,
     motivo,
   });
@@ -3193,14 +3224,28 @@ const notifyManualVerificationToWhatsappAdmin = async ({
 
   const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
   let metodoPagoNombre = "";
+  let metodoPagoVerificacionAutomatica = null;
   if (metodoPagoId) {
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
-      .select("nombre")
+      .select("nombre, verificacion_automatica")
       .eq("id_metodo_de_pago", metodoPagoId)
       .maybeSingle();
     if (metodoPagoErr) throw metodoPagoErr;
     metodoPagoNombre = String(metodoPagoRow?.nombre || "").trim();
+    metodoPagoVerificacionAutomatica = metodoPagoRow?.verificacion_automatica;
+  }
+
+  // La alerta de verificación manual aplica únicamente a métodos no automáticos.
+  if (metodoPagoVerificacionAutomatica !== false) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "payment_method_verification_is_automatic",
+      id_orden: ordenId,
+      id_metodo_de_pago: metodoPagoId || null,
+      id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+    };
   }
 
   const referenciaText = String(ordenRow?.referencia || "").trim();
@@ -3800,18 +3845,14 @@ const processPendingManualVerificationAlerts = async () => {
       }
 
       try {
-        if (!managedWhatsappForRun) {
-          await ensureWhatsappClientReady({
-            reason: "manual_verification_watcher_worker",
-            allowWhenDisabled: true,
-          });
-          managedWhatsappForRun = true;
-        }
         const notifyRes = await notifyManualVerificationToWhatsappAdmin({
           idOrden: ordenId,
           source: "manual_verification_watcher",
           manageWhatsappLifecycle: false,
         });
+        if (!managedWhatsappForRun && isWhatsappClientActive()) {
+          managedWhatsappForRun = true;
+        }
         const notifCreated = notifyRes?.inbox_notification?.created === true;
         if (notifCreated) result.notifCreated += 1;
         if (notifyRes?.sent) {
@@ -4398,6 +4439,55 @@ const countWhatsappSendableRecordatorios = (items = []) => {
     .length;
 };
 
+const resetRecordatoriosSendLockMeta = () => {
+  recordatoriosSendLockMeta = {
+    source: null,
+    startedAt: null,
+    heartbeatAt: null,
+    mode: null,
+    total: 0,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    skippedNoPhone: 0,
+    skippedInvalidPhone: 0,
+    lastCliente: null,
+  };
+};
+
+const touchRecordatoriosSendLock = (partial = {}) => {
+  const nowIso = new Date().toISOString();
+  recordatoriosSendLockMeta = {
+    ...recordatoriosSendLockMeta,
+    ...partial,
+    heartbeatAt: nowIso,
+  };
+};
+
+const getRecordatoriosSendLockState = () => {
+  const nowMs = Date.now();
+  const startedMs = Date.parse(recordatoriosSendLockMeta?.startedAt || "");
+  const heartbeatMs = Date.parse(
+    recordatoriosSendLockMeta?.heartbeatAt || recordatoriosSendLockMeta?.startedAt || "",
+  );
+  const ageMs = Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : null;
+  const idleMs = Number.isFinite(heartbeatMs) ? Math.max(0, nowMs - heartbeatMs) : null;
+  return {
+    ...recordatoriosSendLockMeta,
+    active: recordatoriosSendInProgress,
+    staleAfterMs: WHATSAPP_RECORDATORIOS_LOCK_STALE_MS,
+    ageMs,
+    idleMs,
+  };
+};
+
+const isRecordatoriosSendLockStale = () => {
+  if (!recordatoriosSendInProgress) return false;
+  const lockState = getRecordatoriosSendLockState();
+  if (!Number.isFinite(lockState.idleMs)) return true;
+  return lockState.idleMs > WHATSAPP_RECORDATORIOS_LOCK_STALE_MS;
+};
+
 const buildEmptyWhatsappRecordatorioSendResult = (source = "", mode = "pending") => ({
   source,
   mode: normalizeWhatsappRecordatorioMode(mode),
@@ -4414,6 +4504,7 @@ const sendWhatsappRecordatorioBatch = async ({
   source = "manual",
   items = [],
   mode = "pending",
+  onProgress = null,
 } = {}) => {
   const effectiveMode = normalizeWhatsappRecordatorioMode(mode);
   const rows = Array.isArray(items) ? items : [];
@@ -4439,6 +4530,27 @@ const sendWhatsappRecordatorioBatch = async ({
   let failed = 0;
   let skippedNoPhone = 0;
   let skippedInvalidPhone = 0;
+  const emitProgress = (extra = {}) => {
+    if (typeof onProgress !== "function") return;
+    const processed = sent + failed + skippedNoPhone + skippedInvalidPhone;
+    try {
+      onProgress({
+        source,
+        mode: effectiveMode,
+        total: rows.length,
+        sendable: sendableItemsCount,
+        processed,
+        sent,
+        failed,
+        skippedNoPhone,
+        skippedInvalidPhone,
+        ...extra,
+      });
+    } catch (progressErr) {
+      console.error("[WhatsApp] recordatorios progress callback error", progressErr);
+    }
+  };
+  emitProgress({ stage: "start" });
 
   for (const item of rows) {
     const hasRawPhone = Boolean(String(item.telefonoRaw || "").trim());
@@ -4452,6 +4564,7 @@ const sendWhatsappRecordatorioBatch = async ({
       console.log(
         `[WhatsApp] Recordatorios ${source}:${effectiveMode}: omitido_sin_telefono cliente="${item.cliente || "Cliente"}"`,
       );
+      emitProgress({ stage: "skip_no_phone", item });
       continue;
     }
     if (!item.phone) {
@@ -4464,6 +4577,7 @@ const sendWhatsappRecordatorioBatch = async ({
       console.log(
         `[WhatsApp] Recordatorios ${source}:${effectiveMode}: omitido_telefono_invalido cliente="${item.cliente || "Cliente"}" telefono="${item.telefonoRaw || ""}"`,
       );
+      emitProgress({ stage: "skip_invalid_phone", item });
       continue;
     }
 
@@ -4510,6 +4624,7 @@ const sendWhatsappRecordatorioBatch = async ({
       console.log(
         `[WhatsApp] Recordatorios ${source}:${effectiveMode}: ${progressTag} enviado cliente="${item.cliente || "Cliente"}" phone="${item.phone}" ventas=${ventaIdsItem.length}`,
       );
+      emitProgress({ stage: "sent", item });
     } catch (err) {
       failed += 1;
       const errLog = buildWhatsappErrorLog(err);
@@ -4522,6 +4637,7 @@ const sendWhatsappRecordatorioBatch = async ({
         `[WhatsApp] Recordatorios ${source}:${effectiveMode}: ${progressTag} fallido cliente="${item.cliente || "Cliente"}" phone="${item.phone}" raw_phone="${item.telefonoRaw || ""}" chat_id="${chatId}"`,
         errLog,
       );
+      emitProgress({ stage: "failed", item, error: err?.message || "No se pudo enviar" });
     }
 
     sendableProcessed += 1;
@@ -4533,6 +4649,7 @@ const sendWhatsappRecordatorioBatch = async ({
       await sleep(delayMs);
     }
   }
+  emitProgress({ stage: "done" });
 
   return {
     source,
@@ -4690,20 +4807,91 @@ const sendWhatsappRecordatorios = async ({
   includeCutoffTodayFollowUp = true,
 } = {}) => {
   if (recordatoriosSendInProgress) {
+    if (isRecordatoriosSendLockStale()) {
+      const staleInfo = getRecordatoriosSendLockState();
+      console.warn("[WhatsApp] Liberando lock stale de recordatorios", staleInfo);
+      recordatoriosSendInProgress = false;
+      resetRecordatoriosSendLockMeta();
+    }
+  }
+  if (recordatoriosSendInProgress) {
+    const lockInfo = getRecordatoriosSendLockState();
     const lockErr = new Error("Ya hay un envío de recordatorios en progreso");
     lockErr.code = "RECORDATORIOS_SEND_IN_PROGRESS";
+    lockErr.lock = lockInfo;
     throw lockErr;
   }
 
   recordatoriosSendInProgress = true;
+  const startedAtIso = new Date().toISOString();
+  recordatoriosSendLockMeta = {
+    source: String(source || "manual"),
+    startedAt: startedAtIso,
+    heartbeatAt: startedAtIso,
+    mode: "pending",
+    total: 0,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    skippedNoPhone: 0,
+    skippedInvalidPhone: 0,
+    lastCliente: null,
+  };
+  const syncLockProgress = (progress = {}) => {
+    const sourceValue = String(progress?.source || source || "manual");
+    const modeValue = normalizeWhatsappRecordatorioMode(progress?.mode || "pending");
+    const totalValue = Number.isFinite(Number(progress?.total)) ? Number(progress.total) : 0;
+    const processedValue = Number.isFinite(Number(progress?.processed)) ? Number(progress.processed) : 0;
+    const sentValue = Number.isFinite(Number(progress?.sent)) ? Number(progress.sent) : 0;
+    const failedValue = Number.isFinite(Number(progress?.failed)) ? Number(progress.failed) : 0;
+    const skippedNoPhoneValue = Number.isFinite(Number(progress?.skippedNoPhone))
+      ? Number(progress.skippedNoPhone)
+      : 0;
+    const skippedInvalidPhoneValue = Number.isFinite(Number(progress?.skippedInvalidPhone))
+      ? Number(progress.skippedInvalidPhone)
+      : 0;
+    const itemCliente = String(progress?.item?.cliente || "").trim();
+    touchRecordatoriosSendLock({
+      source: sourceValue,
+      mode: modeValue,
+      total: totalValue,
+      processed: processedValue,
+      sent: sentValue,
+      failed: failedValue,
+      skippedNoPhone: skippedNoPhoneValue,
+      skippedInvalidPhone: skippedInvalidPhoneValue,
+      lastCliente: itemCliente || recordatoriosSendLockMeta.lastCliente || null,
+    });
+  };
+  touchRecordatoriosSendLock({
+    source: String(source || "manual"),
+    mode: "pending",
+    total: 0,
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    skippedNoPhone: 0,
+    skippedInvalidPhone: 0,
+    lastCliente: null,
+  });
   try {
     const primaryItems = Array.isArray(itemsOverride)
       ? itemsOverride
       : await buildWhatsappRecordatorioItems({ targetUserIds });
+    touchRecordatoriosSendLock({
+      mode: "pending",
+      total: Array.isArray(primaryItems) ? primaryItems.length : 0,
+      processed: 0,
+      sent: 0,
+      failed: 0,
+      skippedNoPhone: 0,
+      skippedInvalidPhone: 0,
+    });
     const primaryResult = await sendWhatsappRecordatorioBatch({
       source,
       items: primaryItems,
       mode: "pending",
+      onProgress: syncLockProgress,
     });
 
     let cutoffTodayItems = [];
@@ -4714,10 +4902,20 @@ const sendWhatsappRecordatorios = async ({
           targetUserIds,
           mode: "cutoff_today",
         });
+        touchRecordatoriosSendLock({
+          mode: "cutoff_today",
+          total: Array.isArray(cutoffTodayItems) ? cutoffTodayItems.length : 0,
+          processed: 0,
+          sent: 0,
+          failed: 0,
+          skippedNoPhone: 0,
+          skippedInvalidPhone: 0,
+        });
         cutoffTodayResult = await sendWhatsappRecordatorioBatch({
           source,
           items: cutoffTodayItems,
           mode: "cutoff_today",
+          onProgress: syncLockProgress,
         });
       } catch (err) {
         if (!isMissingColumnError(err, "recordatorio_corte_enviado")) {
@@ -4737,10 +4935,20 @@ const sendWhatsappRecordatorios = async ({
     const cutoffTodayPlatform12Items = includeCutoffTodayFollowUp
       ? buildWhatsappCutoffPlatform12Items(cutoffTodayItems)
       : [];
+    touchRecordatoriosSendLock({
+      mode: "cutoff_today_platform_12",
+      total: Array.isArray(cutoffTodayPlatform12Items) ? cutoffTodayPlatform12Items.length : 0,
+      processed: 0,
+      sent: 0,
+      failed: 0,
+      skippedNoPhone: 0,
+      skippedInvalidPhone: 0,
+    });
     const cutoffTodayPlatform12Result = await sendWhatsappRecordatorioBatch({
       source,
       items: cutoffTodayPlatform12Items,
       mode: "cutoff_today_platform_12",
+      onProgress: syncLockProgress,
     });
 
     return {
@@ -4778,6 +4986,7 @@ const sendWhatsappRecordatorios = async ({
     };
   } finally {
     recordatoriosSendInProgress = false;
+    resetRecordatoriosSendLockMeta();
   }
 };
 
@@ -6444,6 +6653,7 @@ app.get("/api/whatsapp/recordatorios/auto-status", async (req, res) => {
     autoRecordatoriosRetryPending,
     autoRecordatoriosRunInProgress,
     recordatoriosSendInProgress,
+    recordatoriosSendLock: getRecordatoriosSendLockState(),
     pendingMessages,
     pendingError,
     lastAutoRecordatoriosRunDate,
@@ -6972,7 +7182,10 @@ app.post("/api/whatsapp/recordatorios/enviar", async (req, res) => {
       return res.status(403).json({ error: "Solo admin/superadmin" });
     }
     if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
-      return res.status(409).json({ error: "Ya hay un envío de recordatorios en progreso" });
+      return res.status(409).json({
+        error: "Ya hay un envío de recordatorios en progreso",
+        lock: err?.lock || getRecordatoriosSendLockState(),
+      });
     }
     if (
       err?.code === "WHATSAPP_NOT_READY" ||
@@ -7026,7 +7239,10 @@ app.post("/api/whatsapp/recordatorios/trigger-user", async (req, res) => {
       return res.status(403).json({ error: "Solo admin/superadmin" });
     }
     if (err?.code === "RECORDATORIOS_SEND_IN_PROGRESS") {
-      return res.status(409).json({ error: "Ya hay un envío de recordatorios en progreso" });
+      return res.status(409).json({
+        error: "Ya hay un envío de recordatorios en progreso",
+        lock: err?.lock || getRecordatoriosSendLockState(),
+      });
     }
     console.error("[whatsapp/recordatorios/trigger-user] error", err);
     return res
