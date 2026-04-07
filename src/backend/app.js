@@ -1993,6 +1993,17 @@ Puedes verificar la orden por:
 ${detalleUrl}`;
 };
 
+const buildWhatsappPagoVerificadoManualMessage = ({
+  metodoPagoNombre = "",
+  referencia = "",
+} = {}) => {
+  const metodoText = formatWhatsappReporteText(metodoPagoNombre, "-");
+  const refText = formatWhatsappReporteText(referencia, "-");
+  return `\`Pago verificado ✅\`
+Metodo de pago: ${metodoText}
+Ref: ${refText}`;
+};
+
 const buildWhatsappVentaEntregadaMessage = ({
   idVenta = null,
   idOrden = null,
@@ -2017,7 +2028,7 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
   const { data, error } = await supabaseAdmin
     .from("reportes")
     .select(
-      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, descripcion, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
+      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, id_plataforma, descripcion, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
     )
     .eq("id_reporte", reportId)
     .maybeSingle();
@@ -2096,6 +2107,28 @@ const getVentaClaveMiembroForWhatsapp = (venta = null) => {
   return "";
 };
 
+const getVentaCorreoCuentaMiembroForWhatsapp = (venta = null) => {
+  const cuentaMiembro = Array.isArray(venta?.cuentas_miembro)
+    ? venta.cuentas_miembro[0] || null
+    : venta?.cuentas_miembro || null;
+  const correoCuentaMiembro = String(cuentaMiembro?.correo || "").trim();
+  if (correoCuentaMiembro) return correoCuentaMiembro;
+  const correoVenta = String(venta?.correo_miembro || "").trim();
+  if (correoVenta) return correoVenta;
+  return "";
+};
+
+const getVentaClaveCuentaMiembroForWhatsapp = (venta = null) => {
+  const cuentaMiembro = Array.isArray(venta?.cuentas_miembro)
+    ? venta.cuentas_miembro[0] || null
+    : venta?.cuentas_miembro || null;
+  const claveCuentaMiembro = String(cuentaMiembro?.clave || "").trim();
+  if (claveCuentaMiembro) return claveCuentaMiembro;
+  const claveVenta = String(venta?.clave_miembro || "").trim();
+  if (claveVenta) return claveVenta;
+  return "";
+};
+
 const getVentaCorreoCuentaPrincipalForWhatsapp = (venta = null) => {
   const cuentaPrincipal = Array.isArray(venta?.cuentas) ? venta.cuentas[0] || null : venta?.cuentas || null;
   const correoCuenta = String(cuentaPrincipal?.correo || "").trim();
@@ -2125,12 +2158,20 @@ const sendReporteCreatedToWhatsappGroup = async ({
   const motivo =
     String(reporte?.reporte_tipos?.titulo || "").trim() || String(reporte?.descripcion || "").trim();
   const ventaAsociada = await findVentaAsociadaFromReporteForWhatsapp(reporte);
+  const plataformaId = toPositiveInt(reporte?.id_plataforma);
+  const isPlatform9 = plataformaId === 9;
+  const correoReporte = isPlatform9
+    ? getVentaCorreoCuentaMiembroForWhatsapp(ventaAsociada)
+    : getVentaCorreoCuentaPrincipalForWhatsapp(ventaAsociada);
+  const claveReporte = isPlatform9
+    ? getVentaClaveCuentaMiembroForWhatsapp(ventaAsociada)
+    : getVentaClaveCuentaPrincipalForWhatsapp(ventaAsociada);
 
   const message = buildWhatsappReporteCreadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
-    correo: getVentaCorreoCuentaPrincipalForWhatsapp(ventaAsociada) || "-",
-    clave: getVentaClaveCuentaPrincipalForWhatsapp(ventaAsociada) || "-",
+    correo: correoReporte || "-",
+    clave: claveReporte || "-",
     cliente: cliente || `Usuario ${toPositiveInt(reporte?.id_usuario) || "-"}`,
     motivo,
   });
@@ -2499,21 +2540,22 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   }
 
   let metodoVerificacionAutomatica = null;
+  let metodoPagoNombre = "";
   const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
   if (metodoPagoId) {
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
-      .select("verificacion_automatica")
+      .select("verificacion_automatica, nombre")
       .eq("id_metodo_de_pago", metodoPagoId)
       .maybeSingle();
     if (metodoPagoErr) throw metodoPagoErr;
     metodoVerificacionAutomatica = metodoPagoRow?.verificacion_automatica;
+    metodoPagoNombre = String(metodoPagoRow?.nombre || "").trim();
   }
 
-  const manualAdminNoAutoMethod =
-    verifiedByAdmin === true && metodoVerificacionAutomatica === false;
+  const manualVerifiedByAdmin = verifiedByAdmin === true;
   const autoVerifiedBeforeWindow =
-    verifiedByAdmin !== true &&
+    !manualVerifiedByAdmin &&
     metodoVerificacionAutomatica === true &&
     verificationWindowElapsed === false;
   if (autoVerifiedBeforeWindow) {
@@ -2527,7 +2569,7 @@ const sendVentaEntregadaToWhatsappOwner = async ({
       id_usuario_destino: targetUserId,
     };
   }
-  if (!manualAdminNoAutoMethod && verificationWindowElapsed !== true) {
+  if (!manualVerifiedByAdmin && verificationWindowElapsed !== true) {
     return {
       sent: false,
       skipped: true,
@@ -2553,10 +2595,16 @@ const sendVentaEntregadaToWhatsappOwner = async ({
     };
   }
 
-  const message = buildWhatsappOrdenEntregadaMessage({
-    idOrden: ordenId,
-    detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
-  });
+  const message =
+    verifiedByAdmin === true
+      ? buildWhatsappPagoVerificadoManualMessage({
+          metodoPagoNombre,
+          referencia: String(ordenRow?.referencia || "").trim(),
+        })
+      : buildWhatsappOrdenEntregadaMessage({
+          idOrden: ordenId,
+          detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
+        });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
   if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
