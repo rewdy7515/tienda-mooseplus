@@ -568,6 +568,7 @@ const getPriceMaps = () => {
 const calcItemTotals = (item, price, platform) => {
   const unit = price?.precio_usd_detal || 0;
   const qtyVal = item?.cantidad || 0;
+  const qtyDescuento = Math.max(1, Number(item?.qty_descuento || qtyVal) || qtyVal || 1);
   const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
   const mesesVal = isGiftCard ? 1 : item?.meses || price?.duracion || 1;
   const baseSubtotal = round2(unit * qtyVal * (isGiftCard ? 1 : mesesVal));
@@ -586,7 +587,7 @@ const calcItemTotals = (item, price, platform) => {
     rateMeses = rawRate > 1 ? rawRate / 100 : rawRate;
     descuentoMesesVal = round2(baseSubtotal * rateMeses);
   }
-  const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qtyVal, qtyColumn) : 0;
+  const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qtyDescuento, qtyColumn) : 0;
   const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
   if (rateQty > 0) {
     descuentoCantidadVal = round2(baseSubtotal * rateQty);

@@ -8257,6 +8257,38 @@ const assertItemsValidPrecioId = (items = []) => {
   throw err;
 };
 
+const buildRenewalDiscountQtyByPrecio = (items = []) => {
+  const qtyByPrecio = new Map();
+  (items || []).forEach((item) => {
+    if (item?.renovacion !== true) return;
+    if (!toPositiveInt(item?.id_venta)) return;
+    const precioId = toPositiveInt(item?.id_precio);
+    if (!precioId) return;
+    const qty = Math.max(1, Number(item?.cantidad || 1) || 1);
+    const current = Number(qtyByPrecio.get(precioId) || 0);
+    qtyByPrecio.set(precioId, current + qty);
+  });
+  return qtyByPrecio;
+};
+
+const applyRenewalDiscountQtyContext = (items = []) => {
+  const list = Array.isArray(items) ? items : [];
+  const renewalQtyByPrecio = buildRenewalDiscountQtyByPrecio(list);
+  return list.map((item) => {
+    const qty = Math.max(1, Number(item?.cantidad || 1) || 1);
+    const precioId = toPositiveInt(item?.id_precio);
+    const isRenewalWithVenta = item?.renovacion === true && toPositiveInt(item?.id_venta);
+    const qtyDescuento =
+      isRenewalWithVenta && precioId
+        ? Math.max(1, Number(renewalQtyByPrecio.get(precioId) || qty) || qty)
+        : qty;
+    return {
+      ...item,
+      qty_descuento: qtyDescuento,
+    };
+  });
+};
+
 const roundCheckoutMoney = (value) =>
   Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
@@ -8419,6 +8451,7 @@ const computeCheckoutItemPricing = ({
   isCliente = true,
 }) => {
   const qty = Math.max(1, Number(item?.cantidad || priceInfo?.cantidad || 1) || 1);
+  const qtyDescuento = Math.max(1, Number(item?.qty_descuento || qty) || qty);
   const isGiftCard = isTrue(platformInfo?.tarjeta_de_regalo);
   const mesesVal = isGiftCard
     ? 1
@@ -8448,7 +8481,7 @@ const computeCheckoutItemPricing = ({
     ? getClosestCheckoutDiscountPct(descuentos, mesesVal, monthColumn)
     : 0;
   const rawRateQty = qtyEnabled
-    ? getClosestCheckoutDiscountPct(descuentos, qty, qtyColumn)
+    ? getClosestCheckoutDiscountPct(descuentos, qtyDescuento, qtyColumn)
     : 0;
   const rateMeses = rawRateMeses > 1 ? rawRateMeses / 100 : rawRateMeses;
   const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
@@ -8458,6 +8491,7 @@ const computeCheckoutItemPricing = ({
   const subtotalUsd = roundCheckoutMoney(baseSubtotalUsd - descuentoUsd);
   return {
     qty,
+    qtyDescuento,
     mesesVal,
     unitPrice,
     baseSubtotalUsd,
@@ -8529,8 +8563,9 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
     .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
     .eq("id_carrito", carritoId);
   if (itemErr) throw itemErr;
+  const itemsWithDiscountQty = applyRenewalDiscountQtyContext(items || []);
 
-  if (!items?.length) {
+  if (!itemsWithDiscountQty.length) {
     const total = totalClienteParsed ?? 0;
     const tasaBs = Number.isFinite(tasaBsParsed) ? tasaBsParsed : null;
     return {
@@ -8556,9 +8591,9 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
     };
   }
 
-  assertItemsValidPrecioId(items);
+  assertItemsValidPrecioId(itemsWithDiscountQty);
 
-  const preciosIds = (items || []).map((i) => i.id_precio).filter(Boolean);
+  const preciosIds = (itemsWithDiscountQty || []).map((i) => i.id_precio).filter(Boolean);
   const { data: precios, error: precioErr } = await supabaseAdmin
     .from("precios")
     .select(
@@ -8593,7 +8628,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
   const discountColumns = getCheckoutDiscountColumnsFromRows(descuentos || []);
   const discountColumnById = buildCheckoutDiscountColumnByIdMap(descuentos || [], discountColumns);
 
-  const totalCalc = (items || []).reduce((sum, it) => {
+  const totalCalc = (itemsWithDiscountQty || []).reduce((sum, it) => {
     const priceInfo = priceMap[it.id_precio] || {};
     const platId = Number(priceInfo?.id_plataforma) || null;
     const platformInfo = platId ? platInfoById?.[platId] || {} : {};
@@ -8615,7 +8650,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
   const tasaBs = Number.isFinite(tasaBsParsed) ? tasaBsParsed : null;
 
   return {
-    items: items || [],
+    items: itemsWithDiscountQty || [],
     priceMap,
     platInfoById,
     platNameById,
@@ -11481,7 +11516,8 @@ app.get("/api/cart", async (_req, res) => {
       }, {});
     }
 
-    const enriched = (items || []).map((it) => {
+    const itemsWithDiscountQty = applyRenewalDiscountQtyContext(items || []);
+    const enriched = itemsWithDiscountQty.map((it) => {
       const ventaInfo = it.id_venta ? ventaMap[it.id_venta] || {} : {};
       const cuentaItem = it.id_cuenta ? cuentaMap[it.id_cuenta] || null : null;
       const correoResolved =

@@ -670,8 +670,12 @@
           return "Gift Card";
         }
         const isNetflix = platId === 1;
-        const isHogar = isNetflix && (isTrue(perfil?.perfil_hogar) || isTrue(cuenta?.venta_miembro));
-        if (isNetflix) return isHogar ? "Plan 2" : "Plan 1";
+        if (isNetflix) {
+          const hasPerfilRef = toPositiveInt(perfil?.id_perfil) || perfil?.perfil_hogar !== undefined;
+          if (hasPerfilRef) return isTrue(perfil?.perfil_hogar) ? "Plan 2" : "Plan 1";
+          if (isTrue(cuenta?.venta_miembro)) return "Plan 2";
+          return "Completa";
+        }
         if (isTrue(platformInfo?.por_acceso)) return "Acceso";
         if (isTrue(cuenta?.venta_perfil)) return "Perfil";
         if (isTrue(cuenta?.venta_miembro)) return "Miembro";
@@ -1070,6 +1074,7 @@
             { data: ventasVencidas, error: ventasErr },
             { data: reemplazosPendientes, error: replErr },
             { data: historialVentas, error: histErr },
+            { data: perfilesReemplazados, error: replPerfErr },
           ] = await Promise.all([
             supabase
               .from("plataformas")
@@ -1081,7 +1086,6 @@
                 "id_perfil, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro)",
               )
               .eq("ocupado", false)
-              .eq("cuentas.venta_perfil", true)
               .not("id_cuenta", "is", null)
               .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
             supabase
@@ -1121,18 +1125,24 @@
               .not("fecha_pago", "is", null)
               .gte("fecha_pago", start)
               .lte("fecha_pago", end),
+            supabase.from("reemplazos").select("id_perfil").not("id_perfil", "is", null),
           ]);
 
-          if (platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr) {
-            throw platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr;
+          if (platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr || replPerfErr) {
+            throw platErr || perfErr || cuentasErr || giftErr || ventasErr || replErr || histErr || replPerfErr;
           }
 
           const platformById = new Map(
             (plataformas || []).map((row) => [toPositiveInt(row?.id_plataforma), row]),
           );
+          const perfilesReemplazadosSet = new Set(
+            (perfilesReemplazados || []).map((row) => toPositiveInt(row?.id_perfil)).filter(Boolean),
+          );
           const metricsMap = new Map();
 
           (perfilesLibres || []).forEach((perfilRow) => {
+            const perfilId = toPositiveInt(perfilRow?.id_perfil);
+            if (perfilId && perfilesReemplazadosSet.has(perfilId)) return;
             const cuenta = perfilRow?.cuentas || {};
             const platformId = toPositiveInt(cuenta?.id_plataforma);
             if (!platformId) return;
@@ -1268,6 +1278,7 @@
 
           const planRows = sortMetricRows(
             Array.from(metricsMap.values())
+              .filter((row) => String(row?.plan_label || "").trim() !== "Completa")
               .map((row) => ({
                 ...row,
                 avg_diario: Number((Number(row.ventas_periodo || 0) / Math.max(1, dayDivisor)).toFixed(2)),

@@ -160,6 +160,7 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
       tarjeta_de_regalo: platform.tarjeta_de_regalo,
     };
     const qty = Number(item.cantidad || price.cantidad || 1) || 1;
+    const qtyDescuento = Math.max(1, Number(item.qty_descuento || qty) || qty);
     const meses = Number(item.meses || price.duracion || 1) || 1;
     const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
     const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
@@ -193,7 +194,7 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
     const rawRateMeses = monthEnabled
       ? getClosestDiscountPct(descuentos, meses, monthColumn)
       : 0;
-    const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qty, qtyColumn) : 0;
+    const rawRateQty = qtyEnabled ? getClosestDiscountPct(descuentos, qtyDescuento, qtyColumn) : 0;
     const rateMeses = rawRateMeses > 1 ? rawRateMeses / 100 : rawRateMeses;
     const rateQty = rawRateQty > 1 ? rawRateQty / 100 : rawRateQty;
     const descuentoMesesVal = rateMeses > 0 ? round2(baseSubtotal * rateMeses) : 0;
