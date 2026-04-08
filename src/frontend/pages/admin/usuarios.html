@@ -212,6 +212,7 @@
         loadCurrentUser,
         supabase,
         triggerWhatsappReminderForUser,
+        updateUsuarioCorreoWithAuth,
       } from "../../scripts/api.js";
       import { buildNotificationPayload } from "../../scripts/notification-templates.js";
 
@@ -679,12 +680,28 @@
           nextVal = nextVal.replace(/[^\d]/g, "");
         }
         try {
-          const payload = { [field]: nextVal || null };
-          const { error } = await supabase
-            .from("usuarios")
-            .update(payload)
-            .eq("id_usuario", id);
-          if (error) throw error;
+          if (field === "correo") {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const normalizedCorreo = String(nextVal || "")
+              .trim()
+              .toLowerCase();
+            if (!normalizedCorreo || !emailRegex.test(normalizedCorreo)) {
+              alert("Ingresa un correo válido.");
+              input.focus();
+              return;
+            }
+            const correoResp = await updateUsuarioCorreoWithAuth(id, normalizedCorreo);
+            if (correoResp?.error) throw new Error(correoResp.error);
+            nextVal = String(correoResp?.correo || normalizedCorreo).trim().toLowerCase();
+          } else {
+            const payload = { [field]: nextVal || null };
+            const { error } = await supabase
+              .from("usuarios")
+              .update(payload)
+              .eq("id_usuario", id);
+            if (error) throw error;
+          }
+
           const uid = Number(id) || 0;
           if (uid) {
             usuariosRows = (usuariosRows || []).map((row) =>
@@ -700,7 +717,7 @@
           finishEdit(wrap, nextVal);
         } catch (err) {
           console.error("usuarios update error", err);
-          alert("No se pudo guardar el dato.");
+          alert(err?.message || "No se pudo guardar el dato.");
         }
       };
 

@@ -310,7 +310,7 @@ const getTrafficNavigationType = () => {
 const canTrackProductionTraffic = () => {
   if (typeof window === "undefined") return false;
   const host = String(window.location.hostname || "").trim().toLowerCase();
-  return host === "www.mooseplus.com";
+  return host === "mooseplus.com" || host === "www.mooseplus.com";
 };
 
 const getOrCreateTrafficSession = () => {
@@ -972,6 +972,39 @@ export async function createUsuarioSignupLink(idUsuarioTarget) {
     return data;
   } catch (err) {
     console.error("createUsuarioSignupLink error", err);
+    return { error: err.message };
+  }
+}
+
+export async function updateUsuarioCorreoWithAuth(idUsuarioTarget, correo) {
+  await ensureServerSession();
+  try {
+    const target = Number(idUsuarioTarget);
+    if (!Number.isFinite(target) || target <= 0) {
+      return { error: "id_usuario inválido" };
+    }
+    const correoNormalizado = String(correo || "")
+      .trim()
+      .toLowerCase();
+    if (!correoNormalizado) {
+      return { error: "Correo requerido." };
+    }
+    const res = await fetch(
+      `${API_BASE}/api/admin/usuarios/${encodeURIComponent(target)}/correo`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ correo: correoNormalizado }),
+      },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo actualizar el correo del usuario." };
+    }
+    return data;
+  } catch (err) {
+    console.error("updateUsuarioCorreoWithAuth error", err);
     return { error: err.message };
   }
 }

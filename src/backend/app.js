@@ -12448,6 +12448,125 @@ app.put("/api/home-banners/:id_banner", jsonParser, async (req, res) => {
   }
 });
 
+// Actualiza correo de usuario en tabla usuarios y en Supabase Auth (solo admin/superadmin)
+app.put("/api/admin/usuarios/:id_usuario/correo", jsonParser, async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const idUsuarioTarget = toPositiveInt(req.params?.id_usuario);
+    if (!idUsuarioTarget) {
+      return res.status(400).json({ error: "id_usuario inválido." });
+    }
+
+    const correo = String(req.body?.correo || "")
+      .trim()
+      .toLowerCase();
+    if (!correo || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+      return res.status(400).json({ error: "Correo inválido." });
+    }
+
+    const { data: targetRow, error: targetErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, correo, id_auth")
+      .eq("id_usuario", idUsuarioTarget)
+      .maybeSingle();
+    if (targetErr) throw targetErr;
+    if (!targetRow) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+
+    const previousCorreo = String(targetRow?.correo || "")
+      .trim()
+      .toLowerCase();
+    const authUserId = String(targetRow?.id_auth || "").trim();
+
+    const { data: duplicateRows, error: duplicateErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario")
+      .ilike("correo", correo)
+      .neq("id_usuario", idUsuarioTarget)
+      .limit(1);
+    if (duplicateErr) throw duplicateErr;
+    if (Array.isArray(duplicateRows) && duplicateRows.length) {
+      return res.status(409).json({ error: "El correo ya está en uso por otro usuario." });
+    }
+
+    let usuariosUpdated = false;
+    if (previousCorreo !== correo) {
+      const { error: updErr } = await supabaseAdmin
+        .from("usuarios")
+        .update({ correo })
+        .eq("id_usuario", idUsuarioTarget);
+      if (updErr) {
+        if (String(updErr?.code || "") === "23505") {
+          return res.status(409).json({ error: "El correo ya está en uso por otro usuario." });
+        }
+        throw updErr;
+      }
+      usuariosUpdated = true;
+    }
+
+    if (!authUserId) {
+      return res.json({
+        ok: true,
+        id_usuario: idUsuarioTarget,
+        correo,
+        auth_synced: false,
+        auth_user_missing: true,
+      });
+    }
+
+    const { data: authUpdatedData, error: authUpdErr } = await supabaseAdmin.auth.admin.updateUserById(
+      authUserId,
+      { email: correo },
+    );
+    if (authUpdErr) {
+      if (usuariosUpdated && previousCorreo && previousCorreo !== correo) {
+        const { error: rollbackErr } = await supabaseAdmin
+          .from("usuarios")
+          .update({ correo: previousCorreo })
+          .eq("id_usuario", idUsuarioTarget);
+        if (rollbackErr) {
+          console.error("[admin/usuarios/correo] rollback usuarios error", {
+            id_usuario: idUsuarioTarget,
+            rollbackErr,
+          });
+        }
+      }
+      const authErrText = `${authUpdErr?.message || ""} ${authUpdErr?.code || ""}`.toLowerCase();
+      if (
+        authErrText.includes("already") ||
+        authErrText.includes("exists") ||
+        authErrText.includes("duplicate") ||
+        authErrText.includes("taken")
+      ) {
+        return res.status(409).json({ error: "El correo ya existe en Auth." });
+      }
+      return res
+        .status(400)
+        .json({ error: authUpdErr?.message || "No se pudo actualizar el correo en Auth." });
+    }
+
+    return res.json({
+      ok: true,
+      id_usuario: idUsuarioTarget,
+      correo,
+      auth_synced: true,
+      auth_user_id: String(authUpdatedData?.user?.id || authUserId),
+    });
+  } catch (err) {
+    console.error("[admin/usuarios/correo] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    return res
+      .status(500)
+      .json({ error: err?.message || "No se pudo actualizar el correo del usuario." });
+  }
+});
+
 // Genera link de registro firmado para un usuario existente (solo admin/superadmin)
 app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
   try {
@@ -12842,7 +12961,8 @@ const isAllowedTrafficUrl = (value = "") => {
   if (!raw) return false;
   try {
     const parsed = new URL(raw);
-    return String(parsed.hostname || "").trim().toLowerCase() === "www.mooseplus.com";
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    return host === "mooseplus.com" || host === "www.mooseplus.com";
   } catch (_err) {
     return false;
   }
@@ -14549,7 +14669,6 @@ app.post("/api/checkout", async (req, res) => {
     referencia,
     comprobantes,
     comprobante,
-    total: totalCliente,
     tasa_bs,
     monto_transferido,
     id_usuario_override,
@@ -14634,7 +14753,7 @@ app.post("/api/checkout", async (req, res) => {
     const context = await buildCheckoutContext({
       idUsuarioVentas,
       carritoId,
-      totalCliente,
+      totalCliente: null,
     });
     const {
       items,
@@ -14674,41 +14793,34 @@ app.post("/api/checkout", async (req, res) => {
           customItemAmountMap,
         })
       : null;
-    const checkoutTotal = hasCustomItemAmounts ? customSummary?.totalUsd || 0 : total;
-    const montoBaseCobrado = hasCustomItemAmounts
-      ? checkoutTotal
-      : await resolveMontoBaseCarrito({ carritoId, fallbackTotal: total });
-    let ordenSaldoUsage = {
-      usaSaldo: false,
-      saldoAplicadoUsd: 0,
-      totalBrutoUsd: Number.isFinite(Number(total)) ? roundCheckoutMoney(total) : null,
-    };
+    const totalServidor = Number.isFinite(Number(total)) ? roundCheckoutMoney(total) : 0;
+    let carritoSnapshot = null;
     if (!hasCustomItemAmounts) {
-      const { data: carritoSnapshot, error: carritoSnapshotErr } = await supabaseAdmin
+      const { data: carritoSnapshotData, error: carritoSnapshotErr } = await supabaseAdmin
         .from("carritos")
-        .select("monto_usd, monto_final, usa_saldo")
+        .select("monto_final, usa_saldo")
         .eq("id_carrito", carritoId)
         .maybeSingle();
       if (carritoSnapshotErr) throw carritoSnapshotErr;
-
-      const usaSaldoCarrito = isTrue(carritoSnapshot?.usa_saldo);
-      const montoUsdCarrito = parseOptionalCheckoutNumber(carritoSnapshot?.monto_usd);
-      const montoFinalCarrito = parseOptionalCheckoutNumber(carritoSnapshot?.monto_final);
-      const totalBrutoUsd = Number.isFinite(montoUsdCarrito)
-        ? roundCheckoutMoney(montoUsdCarrito)
-        : Number.isFinite(Number(total))
-          ? roundCheckoutMoney(total)
-          : null;
-      const saldoAplicadoUsd =
-        usaSaldoCarrito && Number.isFinite(totalBrutoUsd) && Number.isFinite(montoFinalCarrito)
-          ? roundCheckoutMoney(Math.max(0, totalBrutoUsd - montoFinalCarrito))
-          : 0;
-      ordenSaldoUsage = {
-        usaSaldo: usaSaldoCarrito,
-        saldoAplicadoUsd,
-        totalBrutoUsd,
-      };
+      carritoSnapshot = carritoSnapshotData || null;
     }
+    const usaSaldoCarrito = !hasCustomItemAmounts && isTrue(carritoSnapshot?.usa_saldo);
+    const montoFinalCarrito = parseOptionalCheckoutNumber(carritoSnapshot?.monto_final);
+    const checkoutTotal = hasCustomItemAmounts
+      ? customSummary?.totalUsd || 0
+      : usaSaldoCarrito && Number.isFinite(montoFinalCarrito)
+        ? roundCheckoutMoney(montoFinalCarrito)
+        : totalServidor;
+    const montoBaseCobrado = checkoutTotal;
+    const saldoAplicadoUsd =
+      !hasCustomItemAmounts && usaSaldoCarrito
+        ? roundCheckoutMoney(Math.max(0, totalServidor - checkoutTotal))
+        : 0;
+    const ordenSaldoUsage = {
+      usaSaldo: !!usaSaldoCarrito,
+      saldoAplicadoUsd,
+      totalBrutoUsd: hasCustomItemAmounts ? roundCheckoutMoney(checkoutTotal) : totalServidor,
+    };
     console.log("[checkout] carrito items", items);
     console.log("[checkout] precios usados", priceMap);
 
