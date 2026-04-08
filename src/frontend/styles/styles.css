@@ -3893,6 +3893,13 @@ input[type="number"].input-inline {
   color: #475569;
 }
 
+.auth-page:is(.login-page, .signup-page) .auth-form .form-helper-text {
+  margin: -2px 0 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #64748b;
+}
+
 .auth-page:is(.login-page, .signup-page) .auth-form .form-input {
   min-height: 46px;
   border: 1px solid #d6deea;

@@ -2304,12 +2304,17 @@ const sendReporteSolvedToWhatsappOwner = async ({
     };
   }
 
-  const correoMiembro = getVentaCorreoMiembroForWhatsapp(ventaAsociada);
-  if (!correoMiembro) {
+  const plataformaId = toPositiveInt(reporte?.id_plataforma);
+  const isPlatform9 = plataformaId === 9;
+  const correoReporte = isPlatform9
+    ? getVentaCorreoCuentaMiembroForWhatsapp(ventaAsociada)
+    : getVentaCorreoCuentaPrincipalForWhatsapp(ventaAsociada) ||
+      getVentaCorreoMiembroForWhatsapp(ventaAsociada);
+  if (!correoReporte) {
     return {
       sent: false,
       skipped: true,
-      reason: "associated_sale_member_email_missing",
+      reason: "associated_sale_email_missing",
       id_reporte: reportId,
       id_venta: ventaAsociadaId,
       id_usuario_destino: targetUserId,
@@ -2319,7 +2324,7 @@ const sendReporteSolvedToWhatsappOwner = async ({
   const message = buildWhatsappReporteSolucionadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
-    correo: correoMiembro,
+    correo: correoReporte,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
@@ -8980,6 +8985,19 @@ const processOrderFromItems = async ({
     itemsCount: items?.length || 0,
     carritoId,
   });
+  const saldoConsumption = await consumeSaldoFromCarritoIfNeeded({
+    carritoId,
+    source: "processOrderFromItems",
+  });
+  if (saldoConsumption?.consumed) {
+    console.log("[checkout] saldo consumido en procesamiento", {
+      ordenId,
+      id_carrito: carritoId,
+      id_usuario: saldoConsumption?.id_usuario || null,
+      monto: saldoConsumption?.monto || 0,
+      saldo_nuevo: saldoConsumption?.saldo_nuevo ?? null,
+    });
+  }
   const isoHoy = todayInVenezuela();
   const historialRegistradoPorId =
     Number.isFinite(Number(historialRegistradoPor)) && Number(historialRegistradoPor) > 0
@@ -9571,11 +9589,6 @@ const processOrderFromItems = async ({
       priceInfo.completa === "true" ||
       priceInfo.completa === 1 ||
       priceInfo.completa === "1";
-    const isCorreoCliente =
-      platInfo.correo_cliente === true ||
-      platInfo.correo_cliente === "true" ||
-      platInfo.correo_cliente === 1 ||
-      platInfo.correo_cliente === "1";
     const cuentaId = toPositiveInt(a.id_cuenta);
     const cuentaFlags = cuentaId ? cuentaFlagsById[cuentaId] || null : null;
     const isCuentaCompletaVenta = cuentaFlags
@@ -9607,7 +9620,7 @@ const processOrderFromItems = async ({
       recordatorio_enviado: false,
       recordatorio_corte_enviado: false,
       aviso_admin: false,
-      completa: isCompleta && isCorreoCliente ? true : null,
+      completa: isCompleta ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? false : null,
     };
   });
@@ -10327,6 +10340,111 @@ const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100)
 const toFiniteMoney = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? roundMoney(num) : null;
+};
+const resolveSaldoAplicadoFromCarrito = ({ montoUsd, montoFinal }) => {
+  const montoBase = toFiniteMoney(montoUsd);
+  const montoFinalResolved = toFiniteMoney(montoFinal);
+  if (!Number.isFinite(montoBase) || !Number.isFinite(montoFinalResolved)) return 0;
+  const aplicado = roundMoney(montoBase - montoFinalResolved);
+  return aplicado > 0 ? aplicado : 0;
+};
+
+const consumeSaldoFromCarritoIfNeeded = async ({ carritoId, source = "checkout_process" } = {}) => {
+  const carritoNum = Number(carritoId);
+  if (!Number.isFinite(carritoNum) || carritoNum <= 0) {
+    return { consumed: false, skipped: true, reason: "invalid_carrito" };
+  }
+
+  const { data: claimedRows, error: claimErr } = await supabaseAdmin
+    .from("carritos")
+    .update({ usa_saldo: false })
+    .eq("id_carrito", carritoNum)
+    .eq("usa_saldo", true)
+    .select("id_carrito, id_usuario, monto_usd, monto_final")
+    .limit(1);
+  if (claimErr) throw claimErr;
+
+  const claimedRow = Array.isArray(claimedRows) ? claimedRows[0] || null : claimedRows || null;
+  if (!claimedRow?.id_carrito) {
+    return { consumed: false, skipped: true, reason: "saldo_not_enabled" };
+  }
+
+  const rollbackSaldoFlag = async () => {
+    try {
+      await supabaseAdmin.from("carritos").update({ usa_saldo: true }).eq("id_carrito", carritoNum);
+    } catch (_rollbackErr) {
+      // Best-effort rollback only.
+    }
+  };
+
+  const targetUserId = Number(claimedRow?.id_usuario);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    await rollbackSaldoFlag();
+    throw new Error("No se pudo debitar saldo: carrito sin usuario válido.");
+  }
+
+  const saldoAplicado = resolveSaldoAplicadoFromCarrito({
+    montoUsd: claimedRow?.monto_usd,
+    montoFinal: claimedRow?.monto_final,
+  });
+  if (!(saldoAplicado > 0)) {
+    return {
+      consumed: false,
+      skipped: true,
+      reason: "saldo_amount_zero",
+      monto: 0,
+      id_usuario: targetUserId,
+    };
+  }
+
+  const { data: userRow, error: userErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("saldo")
+    .eq("id_usuario", targetUserId)
+    .maybeSingle();
+  if (userErr) {
+    await rollbackSaldoFlag();
+    throw userErr;
+  }
+
+  const saldoActual = toFiniteMoney(userRow?.saldo);
+  const saldoDisponible = Number.isFinite(saldoActual) && saldoActual > 0 ? saldoActual : 0;
+  const saldoADebitar = Math.min(saldoAplicado, saldoDisponible);
+  if (!(saldoADebitar > 0) || roundMoney(saldoADebitar) < roundMoney(saldoAplicado)) {
+    await rollbackSaldoFlag();
+    const err = new Error("Saldo insuficiente para aplicar el descuento del carrito.");
+    err.code = "SALDO_INSUFICIENTE";
+    err.httpStatus = 409;
+    throw err;
+  }
+
+  const saldoNuevo = roundMoney(Math.max(0, saldoDisponible - saldoADebitar));
+  const { error: updSaldoErr } = await supabaseAdmin
+    .from("usuarios")
+    .update({ saldo: saldoNuevo })
+    .eq("id_usuario", targetUserId);
+  if (updSaldoErr) {
+    await rollbackSaldoFlag();
+    throw updSaldoErr;
+  }
+
+  console.log("[checkout][saldo] debitado", {
+    source,
+    id_carrito: carritoNum,
+    id_usuario: targetUserId,
+    saldo_aplicado: saldoAplicado,
+    saldo_debitado: saldoADebitar,
+    saldo_nuevo: saldoNuevo,
+  });
+
+  return {
+    consumed: true,
+    id_carrito: carritoNum,
+    id_usuario: targetUserId,
+    monto: saldoADebitar,
+    saldo_aplicado: saldoAplicado,
+    saldo_nuevo: saldoNuevo,
+  };
 };
 const resolveMontoFinal = ({ montoUsd, usaSaldo, saldoUsuario }) => {
   const montoBase = toFiniteMoney(montoUsd);
@@ -14554,6 +14672,37 @@ app.post("/api/checkout", async (req, res) => {
     const montoBaseCobrado = hasCustomItemAmounts
       ? checkoutTotal
       : await resolveMontoBaseCarrito({ carritoId, fallbackTotal: total });
+    let ordenSaldoUsage = {
+      usaSaldo: false,
+      saldoAplicadoUsd: 0,
+      totalBrutoUsd: Number.isFinite(Number(total)) ? roundCheckoutMoney(total) : null,
+    };
+    if (!hasCustomItemAmounts) {
+      const { data: carritoSnapshot, error: carritoSnapshotErr } = await supabaseAdmin
+        .from("carritos")
+        .select("monto_usd, monto_final, usa_saldo")
+        .eq("id_carrito", carritoId)
+        .maybeSingle();
+      if (carritoSnapshotErr) throw carritoSnapshotErr;
+
+      const usaSaldoCarrito = isTrue(carritoSnapshot?.usa_saldo);
+      const montoUsdCarrito = parseOptionalCheckoutNumber(carritoSnapshot?.monto_usd);
+      const montoFinalCarrito = parseOptionalCheckoutNumber(carritoSnapshot?.monto_final);
+      const totalBrutoUsd = Number.isFinite(montoUsdCarrito)
+        ? roundCheckoutMoney(montoUsdCarrito)
+        : Number.isFinite(Number(total))
+          ? roundCheckoutMoney(total)
+          : null;
+      const saldoAplicadoUsd =
+        usaSaldoCarrito && Number.isFinite(totalBrutoUsd) && Number.isFinite(montoFinalCarrito)
+          ? roundCheckoutMoney(Math.max(0, totalBrutoUsd - montoFinalCarrito))
+          : 0;
+      ordenSaldoUsage = {
+        usaSaldo: usaSaldoCarrito,
+        saldoAplicadoUsd,
+        totalBrutoUsd,
+      };
+    }
     console.log("[checkout] carrito items", items);
     console.log("[checkout] precios usados", priceMap);
 
@@ -14654,6 +14803,13 @@ app.post("/api/checkout", async (req, res) => {
       checkout_finalizado: true,
       aviso_verificacion_manual: false,
       aviso_verificacion_pago: montoMayor ? false : bypassVerificacion && !requiereEntregaManual ? true : false,
+      usa_saldo: ordenSaldoUsage.usaSaldo,
+      saldo_aplicado_usd: Number.isFinite(Number(ordenSaldoUsage.saldoAplicadoUsd))
+        ? Number(ordenSaldoUsage.saldoAplicadoUsd)
+        : 0,
+      total_bruto_usd: Number.isFinite(Number(ordenSaldoUsage.totalBrutoUsd))
+        ? Number(ordenSaldoUsage.totalBrutoUsd)
+        : null,
     };
     let ordenId = null;
     if (Number.isFinite(parsedOrderId) && parsedOrderId > 0) {
@@ -14807,6 +14963,11 @@ app.post("/api/checkout", async (req, res) => {
       return res.status(Number(err?.httpStatus) || 400).json({
         error: err?.message || "id_precio inválido en la venta",
         details: err?.details || null,
+      });
+    }
+    if (err?.code === "SALDO_INSUFICIENTE") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error: err?.message || "Saldo insuficiente para completar el checkout.",
       });
     }
     res.status(500).json({ error: err.message });
@@ -15355,6 +15516,11 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       return res.status(Number(err?.httpStatus) || 400).json({
         error: err?.message || "id_precio inválido en la venta",
         details: err?.details || null,
+      });
+    }
+    if (err?.code === "SALDO_INSUFICIENTE") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error: err?.message || "Saldo insuficiente para procesar la orden.",
       });
     }
     res.status(500).json({ error: err.message });

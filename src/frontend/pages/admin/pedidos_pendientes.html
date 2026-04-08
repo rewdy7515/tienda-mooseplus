@@ -396,6 +396,81 @@
         if (raw === "-" || lower === "null" || lower === "undefined") return "";
         return raw;
       };
+      const getCaracasDateISO = () => toYMD(getVenezuelaToday());
+      const normalizeForCompare = (value) => String(value || "").trim().toLowerCase();
+      const resolveVentaCredentialTarget = async ({ idVenta = null, rowEl = null } = {}) => {
+        const ventaId = toPositiveId(idVenta);
+        if (!ventaId) return { idVenta: null, idCuenta: null, idUsuario: null, plataforma: "" };
+
+        const entregarBtn = rowEl?.querySelector?.(".btn-entregar") || null;
+        let idCuenta = toPositiveId(entregarBtn?.dataset?.idCuentaMiembro);
+        if (!idCuenta) idCuenta = toPositiveId(entregarBtn?.dataset?.idCuenta);
+        let idUsuario = toPositiveId(entregarBtn?.dataset?.usuario);
+        let plataforma = String(entregarBtn?.dataset?.plataforma || "").trim();
+
+        if (idCuenta && idUsuario && plataforma) {
+          return { idVenta: ventaId, idCuenta, idUsuario, plataforma };
+        }
+
+        const { data: ventaRow, error: ventaErr } = await supabase
+          .from("ventas")
+          .select(
+            "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, precios:precios(id_plataforma, plataformas:plataformas(nombre))",
+          )
+          .eq("id_venta", ventaId)
+          .maybeSingle();
+        if (ventaErr) throw ventaErr;
+        if (!ventaRow?.id_venta) {
+          return { idVenta: ventaId, idCuenta: idCuenta || null, idUsuario: idUsuario || null, plataforma };
+        }
+
+        if (!idCuenta) {
+          idCuenta = toPositiveId(ventaRow?.id_cuenta_miembro) || toPositiveId(ventaRow?.id_cuenta);
+        }
+        if (!idUsuario) {
+          idUsuario = toPositiveId(ventaRow?.id_usuario);
+        }
+        if (!plataforma) {
+          const precioRow = Array.isArray(ventaRow?.precios)
+            ? ventaRow.precios[0] || null
+            : ventaRow?.precios || null;
+          const plataformaRow = Array.isArray(precioRow?.plataformas)
+            ? precioRow.plataformas[0] || null
+            : precioRow?.plataformas || null;
+          plataforma = String(plataformaRow?.nombre || "").trim();
+        }
+
+        return { idVenta: ventaId, idCuenta: idCuenta || null, idUsuario: idUsuario || null, plataforma };
+      };
+      const notifyCorreoCambioCliente = async ({
+        idUsuario = null,
+        idCuenta = null,
+        idVenta = null,
+        plataforma = "",
+        correoAnterior = "",
+        correoNuevo = "",
+      } = {}) => {
+        const userId = toPositiveId(idUsuario);
+        if (!userId) return;
+        const oldCorreo = String(correoAnterior || "").trim();
+        const newCorreo = String(correoNuevo || "").trim();
+        if (!oldCorreo || !newCorreo || normalizeForCompare(oldCorreo) === normalizeForCompare(newCorreo)) {
+          return;
+        }
+        const platformText = escapeHtml(plataforma || "tu servicio");
+        const oldCorreoSafe = escapeHtml(oldCorreo);
+        const newCorreoSafe = escapeHtml(newCorreo);
+        const payload = {
+          titulo: "Correo actualizado",
+          mensaje: `Tu servicio de <strong>${platformText}</strong> cambió de ${oldCorreoSafe} a ${newCorreoSafe}.`,
+          fecha: getCaracasDateISO(),
+          leido: false,
+          id_usuario: userId,
+          id_cuenta: toPositiveId(idCuenta),
+        };
+        const { error } = await supabase.from("notificaciones").insert(payload);
+        if (error) throw error;
+      };
       const loadReemplazosBloqueados = async (force = false) => {
         if (force) {
           reemplazosCache = null;
@@ -729,13 +804,13 @@
         const entries = Object.entries(grouped);
         if (!entries.length) return "";
         const getTipoSolicitudLabel = (row) => {
-          if (isTrue(row?.completa)) return "Cuenta completa";
+          if (isTrue(row?.completa)) return "completa";
           if (isTrue(row?.por_acceso)) return "Acceso";
           if (isTrue(row?.por_pantalla)) return "Pantalla";
           return "-";
         };
         const getTipoSolicitudClass = (label) => {
-          if (label === "Cuenta completa") return "tipo-cuenta-completa";
+          if (label === "completa") return "tipo-cuenta-completa";
           if (label === "Acceso") return "tipo-acceso";
           if (label === "Pantalla") return "tipo-pantalla";
           return "";
@@ -1151,7 +1226,7 @@
         const proveedorId = Number(activationData?.idProveedor);
         const idPlataformaNum = Number(idPlataforma);
         const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
-        const forceCuentaCompleta = idPlataformaNum === 11;
+        const forceCuentaCompleta = isCompleta || idPlataformaNum === 11;
         const wasReportado = btn?.dataset?.reportado === "true";
         const cuentaMadreFlag =
           btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
@@ -1269,13 +1344,13 @@
         if (!cuentaExist && !correoCuentaNorm && hasIdPlataforma) {
           let stockQuery = supabase
             .from("cuentas")
-            .select("id_cuenta, correo, clave, venta_miembro")
+            .select("id_cuenta, correo, clave, venta_miembro, venta_perfil")
             .eq("id_plataforma", idPlataformaNum)
             .eq("ocupado", false)
             .or("inactiva.is.null,inactiva.eq.false");
-          if (!forceCuentaCompleta) {
-            stockQuery = stockQuery.eq("venta_miembro", true);
-          }
+          stockQuery = forceCuentaCompleta
+            ? stockQuery.eq("venta_perfil", false).eq("venta_miembro", false)
+            : stockQuery.eq("venta_perfil", false).eq("venta_miembro", true);
           const { data: cuentasDisponibles, error: cuentasDisponiblesErr } = await stockQuery
             .order("id_cuenta", { ascending: true })
             .limit(300);
@@ -1666,16 +1741,41 @@
           const editBtn = wrap.querySelector(".btn-edit-correo");
           const idVenta = wrap.dataset.venta;
           const nextVal = (input?.value || "").trim();
+          const prevVal = normalizeCredentialValue(wrap.dataset.correo || textEl?.textContent || "");
           if (!idVenta || !nextVal) {
             alert("Ingresa un correo válido.");
             return;
           }
           try {
-            const { error: updErr } = await supabase
-              .from("ventas")
-              .update({ correo_miembro: nextVal })
-              .eq("id_venta", idVenta);
-            if (updErr) throw updErr;
+            const row = wrap.closest("tr");
+            const target = await resolveVentaCredentialTarget({ idVenta, rowEl: row });
+            const updates = [
+              supabase
+                .from("ventas")
+                .update({ correo_miembro: nextVal })
+                .eq("id_venta", idVenta),
+            ];
+            if (toPositiveId(target?.idCuenta)) {
+              updates.push(
+                supabase
+                  .from("cuentas")
+                  .update({ correo: nextVal })
+                  .eq("id_cuenta", Number(target.idCuenta)),
+              );
+            }
+            const results = await Promise.all(updates);
+            const failed = results.find((r) => r?.error);
+            if (failed?.error) throw failed.error;
+
+            await notifyCorreoCambioCliente({
+              idUsuario: target?.idUsuario,
+              idCuenta: target?.idCuenta,
+              idVenta,
+              plataforma: target?.plataforma || "",
+              correoAnterior: prevVal,
+              correoNuevo: nextVal,
+            });
+
             if (textEl) {
               textEl.textContent = nextVal;
               textEl.dataset.clipboard = nextVal;
@@ -1685,11 +1785,10 @@
             wrap.dataset.correo = nextVal;
             input?.remove();
             saveBtn.remove();
-            const row = wrap.closest("tr");
             const entregarBtn = row?.querySelector(".btn-entregar");
             if (entregarBtn) entregarBtn.dataset.correo = nextVal;
           } catch (err) {
-            console.error("guardar correo_miembro error", err);
+            console.error("guardar correo_miembro/cuenta error", err);
             alert("No se pudo guardar el correo.");
           }
           return;
@@ -1731,11 +1830,26 @@
             return;
           }
           try {
-            const { error: updErr } = await supabase
-              .from("ventas")
-              .update({ clave_miembro: nextVal })
-              .eq("id_venta", idVenta);
-            if (updErr) throw updErr;
+            const row = wrap.closest("tr");
+            const target = await resolveVentaCredentialTarget({ idVenta, rowEl: row });
+            const updates = [
+              supabase
+                .from("ventas")
+                .update({ clave_miembro: nextVal })
+                .eq("id_venta", idVenta),
+            ];
+            if (toPositiveId(target?.idCuenta)) {
+              updates.push(
+                supabase
+                  .from("cuentas")
+                  .update({ clave: nextVal })
+                  .eq("id_cuenta", Number(target.idCuenta)),
+              );
+            }
+            const results = await Promise.all(updates);
+            const failed = results.find((r) => r?.error);
+            if (failed?.error) throw failed.error;
+
             if (textEl) {
               textEl.textContent = nextVal;
               textEl.dataset.clipboard = nextVal;
@@ -1745,11 +1859,10 @@
             wrap.dataset.clave = nextVal;
             input?.remove();
             saveClaveBtn.remove();
-            const row = wrap.closest("tr");
             const entregarBtn = row?.querySelector(".btn-entregar");
             if (entregarBtn) entregarBtn.dataset.clave = nextVal;
           } catch (err) {
-            console.error("guardar clave_miembro error", err);
+            console.error("guardar clave_miembro/cuenta error", err);
             alert("No se pudo guardar la clave.");
           }
           return;

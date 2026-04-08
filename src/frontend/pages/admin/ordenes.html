@@ -99,6 +99,22 @@
         align-items: center;
         gap: 6px;
       }
+      .metodo-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .metodo-saldo-usage {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 700;
+        background: #e0f2fe;
+        color: #0c4a6e;
+      }
       .btn-ver-comprobante {
         padding: 4px 8px;
         font-size: 11px;
@@ -510,6 +526,35 @@
       const calcMetodo4Neto = (montoTransferido) =>
         round2((Number(montoTransferido) || 0) - ((Number(montoTransferido) || 0) * 0.054 + 0.3));
       const calcMetodo3Neto = (montoTransferido) => round2((Number(montoTransferido) || 0) * 0.8);
+      const resolveSaldoUsageLabel = (orden) => {
+        const cart = carritoMap[orden?.id_carrito] || null;
+        const usaSaldo = isTrue(orden?.usa_saldo) || isTrue(cart?.usa_saldo);
+        if (!usaSaldo) return "";
+
+        let totalBruto = Number(orden?.total_bruto_usd);
+        if (!Number.isFinite(totalBruto)) {
+          const cartMontoUsd = Number(cart?.monto_usd);
+          if (Number.isFinite(cartMontoUsd)) totalBruto = cartMontoUsd;
+        }
+
+        let saldoAplicado = Number(orden?.saldo_aplicado_usd);
+        if (!Number.isFinite(saldoAplicado)) {
+          const cartMontoUsd = Number(cart?.monto_usd);
+          const cartMontoFinal = Number(cart?.monto_final);
+          if (Number.isFinite(cartMontoUsd) && Number.isFinite(cartMontoFinal)) {
+            saldoAplicado = cartMontoUsd - cartMontoFinal;
+          }
+        }
+
+        const saldoAplicadoNorm = round2(Math.max(0, Number(saldoAplicado) || 0));
+        if (!(saldoAplicadoNorm > 0)) return "";
+
+        const totalBrutoNorm = round2(Math.max(0, Number(totalBruto) || 0));
+        if (totalBrutoNorm > 0 && Math.abs(totalBrutoNorm - saldoAplicadoNorm) <= 0.01) {
+          return "saldo";
+        }
+        return "saldo + diferencia en usd";
+      };
 
       const getMontoBaseCobro = (orden) => {
         const cart = carritoMap[orden?.id_carrito];
@@ -524,6 +569,14 @@
       };
 
       const getSaldoSugerido = (orden) => {
+        if (isTrue(orden?.recargar_saldo)) {
+          const totalRecarga = Number(orden?.total);
+          if (Number.isFinite(totalRecarga) && totalRecarga > 0) return round2(totalRecarga);
+          const montoTransferidoRecarga = Number(orden?.monto_transferido);
+          return Number.isFinite(montoTransferidoRecarga) && montoTransferidoRecarga > 0
+            ? round2(montoTransferidoRecarga)
+            : 0;
+        }
         const montoTransferido = Number(orden?.monto_transferido);
         if (!Number.isFinite(montoTransferido) || montoTransferido <= 0) return 0;
         const baseCobro = getMontoBaseCobro(orden);
@@ -579,6 +632,10 @@
             verificacion_automatica: true,
           };
           const metodo = metodoInfo.nombre || "-";
+          const saldoUsageLabel = resolveSaldoUsageLabel(orden);
+          const metodoHtml = saldoUsageLabel
+            ? `<div class="metodo-cell"><span>${metodo}</span><span class="metodo-saldo-usage">${saldoUsageLabel}</span></div>`
+            : metodo;
           const montoVal = formatOrdenMonto(orden);
           const referencia = orden.referencia || "-";
           const comprobanteUrl = extractComprobanteUrl(orden.comprobante);
@@ -611,7 +668,7 @@
                   </button>
                 </td>
                 <td>${cliente || "-"}</td>
-                <td>${metodo}</td>
+                <td>${metodoHtml}</td>
                 <td>${montoVal}</td>
                 <td>${referenciaHtml}</td>
                 <td>${fecha}</td>
@@ -800,7 +857,7 @@
         let query = supabase
           .from("ordenes")
           .select(
-            "id_orden, id_usuario, id_metodo_de_pago, id_admin, id_carrito, total, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada, checkout_finalizado"
+            "id_orden, id_usuario, id_metodo_de_pago, id_admin, id_carrito, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, monto_bs, monto_transferido, monto_mayor, referencia, comprobante, fecha, hora_orden, pago_verificado, orden_cancelada, checkout_finalizado, recargar_saldo"
           )
           .eq("marcado_pago", true);
         if (!canManageOrdenes) {

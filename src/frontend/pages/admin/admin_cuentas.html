@@ -7777,7 +7777,7 @@
             if (delErr) throw delErr;
             const { error: updErr } = await supabase
               .from("cuentas")
-              .update({ venta_perfil: false, venta_miembro: true })
+              .update({ venta_perfil: false, venta_miembro: false })
               .eq("id_cuenta", cuentaId);
             if (updErr) throw updErr;
             loadCuentaDetalle(cuentaId);

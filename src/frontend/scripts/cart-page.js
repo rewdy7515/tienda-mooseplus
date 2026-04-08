@@ -1342,11 +1342,6 @@ btnPay?.addEventListener("click", () => {
         alert(`Error al procesar: ${resp.error}`);
         return;
       }
-      const nuevoSaldo = Math.max(0, Math.round((saldo - cartMontoUsd) * 100) / 100);
-      await supabase
-        .from("usuarios")
-        .update({ saldo: nuevoSaldo })
-        .eq("id_usuario", currentUser.id_usuario);
       const dest = resp?.id_orden
         ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
         : "entregar_servicios.html";
