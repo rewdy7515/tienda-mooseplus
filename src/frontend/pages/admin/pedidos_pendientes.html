@@ -697,6 +697,12 @@
           })
           .in("id_reporte", ids);
         if (closeErr) throw closeErr;
+
+        const { error: ventaErr } = await supabase
+          .from("ventas")
+          .update({ reportado: false, aviso_admin: true })
+          .eq("id_venta", ventaId);
+        if (ventaErr) throw ventaErr;
         return ids;
       };
 

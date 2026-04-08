@@ -1419,7 +1419,10 @@ async function handleSubmit(e) {
         return;
       }
       if (ventaAsociadaId) {
-        await supabase.from("ventas").update({ reportado: true }).eq("id_venta", ventaAsociadaId);
+        await supabase
+          .from("ventas")
+          .update({ reportado: false, aviso_admin: true })
+          .eq("id_venta", ventaAsociadaId);
       }
       try {
         await markVentaPendienteByReporteRule({

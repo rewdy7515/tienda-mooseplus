@@ -8580,6 +8580,11 @@
 	              })
 	              .eq("id_reporte", reporteId);
 	            if (updReporteErr) throw updReporteErr;
+	            const { error: updVentaReportadoErr } = await supabase
+	              .from("ventas")
+	              .update({ reportado: false, aviso_admin: true })
+	              .eq("id_venta", ventaInfo.id_venta);
+	            if (updVentaReportadoErr) throw updVentaReportadoErr;
 	            try {
 	              const { data: ventaEstadoRow, error: ventaEstadoErr } = await supabase
 	                .from("ventas")

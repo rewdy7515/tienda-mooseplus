@@ -31,6 +31,28 @@
       content="https://mooseplus.com/src/frontend/assets/preview/hxhyethwzrpfjw2nmg9l.webp"
     />
     <link rel="stylesheet" href="../styles/styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/intl-tel-input/build/css/intlTelInput.css"
+    />
+    <style>
+      .auth-page.signup-page .auth-form .iti {
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .auth-page.signup-page .auth-form .iti .form-input {
+        max-width: 100%;
+      }
+
+      .auth-page.signup-page .auth-card {
+        overflow: visible;
+      }
+
+      .auth-page.signup-page .iti__country-list {
+        z-index: 1200;
+      }
+    </style>
   </head>
   <body
     class="auth-page signup-page"
@@ -190,6 +212,8 @@
     </main>
 
     <script type="module" src="../scripts/session-guard.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input/build/js/intlTelInput.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/intl-tel-input/build/js/utils.js"></script>
     <script type="module" src="../scripts/signup.js"></script>
   </body>
 </html>

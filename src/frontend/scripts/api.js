@@ -1059,8 +1059,8 @@ export async function completeSignupWithRegistrationToken(payload = {}) {
 }
 
 export async function applyRenewalReminderToken(token) {
-  await ensureServerSession();
   try {
+    await ensureServerSession();
     const value = String(token || "").trim();
     if (!value) return { error: "Token requerido." };
     const res = await fetch(`${API_BASE}/api/cart/renewal-link/apply`, {

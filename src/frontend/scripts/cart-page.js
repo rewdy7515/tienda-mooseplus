@@ -5,7 +5,6 @@ import {
   sendCartDelta,
   clearServerSession,
   loadCurrentUser,
-  ensureServerSession,
   startSession,
   submitCheckout,
   supabase,
@@ -340,6 +339,26 @@ const clearRenewalReminderTokenFromUrl = () => {
   params.delete("rr");
   const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash || ""}`;
   window.history.replaceState({}, "", next);
+};
+
+const isRenewalAuthError = (value) => {
+  const message = String(value || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("usuario no autenticado") ||
+    message.includes("sesión") ||
+    message.includes("auth") ||
+    message.includes("login")
+  );
+};
+
+const redirectToLoginWithRenewalToken = (token) => {
+  const loginUrl = new URL("login.html", window.location.href);
+  const value = String(token || "").trim();
+  if (value) {
+    loginUrl.searchParams.set("rr", value);
+  }
+  window.location.replace(loginUrl.toString());
 };
 
 const confirmRemoveModal = () => {
@@ -1113,18 +1132,21 @@ async function init() {
   );
   try {
     await syncAuthSession();
-    await ensureServerSession();
     const renewalToken = getRenewalReminderTokenFromUrl();
     let shouldShowRenewalModal = false;
     let keepStatusMessage = false;
     if (renewalToken) {
       setStatus("Añadiendo renovaciones al carrito...");
       const applyResp = await applyRenewalReminderToken(renewalToken);
-      clearRenewalReminderTokenFromUrl();
       if (applyResp?.error) {
+        if (isRenewalAuthError(applyResp.error)) {
+          redirectToLoginWithRenewalToken(renewalToken);
+          return;
+        }
         keepStatusMessage = true;
         setStatus(applyResp.error);
       } else {
+        clearRenewalReminderTokenFromUrl();
         shouldShowRenewalModal = true;
       }
     }

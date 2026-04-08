@@ -4324,7 +4324,14 @@ const buildWhatsappRecordatorioItems = async ({
           idUsuario: group.idUsuario,
           ventaIds,
         });
-        renewalCartToken = String(new URL(renewalCartUrl).searchParams.get("rr") || "").trim();
+        const renewalUrlObj = new URL(renewalCartUrl);
+        renewalCartToken = String(renewalUrlObj.searchParams.get("rr") || "").trim();
+        if (!renewalCartToken) {
+          const shortMatch = renewalUrlObj.pathname.match(/\/r\/([^/?#]+)/i);
+          if (shortMatch?.[1]) {
+            renewalCartToken = decodeURIComponent(shortMatch[1]).trim();
+          }
+        }
 
         if (!group.registrado && renewalCartToken) {
           signupRenewalUrl = buildSignupRegistrationUrl(group.idUsuario, {
@@ -7666,8 +7673,7 @@ const verifyRenewalCartToken = (tokenValue, options = {}) => {
 
 const buildRenewalCartUrl = ({ idUsuario, ventaIds = [] } = {}) => {
   const token = buildRenewalCartToken({ idUsuario, ventaIds });
-  const renewUrl = new URL("/cart.html", PUBLIC_SITE_URL);
-  renewUrl.searchParams.set("rr", token);
+  const renewUrl = new URL(`/r/${encodeURIComponent(token)}`, PUBLIC_SITE_URL);
   return renewUrl.toString();
 };
 
