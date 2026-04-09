@@ -810,12 +810,19 @@
         const entries = Object.entries(grouped);
         if (!entries.length) return "";
         const getTipoSolicitudLabel = (row) => {
+          if (isTrue(row?.reportado)) return "reportado";
+          if (Number(row?.id_plataforma) === 9) {
+            return isTrue(row?.cuenta_nueva) ? "nueva" : "existente";
+          }
           if (isTrue(row?.completa)) return "completa";
           if (isTrue(row?.por_acceso)) return "Acceso";
           if (isTrue(row?.por_pantalla)) return "Pantalla";
           return "-";
         };
         const getTipoSolicitudClass = (label) => {
+          if (label === "reportado") return "tipo-reportado";
+          if (label === "nueva") return "tipo-nueva";
+          if (label === "existente") return "tipo-existe";
           if (label === "completa") return "tipo-cuenta-completa";
           if (label === "Acceso") return "tipo-acceso";
           if (label === "Pantalla") return "tipo-pantalla";

@@ -643,7 +643,7 @@
 
       const getStatusByCoverage = (coverageDays) => {
         const numeric = Number(coverageDays);
-        if (!Number.isFinite(numeric) || numeric < 3) return "critico";
+        if (!Number.isFinite(numeric) || numeric < 2) return "critico";
         if (numeric <= 7) return "medio";
         return "estable";
       };
@@ -854,7 +854,7 @@
         const lines = [];
         if (criticalCoverage.length) {
           lines.push(
-            `<li class="critical">Cobertura critica (&lt; 3 dias): ${escapeHtml(
+            `<li class="critical">Cobertura critica (&lt; 2 dias): ${escapeHtml(
               criticalCoverage.slice(0, 6).map((r) => getRowLabel(r)).join(", "),
             )}${criticalCoverage.length > 6 ? "..." : ""}</li>`,
           );

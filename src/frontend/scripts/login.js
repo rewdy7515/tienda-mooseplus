@@ -13,9 +13,24 @@ const toggleBtn = document.querySelector(".toggle-password");
 const signupBtn = document.getElementById("login-signup-link");
 const forgotBtn = document.getElementById("login-forgot-link");
 const submitBtn = document.querySelector(".auth-submit");
-const renewalReminderToken = String(
-  new URLSearchParams(window.location.search || "").get("rr") || "",
-).trim();
+const normalizeNextRedirectTarget = (rawValue = "") => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    if (parsed.origin !== window.location.origin) return "";
+    const pathName = String(parsed.pathname || "/").trim() || "/";
+    return `${pathName.startsWith("/") ? pathName : `/${pathName}`}${parsed.search || ""}${
+      parsed.hash || ""
+    }`;
+  } catch (_err) {
+    return "";
+  }
+};
+const loginPageParams = new URLSearchParams(window.location.search || "");
+const renewalReminderToken = String(loginPageParams.get("rr") || "").trim();
+const nextRedirectTarget = normalizeNextRedirectTarget(loginPageParams.get("next"));
 let forgotLoading = false;
 let captchaController = null;
 let captchaInitPromise = null;
@@ -24,11 +39,15 @@ const LOGIN_DEBUG_PREFIX = "[login-debug]";
 const buildSignupHref = () => {
   const params = new URLSearchParams();
   if (renewalReminderToken) params.set("rr", renewalReminderToken);
+  if (nextRedirectTarget) params.set("next", nextRedirectTarget);
   const query = params.toString();
   return `signup.html${query ? `?${query}` : ""}`;
 };
 
 const buildPostLoginRedirect = () => {
+  if (nextRedirectTarget && !/^\/login\.html(?:[?#]|$)/i.test(nextRedirectTarget)) {
+    return nextRedirectTarget;
+  }
   if (!renewalReminderToken) return "index.html";
   const params = new URLSearchParams();
   params.set("rr", renewalReminderToken);
@@ -451,6 +470,7 @@ async function handleLogin(event) {
       delayMs: 400,
       target: postLoginHref,
       hasRenewalToken: Boolean(renewalReminderToken),
+      hasNextTarget: Boolean(nextRedirectTarget),
     });
     setTimeout(() => {
       window.location.href = postLoginHref;

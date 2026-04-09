@@ -342,6 +342,13 @@ let manualVerificationWatcherLastResult = {
   skippedRecent: 0,
   skippedNoDate: 0,
   failed: 0,
+  autoFetched: 0,
+  autoSentWhatsapp: 0,
+  autoAlreadyNotified: 0,
+  autoSkippedRecent: 0,
+  autoSkippedNoDate: 0,
+  autoSkippedNoSale: 0,
+  autoFailed: 0,
 };
 let manualVerificationWatcherLastError = null;
 let reportesWhatsappWatcherInProgress = false;
@@ -2008,17 +2015,25 @@ const buildWhatsappVentaEntregadaMessage = ({
   idVenta = null,
   idOrden = null,
   detalleOrdenUrl = "",
+  clienteRegistrado = true,
+  signupRegistroUrl = "",
 } = {}) => {
   const ventaId = toPositiveInt(idVenta) || idVenta || "-";
   const ordenId = toPositiveInt(idOrden);
   const detalleUrl =
     String(detalleOrdenUrl || "").trim() ||
     (ordenId ? buildWhatsappOrderDetailUrl(ordenId) : buildPublicSiteUrl());
-  return `Venta #${ventaId}
-estado: servicio entregado ✅
+  const isRegisteredClient = clienteRegistrado !== false;
+  const signupUrl = String(signupRegistroUrl || "").trim();
+  const targetUrl = isRegisteredClient ? detalleUrl : signupUrl || detalleUrl;
+  const actionText = isRegisteredClient
+    ? "Puedes verificar la orden por:"
+    : "Registrate verifica detalles de la orden por:";
+  return `\`Venta #${ventaId}\`
+*estado:* servicio entregado ✅
 
-Puedes verificar la orden por:
-${detalleUrl}`;
+${actionText}
+${targetUrl}`;
 };
 
 const fetchReporteWhatsappContextById = async (idReporte) => {
@@ -2564,7 +2579,6 @@ const sendVentaEntregadaToWhatsappOwner = async ({
     metodoVerificacionAutomatica === true &&
     verificationWindowElapsed === false;
   if (autoVerifiedBeforeWindow) {
-    await markOrderPaymentVerificationWhatsappNotified(ordenId, true);
     return {
       sent: false,
       skipped: true,
@@ -2724,7 +2738,14 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     };
   }
 
-  const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
+  const { data: targetUserRow, error: targetUserErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("id_usuario, telefono, fecha_registro")
+    .eq("id_usuario", targetUserId)
+    .maybeSingle();
+  if (targetUserErr) throw targetUserErr;
+
+  const targetPhone = normalizeWhatsappPhone(targetUserRow?.telefono);
   if (!targetPhone) {
     return {
       sent: false,
@@ -2736,10 +2757,30 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     };
   }
 
+  const detalleOrdenUrl = buildWhatsappOrderDetailUrl(ordenId);
+  const clienteRegistrado = Boolean(targetUserRow?.fecha_registro);
+  let signupRegistroUrl = "";
+  if (!clienteRegistrado) {
+    try {
+      signupRegistroUrl = buildSignupRegistrationUrl(targetUserId, {
+        redirectUrl: detalleOrdenUrl,
+      });
+    } catch (signupErr) {
+      console.error("[ventas:whatsapp] signup url build error", {
+        id_venta: ventaId,
+        id_orden: ordenId,
+        id_usuario: targetUserId,
+        error: signupErr?.message || signupErr,
+      });
+    }
+  }
+
   const message = buildWhatsappVentaEntregadaMessage({
     idVenta: ventaId,
     idOrden: ordenId,
-    detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
+    detalleOrdenUrl,
+    clienteRegistrado,
+    signupRegistroUrl,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
@@ -2788,6 +2829,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
       id_orden: ordenId,
       id_usuario_destino: targetUserId,
       phone: targetPhone,
+      cliente_registrado: clienteRegistrado,
     };
   }
 
@@ -2799,6 +2841,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     id_orden: ordenId,
     id_usuario_destino: targetUserId,
     phone: targetPhone,
+    cliente_registrado: clienteRegistrado,
   };
 };
 
@@ -3856,6 +3899,13 @@ const processPendingManualVerificationAlerts = async () => {
     skippedRecent: 0,
     skippedNoDate: 0,
     failed: 0,
+    autoFetched: 0,
+    autoSentWhatsapp: 0,
+    autoAlreadyNotified: 0,
+    autoSkippedRecent: 0,
+    autoSkippedNoDate: 0,
+    autoSkippedNoSale: 0,
+    autoFailed: 0,
   };
 
   let managedWhatsappForRun = false;
@@ -3929,6 +3979,99 @@ const processPendingManualVerificationAlerts = async () => {
           id_orden: ordenId,
           error: notifyErr?.message || notifyErr,
         });
+      }
+    }
+
+    if (shouldStartWhatsapp) {
+      const { data: autoMetodoRows, error: autoMetodoErr } = await supabaseAdmin
+        .from("metodos_de_pago")
+        .select("id_metodo_de_pago")
+        .eq("verificacion_automatica", true);
+      if (autoMetodoErr) throw autoMetodoErr;
+
+      const autoMetodoIds = (autoMetodoRows || [])
+        .map((row) => toPositiveInt(row?.id_metodo_de_pago))
+        .filter((id) => !!id);
+      if (autoMetodoIds.length) {
+        const { data: autoPendingOrders, error: autoPendingErr } = await supabaseAdmin
+          .from("ordenes")
+          .select(
+            "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada, aviso_verificacion_pago",
+          )
+          .eq("marcado_pago", true)
+          .eq("checkout_finalizado", true)
+          .eq("pago_verificado", true)
+          .in("id_metodo_de_pago", autoMetodoIds)
+          .or("orden_cancelada.eq.false,orden_cancelada.is.null")
+          .order("id_orden", { ascending: false })
+          .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
+        if (autoPendingErr) throw autoPendingErr;
+
+        const autoOrders = Array.isArray(autoPendingOrders) ? autoPendingOrders : [];
+        result.autoFetched = autoOrders.length;
+
+        for (const ordenRow of autoOrders) {
+          const ordenId = toPositiveInt(ordenRow?.id_orden);
+          if (!ordenId) {
+            result.autoFailed += 1;
+            continue;
+          }
+          if (isTrue(ordenRow?.aviso_verificacion_pago)) {
+            result.autoAlreadyNotified += 1;
+            continue;
+          }
+
+          const isExpired = hasManualVerificationWindowElapsed(ordenRow);
+          if (isExpired === null) {
+            result.autoSkippedNoDate += 1;
+            continue;
+          }
+          if (isExpired !== true) {
+            result.autoSkippedRecent += 1;
+            continue;
+          }
+
+          try {
+            const notifyRes = await notifyVentaEntregadaAfterOrderVerified({
+              idOrden: ordenId,
+              manageWhatsappLifecycle: false,
+            });
+            if (!managedWhatsappForRun && isWhatsappClientActive()) {
+              managedWhatsappForRun = true;
+            }
+            if (notifyRes?.sent) {
+              result.autoSentWhatsapp += 1;
+              continue;
+            }
+            if (notifyRes?.reason === "order_payment_already_notified") {
+              result.autoAlreadyNotified += 1;
+              continue;
+            }
+            if (notifyRes?.reason === "no_delivered_non_reported_sale") {
+              result.autoSkippedNoSale += 1;
+              continue;
+            }
+            console.warn("[auto_verified_payment_watcher] not sent", {
+              id_orden: ordenId,
+              reason: notifyRes?.reason || "unknown",
+              skipped: !!notifyRes?.skipped,
+              target_user: notifyRes?.id_usuario_destino || null,
+              phone: notifyRes?.phone || null,
+              error: notifyRes?.error || null,
+            });
+            if (notifyRes?.skipped) {
+              result.autoSkippedNoSale += 1;
+              continue;
+            }
+            result.autoFailed += 1;
+          } catch (notifyErr) {
+            result.autoFailed += 1;
+            console.error("[auto_verified_payment_watcher] notify error", {
+              id_orden: ordenId,
+              error: notifyErr?.message || notifyErr,
+            });
+          }
+        }
       }
     }
 
@@ -5272,7 +5415,7 @@ if (WHATSAPP_PEDIDO_PENDIENTE_WATCHER_ENABLED && shouldStartWhatsapp) {
 
 if (WHATSAPP_MANUAL_VERIFICATION_WATCHER_ENABLED) {
   console.log(
-    `[Notificaciones] Worker verificación manual activo (cada ${Math.round(
+    `[Notificaciones] Worker verificación manual/auto activo (cada ${Math.round(
       WHATSAPP_MANUAL_VERIFICATION_WATCHER_INTERVAL_MS / 1000,
     )}s, ventana ${Math.round(WHATSAPP_MANUAL_VERIFICATION_WINDOW_MS / 1000)}s).`,
   );
@@ -7600,13 +7743,35 @@ const buildSignupRegistrationToken = (idUsuario) => {
   return `${SIGNUP_ULTRA_PREFIX}${payloadPart}${signaturePart}`;
 };
 
+const normalizeSignupNextPath = (rawValue = "") => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value, PUBLIC_SITE_URL);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    if (!isAllowedPublicRedirectUrl(parsed.toString())) return "";
+    const pathName = String(parsed.pathname || "/").trim() || "/";
+    return `${pathName.startsWith("/") ? pathName : `/${pathName}`}${parsed.search || ""}${
+      parsed.hash || ""
+    }`;
+  } catch (_err) {
+    return "";
+  }
+};
+
 const buildSignupRegistrationUrl = (idUsuario, options = {}) => {
   const token = buildSignupRegistrationToken(idUsuario);
-  const signupUrl = new URL("/signup", PUBLIC_SITE_URL);
+  const signupUrl = new URL("/signup.html", PUBLIC_SITE_URL);
   signupUrl.searchParams.set("t", token);
   const renewalToken = String(options?.renewalToken || options?.rr || "").trim();
   if (renewalToken) {
     signupUrl.searchParams.set("rr", renewalToken);
+  }
+  const nextPath = normalizeSignupNextPath(
+    options?.nextUrl || options?.redirectUrl || options?.next || "",
+  );
+  if (nextPath) {
+    signupUrl.searchParams.set("next", nextPath);
   }
   return signupUrl.toString();
 };

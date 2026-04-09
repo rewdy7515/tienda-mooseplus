@@ -1,6 +1,7 @@
 import {
   supabase,
   fetchCart,
+  fetchCheckoutSummary,
   loadCatalog,
   submitCheckout,
   fetchCheckoutDraft,
@@ -152,6 +153,21 @@ const getTotalUsdMostrado = (baseUsd, metodoId) => {
     return round2(montoBase * (1 + METODO_COMISION_20_PERCENT));
   }
   return round2(montoBase);
+};
+
+const applyCheckoutSummaryTotals = async () => {
+  const summary = await fetchCheckoutSummary();
+  if (summary?.error) return false;
+  const summaryTotalUsd = Number(summary?.total_usd);
+  const summaryMontoBs = Number(summary?.monto_bs);
+  if (Number.isFinite(summaryTotalUsd)) {
+    totalUsd = summaryTotalUsd;
+    fixedMontoUsd = summaryTotalUsd;
+  }
+  if (Number.isFinite(summaryMontoBs)) {
+    fixedMontoBs = summaryMontoBs;
+  }
+  return Number.isFinite(summaryTotalUsd);
 };
 
 const readFileAsDataUrl = (file) =>
@@ -1148,6 +1164,12 @@ async function init() {
       fixedFecha = cartData?.fecha ?? null;
 
       try {
+        await applyCheckoutSummaryTotals();
+      } catch (summaryErr) {
+        console.warn("checkout summary load error", summaryErr);
+      }
+
+      try {
         await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
       } catch (syncErr) {
         console.warn("checkout sync cart montos error", syncErr);
@@ -1306,6 +1328,11 @@ btnSendPayment?.addEventListener("click", async () => {
         }
         fixedHora = cartData?.hora ?? null;
         fixedFecha = cartData?.fecha ?? null;
+        try {
+          await applyCheckoutSummaryTotals();
+        } catch (summaryErr) {
+          console.warn("checkout summary before submit error", summaryErr);
+        }
         renderTotal();
       } else if (saldoOrder) {
         totalUsd = Number.isFinite(Number(saldoOrder?.total))

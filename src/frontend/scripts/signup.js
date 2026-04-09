@@ -45,15 +45,23 @@ const RESEND_COOLDOWN_SECONDS = 60;
 let resendCountdownTimer = null;
 let resendSecondsLeft = 0;
 let resendTargetEmail = "";
-const signupToken =
-  new URLSearchParams(window.location.search || "").get("t") ||
-  new URLSearchParams(window.location.search || "").get("registro_token") ||
-  "";
-const renewalReminderToken = String(
-  new URLSearchParams(window.location.search || "").get("rr") || "",
-).trim();
-const signupSuccessPreviewMode =
-  new URLSearchParams(window.location.search || "").get("preview_success") === "1";
+const signupPageParams = new URLSearchParams(window.location.search || "");
+const signupToken = signupPageParams.get("t") || signupPageParams.get("registro_token") || "";
+const renewalReminderToken = String(signupPageParams.get("rr") || "").trim();
+const signupSuccessPreviewMode = signupPageParams.get("preview_success") === "1";
+const normalizeSignupNextTarget = (rawValue = "") => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    if (parsed.origin !== window.location.origin) return "";
+    return `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+  } catch (_err) {
+    return "";
+  }
+};
+const signupNextTarget = normalizeSignupNextTarget(signupPageParams.get("next"));
 let signupTokenContext = null;
 const SIGNUP_CONFIRM_REDIRECT_URL = "https://mooseplus.com/login.html";
 const DEFAULT_DIAL_CODE = "58";
@@ -61,6 +69,7 @@ const DEFAULT_DIAL_CODE = "58";
 function getLoginPageUrl() {
   const params = new URLSearchParams();
   if (renewalReminderToken) params.set("rr", renewalReminderToken);
+  if (signupNextTarget) params.set("next", signupNextTarget);
   const query = params.toString();
   return `login.html${query ? `?${query}` : ""}`;
 }
@@ -69,6 +78,9 @@ function getSignupEmailRedirectUrl() {
   const loginUrl = new URL(SIGNUP_CONFIRM_REDIRECT_URL);
   if (renewalReminderToken) {
     loginUrl.searchParams.set("rr", renewalReminderToken);
+  }
+  if (signupNextTarget) {
+    loginUrl.searchParams.set("next", signupNextTarget);
   }
   return loginUrl.toString();
 }

@@ -1,6 +1,7 @@
 import {
   applyRenewalReminderToken,
   fetchCart,
+  fetchCheckoutSummary,
   loadCatalog,
   sendCartDelta,
   clearServerSession,
@@ -432,6 +433,33 @@ const updateRefreshButtonState = () => {
   refreshNoteEl?.classList.toggle("hidden", !needsSync);
 };
 
+const refreshCanonicalCheckoutSummary = async () => {
+  if (!cartItems.length) return true;
+  const summaryResp = await fetchCheckoutSummary();
+  if (summaryResp?.error) {
+    console.warn("cart checkout summary error", summaryResp.error);
+    return false;
+  }
+  const totalUsd = Number(summaryResp?.total_usd);
+  const montoBs = Number(summaryResp?.monto_bs);
+  const descuentoSum = round2(
+    (summaryResp?.items || []).reduce(
+      (acc, row) => acc + (Number(row?.descuento_usd) || 0),
+      0,
+    ),
+  );
+  if (Number.isFinite(totalUsd)) {
+    cartMontoUsd = totalUsd;
+  }
+  if (Number.isFinite(montoBs)) {
+    cartMontoBs = montoBs;
+  }
+  if (Number.isFinite(descuentoSum)) {
+    cartDescuento = descuentoSum;
+  }
+  return Number.isFinite(totalUsd);
+};
+
 const syncCartWithServer = async ({ refreshBtn = null, alertOnError = false } = {}) => {
   try {
     if (refreshBtn) setRefreshLoading(refreshBtn, true);
@@ -455,16 +483,15 @@ const syncCartWithServer = async ({ refreshBtn = null, alertOnError = false } = 
     cartDescuento = Number.isFinite(Number(freshCart?.descuento))
       ? Number(freshCart.descuento)
       : cartDescuento;
+    try {
+      await refreshCanonicalCheckoutSummary();
+    } catch (summaryErr) {
+      console.warn("cart summary refresh error", summaryErr);
+    }
     dbCartSnapshot = buildCartSnapshot(cartItems);
     cartNeedsSync = false;
     updateCartNeedsSync();
-    const cardCount = itemsEl?.querySelectorAll(".cart-item-card").length || 0;
-    if (cardCount && cardCount !== cartItems.length) {
-      renderCart();
-    } else {
-      (cartItems || []).forEach((_, idx) => updateCartRowUI(idx));
-      updateCartSummaryUI();
-    }
+    renderCart();
     return true;
   } catch (err) {
     console.error("refresh cart error", err);
@@ -543,7 +570,7 @@ const buildPrecioDetalle = (item, price, platform) => {
     const monto = `${price.valor_tarjeta_de_regalo || ""} ${price.moneda || ""} $${price.precio_usd_detal || ""}`;
     return `Región: ${region} · Monto: ${monto}`;
   }
-  const qty = item.cantidad || price.cantidad || 1;
+  const qty = Math.max(1, Number(item?.cantidad) || Number(price?.cantidad) || 1);
   const baseUnit = flags.por_pantalla
     ? "pantalla"
     : flags.por_acceso
@@ -566,11 +593,11 @@ const getPriceMaps = () => {
 };
 
 const calcItemTotals = (item, price, platform) => {
-  const unit = price?.precio_usd_detal || 0;
-  const qtyVal = item?.cantidad || 0;
-  const qtyDescuento = Math.max(1, Number(item?.qty_descuento || qtyVal) || qtyVal || 1);
+  const unit = Number(price?.precio_usd_detal) || 0;
+  const qtyVal = Math.max(1, Number(item?.cantidad) || Number(price?.cantidad) || 1);
+  const qtyDescuento = Math.max(1, Number(item?.qty_descuento) || qtyVal);
   const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
-  const mesesVal = isGiftCard ? 1 : item?.meses || price?.duracion || 1;
+  const mesesVal = isGiftCard ? 1 : Math.max(1, Number(item?.meses) || Number(price?.duracion) || 1);
   const baseSubtotal = round2(unit * qtyVal * (isGiftCard ? 1 : mesesVal));
   let descuentoMesesVal = 0;
   let descuentoCantidadVal = 0;
@@ -621,13 +648,27 @@ const updateCartSummaryUI = () => {
     subtotalBruto = round2(subtotalBruto + totals.baseSubtotal);
     totalDescuento = round2(totalDescuento + totals.descuentoVal);
   });
-  const subtotalMostrar = round2(subtotalBruto);
-  const descuentoMostrar = round2(totalDescuento);
+  let subtotalMostrar = round2(subtotalBruto);
+  let descuentoMostrar = round2(totalDescuento);
+  if (
+    !cartNeedsSync &&
+    Number.isFinite(Number(cartMontoUsd)) &&
+    Number.isFinite(Number(cartDescuento))
+  ) {
+    descuentoMostrar = round2(Number(cartDescuento));
+    subtotalMostrar = round2(Number(cartMontoUsd) + descuentoMostrar);
+  }
   const showSaldoRow = cartUseSaldo && userSaldo > 0;
-  const saldoAplicado = showSaldoRow ? round2(userSaldo) : 0;
-  const totalMostrar = round2(
-    round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
-  );
+  const totalAntesSaldo = round2(subtotalMostrar - descuentoMostrar);
+  const saldoAplicado = showSaldoRow
+    ? round2(
+        Math.min(
+          Math.max(0, Number(userSaldo) || 0),
+          Math.max(0, totalAntesSaldo),
+        ),
+      )
+    : 0;
+  const totalMostrar = round2(totalAntesSaldo - saldoAplicado);
   const totalBsMostrar = Number.isFinite(Number(cartMontoBs)) ? Number(cartMontoBs) : null;
 
   const subtotalEl = itemsEl.querySelector('[data-summary="subtotal"]');
@@ -874,13 +915,27 @@ const renderCart = () => {
   const rows = renderedItems.map((r) => r.rowHtml).join("");
   const cards = renderedItems.map((r) => r.cardHtml).join("");
 
-  const descuentoMostrar = round2(totalDescuento);
-  const subtotalMostrar = round2(subtotalBruto);
+  let descuentoMostrar = round2(totalDescuento);
+  let subtotalMostrar = round2(subtotalBruto);
+  if (
+    !cartNeedsSync &&
+    Number.isFinite(Number(cartMontoUsd)) &&
+    Number.isFinite(Number(cartDescuento))
+  ) {
+    descuentoMostrar = round2(Number(cartDescuento));
+    subtotalMostrar = round2(Number(cartMontoUsd) + descuentoMostrar);
+  }
   const showSaldoRow = cartUseSaldo && userSaldo > 0;
-  const saldoAplicado = showSaldoRow ? round2(userSaldo) : 0;
-  const totalMostrar = round2(
-    round2(subtotalMostrar) + round2(-descuentoMostrar) + round2(-saldoAplicado),
-  );
+  const totalAntesSaldo = round2(subtotalMostrar - descuentoMostrar);
+  const saldoAplicado = showSaldoRow
+    ? round2(
+        Math.min(
+          Math.max(0, Number(userSaldo) || 0),
+          Math.max(0, totalAntesSaldo),
+        ),
+      )
+    : 0;
+  const totalMostrar = round2(totalAntesSaldo - saldoAplicado);
   const totalBsMostrar = Number.isFinite(Number(cartMontoBs)) ? Number(cartMontoBs) : null;
   if (Number.isFinite(Number(cartDescuento))) {
     const diff = Math.abs(Number(cartDescuento) - totalDescuento);
@@ -1027,8 +1082,8 @@ const handleCartClick = async (e) => {
   if (!btnRemove && !btnMinus && !btnPlus && !btnMesesMinus && !btnMesesPlus)
     return;
 
-  const wrapper = e.target.closest("[data-index]");
-  const idx = Number(wrapper?.dataset.index);
+  const idxSource = btnRemove || btnMinus || btnPlus || btnMesesMinus || btnMesesPlus;
+  const idx = Number(idxSource?.dataset.index);
   if (Number.isNaN(idx)) return;
   const item = cartItems[idx];
   if (!item) return;
@@ -1043,19 +1098,20 @@ const handleCartClick = async (e) => {
   let didUpdate = false;
   if (btnMinus || btnPlus) {
     const delta = btnMinus ? -1 : 1;
-    const newQty = (item.cantidad || 0) + delta;
+    const currentQty = Math.max(1, Number(item?.cantidad) || 1);
+    const newQty = currentQty + delta;
     if (newQty <= 0) {
       openRemoveModal(idx);
       return;
     }
-    item.cantidad = newQty;
+    item.cantidad = Math.max(1, Number(newQty) || 1);
     cartNeedsSync = true;
     didUpdate = true;
   }
   if (btnMesesMinus || btnMesesPlus) {
     if (isTrue(platform?.tarjeta_de_regalo)) return;
     const delta = btnMesesMinus ? -1 : 1;
-    const current = item.meses || price.duracion || 1;
+    const current = Math.max(1, Number(item?.meses) || Number(price?.duracion) || 1);
     const next = Math.max(1, current + delta);
     item.meses = next;
     cartNeedsSync = true;
@@ -1222,6 +1278,11 @@ async function init() {
     discountColumns = getDiscountColumnsFromRows(descuentos);
     discountColumnById = buildDiscountColumnByIdMap(descuentos, discountColumns);
     cartItems = cartData.items || [];
+    try {
+      await refreshCanonicalCheckoutSummary();
+    } catch (summaryErr) {
+      console.warn("cart summary init refresh error", summaryErr);
+    }
     renderCart();
     if (shouldShowRenewalModal) {
       openRenewalModal();
