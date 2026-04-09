@@ -68,6 +68,7 @@ const AUTH_ACCESS_TOKEN_BRIDGE_KEY = "auth_access_token_bridge_v1";
 const AUTH_ACCESS_TOKEN_BRIDGE_TTL_MS = 5 * 60 * 1000;
 const AUTH_SESSION_FAILURE_COOLDOWN_MS = 12000;
 let cachedAuthAccessToken = "";
+let cachedAuthAccessTokenStoredAt = 0;
 let authStateBridgeInit = false;
 let authSessionFailureCooldownUntil = 0;
 let authSessionFailureMessage = "";
@@ -162,6 +163,7 @@ const rememberAccessToken = (token = "", source = "") => {
   const normalizedToken = normalizeAccessToken(token);
   if (!normalizedToken) return "";
   cachedAuthAccessToken = normalizedToken;
+  cachedAuthAccessTokenStoredAt = Date.now();
   writeAccessTokenBridge(normalizedToken, source);
   logApiDebug("accessToken.remember", {
     source: trimText(source, 80),
@@ -172,6 +174,7 @@ const rememberAccessToken = (token = "", source = "") => {
 
 const clearRememberedAccessToken = (source = "") => {
   cachedAuthAccessToken = "";
+  cachedAuthAccessTokenStoredAt = 0;
   writeAccessTokenBridge("", source);
   logApiDebug("accessToken.clear", {
     source: trimText(source, 80),
@@ -180,10 +183,18 @@ const clearRememberedAccessToken = (source = "") => {
 
 const getRememberedAccessToken = () => {
   const cached = normalizeAccessToken(cachedAuthAccessToken);
-  if (cached) return cached;
+  const cachedAgeMs = Date.now() - Number(cachedAuthAccessTokenStoredAt || 0);
+  if (cached && cachedAgeMs >= 0 && cachedAgeMs <= AUTH_ACCESS_TOKEN_BRIDGE_TTL_MS) {
+    return cached;
+  }
+  if (cached) {
+    cachedAuthAccessToken = "";
+    cachedAuthAccessTokenStoredAt = 0;
+  }
   const bridged = readAccessTokenBridge();
   if (bridged) {
     cachedAuthAccessToken = bridged;
+    cachedAuthAccessTokenStoredAt = Date.now();
     logApiDebug("accessToken.restoreFromBridge", {
       tokenLength: bridged.length,
     });
@@ -725,6 +736,110 @@ const rememberAuthSessionTransientFailure = (err, fallbackMessage = "") => {
   if (!isAuthGetSessionTransientError(err)) return;
   authSessionFailureCooldownUntil = Date.now() + AUTH_SESSION_FAILURE_COOLDOWN_MS;
   authSessionFailureMessage = getFriendlyApiErrorMessage(err, fallbackMessage);
+};
+
+const resolveAccessTokenFromSupabaseSession = async ({
+  timeoutMs = 6000,
+  startedAt = getDebugNow(),
+  fallbackSessionErrorMessage = "",
+  source = "auth.getSession",
+  forceRefresh = false,
+} = {}) => {
+  let timeoutId = null;
+  let sessionResult = null;
+  const authMethod =
+    forceRefresh && typeof supabase.auth.refreshSession === "function"
+      ? () => supabase.auth.refreshSession()
+      : () => supabase.auth.getSession();
+
+  try {
+    sessionResult = await Promise.race([
+      authMethod(),
+      new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          const timeoutErr = new Error("Supabase auth.getSession timeout");
+          timeoutErr.code = "AUTH_GET_SESSION_TIMEOUT";
+          reject(timeoutErr);
+        }, timeoutMs);
+      }),
+    ]).finally(() => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    });
+  } catch (sessionRuntimeErr) {
+    rememberAuthSessionTransientFailure(sessionRuntimeErr, fallbackSessionErrorMessage);
+    if (isAuthGetSessionTransientError(sessionRuntimeErr)) {
+      warnApiDebug(`${source}:transientFailure`, {
+        ms: getElapsedMs(startedAt),
+        timeoutMs,
+        ...summarizeError(sessionRuntimeErr),
+      });
+      return {
+        accessToken: "",
+        error: getFriendlyApiErrorMessage(sessionRuntimeErr, fallbackSessionErrorMessage),
+      };
+    }
+    throw sessionRuntimeErr;
+  }
+
+  const { data: sessionData, error: sessionErr } = sessionResult || {};
+  if (sessionErr) {
+    rememberAuthSessionTransientFailure(sessionErr, fallbackSessionErrorMessage);
+    if (isAuthGetSessionTransientError(sessionErr)) {
+      warnApiDebug(`${source}:transientResponse`, {
+        ms: getElapsedMs(startedAt),
+        ...summarizeError(sessionErr),
+      });
+      return {
+        accessToken: "",
+        error: getFriendlyApiErrorMessage(sessionErr, fallbackSessionErrorMessage),
+      };
+    }
+    console.error(`${source} error`, sessionErr);
+    console.error(`${API_DEBUG_PREFIX} ${source}:error`, {
+      ms: getElapsedMs(startedAt),
+      ...summarizeError(sessionErr),
+    });
+    return { accessToken: "", error: "No se pudo leer la sesión de auth" };
+  }
+
+  const accessToken = rememberAccessToken(
+    sessionData?.session?.access_token || "",
+    source,
+  );
+  if (accessToken) {
+    clearAuthSessionFailureCooldown();
+  }
+  logApiDebug(`${source}:done`, {
+    ms: getElapsedMs(startedAt),
+    hasSession: Boolean(sessionData?.session),
+    hasAccessToken: Boolean(accessToken),
+    authUserId: sessionData?.session?.user?.id || "",
+    authEmail: trimText(sessionData?.session?.user?.email || "", 120),
+  });
+
+  return {
+    accessToken,
+    error: accessToken ? "" : "Sesión de auth no disponible",
+  };
+};
+
+const postServerSessionWithAccessToken = async (accessToken = "") => {
+  const requestStartedAt = getDebugNow();
+  const res = await fetchWithRetry(
+    `${API_BASE}/api/session`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      credentials: "include",
+      body: "{}",
+    },
+    { attempts: 2, label: "startSession" },
+  );
+  const { text, data } = await readResponseBodySafe(res);
+  return { res, text, data, requestStartedAt };
 };
 
 const fetchWithRetry = async (url, options = {}, retryOptions = {}) => {
@@ -1977,6 +2092,7 @@ export async function startSession(_idUsuario) {
     _idUsuario && typeof _idUsuario === "object" && !Array.isArray(_idUsuario) ? _idUsuario : {};
   const startedAt = getDebugNow();
   const fallbackSessionErrorMessage = "No se pudo validar la sesión por un problema de conexión.";
+  const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 6000);
   logApiDebug("startSession:start", {
     apiBase: API_BASE,
     path: typeof window !== "undefined" ? window.location.pathname : "",
@@ -2008,71 +2124,16 @@ export async function startSession(_idUsuario) {
           error: authSessionFailureMessage || fallbackSessionErrorMessage,
         };
       }
-
-      const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 6000);
-      let timeoutId = null;
-      let sessionResult = null;
-      try {
-        sessionResult = await Promise.race([
-          supabase.auth.getSession(),
-          new Promise((_, reject) => {
-            timeoutId = window.setTimeout(() => {
-              const timeoutErr = new Error("Supabase auth.getSession timeout");
-              timeoutErr.code = "AUTH_GET_SESSION_TIMEOUT";
-              reject(timeoutErr);
-            }, timeoutMs);
-          }),
-        ]).finally(() => {
-          if (timeoutId) window.clearTimeout(timeoutId);
-        });
-      } catch (sessionRuntimeErr) {
-        rememberAuthSessionTransientFailure(sessionRuntimeErr, fallbackSessionErrorMessage);
-        if (isAuthGetSessionTransientError(sessionRuntimeErr)) {
-          warnApiDebug("startSession:getSession:transientFailure", {
-            ms: getElapsedMs(startedAt),
-            timeoutMs,
-            ...summarizeError(sessionRuntimeErr),
-          });
-          return {
-            error: getFriendlyApiErrorMessage(sessionRuntimeErr, fallbackSessionErrorMessage),
-          };
-        }
-        throw sessionRuntimeErr;
-      }
-
-      const { data: sessionData, error: sessionErr } = sessionResult || {};
-      if (sessionErr) {
-        rememberAuthSessionTransientFailure(sessionErr, fallbackSessionErrorMessage);
-        if (isAuthGetSessionTransientError(sessionErr)) {
-          warnApiDebug("startSession:getSession:transientResponse", {
-            ms: getElapsedMs(startedAt),
-            ...summarizeError(sessionErr),
-          });
-          return {
-            error: getFriendlyApiErrorMessage(sessionErr, fallbackSessionErrorMessage),
-          };
-        }
-        console.error("startSession getSession error", sessionErr);
-        console.error(`${API_DEBUG_PREFIX} startSession:getSession:error`, {
-          ms: getElapsedMs(startedAt),
-          ...summarizeError(sessionErr),
-        });
-        return { error: "No se pudo leer la sesión de auth" };
-      }
-      accessToken = rememberAccessToken(
-        sessionData?.session?.access_token || "",
-        "startSession:getSession",
-      );
-      if (accessToken) {
-        clearAuthSessionFailureCooldown();
-      }
-      logApiDebug("startSession:getSession:done", {
-        ms: getElapsedMs(startedAt),
-        hasSession: Boolean(sessionData?.session),
-        hasAccessToken: Boolean(accessToken),
-        authUserId: sessionData?.session?.user?.id || "",
-        authEmail: trimText(sessionData?.session?.user?.email || "", 120),
+      const sessionResolution = await resolveAccessTokenFromSupabaseSession({
+        timeoutMs,
+        startedAt,
+        fallbackSessionErrorMessage,
+        source: "startSession:getSession",
       });
+      if (sessionResolution?.error && !sessionResolution?.accessToken) {
+        return { error: sessionResolution.error };
+      }
+      accessToken = sessionResolution?.accessToken || "";
     }
 
     if (!accessToken) {
@@ -2082,36 +2143,51 @@ export async function startSession(_idUsuario) {
       return { error: "Sesión de auth no disponible" };
     }
 
-    const requestStartedAt = getDebugNow();
-    const res = await fetchWithRetry(
-      `${API_BASE}/api/session`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        credentials: "include",
-        body: "{}",
-      },
-      { attempts: 2, label: "startSession" },
-    );
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("startSession response", res.status, text);
-      warnApiDebug("startSession:response", {
-        ms: getElapsedMs(requestStartedAt),
-        totalMs: getElapsedMs(startedAt),
-        status: res.status,
-        body: trimText(text, 300),
+    let sessionResponse = await postServerSessionWithAccessToken(accessToken);
+    if (
+      !sessionResponse.res.ok &&
+      isAuthFatalErrorMessage(sessionResponse.data?.error || sessionResponse.text || "")
+    ) {
+      clearRememberedAccessToken("startSession:staleAccessToken");
+      const refreshedSession = await resolveAccessTokenFromSupabaseSession({
+        timeoutMs,
+        startedAt,
+        fallbackSessionErrorMessage,
+        source: "startSession:refreshSession",
+        forceRefresh: true,
       });
-      return { error: text || "No se pudo establecer la sesión" };
+      const refreshedToken = normalizeAccessToken(refreshedSession?.accessToken);
+      if (refreshedToken && refreshedToken !== accessToken) {
+        sessionResponse = await postServerSessionWithAccessToken(refreshedToken);
+        accessToken = refreshedToken;
+      }
     }
-    const payload = await res.json();
+
+    if (!sessionResponse.res.ok) {
+      console.error(
+        "startSession response",
+        sessionResponse.res.status,
+        sessionResponse.text,
+      );
+      warnApiDebug("startSession:response", {
+        ms: getElapsedMs(sessionResponse.requestStartedAt),
+        totalMs: getElapsedMs(startedAt),
+        status: sessionResponse.res.status,
+        body: trimText(sessionResponse.text, 300),
+      });
+      return {
+        error:
+          sessionResponse.data?.error ||
+          sessionResponse.text ||
+          "No se pudo establecer la sesión",
+      };
+    }
+    const payload =
+      sessionResponse.data && typeof sessionResponse.data === "object" ? sessionResponse.data : {};
     clearAuthSessionFailureCooldown();
     logApiDebug("startSession:done", {
       ms: getElapsedMs(startedAt),
-      requestMs: getElapsedMs(requestStartedAt),
+      requestMs: getElapsedMs(sessionResponse.requestStartedAt),
       id_usuario: Number(payload?.id_usuario) || null,
     });
     return payload;
