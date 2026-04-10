@@ -81,6 +81,34 @@ const escapeHtml = (value) =>
 
 const REEMPLAZO_NOTA_PREFIX = "Reemplazo automático por cuenta inactiva:";
 
+const linkifyText = (value = "") => {
+  const source = String(value || "");
+  const urlRegex = /https?:\/\/[^\s<>"']+/gi;
+  let output = "";
+  let lastIndex = 0;
+  let match;
+  while ((match = urlRegex.exec(source)) !== null) {
+    const rawUrl = String(match[0] || "");
+    const start = match.index;
+    output += escapeHtml(source.slice(lastIndex, start));
+    let url = rawUrl;
+    let trailing = "";
+    while (/[),.!?;:]$/.test(url)) {
+      trailing = `${url.slice(-1)}${trailing}`;
+      url = url.slice(0, -1);
+    }
+    if (url) {
+      output += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
+    } else {
+      output += escapeHtml(rawUrl);
+    }
+    if (trailing) output += escapeHtml(trailing);
+    lastIndex = start + rawUrl.length;
+  }
+  output += escapeHtml(source.slice(lastIndex));
+  return output;
+};
+
 const renderSolucionNota = (notaRaw = "") => {
   const nota = String(notaRaw || "").trim();
   if (!nota) return "";
@@ -91,7 +119,7 @@ const renderSolucionNota = (notaRaw = "") => {
       return `${escapeHtml(REEMPLAZO_NOTA_PREFIX)} <a href="${href}">${escapeHtml(correo)}</a>`;
     }
   }
-  return escapeHtml(nota);
+  return linkifyText(nota);
 };
 
 const toPositiveId = (value) => {
@@ -100,13 +128,14 @@ const toPositiveId = (value) => {
   return Math.trunc(parsed);
 };
 
-const buildEntregarHrefByReporte = (row = {}) => {
-  const ventaId = toPositiveId(row?.id_venta);
-  if (!ventaId) return "";
+const goToEntregarServiciosModificarDatos = (idVenta) => {
+  const ventaId = toPositiveId(idVenta);
+  if (!ventaId) return false;
   const targetUrl = new URL("../entregar_servicios.html", window.location.href);
   targetUrl.searchParams.set("id_venta", String(ventaId));
   targetUrl.searchParams.set("modificar_datos", "1");
-  return targetUrl.toString();
+  window.location.href = targetUrl.toString();
+  return true;
 };
 
 async function init() {
@@ -177,12 +206,10 @@ function renderReportes(items = []) {
             : r.en_revision
               ? "En revisión"
               : "Pendiente";
-          const modifyHref = buildEntregarHrefByReporte(r);
+          const modifyVentaId = toPositiveId(r?.id_venta);
           const estadoCellClass = hasDatosIncorrectos ? ` class="estado-datos-incorrectos"` : "";
-          const modifyButton = hasDatosIncorrectos && modifyHref
-            ? `<button type="button" class="btn-outline btn-small btn-modificar-datos" data-action="modificar-datos" data-href="${escapeHtml(
-                modifyHref,
-              )}">Modificar datos</button>`
+          const modifyButton = hasDatosIncorrectos && modifyVentaId
+            ? `<button type="button" class="btn-outline btn-small btn-modificar-datos" data-action="modificar-datos" data-id-venta="${modifyVentaId}">Modificar datos</button>`
             : "";
           return `
             <tr>
@@ -267,8 +294,10 @@ attachLogoHome();
 pendientesListEl?.addEventListener("click", (e) => {
   const modifyBtn = e.target.closest("button[data-action='modificar-datos']");
   if (modifyBtn) {
-    const href = String(modifyBtn.dataset.href || "").trim();
-    if (href) window.location.href = href;
+    const moved = goToEntregarServiciosModificarDatos(modifyBtn.dataset.idVenta);
+    if (!moved && statusEl) {
+      statusEl.textContent = "No se pudo abrir la venta para modificar datos.";
+    }
     return;
   }
   const btn = e.target.closest("button[data-toggle-plat]");

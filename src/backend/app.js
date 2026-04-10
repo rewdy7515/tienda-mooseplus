@@ -491,7 +491,7 @@ const buildGiftCardSaleCopyText = ({
     );
   }
   lines.push(`(Región: ${regionTxt})`);
-  lines.push("_Pagina Web: www.mooseplus.com_");
+  lines.push("_Pagina Web: https://mooseplus.com_");
   lines.push("");
   lines.push(`\`${valueTxt}\``);
   lines.push(`PIN: ${pinTxt}`);
@@ -6134,11 +6134,25 @@ const autoProcessMatchedOrder = async (match = {}) => {
     return { processed: false, reason: "id_usuario_invalido", id_orden: idOrden };
   }
 
-  await markPagoMovilRowAsCredited({
-    pagoId: match?.pago_id,
-    idUsuario: idUsuarioVentas,
-    referenciaMatch: match?.referencia_match,
-  });
+  const syncPagoMovilCredito = async () => {
+    try {
+      await markPagoMovilRowAsCredited({
+        pagoId: match?.pago_id,
+        idUsuario: idUsuarioVentas,
+        referenciaMatch: match?.referencia_match,
+      });
+      return { ok: true, error: null };
+    } catch (err) {
+      const errorMsg = err?.message || String(err);
+      console.error("[autoProcessMatchedOrder] pagomoviles sync error", {
+        id_orden: idOrden,
+        pago_id: toPositiveInt(match?.pago_id) || null,
+        id_usuario: idUsuarioVentas,
+        error: errorMsg,
+      });
+      return { ok: false, error: errorMsg };
+    }
+  };
 
   const { data: ventasExist, error: ventasErr } = await supabaseAdmin
     .from("ventas")
@@ -6174,17 +6188,27 @@ const autoProcessMatchedOrder = async (match = {}) => {
         error: waDeliveredErr?.message || waDeliveredErr,
       });
     }
+    const pagoSync = await syncPagoMovilCredito();
     return {
       processed: true,
       reason: "orden_ya_procesada",
       id_orden: idOrden,
       ventas: ventasExist.length,
       pendientes: pendientesCount,
+      pago_sync_ok: pagoSync.ok,
+      pago_sync_error: pagoSync.error,
     };
   }
 
   if (isTrue(orden?.pago_verificado)) {
-    return { processed: false, reason: "orden_ya_verificada", id_orden: idOrden };
+    const pagoSync = await syncPagoMovilCredito();
+    return {
+      processed: false,
+      reason: "orden_ya_verificada",
+      id_orden: idOrden,
+      pago_sync_ok: pagoSync.ok,
+      pago_sync_error: pagoSync.error,
+    };
   }
 
   const completeNoItemsOrder = async ({ montoAuto = 0, motivo = "sin_items" } = {}) => {
@@ -6200,6 +6224,7 @@ const autoProcessMatchedOrder = async (match = {}) => {
       })
       .eq("id_orden", idOrden);
     if (updOrdErr) throw updOrdErr;
+    const pagoSync = await syncPagoMovilCredito();
 
     return {
       processed: true,
@@ -6210,6 +6235,8 @@ const autoProcessMatchedOrder = async (match = {}) => {
       saldo_acreditado: saldoInfo.acreditado,
       excedente_acreditado: saldoInfo.monto,
       saldo_nuevo: saldoInfo.saldoNuevo,
+      pago_sync_ok: pagoSync.ok,
+      pago_sync_error: pagoSync.error,
     };
   };
 
@@ -6287,6 +6314,7 @@ const autoProcessMatchedOrder = async (match = {}) => {
       error: waDeliveredErr?.message || waDeliveredErr,
     });
   }
+  const pagoSync = await syncPagoMovilCredito();
 
   return {
     processed: true,
@@ -6294,6 +6322,8 @@ const autoProcessMatchedOrder = async (match = {}) => {
     id_orden: idOrden,
     ventas: result.ventasCount,
     pendientes: result.pendientesCount,
+    pago_sync_ok: pagoSync.ok,
+    pago_sync_error: pagoSync.error,
   };
 };
 
@@ -6483,6 +6513,11 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       }
     } catch (matchErr) {
       console.error("[bdv/notify] conciliacion automatica error", matchErr);
+      processResult = {
+        processed: false,
+        reason: "auto_process_error",
+        error: matchErr?.message || String(matchErr),
+      };
     }
 
     return res.json({
@@ -6492,6 +6527,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       id_orden: matchResult?.id_orden || null,
       orden_procesada: processResult?.processed === true,
       razon_orden: processResult?.reason || null,
+      detalle_error_orden: processResult?.error || null,
     });
   } catch (err) {
     console.error("bdv notify error", err);

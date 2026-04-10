@@ -416,6 +416,17 @@
         return venta?.cuentas?.correo || "";
       };
 
+      const resolveVentaClave = (venta, plat = {}) => {
+        const cuentaCliente = venta?.cuentas_miembro || null;
+        const requiresClientCorreo = isTrue(plat?.correo_cliente);
+        const isPendienteVenta = !!venta?.pendiente;
+        if (isPendienteVenta) return venta?.clave_miembro || "";
+        if (requiresClientCorreo) {
+          return venta?.clave_miembro || cuentaCliente?.clave || venta?.cuentas?.clave || "";
+        }
+        return venta?.cuentas?.clave || venta?.clave_miembro || cuentaCliente?.clave || "";
+      };
+
       const resolveVentaPin = (ventaRow = {}) => {
         const pinTarjeta = normalizeCopyValue(ventaRow?.pin_tarjeta);
         if (pinTarjeta) return pinTarjeta;
@@ -924,14 +935,8 @@
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
-            const cuentaCliente = v.cuentas_miembro || null;
-            const requiresClientCorreo = isTrue(plat.correo_cliente);
             const correoCuenta = resolveVentaCorreo(v, plat);
-            const claveCuenta = isPendienteVenta
-              ? v.clave_miembro || ""
-              : requiresClientCorreo
-              ? v.clave_miembro || cuentaCliente?.clave || ""
-              : v.cuentas?.clave || "";
+            const claveCuenta = resolveVentaClave(v, plat);
             grouped[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
@@ -989,14 +994,8 @@
               : v.perfiles?.n_perfil
               ? `M${v.perfiles.n_perfil}`
               : "";
-            const cuentaCliente = v.cuentas_miembro || null;
-            const requiresClientCorreo = isTrue(plat.correo_cliente);
             const correoCuenta = resolveVentaCorreo(v, plat);
-            const claveCuenta = isPendienteVenta
-              ? v.clave_miembro || ""
-              : requiresClientCorreo
-              ? v.clave_miembro || cuentaCliente?.clave || ""
-              : v.cuentas?.clave || "";
+            const claveCuenta = resolveVentaClave(v, plat);
             groupedNuevas[groupKey].rows.push({
               id_venta: v.id_venta,
               correo: correoCuenta,
@@ -1057,9 +1056,11 @@
                   const plat = platMap[platId] || {};
                   const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
                   const correoCuenta = resolveVentaCorreo(venta, plat);
+                  const claveCuenta = resolveVentaClave(venta, plat);
                   return {
                     id_venta: h.id_venta,
                     correo: correoCuenta,
+                    clave: claveCuenta,
                     fecha_corte: venta.fecha_corte || "",
                     plataforma: platName,
                     id_plataforma: platId,

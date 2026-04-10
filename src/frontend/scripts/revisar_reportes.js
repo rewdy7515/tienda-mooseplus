@@ -90,6 +90,7 @@ const checkAgregarDiasLabel = checkAgregarDias?.closest("label") || null;
 const checkSuscripcion = document.querySelector("#check-suscripcion");
 const checkPerfiles = document.querySelector("#check-perfiles");
 const checkIngreso = document.querySelector("#check-ingreso");
+const checkSuscripcionActiva = document.querySelector("#check-suscripcion-activa");
 const checkPinSame = document.querySelector("#check-pin-same");
 const checkCodigoAyudaWrap = document.querySelector("#check-codigo-ayuda-wrap");
 const checkCodigoAyuda = document.querySelector("#check-codigo-ayuda");
@@ -196,11 +197,25 @@ const openAdminCuentasByCorreo = (rawCorreo) => {
   window.open(targetUrl.toString(), "_blank", "noopener");
 };
 
+const normalizePublicMooseUrl = (rawUrl = "") => {
+  try {
+    const parsed = new URL(String(rawUrl || "").trim(), window.location.href);
+    const host = String(parsed.hostname || "").trim().toLowerCase();
+    if (host === "mooseplus.com" || host === "www.mooseplus.com") {
+      parsed.protocol = "https:";
+      parsed.hostname = "mooseplus.com";
+    }
+    return parsed.toString();
+  } catch (_err) {
+    return String(rawUrl || "").trim();
+  }
+};
+
 const buildInventarioLinkByCorreo = (rawCorreo) => {
   const targetUrl = new URL("../inventario.html", window.location.href);
   const correo = normalizeCopyValue(rawCorreo);
   if (correo) targetUrl.searchParams.set("correo", correo);
-  return targetUrl.toString();
+  return normalizePublicMooseUrl(targetUrl.toString());
 };
 
 const sanitizeFileName = (name = "") =>
@@ -214,6 +229,7 @@ const resetResumenChecks = () => {
     checkSuscripcion,
     checkPerfiles,
     checkIngreso,
+    checkSuscripcionActiva,
     checkPinSame,
     checkCodigoAyuda,
     checkCodigoWhatsapp,
@@ -1602,6 +1618,9 @@ async function guardarCambios() {
         `Se pudo ingresar sin problemas con los datos actuales de la cuenta. Verifíquelos en ${inventarioLink}.`,
       );
       textos.push("Puedes intentar también cerrar sesión y volver a ingresar a la cuenta con los datos actuales.");
+    }
+    if (checkSuscripcionActiva?.checked) {
+      textos.push("La suscripción de la cuenta está activa.");
     }
     if (checkCodigoAyuda?.checked) {
       textos.push('Presione "obtener ayuda" y luego "usar contraseña".');
