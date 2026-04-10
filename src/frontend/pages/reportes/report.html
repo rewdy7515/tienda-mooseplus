@@ -121,6 +121,13 @@
       .reportes-sol-filter select {
         min-width: 220px;
       }
+      .reporte-sol-reemplazo-msg {
+        line-height: 1.5;
+      }
+      .reporte-sol-reemplazo-btn {
+        margin-top: 10px;
+        display: inline-flex;
+      }
     </style>
   </head>
   <body>
@@ -169,6 +176,8 @@
           <div class="modal-body resumen-body">
             <h3 id="sol-modal-title"></h3>
             <div class="modal-info-grid">
+              <div class="label">ID venta:</div>
+              <div class="value" id="sol-modal-venta"></div>
               <div class="label">Correo:</div>
               <div class="value" id="sol-modal-correo"></div>
               <div class="label">Clave:</div>

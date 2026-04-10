@@ -46,12 +46,15 @@
         content: "";
         position: absolute;
         top: 0;
-        left: 0;
+        right: 0;
         width: 6px;
         height: 100%;
-        background: linear-gradient(180deg, #111, #444);
+        background: linear-gradient(180deg, #111827, #374151);
         opacity: 0.85;
         transition: opacity 0.18s ease;
+      }
+      .notif-item.notif-item-report::before {
+        background: linear-gradient(180deg, #b91c1c, #ef4444);
       }
       .notif-item:hover::before {
         opacity: 1;
@@ -291,6 +294,71 @@
           });
           return wrap.innerHTML;
         };
+        const linkifyUrls = (html = "") => {
+          const wrap = document.createElement("div");
+          wrap.innerHTML = html;
+          const walker = document.createTreeWalker(
+            wrap,
+            NodeFilter.SHOW_TEXT,
+            {
+              acceptNode: (node) => {
+                if (!/https?:\/\//i.test(node.nodeValue || "")) return NodeFilter.FILTER_REJECT;
+                if (node.parentElement?.closest("a")) return NodeFilter.FILTER_REJECT;
+                if (node.parentElement?.closest(".no-linkify")) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              },
+            },
+          );
+          const urlRegex = /https?:\/\/[^\s<>"']+/gi;
+          const splitTrailingPunctuation = (rawUrl = "") => {
+            let url = String(rawUrl || "");
+            let trailing = "";
+            while (/[),.;!?]$/.test(url)) {
+              trailing = `${url.slice(-1)}${trailing}`;
+              url = url.slice(0, -1);
+            }
+            return { url, trailing };
+          };
+          const nodes = [];
+          while (walker.nextNode()) nodes.push(walker.currentNode);
+          nodes.forEach((node) => {
+            const text = node.nodeValue || "";
+            if (!urlRegex.test(text)) return;
+            const frag = document.createDocumentFragment();
+            let lastIndex = 0;
+            text.replace(urlRegex, (match, offset) => {
+              if (offset > lastIndex) {
+                frag.appendChild(
+                  document.createTextNode(text.slice(lastIndex, offset)),
+                );
+              }
+              const { url, trailing } = splitTrailingPunctuation(match);
+              if (url) {
+                const link = document.createElement("a");
+                link.href = url;
+                link.textContent = url;
+                link.className = "link-inline";
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                frag.appendChild(link);
+                if (trailing) {
+                  frag.appendChild(document.createTextNode(trailing));
+                }
+              } else {
+                frag.appendChild(document.createTextNode(match));
+              }
+              lastIndex = offset + match.length;
+              return match;
+            });
+            if (lastIndex < text.length) {
+              frag.appendChild(
+                document.createTextNode(text.slice(lastIndex)),
+              );
+            }
+            node.parentNode?.replaceChild(frag, node);
+          });
+          return wrap.innerHTML;
+        };
         const colorizePlatformNames = (html = "") => {
           const wrap = document.createElement("div");
           wrap.innerHTML = html;
@@ -306,9 +374,12 @@
         tbody.innerHTML = items
           .map((n) => {
             const title = n.titulo || "-";
-            const mensaje = colorizePlatformNames(linkifyEmails(n.mensaje || "-"));
+            const isReporteNotif =
+              /\breporte\b/i.test(title) || /reportes\/report\.html/i.test(String(n.mensaje || ""));
+            const cardClass = isReporteNotif ? "notif-item notif-item-report" : "notif-item";
+            const mensaje = colorizePlatformNames(linkifyUrls(linkifyEmails(n.mensaje || "-")));
             return `
-          <div class="notif-item">
+          <div class="${cardClass}">
             <h4>${title}</h4>
             <p>${mensaje}</p>
             <small>${formatDateDMY(n.fecha)}</small>

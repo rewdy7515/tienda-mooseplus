@@ -322,17 +322,41 @@ const getReportePlatformId = (row) => {
   return Number.isFinite(platformId) && platformId > 0 ? platformId : null;
 };
 
+const pickReportePlataformaNombre = (row) => {
+  const fromPlataforma = String(row?.plataformas?.nombre || "").trim();
+  if (fromPlataforma) return fromPlataforma;
+  const fromCuentaPlataforma = String(row?.cuentas?.plataformas?.nombre || "").trim();
+  if (fromCuentaPlataforma) return fromCuentaPlataforma;
+  return "Plataforma";
+};
+
+const pickReporteCorreo = (row) => {
+  const correoMiembro = String(row?.correo_miembro || "").trim();
+  if (correoMiembro) return correoMiembro;
+  const correoCuenta = String(row?.cuentas?.correo || "").trim();
+  if (correoCuenta) return correoCuenta;
+  const correoMadre = String(row?.cuenta_madre_correo || "").trim();
+  if (correoMadre) return correoMadre;
+  return "";
+};
+
 const notifyReporteCerrado = async (row, options = {}) => {
   const reportId = Number(row?.id_reporte);
   const targetUserId = Number(row?.id_usuario);
   if (!Number.isFinite(reportId) || !Number.isFinite(targetUserId)) return;
+  const plataformaTxt = escapeHtml(pickReportePlataformaNombre(row));
+  const correoRaw = pickReporteCorreo(row);
+  const correoTxt = correoRaw ? escapeHtml(correoRaw) : "-";
+  const notaRaw = String(options?.nota ?? row?.descripcion_solucion ?? row?.descripcion ?? "").trim();
+  const notaTxt = notaRaw ? escapeHtml(notaRaw) : "-";
   const diasAgregadosRaw = Number(options?.diasAgregados || 0);
   const diasAgregados = Number.isFinite(diasAgregadosRaw) ? Math.max(0, Math.trunc(diasAgregadosRaw)) : 0;
   const diasMsg = diasAgregados > 0 ? `<br>Se sumó ${diasAgregados} dias a tu fecha de pago.` : "";
+  const mensaje = `<strong>${plataformaTxt}</strong><br>Correo: ${correoTxt}<br>Nota: ${notaTxt}${diasMsg}<br><a href="reportes/report.html" class="link-inline">Más detalles.</a>`;
   const fecha = getCaracasDateISO();
   const payload = {
     titulo: `Reporte ${reportId} cerrado.`,
-    mensaje: `<a href="reportes/report.html" class="link-inline">Más detalles</a>.${diasMsg}`,
+    mensaje,
     fecha,
     leido: false,
     id_usuario: targetUserId,
@@ -1673,7 +1697,10 @@ async function guardarCambios() {
     await clearVentaReportadoFlag(currentRow);
 
     try {
-      await notifyReporteCerrado(currentRow, { diasAgregados });
+      await notifyReporteCerrado(currentRow, {
+        diasAgregados,
+        nota: descripcion_solucion,
+      });
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }
@@ -2202,7 +2229,10 @@ async function reemplazarServicio(options = {}) {
     }
 
     try {
-      await notifyReporteCerrado(selectedRow, { diasAgregados: diasSumados });
+      await notifyReporteCerrado(selectedRow, {
+        diasAgregados: diasSumados,
+        nota: descripcionSolucion,
+      });
     } catch (notifErr) {
       console.error("notificacion reporte cerrado error", notifErr);
     }

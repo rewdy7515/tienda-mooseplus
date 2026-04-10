@@ -1968,14 +1968,17 @@ const buildWhatsappReporteSolucionadoMessage = ({
   idReporte = null,
   plataforma = "",
   correo = "",
+  nota = "",
 } = {}) => {
   const reportId = toPositiveInt(idReporte) || idReporte || "-";
   const plataformaText = formatWhatsappReporteText(plataforma, "Sin plataforma");
   const correoText = formatWhatsappReporteText(correo, "-");
+  const notaText = formatWhatsappReporteText(nota, "-");
   return `\`Reporte #${reportId}\`
 *${plataformaText}*
 Correo: ${correoText}
-Estado: solucionado ✅`;
+Estado: solucionado ✅
+Nota: ${notaText}`;
 };
 
 const buildWhatsappReporteDatosIncorrectosMessage = ({
@@ -2227,7 +2230,7 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
   const { data, error } = await supabaseAdmin
     .from("reportes")
     .select(
-      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, id_plataforma, descripcion, en_revision, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
+      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, id_plataforma, descripcion, descripcion_solucion, en_revision, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
     )
     .eq("id_reporte", reportId)
     .maybeSingle();
@@ -2534,6 +2537,7 @@ const sendReporteSolvedToWhatsappOwner = async ({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
     correo: correoReporte,
+    nota: reporte?.descripcion_solucion || reporte?.descripcion,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;

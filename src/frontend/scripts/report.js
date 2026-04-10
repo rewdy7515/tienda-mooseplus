@@ -18,6 +18,7 @@ const btnCrear = document.querySelector("#btn-crear-reporte");
 const logo = document.querySelector(".logo");
 const modalSol = document.querySelector("#modal-solucionado");
 const modalSolTitle = document.querySelector("#sol-modal-title");
+const modalSolVenta = document.querySelector("#sol-modal-venta");
 const modalSolCorreo = document.querySelector("#sol-modal-correo");
 const modalSolClave = document.querySelector("#sol-modal-clave");
 const modalSolPerfil = document.querySelector("#sol-modal-perfil");
@@ -109,15 +110,16 @@ const linkifyText = (value = "") => {
   return output;
 };
 
-const renderSolucionNota = (notaRaw = "") => {
+const renderSolucionNota = (notaRaw = "", row = null) => {
   const nota = String(notaRaw || "").trim();
   if (!nota) return "";
   if (nota.startsWith(REEMPLAZO_NOTA_PREFIX)) {
-    const correo = nota.slice(REEMPLAZO_NOTA_PREFIX.length).trim();
-    if (correo) {
-      const href = `../inventario.html?correo=${encodeURIComponent(correo)}`;
-      return `${escapeHtml(REEMPLAZO_NOTA_PREFIX)} <a href="${href}">${escapeHtml(correo)}</a>`;
-    }
+    const ventaId = toPositiveId(row?.id_venta);
+    const inventarioUrl = buildInventarioVentaUrl(ventaId);
+    const botonHtml = ventaId
+      ? `<a href="${escapeHtml(inventarioUrl)}" class="btn-outline btn-small reporte-sol-reemplazo-btn">Ver nuevos datos</a>`
+      : "";
+    return `<div class="reporte-sol-reemplazo-msg">Se reemplazó automaticamente su servicio a una cuenta funcional.${botonHtml ? `<br>${botonHtml}` : ""}</div>`;
   }
   return linkifyText(nota);
 };
@@ -126,6 +128,13 @@ const toPositiveId = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.trunc(parsed);
+};
+
+const buildInventarioVentaUrl = (idVenta) => {
+  const ventaId = toPositiveId(idVenta);
+  const targetUrl = new URL("../inventario.html", window.location.href);
+  if (ventaId) targetUrl.searchParams.set("id_venta", String(ventaId));
+  return targetUrl.toString();
 };
 
 const goToEntregarServiciosModificarDatos = (idVenta) => {
@@ -513,6 +522,8 @@ solFilterSelect?.addEventListener("change", () => {
 function openModalSol(row) {
   if (!modalSol) return;
   modalSolTitle.textContent = row.plataformas?.nombre || "Detalle de reporte";
+  const ventaId = toPositiveId(row?.id_venta);
+  if (modalSolVenta) modalSolVenta.textContent = ventaId ? String(ventaId) : "-";
   modalSolCorreo.textContent = row.cuentas?.correo || "-";
   modalSolClave.textContent = row.cuentas?.clave || "-";
   modalSolPerfil.textContent =
@@ -528,9 +539,15 @@ function openModalSol(row) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (parts.length) {
-      modalSolNotas.innerHTML = `<ul>${parts
-        .map((p) => `<li>${renderSolucionNota(p)}</li>`)
-        .join("")}</ul>`;
+      const isSingleAutoReplace =
+        parts.length === 1 && parts[0].startsWith(REEMPLAZO_NOTA_PREFIX);
+      if (isSingleAutoReplace) {
+        modalSolNotas.innerHTML = renderSolucionNota(parts[0], row);
+      } else {
+        modalSolNotas.innerHTML = `<ul>${parts
+          .map((p) => `<li>${renderSolucionNota(p, row)}</li>`)
+          .join("")}</ul>`;
+      }
     } else {
       modalSolNotas.textContent = "-";
     }

@@ -270,6 +270,11 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) =>
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const toPositiveId = (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return Math.trunc(parsed);
+      };
       const logo = document.querySelector(".logo");
       const listEl = document.querySelector("#inventario-list");
       const statusEl = document.querySelector("#inventario-status");
@@ -653,10 +658,13 @@
           toggleInventoryView(true);
           return;
         }
-        const matches = ventasIndex.filter((v) =>
-          v.correo.toLowerCase().includes(term)
-        );
-        showSuggestions(matches.slice(0, 6));
+        const termVentaId = toPositiveId(term.replace(/^#/, ""));
+        const matches = ventasIndex.filter((v) => {
+          const correo = String(v?.correo || "").toLowerCase();
+          if (correo.includes(term)) return true;
+          return termVentaId && toPositiveId(v?.id_venta) === termVentaId;
+        });
+        showSuggestions(termVentaId ? [] : matches.slice(0, 6));
         renderSearchResults(matches, term);
         toggleInventoryView(false);
       };
@@ -1018,8 +1026,11 @@
       async function init() {
         try {
           const params = new URLSearchParams(window.location.search);
+          const ventaParam = toPositiveId(params.get("id_venta") || params.get("venta"));
           const correoParam = params.get("correo");
-          if (correoParam && searchInput) {
+          if (ventaParam && searchInput) {
+            searchInput.value = String(ventaParam);
+          } else if (correoParam && searchInput) {
             searchInput.value = correoParam;
           }
           const user = await loadCurrentUser();
