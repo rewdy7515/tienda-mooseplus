@@ -2202,7 +2202,11 @@ async function reemplazarServicio(options = {}) {
       return { ok: true, kept_open: true };
     }
 
-    const descripcionSolucion = "Servicio reemplazado";
+    const correoNuevoReemplazo = String(dataDestino?.correo || "").trim();
+    const inventarioLinkReemplazo = buildInventarioLinkByCorreo(correoNuevoReemplazo);
+    const descripcionSolucion = correoNuevoReemplazo
+      ? `Su servicio fue reemplazado a una cuenta funcional. Verifique sus nuevos datos en: ${inventarioLinkReemplazo}`
+      : "Su servicio fue reemplazado a una cuenta funcional.";
     const { error: repErr } = await supabase
       .from("reportes")
       .update({

@@ -621,6 +621,14 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     forceNetflixPlan1Hogar === true && Number(plataformaId) === 1;
   const forceEligiblePlan1 =
     forceByNetflixMotivo && !!toPositiveId(idPerfil) && !isPlanMiembroEquivalente;
+  if (forceByNetflixMotivo && !forceEligiblePlan1) {
+    return {
+      reemplazado: false,
+      aplica: false,
+      sinStock: false,
+      mode: "netflix_plan2_keep_reported",
+    };
+  }
   const puedeAutoReemplazar = forceEligiblePlan1 || cuentaActual.inactiva === true;
   if (!puedeAutoReemplazar) {
     return { reemplazado: false, aplica: false, sinStock: false };

@@ -1981,6 +1981,36 @@ Estado: solucionado ✅
 Nota: ${notaText}`;
 };
 
+const buildInventarioUrlByCorreo = (correo = "") => {
+  const correoTxt = String(correo || "").trim();
+  try {
+    const url = new URL("/inventario.html", buildPublicSiteUrl());
+    if (correoTxt) url.searchParams.set("correo", correoTxt);
+    return url.toString();
+  } catch (_err) {
+    const base = String(buildPublicSiteUrl() || "").replace(/\/+$/, "");
+    if (!correoTxt) return `${base}/inventario.html`;
+    return `${base}/inventario.html?correo=${encodeURIComponent(correoTxt)}`;
+  }
+};
+
+const normalizeReplacementText = (value = "") =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+const formatWhatsappReporteSolvedNote = ({ nota = "", correo = "" } = {}) => {
+  const notaRaw = String(nota || "").trim();
+  const normalized = normalizeReplacementText(notaRaw);
+  const isReplacement =
+    normalized.includes("reemplazo") || normalized.includes("reemplazado");
+  if (!isReplacement) return notaRaw || "-";
+  const inventarioUrl = buildInventarioUrlByCorreo(correo);
+  return `Su servicio fue reemplazado a una cuenta funcional. Verifique sus nuevos datos en: ${inventarioUrl}`;
+};
+
 const buildWhatsappReporteDatosIncorrectosMessage = ({
   idReporte = null,
   incluirCorreo = false,
@@ -2533,11 +2563,15 @@ const sendReporteSolvedToWhatsappOwner = async ({
     };
   }
 
+  const notaWhatsapp = formatWhatsappReporteSolvedNote({
+    nota: reporte?.descripcion_solucion || reporte?.descripcion,
+    correo: correoReporte,
+  });
   const message = buildWhatsappReporteSolucionadoMessage({
     idReporte: reportId,
     plataforma: reporte?.plataformas?.nombre,
     correo: correoReporte,
-    nota: reporte?.descripcion_solucion || reporte?.descripcion,
+    nota: notaWhatsapp,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;

@@ -351,7 +351,7 @@
               const { data: ventasSusp, error: ventasErr } = await supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_cuenta, id_perfil, id_cuenta_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(correo, id_plataforma, venta_miembro, plataformas:plataformas(nombre)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo), perfiles:perfiles!ventas_id_perfil_fkey(perfil_hogar), usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido)"
+                  "id_venta, id_cuenta, id_perfil, id_cuenta_miembro, completa, cuentas:cuentas!ventas_id_cuenta_fkey(correo, id_plataforma, venta_miembro, plataformas:plataformas(nombre)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo), perfiles:perfiles!ventas_id_perfil_fkey(perfil_hogar), usuarios:usuarios!ventas_id_usuario_fkey(nombre, apellido)"
                 )
                 .eq("suspendido", true)
                 .or("reportado.is.null,reportado.eq.false");
@@ -361,11 +361,12 @@
 
             const renderModalRows = (rows = []) => {
               if (!modalBody) return;
-              if (!rows.length) {
+              const visibles = (rows || []).filter((v) => !shouldHideCompletePlat9Venta(v));
+              if (!visibles.length) {
                 modalBody.innerHTML = `<tr><td colspan="4">No hay ventas suspendidas.</td></tr>`;
                 return;
               }
-              modalBody.innerHTML = rows
+              modalBody.innerHTML = visibles
                 .map((v) => {
                   const cliente = v.usuarios
                     ? `${v.usuarios.nombre || ""} ${v.usuarios.apellido || ""}`.trim() ||
@@ -465,6 +466,10 @@
       let platCorteDirectoMap = {};
       const isTruthy = (value) =>
         value === true || value === "true" || value === 1 || value === "1" || value === "t";
+      const shouldHideCompletePlat9Venta = (venta = null) => {
+        const plataformaId = Number(venta?.cuentas?.id_plataforma);
+        return plataformaId === 9 && isTruthy(venta?.completa);
+      };
       const shouldShowOrangeDot = ({ ventaMiembro, perfilHogar }) =>
         isTruthy(ventaMiembro) || isTruthy(perfilHogar);
       const escapeHtml = (value) =>
@@ -735,7 +740,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, fecha_corte, aviso_corte, id_cuenta_miembro, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, correo, clave, link_codigo, id_plataforma, inactiva, venta_perfil, venta_miembro, cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, link_codigo), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
+              "id_venta, fecha_corte, aviso_corte, completa, id_cuenta_miembro, usuarios:usuarios!ventas_id_usuario_fkey(id_usuario, nombre, apellido), cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, correo, clave, link_codigo, id_plataforma, inactiva, venta_perfil, venta_miembro, cuenta_madre), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, link_codigo), perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar)"
             )
             .lte("fecha_corte", today)
             .eq("recordatorio_enviado", true)
@@ -753,6 +758,7 @@
           };
 
           (ventas || []).forEach((v) => {
+            if (shouldHideCompletePlat9Venta(v)) return;
             const platId = v.cuentas?.id_plataforma;
             if (!platId) return;
             const entry = ensureEntry(platId);
