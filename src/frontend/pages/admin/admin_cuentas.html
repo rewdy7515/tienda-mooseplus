@@ -8676,7 +8676,13 @@
         if (error) return { error };
         const libre = (data || []).find((perfil) => {
           const perfilId = toPositiveId(perfil?.id_perfil);
-          return !!perfilId && !bloqueados.perfiles.has(perfilId);
+          const cuentaId = toPositiveId(perfil?.id_cuenta);
+          return (
+            !!perfilId &&
+            !!cuentaId &&
+            !bloqueados.perfiles.has(perfilId) &&
+            !bloqueados.cuentas.has(cuentaId)
+          );
         });
         return { data: libre || null };
       };
@@ -8749,7 +8755,13 @@
         if (error) return { error };
         const libre = (data || []).find((perfil) => {
           const perfilId = toPositiveId(perfil?.id_perfil);
-          return !!perfilId && !bloqueados.perfiles.has(perfilId);
+          const cuentaId = toPositiveId(perfil?.id_cuenta);
+          return (
+            !!perfilId &&
+            !!cuentaId &&
+            !bloqueados.perfiles.has(perfilId) &&
+            !bloqueados.cuentas.has(cuentaId)
+          );
         });
         return { data: libre || null };
       };

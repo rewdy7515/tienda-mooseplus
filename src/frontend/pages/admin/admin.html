@@ -1001,16 +1001,90 @@
       };
       const getSelectedSpotifyRenewChecks = () =>
         Array.from(document.querySelectorAll(".spotify-renovar-check:checked"));
-      const buildSpotifyRenewCredentialsText = (checks = getSelectedSpotifyRenewChecks()) =>
+      const getSpotifyRenewCredentialItems = (checks = getSelectedSpotifyRenewChecks()) =>
         checks
           .map((check) => {
             const correo = check.dataset.correo ? decodeURIComponent(check.dataset.correo) : "";
             const clave = check.dataset.clave ? decodeURIComponent(check.dataset.clave) : "";
-            if (!correo && !clave) return "";
+            if (!correo && !clave) return null;
+            return { correo, clave };
+          })
+          .filter(Boolean);
+      const buildSpotifyRenewCredentialsText = (checks = getSelectedSpotifyRenewChecks()) =>
+        getSpotifyRenewCredentialItems(checks)
+          .map((item) => {
+            const correo = String(item?.correo || "").trim();
+            const clave = String(item?.clave || "").trim();
             return `correo: ${correo}\nclave: ${clave}`;
           })
           .filter(Boolean)
           .join("\n\n");
+      const buildSpotifyProviderWhatsappMessage = (items = []) => {
+        const rows = (Array.isArray(items) ? items : [])
+          .map((item) => ({
+            correo: String(item?.correo || "").trim(),
+            clave: String(item?.clave || "").trim(),
+          }))
+          .filter((item) => item.correo || item.clave);
+        if (!rows.length) return "";
+        const lines = ["`Renovación Spotify`"];
+        rows.forEach((row, idx) => {
+          lines.push("");
+          lines.push(`${idx + 1}.`);
+          lines.push(`correo: ${row.correo || "-"}`);
+          lines.push(`clave: ${row.clave || "-"}`);
+        });
+        return lines.join("\n");
+      };
+      const normalizeWhatsappPhone = (rawPhone) => {
+        const digits = String(rawPhone || "").replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("58") && digits.length >= 11) return digits;
+        if (digits.length === 11 && digits.startsWith("0")) return `58${digits.slice(1)}`;
+        if (digits.length === 10 && digits.startsWith("4")) return `58${digits}`;
+        return digits.length >= 10 ? digits : "";
+      };
+      const sendSpotifyProviderRenewalWhatsapp = async (items = []) => {
+        const payloadItems = (Array.isArray(items) ? items : [])
+          .map((item) => ({
+            correo: String(item?.correo || "").trim(),
+            clave: String(item?.clave || "").trim(),
+          }))
+          .filter((item) => item.correo || item.clave);
+        if (!payloadItems.length) {
+          return { sent: false, skipped: true, reason: "empty_payload" };
+        }
+        const { data: proveedor, error: provErr } = await supabase
+          .from("proveedores")
+          .select("id_proveedor, whatsapp")
+          .eq("id_proveedor", 11)
+          .maybeSingle();
+        if (provErr) throw provErr;
+        const phone = normalizeWhatsappPhone(proveedor?.whatsapp);
+        if (!phone) {
+          return { sent: false, skipped: true, reason: "provider_phone_missing" };
+        }
+        const message = buildSpotifyProviderWhatsappMessage(payloadItems);
+        if (!message) {
+          return { sent: false, skipped: true, reason: "empty_message" };
+        }
+        const resp = await fetch("/api/whatsapp/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ phone, message }),
+        });
+        let body = null;
+        try {
+          body = await resp.json();
+        } catch (_err) {
+          body = null;
+        }
+        if (!resp.ok || body?.ok !== true) {
+          throw new Error(body?.error || `HTTP ${resp.status}`);
+        }
+        return { sent: true, skipped: false, total: payloadItems.length };
+      };
       spotifyTable?.addEventListener("click", handleCopyClick);
       netflixTable?.addEventListener("click", handleCopyClick);
 
@@ -1077,7 +1151,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, id_plataforma, correo, fecha_corte")
+            .select("id_cuenta, id_plataforma, correo, clave, fecha_corte")
             .in("correo", correos)
             .eq("id_plataforma", 9);
           if (cErr) throw cErr;
@@ -1094,7 +1168,13 @@
               base.setHours(12, 0, 0, 0);
               const next = addMonthsKeepDay(base, 1);
               const nextIso = next.toISOString().slice(0, 10);
-              return { id_cuenta: c.id_cuenta, id_plataforma: c.id_plataforma || 9, nextIso };
+              return {
+                id_cuenta: c.id_cuenta,
+                id_plataforma: c.id_plataforma || 9,
+                nextIso,
+                correo: c.correo || "",
+                clave: c.clave || "",
+              };
             });
           const rows = updates.map((u) => ({
             monto: montoVal,
@@ -1122,6 +1202,20 @@
             .from("historial_ventas")
             .insert(rows);
           if (histErr) throw histErr;
+
+          let whatsappWarn = "";
+          try {
+            const waResult = await sendSpotifyProviderRenewalWhatsapp(
+              updates.map((u) => ({ correo: u.correo, clave: u.clave })),
+            );
+            if (!waResult?.sent) {
+              whatsappWarn = " La renovación se registró, pero no se pudo enviar WhatsApp al proveedor.";
+            }
+          } catch (waErr) {
+            console.error("renovar spotify whatsapp proveedor error", waErr);
+            whatsappWarn = " La renovación se registró, pero no se pudo enviar WhatsApp al proveedor.";
+          }
+
           hideRenovarSpotifyModal();
           let copied = false;
           if (credentialsText) {
@@ -1133,8 +1227,8 @@
           await loadSpotifyMadres();
           alert(
             copied
-              ? "Renovación registrada. Correo y clave copiados al portapapeles."
-              : "Renovación registrada.",
+              ? `Renovación registrada. Correo y clave copiados al portapapeles.${whatsappWarn}`
+              : `Renovación registrada.${whatsappWarn}`,
           );
         } catch (err) {
           console.error("renovar spotify error", err);

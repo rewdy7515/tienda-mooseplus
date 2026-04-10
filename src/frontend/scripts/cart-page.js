@@ -50,6 +50,7 @@ let currentUser = null;
 let userSaldo = 0;
 let cartMontoUsd = null;
 let cartMontoBs = null;
+let cartTasaBs = null;
 let cartMontoFinal = null;
 let cartDescuento = null;
 let cartNeedsSync = false;
@@ -67,6 +68,29 @@ const isTrue = (v) =>
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const formatBsAmount = (amount) =>
   Number.isFinite(Number(amount)) ? `Bs. ${Number(amount).toFixed(2)}` : "Bs. -";
+const resolveActiveRateBs = () => {
+  const tasa = Number(cartTasaBs);
+  if (Number.isFinite(tasa) && tasa > 0) return tasa;
+  const montoUsd = Number(cartMontoUsd);
+  const montoBs = Number(cartMontoBs);
+  if (
+    Number.isFinite(montoUsd) &&
+    montoUsd > 0 &&
+    Number.isFinite(montoBs) &&
+    montoBs >= 0
+  ) {
+    return montoBs / montoUsd;
+  }
+  return null;
+};
+const calcDisplayTotalBs = (totalUsd) => {
+  const total = Number(totalUsd);
+  if (!Number.isFinite(total)) return null;
+  if (Math.abs(total) < 0.005) return 0;
+  const tasa = resolveActiveRateBs();
+  if (!Number.isFinite(tasa) || tasa <= 0) return null;
+  return round2(total * tasa);
+};
 
 const positionRatePopover = (btn, popover) => {
   if (!btn || !popover) return;
@@ -442,6 +466,7 @@ const refreshCanonicalCheckoutSummary = async () => {
   }
   const totalUsd = Number(summaryResp?.total_usd);
   const montoBs = Number(summaryResp?.monto_bs);
+  const tasaBs = Number(summaryResp?.tasa_bs ?? summaryResp?.tasa_actual);
   const descuentoSum = round2(
     (summaryResp?.items || []).reduce(
       (acc, row) => acc + (Number(row?.descuento_usd) || 0),
@@ -453,6 +478,9 @@ const refreshCanonicalCheckoutSummary = async () => {
   }
   if (Number.isFinite(montoBs)) {
     cartMontoBs = montoBs;
+  }
+  if (Number.isFinite(tasaBs) && tasaBs > 0) {
+    cartTasaBs = tasaBs;
   }
   if (Number.isFinite(descuentoSum)) {
     cartDescuento = descuentoSum;
@@ -477,6 +505,9 @@ const syncCartWithServer = async ({ refreshBtn = null, alertOnError = false } = 
     cartMontoBs = Number.isFinite(Number(freshCart?.monto_bs))
       ? Number(freshCart.monto_bs)
       : cartMontoBs;
+    cartTasaBs = Number.isFinite(Number(freshCart?.tasa_bs))
+      ? Number(freshCart.tasa_bs)
+      : cartTasaBs;
     cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
       ? Number(freshCart.monto_final)
       : cartMontoFinal;
@@ -669,7 +700,7 @@ const updateCartSummaryUI = () => {
       )
     : 0;
   const totalMostrar = round2(totalAntesSaldo - saldoAplicado);
-  const totalBsMostrar = Number.isFinite(Number(cartMontoBs)) ? Number(cartMontoBs) : null;
+  const totalBsMostrar = calcDisplayTotalBs(totalMostrar);
 
   const subtotalEl = itemsEl.querySelector('[data-summary="subtotal"]');
   if (subtotalEl) subtotalEl.textContent = `$${subtotalMostrar.toFixed(2)}`;
@@ -936,7 +967,7 @@ const renderCart = () => {
       )
     : 0;
   const totalMostrar = round2(totalAntesSaldo - saldoAplicado);
-  const totalBsMostrar = Number.isFinite(Number(cartMontoBs)) ? Number(cartMontoBs) : null;
+  const totalBsMostrar = calcDisplayTotalBs(totalMostrar);
   if (Number.isFinite(Number(cartDescuento))) {
     const diff = Math.abs(Number(cartDescuento) - totalDescuento);
     if (diff >= 0.01) {
@@ -1254,6 +1285,9 @@ async function init() {
     cartMontoBs = Number.isFinite(Number(cartData?.monto_bs))
       ? Number(cartData.monto_bs)
       : null;
+    cartTasaBs = Number.isFinite(Number(cartData?.tasa_bs))
+      ? Number(cartData.tasa_bs)
+      : null;
     cartMontoFinal = Number.isFinite(Number(cartData?.monto_final))
       ? Number(cartData.monto_final)
       : null;
@@ -1385,6 +1419,9 @@ btnPay?.addEventListener("click", () => {
       cartMontoBs = Number.isFinite(Number(freshCart?.monto_bs))
         ? Number(freshCart.monto_bs)
         : cartMontoBs;
+      cartTasaBs = Number.isFinite(Number(freshCart?.tasa_bs))
+        ? Number(freshCart.tasa_bs)
+        : cartTasaBs;
       cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
         ? Number(freshCart.monto_final)
         : cartMontoFinal;

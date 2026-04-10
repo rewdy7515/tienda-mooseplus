@@ -90,6 +90,18 @@
         font-size: 13px;
         font-weight: 600;
       }
+      .reportes-sol-filter {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 8px 0 12px;
+      }
+      .reportes-sol-filter label {
+        font-weight: 600;
+      }
+      .reportes-sol-filter select {
+        min-width: 220px;
+      }
     </style>
   </head>
   <body>
@@ -116,11 +128,19 @@
       <div id="reportes-status" class="status"></div>
       <div id="reportes-pendientes-list" class="inventario-list reportes-pendientes-list"></div>
 
-      <div class="actions" style="margin-top:20px;">
-        <button id="btn-solucionados" class="btn-outline">Reportes solucionados (últimos 30 días)</button>
-      </div>
-      <div id="solucionados-section" class="hidden">
-        <div id="reportes-solucionados-list" class="inventario-list reportes-solucionados-list" style="margin-top: 12px;"></div>
+      <div id="solucionados-section" style="margin-top: 20px;">
+        <h3>Reportes solucionados</h3>
+        <div class="reportes-sol-filter">
+          <label for="reportes-solucionados-filtro">Plataforma:</label>
+          <select id="reportes-solucionados-filtro" class="input-cuenta">
+            <option value="">Todas</option>
+          </select>
+        </div>
+        <div
+          id="reportes-solucionados-list"
+          class="inventario-list reportes-solucionados-list"
+          style="margin-top: 12px;"
+        ></div>
       </div>
 
       <div id="modal-solucionado" class="modal hidden">

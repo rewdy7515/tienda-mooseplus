@@ -1938,6 +1938,51 @@ export async function notifyReporteSolvedWhatsapp(idReporte) {
   }
 }
 
+export async function notifyReporteIncorrectDataWhatsapp(
+  idReporte,
+  { correo = false, clave = false, imagen = "" } = {},
+) {
+  await ensureServerSession();
+  const reportId = Number(idReporte);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return { error: "id_reporte invalido" };
+  }
+  const payload = {
+    id_reporte: reportId,
+    correo: correo === true,
+    clave: clave === true,
+    imagen: String(imagen || "").trim(),
+  };
+  if (!payload.correo && !payload.clave) {
+    return { error: "Debe seleccionar al menos Correo o Contraseña." };
+  }
+  try {
+    const headers = { "Content-Type": "application/json" };
+    const accessToken = getRememberedAccessToken();
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+    const res = await fetch(`${API_BASE}/api/whatsapp/reportes/notificar-datos-incorrectos`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const { text, data } = await readResponseBodySafe(res);
+    if (!res.ok) {
+      const message = String(data?.error || text || "").trim();
+      return {
+        error: message || "No se pudo notificar datos incorrectos por WhatsApp",
+        status: res.status,
+      };
+    }
+    return data || { ok: true };
+  } catch (err) {
+    console.error("notifyReporteIncorrectDataWhatsapp error", err);
+    return { error: err.message };
+  }
+}
+
 export async function notifyVentaDeliveredWhatsapp(idVenta) {
   await ensureServerSession();
   const ventaId = Number(idVenta);

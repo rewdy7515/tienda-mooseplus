@@ -84,6 +84,10 @@ const isOtroMotivo = (val) => {
   const n = normalizeMotivo(val);
   return n.startsWith("otro") || n.startsWith("otra");
 };
+const isMotivoNetflixTvNoHogar = (val) => {
+  const n = normalizeMotivo(val);
+  return n.includes("tv no forma parte del hogar") && n.includes("netflix");
+};
 const getSelectedMotivoTitle = () => {
   const opt = selectMotivo?.selectedOptions?.[0];
   return String(opt?.dataset?.titulo || opt?.textContent || "").trim();
@@ -430,7 +434,26 @@ const renderCorreoSugerencias = (termRaw = "") => {
   correoSugerenciasEl.classList.remove("hidden");
 };
 
-const findPerfilLibre = async (plataformaId, perfilHogar, excludeCuenta) => {
+const loadReemplazosBloqueados = async () => {
+  const { data, error } = await supabase.from("reemplazos").select("id_cuenta, id_perfil");
+  if (error) return { error };
+  const cuentas = new Set();
+  const perfiles = new Set();
+  (data || []).forEach((row) => {
+    const cuentaId = toPositiveId(row?.id_cuenta);
+    const perfilId = toPositiveId(row?.id_perfil);
+    if (cuentaId) cuentas.add(cuentaId);
+    if (perfilId) perfiles.add(perfilId);
+  });
+  return { data: { cuentas, perfiles } };
+};
+
+const findPerfilLibre = async (
+  plataformaId,
+  perfilHogar,
+  excludeCuenta,
+  reemplazosBloqueados = null,
+) => {
   let query = supabase
     .from("perfiles")
     .select(
@@ -439,7 +462,7 @@ const findPerfilLibre = async (plataformaId, perfilHogar, excludeCuenta) => {
     .eq("cuentas.id_plataforma", plataformaId)
     .eq("ocupado", false)
     .order("id_perfil", { ascending: true })
-    .limit(1);
+    .limit(120);
   if (perfilHogar === true) {
     query = query.eq("perfil_hogar", true);
   } else {
@@ -451,10 +474,24 @@ const findPerfilLibre = async (plataformaId, perfilHogar, excludeCuenta) => {
   if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
   const { data, error } = await query;
   if (error) return { error };
-  return { data: data?.[0] || null };
+  const libre = (data || []).find((perfil) => {
+    const perfilId = toPositiveId(perfil?.id_perfil);
+    const cuentaId = toPositiveId(perfil?.id_cuenta);
+    if (!perfilId || !cuentaId) return false;
+    if (!reemplazosBloqueados) return true;
+    return (
+      !reemplazosBloqueados.perfiles.has(perfilId) &&
+      !reemplazosBloqueados.cuentas.has(cuentaId)
+    );
+  });
+  return { data: libre || null };
 };
 
-const findCuentaMiembroLibre = async (plataformaId, excludeCuenta) => {
+const findCuentaMiembroLibre = async (
+  plataformaId,
+  excludeCuenta,
+  reemplazosBloqueados = null,
+) => {
   let query = supabase
     .from("cuentas")
     .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
@@ -463,15 +500,25 @@ const findCuentaMiembroLibre = async (plataformaId, excludeCuenta) => {
     .eq("venta_miembro", true)
     .eq("ocupado", false)
     .order("id_cuenta", { ascending: true })
-    .limit(1);
+    .limit(120);
   query = query.or("inactiva.is.null,inactiva.eq.false");
   if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
   const { data, error } = await query;
   if (error) return { error };
-  return { data: data?.[0] || null };
+  const libre = (data || []).find((cuenta) => {
+    const cuentaId = toPositiveId(cuenta?.id_cuenta);
+    if (!cuentaId) return false;
+    if (!reemplazosBloqueados) return true;
+    return !reemplazosBloqueados.cuentas.has(cuentaId);
+  });
+  return { data: libre || null };
 };
 
-const findCuentaCompletaLibre = async (plataformaId, excludeCuenta) => {
+const findCuentaCompletaLibre = async (
+  plataformaId,
+  excludeCuenta,
+  reemplazosBloqueados = null,
+) => {
   let query = supabase
     .from("cuentas")
     .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
@@ -480,12 +527,18 @@ const findCuentaCompletaLibre = async (plataformaId, excludeCuenta) => {
     .eq("venta_miembro", false)
     .eq("inactiva", false)
     .order("id_cuenta", { ascending: true })
-    .limit(1);
+    .limit(120);
   query = query.or("ocupado.is.null,ocupado.eq.false");
   if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
   const { data, error } = await query;
   if (error) return { error };
-  return { data: data?.[0] || null };
+  const libre = (data || []).find((cuenta) => {
+    const cuentaId = toPositiveId(cuenta?.id_cuenta);
+    if (!cuentaId) return false;
+    if (!reemplazosBloqueados) return true;
+    return !reemplazosBloqueados.cuentas.has(cuentaId);
+  });
+  return { data: libre || null };
 };
 
 async function intentarReemplazoAutomaticoCuentaInactiva({
@@ -493,6 +546,7 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
   idCuenta,
   idPerfil,
   idPlataforma,
+  forceNetflixPlan1Hogar = false,
 }) {
   if (!idUsuario || !idCuenta) {
     return { reemplazado: false, aplica: false, sinStock: false };
@@ -504,7 +558,7 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     .eq("id_cuenta", idCuenta)
     .maybeSingle();
   if (cuentaErr) throw cuentaErr;
-  if (!cuentaActual || cuentaActual.inactiva !== true) {
+  if (!cuentaActual) {
     return { reemplazado: false, aplica: false, sinStock: false };
   }
 
@@ -512,6 +566,12 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
   if (!plataformaId) {
     return { reemplazado: false, aplica: true, sinStock: true };
   }
+
+  const {
+    data: reemplazosBloqueados,
+    error: reemplazosErr,
+  } = await loadReemplazosBloqueados();
+  if (reemplazosErr) throw reemplazosErr;
 
   let ventaQuery = supabase
     .from("ventas")
@@ -553,6 +613,19 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     if (perfilErr) throw perfilErr;
     perfilActual = perfilData || null;
   }
+  const perfilHogar = perfilActual?.perfil_hogar === true;
+  const ventaMiembro = isTrue(cuentaActual?.venta_miembro);
+  const ventaPerfil = isTrue(cuentaActual?.venta_perfil);
+  const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
+  const forceByNetflixMotivo =
+    forceNetflixPlan1Hogar === true && Number(plataformaId) === 1;
+  const forceEligiblePlan1 =
+    forceByNetflixMotivo && !!toPositiveId(idPerfil) && !isPlanMiembroEquivalente;
+  const puedeAutoReemplazar = forceEligiblePlan1 || cuentaActual.inactiva === true;
+  if (!puedeAutoReemplazar) {
+    return { reemplazado: false, aplica: false, sinStock: false };
+  }
+  const replaceMode = forceEligiblePlan1 ? "netflix_plan1_hogar" : "cuenta_inactiva";
 
   let nuevoCuenta = null;
   let nuevoPerfil = null;
@@ -563,10 +636,11 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
       plataformaId,
       perfilActual?.perfil_hogar === true,
       idCuenta,
+      reemplazosBloqueados,
     );
     if (perfilDestinoErr) throw perfilDestinoErr;
     if (!perfilDestino) {
-      return { reemplazado: false, aplica: true, sinStock: true };
+      return { reemplazado: false, aplica: true, sinStock: true, mode: replaceMode };
     }
     nuevoCuenta = asInt(perfilDestino.id_cuenta);
     nuevoPerfil = asInt(perfilDestino.id_perfil);
@@ -579,10 +653,11 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     const { data: cuentaDestino, error: cuentaDestinoErr } = await findCuentaMiembroLibre(
       plataformaId,
       idCuenta,
+      reemplazosBloqueados,
     );
     if (cuentaDestinoErr) throw cuentaDestinoErr;
     if (!cuentaDestino) {
-      return { reemplazado: false, aplica: true, sinStock: true };
+      return { reemplazado: false, aplica: true, sinStock: true, mode: replaceMode };
     }
     nuevoCuenta = asInt(cuentaDestino.id_cuenta);
     nuevoPerfil = null;
@@ -595,10 +670,11 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     const { data: cuentaDestino, error: cuentaDestinoErr } = await findCuentaCompletaLibre(
       plataformaId,
       idCuenta,
+      reemplazosBloqueados,
     );
     if (cuentaDestinoErr) throw cuentaDestinoErr;
     if (!cuentaDestino) {
-      return { reemplazado: false, aplica: true, sinStock: true };
+      return { reemplazado: false, aplica: true, sinStock: true, mode: replaceMode };
     }
     nuevoCuenta = asInt(cuentaDestino.id_cuenta);
     nuevoPerfil = null;
@@ -610,7 +686,7 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
   }
 
   if (!nuevoCuenta) {
-    return { reemplazado: false, aplica: true, sinStock: true };
+    return { reemplazado: false, aplica: true, sinStock: true, mode: replaceMode };
   }
 
   const { error: updVentaErr } = await supabase
@@ -681,6 +757,7 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
     aplica: true,
     sinStock: false,
     correoNuevo: dataDestino.correo || "",
+    mode: replaceMode,
   };
 }
 
@@ -1356,6 +1433,8 @@ async function handleSubmit(e) {
     } else {
       descripcion = motivoLabel;
     }
+    const forzarAutoNetflixPlan1Hogar =
+      Number(id_plataforma) === 1 && isMotivoNetflixTvNoHogar(motivoLabel || descripcion);
 
     const file = (inputFiles?.files && inputFiles.files[0]) || null;
     let imagenPath = null;
@@ -1378,21 +1457,27 @@ async function handleSubmit(e) {
     };
 
     const autoReemplazoEnabled = await isAutoReemplazoCuentaInactivaEnabled();
-    const autoReplaceResult = autoReemplazoEnabled
+    const shouldTryAutoReplace = autoReemplazoEnabled || forzarAutoNetflixPlan1Hogar;
+    const autoReplaceResult = shouldTryAutoReplace
       ? await intentarReemplazoAutomaticoCuentaInactiva({
           idUsuario: reportUserId,
           idCuenta: id_cuenta,
           idPerfil: id_perfil,
           idPlataforma: id_plataforma,
+          forceNetflixPlan1Hogar: forzarAutoNetflixPlan1Hogar,
         })
       : { reemplazado: false, aplica: false, sinStock: false };
     if (autoReplaceResult?.reemplazado) {
       const caracasNow = getCaracasDateTime();
       const imagenAuto = await resolveImagenPath();
       const correoNuevoAuto = String(autoReplaceResult?.correoNuevo || "").trim();
+      const descripcionSolucionBase =
+        autoReplaceResult?.mode === "netflix_plan1_hogar"
+          ? "Reemplazo automático por motivo hogar Netflix (plan 1)"
+          : "Reemplazo automático por cuenta inactiva";
       const descripcionSolucionAuto = correoNuevoAuto
-        ? `Reemplazo automático por cuenta inactiva: ${correoNuevoAuto}`
-        : "Reemplazo automático por cuenta inactiva";
+        ? `${descripcionSolucionBase}: ${correoNuevoAuto}`
+        : descripcionSolucionBase;
       const payloadAuto = {
         id_usuario: reportUserId,
         id_plataforma,

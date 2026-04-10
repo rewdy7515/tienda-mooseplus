@@ -11,6 +11,8 @@ import {
   supabase,
   ensureServerSession,
   notifyReporteSolvedWhatsapp,
+  notifyReporteIncorrectDataWhatsapp,
+  uploadComprobantes,
 } from "./api.js";
 import { formatDDMMYYYY } from "./date-format.js";
 import { pickNotificationUserIds } from "./notification-templates.js";
@@ -77,6 +79,7 @@ const resumenPinRow = document.querySelector("#resumen-pin");
 const resumenPinText = document.querySelector("#resumen-pin-text");
 const btnGuardarCampos = document.querySelector("#btn-guardar-campos");
 const btnCerrarReporte = document.querySelector("#btn-cerrar-reporte");
+const btnDatosIncorrectos = document.querySelector("#btn-datos-incorrectos");
 const btnFaltanRecaudos = document.querySelector("#btn-faltan-recaudos");
 const btnReemplazar = document.querySelector("#btn-reemplazar");
 const modalResumenClose = document.querySelector(".modal-resumen-close");
@@ -88,6 +91,17 @@ const checkSuscripcion = document.querySelector("#check-suscripcion");
 const checkPerfiles = document.querySelector("#check-perfiles");
 const checkIngreso = document.querySelector("#check-ingreso");
 const checkPinSame = document.querySelector("#check-pin-same");
+const checkCodigoAyudaWrap = document.querySelector("#check-codigo-ayuda-wrap");
+const checkCodigoAyuda = document.querySelector("#check-codigo-ayuda");
+const checkCodigoWhatsapp = document.querySelector("#check-codigo-whatsapp");
+const resumenGroupEls = document.querySelectorAll("[data-resumen-group]");
+const modalDatosIncorrectos = document.querySelector("#modal-datos-incorrectos");
+const modalDatosIncorrectosClose = document.querySelector(".modal-datos-incorrectos-close");
+const datosIncorrectosImagenInput = document.querySelector("#datos-incorrectos-imagen");
+const datosIncorrectosImagenPreview = document.querySelector("#datos-incorrectos-imagen-preview");
+const datosIncorrectosCheckCorreo = document.querySelector("#datos-incorrectos-check-correo");
+const datosIncorrectosCheckClave = document.querySelector("#datos-incorrectos-check-clave");
+const btnEnviarDatosIncorrectos = document.querySelector("#btn-enviar-datos-incorrectos");
 
 let currentRow = null;
 let oldClave = "";
@@ -180,6 +194,90 @@ const openAdminCuentasByCorreo = (rawCorreo) => {
   const targetUrl = new URL("../admin/admin_cuentas.html", window.location.href);
   targetUrl.searchParams.set("correo", correo);
   window.open(targetUrl.toString(), "_blank", "noopener");
+};
+
+const buildInventarioLinkByCorreo = (rawCorreo) => {
+  const targetUrl = new URL("../inventario.html", window.location.href);
+  const correo = normalizeCopyValue(rawCorreo);
+  if (correo) targetUrl.searchParams.set("correo", correo);
+  return targetUrl.toString();
+};
+
+const sanitizeFileName = (name = "") =>
+  String(name || "imagen.jpg")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "_");
+
+const resetResumenChecks = () => {
+  [
+    checkSuscripcion,
+    checkPerfiles,
+    checkIngreso,
+    checkPinSame,
+    checkCodigoAyuda,
+    checkCodigoWhatsapp,
+    checkOtro,
+  ].forEach((input) => {
+    if (input) input.checked = false;
+  });
+  if (resumenOtroText) {
+    resumenOtroText.value = "";
+    resumenOtroText.classList.add("hidden");
+  }
+};
+
+const syncCodigoAyudaOptionForRow = (row) => {
+  const platformId = getReportePlatformId(row);
+  const showCodigoAyuda = platformId === 1;
+  if (checkCodigoAyudaWrap) checkCodigoAyudaWrap.classList.toggle("hidden", !showCodigoAyuda);
+  if (!showCodigoAyuda && checkCodigoAyuda) checkCodigoAyuda.checked = false;
+};
+
+const collapseResumenGroups = ({ keepGroup = null } = {}) => {
+  resumenGroupEls.forEach((group) => {
+    if (!group) return;
+    const content = group.querySelector("[data-resumen-group-content]");
+    const shouldKeepOpen = keepGroup && group === keepGroup;
+    if (content) content.classList.toggle("hidden", !shouldKeepOpen);
+    group.classList.toggle("is-open", !!shouldKeepOpen);
+  });
+};
+
+const syncDatosIncorrectosButtonForRow = (row) => {
+  const platformId = getReportePlatformId(row);
+  const showButton = platformId === 9;
+  if (btnDatosIncorrectos) btnDatosIncorrectos.classList.toggle("hidden", !showButton);
+};
+
+const resetDatosIncorrectosModalState = () => {
+  if (datosIncorrectosImagenInput) datosIncorrectosImagenInput.value = "";
+  if (datosIncorrectosImagenPreview) {
+    datosIncorrectosImagenPreview.textContent = "Sin imagen seleccionada.";
+  }
+  if (datosIncorrectosCheckCorreo) datosIncorrectosCheckCorreo.checked = false;
+  if (datosIncorrectosCheckClave) datosIncorrectosCheckClave.checked = false;
+};
+
+const closeDatosIncorrectosModal = () => {
+  modalDatosIncorrectos?.classList.add("hidden");
+  resetDatosIncorrectosModalState();
+};
+
+const uploadDatosIncorrectosImage = async (file, reportUserId) => {
+  if (!file) return "";
+  const safeName = sanitizeFileName(file.name || "imagen.jpg");
+  const uniqueName = `datos-incorrectos-${reportUserId}-${Date.now()}-${safeName}`;
+  const payloadFile = {
+    name: uniqueName,
+    type: file.type || "image/jpeg",
+    arrayBuffer: () => file.arrayBuffer(),
+  };
+  const { urls, error } = await uploadComprobantes([payloadFile]);
+  if (error || !urls?.length) {
+    throw error || new Error("No se pudo subir la imagen.");
+  }
+  return String(urls[0] || "").trim();
 };
 
 const getDescripcion = (row) => {
@@ -990,6 +1088,8 @@ const triggerImageDownload = async () => {
 
 function closeModal() {
   modal?.classList.add("hidden");
+  if (btnDatosIncorrectos) btnDatosIncorrectos.classList.add("hidden");
+  closeDatosIncorrectosModal();
   modalImagenWrapper?.classList.add("hidden");
   modalImagenWrapper?.classList.remove("no-image");
   modalImagenWrapper?.classList.remove("downloadable");
@@ -1010,6 +1110,7 @@ function closeModal() {
 
 async function openModal(row) {
   if (!modal) return;
+  syncDatosIncorrectosButtonForRow(row);
   const platName = row.plataformas?.nombre || "-";
   const platColor = normalizeHexColor(row.plataformas?.color_1) || "#111";
   const platLink = normalizePlatformLink(row.plataformas?.link_pagina);
@@ -1229,22 +1330,29 @@ async function init() {
       }
     });
 
-  btnCerrarReporte?.addEventListener("click", () => {
-    if (!currentRow) return;
-    const nuevaClave = modalClave?.value || "";
-    const nuevoPin = (modalPin?.value || "").trim();
-    const claveCambia = nuevaClave !== oldClave;
-    const pinCambia = !!currentRow.id_perfil && nuevoPin !== oldPin;
-    cambioClave = claveCambia;
-    cambioPin = pinCambia;
+    btnCerrarReporte?.addEventListener("click", () => {
+      if (!currentRow) return;
+      resetResumenChecks();
+      syncCodigoAyudaOptionForRow(currentRow);
+      collapseResumenGroups();
+      const nuevaClave = modalClave?.value || "";
+      const nuevoPin = (modalPin?.value || "").trim();
+      const claveCambia = nuevaClave !== oldClave;
+      const pinCambia = !!currentRow.id_perfil && nuevoPin !== oldPin;
+      cambioClave = claveCambia;
+      cambioPin = pinCambia;
 
-    if (resumenClaveRow) resumenClaveRow.classList.toggle("hidden", !claveCambia);
-    if (resumenClaveText)
-      resumenClaveText.textContent = claveCambia ? `${oldClave || "(vacía)"} -> ${nuevaClave || "(vacía)"}` : "";
+      if (resumenClaveRow) resumenClaveRow.classList.toggle("hidden", !claveCambia);
+      if (resumenClaveText) {
+        resumenClaveText.textContent = claveCambia
+          ? `${oldClave || "(vacía)"} -> ${nuevaClave || "(vacía)"}`
+          : "";
+      }
       const showPin = pinCambia;
       if (resumenPinRow) resumenPinRow.classList.toggle("hidden", !showPin);
-      if (resumenPinText)
+      if (resumenPinText) {
         resumenPinText.textContent = showPin ? `${oldPin || "(vacío)"} -> ${nuevoPin || "(vacío)"}` : "";
+      }
 
       modalResumen?.classList.remove("hidden");
       const reporteCreadoHoy = isReporteCreadoHoyCaracas(currentRow);
@@ -1256,10 +1364,24 @@ async function init() {
     });
 
     modalResumen?.addEventListener("click", (e) => {
-      if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close") || e.target.classList.contains("modal-resumen-close")) {
+      const toggleBtn = e.target.closest("[data-resumen-group-toggle]");
+      if (toggleBtn) {
+        const group = toggleBtn.closest("[data-resumen-group]");
+        if (!group) return;
+        const content = group.querySelector("[data-resumen-group-content]");
+        if (!content) return;
+        const shouldOpen = content.classList.contains("hidden");
+        collapseResumenGroups({ keepGroup: shouldOpen ? group : null });
+        return;
+      }
+      if (
+        e.target.classList.contains("modal-backdrop") ||
+        e.target.classList.contains("modal-close") ||
+        e.target.classList.contains("modal-resumen-close")
+      ) {
         modalResumen.classList.add("hidden");
       }
-  });
+    });
 
   modalResumenClose?.addEventListener("click", () => modalResumen?.classList.add("hidden"));
 
@@ -1277,6 +1399,73 @@ async function init() {
     if (resumenOtroText) {
       resumenOtroText.classList.toggle("hidden", !show);
       if (!show) resumenOtroText.value = "";
+    }
+  });
+
+  btnDatosIncorrectos?.addEventListener("click", () => {
+    if (!currentRow) return;
+    if (getReportePlatformId(currentRow) !== 9) return;
+    resetDatosIncorrectosModalState();
+    modalDatosIncorrectos?.classList.remove("hidden");
+  });
+
+  modalDatosIncorrectos?.addEventListener("click", (e) => {
+    if (
+      e.target.classList.contains("modal-backdrop") ||
+      e.target.classList.contains("modal-close") ||
+      e.target.classList.contains("modal-datos-incorrectos-close")
+    ) {
+      closeDatosIncorrectosModal();
+    }
+  });
+
+  modalDatosIncorrectosClose?.addEventListener("click", () => closeDatosIncorrectosModal());
+
+  datosIncorrectosImagenInput?.addEventListener("change", () => {
+    const file = (datosIncorrectosImagenInput.files || [])[0] || null;
+    if (datosIncorrectosImagenPreview) {
+      datosIncorrectosImagenPreview.textContent = file ? file.name : "Sin imagen seleccionada.";
+    }
+  });
+
+  btnEnviarDatosIncorrectos?.addEventListener("click", async () => {
+    if (!currentRow) return;
+    const reportId = toPositiveId(currentRow?.id_reporte);
+    if (!reportId) {
+      alert("No se encontró el reporte.");
+      return;
+    }
+    const correoMarcado = datosIncorrectosCheckCorreo?.checked === true;
+    const claveMarcada = datosIncorrectosCheckClave?.checked === true;
+    if (!correoMarcado && !claveMarcada) {
+      alert("Selecciona al menos Correo o Contraseña.");
+      return;
+    }
+    const btn = btnEnviarDatosIncorrectos;
+    if (btn) btn.disabled = true;
+    try {
+      let imageUrl = "";
+      const imageFile = (datosIncorrectosImagenInput?.files || [])[0] || null;
+      if (imageFile) {
+        const reportUserId = toPositiveId(currentRow?.id_usuario) || toPositiveId(requireSession()) || 0;
+        imageUrl = await uploadDatosIncorrectosImage(imageFile, reportUserId);
+      }
+      const waRes = await notifyReporteIncorrectDataWhatsapp(reportId, {
+        correo: correoMarcado,
+        clave: claveMarcada,
+        imagen: imageUrl,
+      });
+      if (waRes?.error) {
+        alert(waRes.error || "No se pudo enviar el mensaje.");
+        return;
+      }
+      alert("Mensaje enviado al cliente.");
+      closeDatosIncorrectosModal();
+    } catch (err) {
+      console.error("enviar datos incorrectos whatsapp error", err);
+      alert("No se pudo enviar el mensaje.");
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 
@@ -1364,10 +1553,30 @@ async function guardarCambios() {
     const textos = [];
     if (cambioClave) textos.push("Se actualizó la contraseña");
     if (cambioPin) textos.push("Se actualizó el pin");
-    if (checkSuscripcion?.checked) textos.push("Suscripción activada");
-    if (checkPerfiles?.checked) textos.push("Perfiles modificados");
-    if (checkIngreso?.checked) textos.push("Se pudo ingresar sin problemas con los datos de la cuenta");
-    if (checkPinSame?.checked) textos.push("Se volvió a poner el mismo pin al perfil");
+    if (checkSuscripcion?.checked) {
+      textos.push("La cuenta ya cuenta con suscripción activa. Cierre y vuelva a abrir la aplicación por favor.");
+    }
+    if (checkPerfiles?.checked) {
+      textos.push("Se actualizó el pin de su perfil. Cierre y vuelva a abrir la aplicación por favor.");
+    }
+    if (checkPinSame?.checked) {
+      textos.push("Se volvió a poner el mismo pin al perfil. Cierre y vuelva a abrir la aplicación por favor.");
+    }
+    if (checkIngreso?.checked) {
+      const inventarioLink = buildInventarioLinkByCorreo(
+        currentRow?.cuentas?.correo || modalCorreo?.value || "",
+      );
+      textos.push(
+        `Se pudo ingresar sin problemas con los datos actuales de la cuenta. Verifíquelos en ${inventarioLink}.`,
+      );
+      textos.push("Puedes intentar también cerrar sesión y volver a ingresar a la cuenta con los datos actuales.");
+    }
+    if (checkCodigoAyuda?.checked) {
+      textos.push('Presione "obtener ayuda" y luego "usar contraseña".');
+    }
+    if (checkCodigoWhatsapp?.checked) {
+      textos.push("Un admin se comunicará con usted vía WhatsApp.");
+    }
     if (checkOtro?.checked && resumenOtroText) {
       const extra = resumenOtroText.value.trim();
       if (extra) textos.push(extra);
@@ -1549,7 +1758,13 @@ async function reemplazarServicio(options = {}) {
       if (error) return { error };
       const libre = (data || []).find((perfil) => {
         const perfilId = toPositiveId(perfil?.id_perfil);
-        return !!perfilId && !reemplazosBloqueados.perfiles.has(perfilId);
+        const cuentaId = toPositiveId(perfil?.id_cuenta);
+        return (
+          !!perfilId &&
+          !!cuentaId &&
+          !reemplazosBloqueados.perfiles.has(perfilId) &&
+          !reemplazosBloqueados.cuentas.has(cuentaId)
+        );
       });
       return { data: libre || null };
     };
@@ -1577,7 +1792,13 @@ async function reemplazarServicio(options = {}) {
       if (error) return { error };
       const libre = (data || []).find((perfil) => {
         const perfilId = toPositiveId(perfil?.id_perfil);
-        return !!perfilId && !reemplazosBloqueados.perfiles.has(perfilId);
+        const cuentaId = toPositiveId(perfil?.id_cuenta);
+        return (
+          !!perfilId &&
+          !!cuentaId &&
+          !reemplazosBloqueados.perfiles.has(perfilId) &&
+          !reemplazosBloqueados.cuentas.has(cuentaId)
+        );
       });
       return { data: libre || null };
     };

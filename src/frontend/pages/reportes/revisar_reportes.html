@@ -370,6 +370,99 @@
       #modal-plat-title.is-link {
         cursor: pointer;
       }
+      .btn-datos-incorrectos {
+        background: #b91c1c;
+        border: 1px solid #b91c1c;
+        color: #fff;
+      }
+      .btn-datos-incorrectos:hover,
+      .btn-datos-incorrectos:focus-visible {
+        background: #991b1b;
+        border-color: #991b1b;
+        color: #fff;
+      }
+      .resumen-group {
+        width: 100%;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 0;
+        background: #f9fafb;
+        overflow: hidden;
+      }
+      .resumen-group-btn {
+        width: 100%;
+        margin: 0;
+        border: 0;
+        background: linear-gradient(135deg, #ffffff, #f3f4f6);
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 800;
+        color: #111827;
+      }
+      .resumen-group-btn:hover {
+        background: linear-gradient(135deg, #ffffff, #eef2f7);
+      }
+      .resumen-group-caret {
+        font-size: 12px;
+        color: #6b7280;
+        transition: transform 0.2s ease;
+      }
+      .resumen-group.is-open .resumen-group-caret {
+        transform: rotate(180deg);
+      }
+      .resumen-group-options {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 12px 12px;
+        border-top: 1px solid #e5e7eb;
+        background: #fff;
+      }
+      .resumen-custom-toggle {
+        width: 100%;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: #e5e7eb;
+        color: #374151;
+        font-weight: 600;
+      }
+      .resumen-custom-toggle:hover {
+        background: #d1d5db;
+      }
+      .resumen-custom-toggle input {
+        margin-top: 1px;
+      }
+      .modal-card-datos-incorrectos {
+        width: min(92vw, 460px);
+      }
+      .datos-incorrectos-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .datos-incorrectos-subtitle {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 800;
+        color: #111827;
+      }
+      .datos-incorrectos-checks {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .datos-incorrectos-preview {
+        min-height: 30px;
+        margin: 0;
+        font-size: 13px;
+        color: #6b7280;
+      }
     </style>
   </head>
   <body>
@@ -448,6 +541,7 @@
                 <div class="value" id="modal-motivo"></div>
               </div>
               <div class="modal-actions-column">
+                <button class="btn-outline btn-datos-incorrectos hidden" id="btn-datos-incorrectos">Datos incorrectos</button>
                 <button class="btn-primary" id="btn-cerrar-reporte">Cerrar reporte</button>
                 <button class="btn-outline" id="btn-faltan-recaudos">Faltan recaudos</button>
                 <button class="btn-outline" id="btn-reemplazar">Reemplazar</button>
@@ -482,15 +576,77 @@
             </div>
             <div class="resumen-checks">
               <label><input type="checkbox" class="resumen-check" id="check-agregar-dias" checked /> Agregar días</label>
-              <label><input type="checkbox" class="resumen-check" id="check-suscripcion" /> Suscripción activada</label>
-              <label><input type="checkbox" class="resumen-check" id="check-perfiles" /> Perfiles modificados</label>
-              <label><input type="checkbox" class="resumen-check" id="check-ingreso" /> Se pudo ingresar sin problemas con los datos de la cuenta</label>
-              <label><input type="checkbox" class="resumen-check" id="check-pin-same" /> Se volvió a poner el mismo pin al perfil</label>
-              <label><input type="checkbox" class="resumen-check" id="check-otro" /> Otro</label>
+
+              <div class="resumen-group" data-resumen-group>
+                <button type="button" class="resumen-group-btn" data-resumen-group-toggle>
+                  <span>Suscripción activada</span>
+                  <span class="resumen-group-caret">▾</span>
+                </button>
+                <div class="resumen-group-options hidden" data-resumen-group-content>
+                  <label><input type="checkbox" class="resumen-check" id="check-suscripcion" /> La cuenta ya cuenta con suscripción activa. Cierre y vuelva a abrir la aplicación por favor.</label>
+                </div>
+              </div>
+
+              <div class="resumen-group" data-resumen-group>
+                <button type="button" class="resumen-group-btn" data-resumen-group-toggle>
+                  <span>Perfiles modificados</span>
+                  <span class="resumen-group-caret">▾</span>
+                </button>
+                <div class="resumen-group-options hidden" data-resumen-group-content>
+                  <label><input type="checkbox" class="resumen-check" id="check-perfiles" /> Se actualizó el pin de su perfil. Cierre y vuelva a abrir la aplicación por favor.</label>
+                  <label><input type="checkbox" class="resumen-check" id="check-pin-same" /> Se volvió a poner el mismo pin al perfil. Cierre y vuelva a abrir la aplicación por favor.</label>
+                </div>
+              </div>
+
+              <div class="resumen-group" data-resumen-group>
+                <button type="button" class="resumen-group-btn" data-resumen-group-toggle>
+                  <span>No se encontraron inconvenientes</span>
+                  <span class="resumen-group-caret">▾</span>
+                </button>
+                <div class="resumen-group-options hidden" data-resumen-group-content>
+                  <label><input type="checkbox" class="resumen-check" id="check-ingreso" /> Se pudo ingresar sin problemas con los datos actuales de la cuenta. Verifíquelos en inventario.</label>
+                </div>
+              </div>
+
+              <div class="resumen-group" data-resumen-group>
+                <button type="button" class="resumen-group-btn" data-resumen-group-toggle>
+                  <span>Código</span>
+                  <span class="resumen-group-caret">▾</span>
+                </button>
+                <div class="resumen-group-options hidden" data-resumen-group-content>
+                  <label id="check-codigo-ayuda-wrap" class="hidden"><input type="checkbox" class="resumen-check" id="check-codigo-ayuda" /> Presione "obtener ayuda" y luego "usar contraseña".</label>
+                  <label><input type="checkbox" class="resumen-check" id="check-codigo-whatsapp" /> Un admin se comunicará con usted vía WhatsApp.</label>
+                </div>
+              </div>
+
+              <label class="resumen-custom-toggle"><input type="checkbox" class="resumen-check" id="check-otro" /> Describir motivo personalizado</label>
               <textarea id="resumen-otro-text" class="form-input hidden" rows="3" placeholder="Describe el caso"></textarea>
             </div>
             <div class="modal-actions-column" style="margin-top:12px;">
               <button class="btn-primary" id="btn-guardar-campos">Guardar campos</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modal-datos-incorrectos" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card modal-card-datos-incorrectos">
+          <button class="modal-close modal-datos-incorrectos-close" aria-label="Cerrar">×</button>
+          <div class="modal-body datos-incorrectos-body">
+            <h3>Datos incorrectos</h3>
+            <div>
+              <label for="datos-incorrectos-imagen"><strong>Imagen</strong></label>
+              <input type="file" id="datos-incorrectos-imagen" class="form-input" accept="image/*" />
+              <p id="datos-incorrectos-imagen-preview" class="datos-incorrectos-preview">Sin imagen seleccionada.</p>
+            </div>
+            <p class="datos-incorrectos-subtitle">Datos erroneos</p>
+            <div class="datos-incorrectos-checks">
+              <label><input type="checkbox" id="datos-incorrectos-check-correo" /> Correo</label>
+              <label><input type="checkbox" id="datos-incorrectos-check-clave" /> Contraseña</label>
+            </div>
+            <div class="modal-actions-column" style="margin-top:4px;">
+              <button class="btn-primary" id="btn-enviar-datos-incorrectos">Enviar</button>
             </div>
           </div>
         </div>

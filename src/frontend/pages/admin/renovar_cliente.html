@@ -1859,7 +1859,8 @@
               suspendido: false,
             };
             if (isCuentaCompletaItem || !!costoRenovacionProveedorSel) {
-              updatePayload.cuenta_pagada_admin = false;
+              // Renovaciones hechas desde renovar_cliente no deben pasar por renovaciones_pendientes.
+              updatePayload.cuenta_pagada_admin = true;
             }
             updatePayload.pendiente = isSuspendido && entregaInmediata;
             const { error } = await supabase
@@ -2140,7 +2141,8 @@
             suspendido: false,
           };
           if (esCuentaCompleta || !!costoRenovacionProveedor) {
-            updatePayload.cuenta_pagada_admin = false;
+            // Renovaciones hechas desde renovar_cliente no deben pasar por renovaciones_pendientes.
+            updatePayload.cuenta_pagada_admin = true;
           }
           updatePayload.pendiente = isSuspendido && entregaInmediata;
           const { error: updErr } = await supabase

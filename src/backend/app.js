@@ -1978,6 +1978,29 @@ Correo: ${correoText}
 Estado: solucionado ✅`;
 };
 
+const buildWhatsappReporteDatosIncorrectosMessage = ({
+  idReporte = null,
+  incluirCorreo = false,
+  incluirClave = false,
+  imagen = "",
+} = {}) => {
+  const reportId = toPositiveInt(idReporte) || idReporte || "-";
+  const imagenUrl = String(imagen || "").trim();
+  const bullets = [];
+  if (incluirCorreo === true) bullets.push("* Correo");
+  if (incluirClave === true) bullets.push("* Contraseña");
+  const bodyBullets = bullets.length ? bullets.join("\n") : "* -";
+  const resetClaveMsg =
+    incluirClave === true
+      ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
+      : "";
+  const imageSection = imagenUrl ? `${imagenUrl}\n` : "";
+  return `${imageSection}\`Reporte #${reportId}\`
+Respuesta:
+Datos erroneos:
+${bodyBullets}${resetClaveMsg}`;
+};
+
 const buildWhatsappOrderDetailUrl = (idOrden = null) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) return "";
@@ -2009,6 +2032,167 @@ const buildWhatsappPagoVerificadoManualMessage = ({
   return `\`Pago verificado ✅\`
 Metodo de pago: ${metodoText}
 Ref: ${refText}`;
+};
+
+const buildWhatsappSpotifyRenewalsMessage = (items = []) => {
+  const normalized = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      correo: String(item?.correo || "").trim(),
+      clave: String(item?.clave || "").trim(),
+    }))
+    .filter((item) => item.correo || item.clave);
+  if (!normalized.length) return "";
+
+  const lines = ["`Renovación Spotify`"];
+  normalized.forEach((item, idx) => {
+    lines.push("");
+    lines.push(`${idx + 1}.`);
+    lines.push(`correo: ${item.correo || "-"}`);
+    lines.push(`clave: ${item.clave || "-"}`);
+  });
+  return lines.join("\n");
+};
+
+const sendSpotifyRenewalsToProviderWhatsapp = async ({
+  renewals = [],
+  providerId = 11,
+  manageWhatsappLifecycle = true,
+  source = "checkout_renewal",
+  idOrden = null,
+} = {}) => {
+  const items = (Array.isArray(renewals) ? renewals : [])
+    .map((item) => ({
+      correo: String(item?.correo || "").trim(),
+      clave: String(item?.clave || "").trim(),
+    }))
+    .filter((item) => item.correo || item.clave);
+  if (!items.length) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "no_spotify_renewals",
+      id_orden: toPositiveInt(idOrden) || null,
+    };
+  }
+
+  const resolvedProviderId = toPositiveInt(providerId);
+  if (!resolvedProviderId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_provider_id",
+      id_orden: toPositiveInt(idOrden) || null,
+    };
+  }
+
+  const { data: providerRow, error: providerErr } = await supabaseAdmin
+    .from("proveedores")
+    .select("id_proveedor, whatsapp")
+    .eq("id_proveedor", resolvedProviderId)
+    .maybeSingle();
+  if (providerErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: isMissingColumnError(providerErr, "whatsapp")
+        ? "provider_whatsapp_column_missing"
+        : "provider_lookup_error",
+      error: providerErr?.message || String(providerErr),
+      id_proveedor: resolvedProviderId,
+      id_orden: toPositiveInt(idOrden) || null,
+    };
+  }
+
+  const targetPhone = normalizeWhatsappPhone(providerRow?.whatsapp);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "provider_phone_missing",
+      id_proveedor: resolvedProviderId,
+      id_orden: toPositiveInt(idOrden) || null,
+    };
+  }
+
+  const message = buildWhatsappSpotifyRenewalsMessage(items);
+  if (!message) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "empty_message_payload",
+      id_proveedor: resolvedProviderId,
+      id_orden: toPositiveInt(idOrden) || null,
+    };
+  }
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    try {
+      await ensureWhatsappClientReady({
+        reason: shouldManageWhatsappLifecycle
+          ? `spotify_renewal_provider_alert:${source}`
+          : "spotify_renewal_provider_alert_batch",
+        allowWhenDisabled: true,
+      });
+    } catch (readyErr) {
+      return {
+        sent: false,
+        skipped: false,
+        reason: "whatsapp_not_ready",
+        error: readyErr?.message || String(readyErr),
+        id_proveedor: resolvedProviderId,
+        id_orden: toPositiveInt(idOrden) || null,
+      };
+    }
+  }
+
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando renovaciones Spotify al proveedor",
+    );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: `spotify_renewal_provider_alert_completed:${source}`,
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[spotify-renovacion] whatsapp shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_proveedor: resolvedProviderId,
+      id_orden: toPositiveInt(idOrden) || null,
+      phone: targetPhone,
+    };
+  }
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_proveedor: resolvedProviderId,
+    id_orden: toPositiveInt(idOrden) || null,
+    phone: targetPhone,
+    total: items.length,
+  };
 };
 
 const buildWhatsappVentaEntregadaMessage = ({
@@ -2374,6 +2558,123 @@ const sendReporteSolvedToWhatsappOwner = async ({
         });
       } catch (shutdownErr) {
         console.error("[reportes:whatsapp] solucionado shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+      phone: targetPhone,
+    };
+  }
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_reporte: reportId,
+    id_usuario_destino: targetUserId,
+    phone: targetPhone,
+  };
+};
+
+const sendReporteIncorrectDataToWhatsappOwner = async ({
+  reporte = null,
+  incluirCorreo = false,
+  incluirClave = false,
+  imagen = "",
+  manageWhatsappLifecycle = true,
+} = {}) => {
+  const reportId = toPositiveInt(reporte?.id_reporte);
+  const targetUserId = toPositiveInt(reporte?.id_usuario);
+  if (!reportId) {
+    return { sent: false, skipped: true, reason: "invalid_report" };
+  }
+  if (!targetUserId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_target_user",
+      id_reporte: reportId,
+    };
+  }
+  const plataformaId = toPositiveInt(reporte?.id_plataforma);
+  if (plataformaId !== 9) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "platform_not_supported",
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+      id_plataforma: plataformaId || null,
+    };
+  }
+  if (incluirCorreo !== true && incluirClave !== true) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "missing_incorrect_data_flags",
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "target_user_phone_missing",
+      id_reporte: reportId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const message = buildWhatsappReporteDatosIncorrectosMessage({
+    idReporte: reportId,
+    incluirCorreo,
+    incluirClave,
+    imagen,
+  });
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? "report_incorrect_data_user_alert"
+        : "report_incorrect_data_user_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando alerta de datos incorrectos",
+    );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "report_incorrect_data_user_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[reportes:whatsapp] datos incorrectos shutdown error", shutdownErr);
       }
     }
   }
@@ -7082,6 +7383,72 @@ app.post("/api/whatsapp/reportes/notificar-solucion", async (req, res) => {
   }
 });
 
+app.post("/api/whatsapp/reportes/notificar-datos-incorrectos", async (req, res) => {
+  try {
+    let sessionUserId = null;
+    try {
+      sessionUserId = await getSessionUsuario(req);
+    } catch (authErr) {
+      if (authErr?.code !== AUTH_REQUIRED && authErr?.message !== AUTH_REQUIRED) throw authErr;
+      const bearerToken = getBearerTokenFromRequest(req);
+      if (!bearerToken) throw authErr;
+      sessionUserId = await resolveUsuarioFromAuthToken(bearerToken);
+    }
+    const reportId = toPositiveInt(req.body?.id_reporte ?? req.body?.idReporte);
+    if (!reportId) {
+      return res.status(400).json({ error: "id_reporte invalido" });
+    }
+    const incluirCorreo = isTrue(req.body?.correo ?? req.body?.incluirCorreo);
+    const incluirClave = isTrue(req.body?.clave ?? req.body?.incluirClave);
+    if (!incluirCorreo && !incluirClave) {
+      return res.status(400).json({ error: "Debe seleccionar Correo o Contraseña." });
+    }
+    const imagen = String(req.body?.imagen || "").trim();
+
+    const reporte = await fetchReporteWhatsappContextById(reportId);
+    if (!reporte?.id_reporte) {
+      return res.status(404).json({ error: "Reporte no encontrado" });
+    }
+
+    const reportOwnerId = toPositiveInt(reporte?.id_usuario);
+    if (reportOwnerId && reportOwnerId !== sessionUserId) {
+      const { data: permRow, error: permErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("permiso_admin, permiso_superadmin")
+        .eq("id_usuario", sessionUserId)
+        .maybeSingle();
+      if (permErr) throw permErr;
+      const isAdmin = isTrue(permRow?.permiso_admin) || isTrue(permRow?.permiso_superadmin);
+      if (!isAdmin) {
+        return res.status(403).json({ error: "No autorizado para notificar este reporte" });
+      }
+    }
+
+    const result = await sendReporteIncorrectDataToWhatsappOwner({
+      reporte,
+      incluirCorreo,
+      incluirClave,
+      imagen,
+      manageWhatsappLifecycle: true,
+    });
+
+    if (result?.skipped) return res.status(202).json({ ok: false, ...result });
+    if (result?.sent) return res.json({ ok: true, ...result });
+    return res.status(500).json({
+      error: result?.error || "No se pudo enviar la alerta de datos incorrectos por WhatsApp",
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[whatsapp/reportes/notificar-datos-incorrectos] error", err);
+    return res.status(500).json({
+      error: err?.message || "No se pudo notificar datos incorrectos por WhatsApp",
+    });
+  }
+});
+
 app.post("/api/whatsapp/ventas/notificar-entregada", async (req, res) => {
   try {
     await requireAdminSession(req);
@@ -9246,7 +9613,7 @@ const processOrderFromItems = async ({
     const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, suspendido, cuenta_principal:cuentas!ventas_id_cuenta_fkey(venta_perfil, venta_miembro), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(venta_perfil, venta_miembro)"
+        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)"
       )
       .in("id_venta", idsVentasRenovar);
     if (ventErr) throw ventErr;
@@ -9256,6 +9623,7 @@ const processOrderFromItems = async ({
   }
 
   let renovacionesPendientesCount = 0;
+  const spotifyRenovacionesParaProveedor = [];
   const renovPromises = renovaciones.map((it) => {
     const price = priceMap[it.id_precio] || {};
     const platId = Number(price?.id_plataforma) || null;
@@ -9281,6 +9649,10 @@ const processOrderFromItems = async ({
     const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
     if (renovarPendiente) renovacionesPendientesCount += 1;
     const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
+    const sourceAccountRenov =
+      ventaAnt?.cuenta_miembro?.id_cuenta ? ventaAnt.cuenta_miembro : ventaAnt?.cuenta_principal || null;
+    const correoRenovacion = String(sourceAccountRenov?.correo || "").trim();
+    const claveRenovacion = String(sourceAccountRenov?.clave || "").trim();
     const isCuentaCompletaRenov =
       isCuentaCompletaByFlags(cuentaVenta) ||
       (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
@@ -9303,7 +9675,16 @@ const processOrderFromItems = async ({
       updatePayload.cuenta_nueva = false;
     }
     if (isCuentaCompletaRenov || isVentaCompletaRenov) {
-      updatePayload.cuenta_pagada_admin = false;
+      if (platId === 9) {
+        updatePayload.cuenta_pagada_admin = true;
+        spotifyRenovacionesParaProveedor.push({
+          id_venta: toPositiveInt(it?.id_venta) || null,
+          correo: correoRenovacion || "-",
+          clave: claveRenovacion || "-",
+        });
+      } else {
+        updatePayload.cuenta_pagada_admin = false;
+      }
     }
     return supabaseAdmin
       .from("ventas")
@@ -9314,6 +9695,23 @@ const processOrderFromItems = async ({
     const renovRes = await Promise.all(renovPromises);
     const renovErr = renovRes.find((r) => r?.error);
     if (renovErr?.error) throw renovErr.error;
+  }
+  if (spotifyRenovacionesParaProveedor.length) {
+    const waProveedorResult = await sendSpotifyRenewalsToProviderWhatsapp({
+      renewals: spotifyRenovacionesParaProveedor,
+      providerId: 11,
+      source: "processOrderFromItems",
+      idOrden: ordenId,
+    });
+    if (waProveedorResult?.sent) {
+      console.log("[checkout] spotify renovaciones notificadas a proveedor", {
+        id_orden: ordenId,
+        id_proveedor: waProveedorResult?.id_proveedor || 11,
+        total: waProveedorResult?.total || spotifyRenovacionesParaProveedor.length,
+      });
+    } else {
+      console.warn("[checkout] spotify renovaciones proveedor no enviadas", waProveedorResult);
+    }
   }
 
   // Filtra items nuevos (no renovaciones) para asignación de stock
@@ -9716,7 +10114,7 @@ const processOrderFromItems = async ({
   if (assignedCuentaIds.length) {
     const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
       .from("cuentas")
-      .select("id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro")
+      .select("id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro, correo, clave")
       .in("id_cuenta", assignedCuentaIds);
     if (ctaValErr) throw ctaValErr;
     const bad = (cuentasAsignadas || []).find((c) => isInactive(c.inactiva));
@@ -9780,6 +10178,7 @@ const processOrderFromItems = async ({
   });
 
   const sourceRowsForVentas = [...asignaciones, ...pendientes];
+  const spotifyComprasCompletasParaProveedor = [];
   const ventasToInsert = sourceRowsForVentas.map((a) => {
     const mesesValRaw = a.meses || 1;
     const mesesVal =
@@ -9800,6 +10199,16 @@ const processOrderFromItems = async ({
     const isCuentaCompletaVenta = cuentaFlags
       ? isCuentaCompletaByFlags(cuentaFlags)
       : isCompleta && !isTrue(priceInfo.sub_cuenta);
+    const isSpotifyCompletaCompra = isCuentaCompletaVenta && Number(platId) === 9;
+    if (isSpotifyCompletaCompra) {
+      const correoCuenta = String(cuentaFlags?.correo || "").trim();
+      const claveCuenta = String(cuentaFlags?.clave || "").trim();
+      spotifyComprasCompletasParaProveedor.push({
+        id_cuenta: cuentaId || null,
+        correo: correoCuenta || "-",
+        clave: claveCuenta || "-",
+      });
+    }
     return {
       id_usuario: idUsuarioVentas,
       id_precio: a.id_precio,
@@ -9827,7 +10236,7 @@ const processOrderFromItems = async ({
       recordatorio_corte_enviado: false,
       aviso_admin: false,
       completa: isCompleta ? true : null,
-      cuenta_pagada_admin: isCuentaCompletaVenta ? false : null,
+      cuenta_pagada_admin: isCuentaCompletaVenta ? (isSpotifyCompletaCompra ? true : false) : null,
     };
   });
   console.log("[checkout] asignaciones", asignaciones);
@@ -9842,6 +10251,23 @@ const processOrderFromItems = async ({
       .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
     if (ventaErr) throw ventaErr;
     insertedVentas = ventasRes || [];
+  }
+  if (insertedVentas.length && spotifyComprasCompletasParaProveedor.length) {
+    const waComprasSpotifyResult = await sendSpotifyRenewalsToProviderWhatsapp({
+      renewals: spotifyComprasCompletasParaProveedor,
+      providerId: 11,
+      source: "processOrderFromItems_new_sales",
+      idOrden: ordenId,
+    });
+    if (waComprasSpotifyResult?.sent) {
+      console.log("[checkout] spotify compras completas notificadas a proveedor", {
+        id_orden: ordenId,
+        id_proveedor: waComprasSpotifyResult?.id_proveedor || 11,
+        total: waComprasSpotifyResult?.total || spotifyComprasCompletasParaProveedor.length,
+      });
+    } else {
+      console.warn("[checkout] spotify compras completas proveedor no enviadas", waComprasSpotifyResult);
+    }
   }
 
   const resolvedVentaByItemId = new Map();

@@ -26,11 +26,10 @@ const modalSolNotas = document.querySelector("#sol-modal-notas");
 const modalSolClose = document.querySelector(".modal-sol-close");
 
 let porPlataforma = new Map();
-let porPlataformaSol = new Map();
+let reportesSolRows = [];
 let reportesSolById = new Map();
-const btnSolucionados = document.querySelector("#btn-solucionados");
-const solSection = document.querySelector("#solucionados-section");
 const solListEl = document.querySelector("#reportes-solucionados-list");
+const solFilterSelect = document.querySelector("#reportes-solucionados-filtro");
 const adminSearchWrap = document.querySelector("#reportes-admin-search");
 const adminSearchInput = document.querySelector("#reportes-admin-input");
 const adminSearchResults = document.querySelector("#reportes-admin-results");
@@ -247,7 +246,12 @@ async function loadReportesSolucionados() {
   try {
     const id = Number(selectedUserId || requireSession() || 0);
     if (!Number.isFinite(id) || id <= 0) {
-      porPlataformaSol = new Map();
+      reportesSolRows = [];
+      reportesSolById = new Map();
+      if (solFilterSelect) {
+        solFilterSelect.innerHTML = '<option value="">Todas</option>';
+        solFilterSelect.value = "";
+      }
       renderSolucionadosList();
       return;
     }
@@ -259,17 +263,28 @@ async function loadReportesSolucionados() {
       .eq("solucionado", true)
       .order("id_reporte", { ascending: false });
     if (error) throw error;
-    porPlataformaSol = new Map();
-    (data || []).forEach((r) => {
-      const idp = r.id_plataforma;
-      const nombre = r.plataformas?.nombre || `Plataforma ${idp}`;
-      const buttonColor = r.plataformas?.color_1 || null;
-      const headerColor = r.plataformas?.color_2 || null;
-      if (!porPlataformaSol.has(idp)) {
-        porPlataformaSol.set(idp, { id: idp, nombre, buttonColor, headerColor, items: [] });
+    reportesSolRows = data || [];
+    if (solFilterSelect) {
+      const selectedPrev = String(solFilterSelect.value || "");
+      const plataformasMap = new Map();
+      (reportesSolRows || []).forEach((row) => {
+        const platId = Number(row?.id_plataforma);
+        if (!Number.isFinite(platId) || platId <= 0) return;
+        if (plataformasMap.has(platId)) return;
+        const nombre = String(row?.plataformas?.nombre || "").trim() || `Plataforma ${platId}`;
+        plataformasMap.set(platId, nombre);
+      });
+      const optionsHtml = Array.from(plataformasMap.entries())
+        .sort((a, b) => String(a[1]).localeCompare(String(b[1]), "es", { sensitivity: "base" }))
+        .map(([platId, nombre]) => `<option value="${platId}">${escapeHtml(nombre)}</option>`)
+        .join("");
+      solFilterSelect.innerHTML = `<option value="">Todas</option>${optionsHtml}`;
+      if (selectedPrev && solFilterSelect.querySelector(`option[value="${selectedPrev}"]`)) {
+        solFilterSelect.value = selectedPrev;
+      } else {
+        solFilterSelect.value = "";
       }
-      porPlataformaSol.get(idp).items.push(r);
-    });
+    }
     renderSolucionadosList();
   } catch (err) {
     console.error("load solucionados error", err);
@@ -365,85 +380,66 @@ function bindSuperadminSearch({ selfName = "Mi cuenta" } = {}) {
 
 function renderSolucionadosList() {
   if (!solListEl) return;
-  if (!porPlataformaSol.size) {
+  const selectedPlatId = String(solFilterSelect?.value || "").trim();
+  const rows = selectedPlatId
+    ? (reportesSolRows || []).filter(
+        (row) => String(row?.id_plataforma || "") === selectedPlatId,
+      )
+    : reportesSolRows || [];
+  if (!rows.length) {
     reportesSolById = new Map();
-    solListEl.innerHTML = `<p class="status">No hay reportes solucionados en los últimos 30 días.</p>`;
+    solListEl.innerHTML = `<p class="status">No hay reportes solucionados.</p>`;
     return;
   }
   reportesSolById = new Map();
-  Array.from(porPlataformaSol.values()).forEach((p) => {
-    (p.items || []).forEach((r) => {
+  const rowsHtml = rows
+    .map((r) => {
       if (r?.id_reporte) reportesSolById.set(String(r.id_reporte), r);
-    });
-  });
-  solListEl.innerHTML = Array.from(porPlataformaSol.values())
-    .map((p, idx) => {
-      const rows = (p.items || [])
-        .map((r) => {
-          const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
-          const correo = r.cuentas?.correo || "-";
-          const fecha = r.fecha_creacion || "-";
-          return `
-            <tr>
-              <td>${escapeHtml(idReporte)}</td>
-              <td>${escapeHtml(correo)}</td>
-              <td>${escapeHtml(fecha)}</td>
-              <td><button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle-sol">Ver detalles</button></td>
-            </tr>
-          `;
-        })
-        .join("");
+      const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
+      const plataforma = r.plataformas?.nombre || `Plataforma ${r.id_plataforma || "-"}`;
+      const correo = r.cuentas?.correo || "-";
+      const fecha = r.fecha_creacion || "-";
       return `
-        <section class="inventario-item" data-plat="${p.id}">
-          <button type="button" class="btn-outline inventario-btn" data-toggle-sol="${p.id}" data-idx="${idx}"${buttonStyleForColor(p.buttonColor)}>
-            ${escapeHtml(p.nombre)}
-          </button>
-          <div class="inventario-plan hidden" data-sol-content="${p.id}">
-            <div class="tabla-wrapper">
-              <table class="table-base reportes-table"${tableStyleForColor(p.headerColor)}>
-                <thead>
-                  <tr>
-                    <th>ID Reporte</th>
-                    <th>Correo</th>
-                    <th>Fecha del reporte</th>
-                    <th>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rows || `<tr><td colspan="4" class="status">No hay reportes solucionados para esta plataforma.</td></tr>`}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
+        <tr>
+          <td>${escapeHtml(idReporte)}</td>
+          <td>${escapeHtml(plataforma)}</td>
+          <td>${escapeHtml(correo)}</td>
+          <td>${escapeHtml(fecha)}</td>
+          <td><button class="btn-outline btn-small" data-id="${r.id_reporte}" data-action="detalle-sol">Ver detalles</button></td>
+        </tr>
       `;
     })
     .join("");
+  solListEl.innerHTML = `
+    <div class="tabla-wrapper">
+      <table class="table-base reportes-table">
+        <thead>
+          <tr>
+            <th>ID Reporte</th>
+            <th>Plataforma</th>
+            <th>Correo</th>
+            <th>Fecha del reporte</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
-btnSolucionados?.addEventListener("click", () => {
-  if (!solSection) return;
-  const isHidden = solSection.classList.contains("hidden");
-  solSection.classList.toggle("hidden", !isHidden);
-});
-
 solListEl?.addEventListener("click", (e) => {
-  const toggleBtn = e.target.closest("button[data-toggle-sol]");
-  if (toggleBtn) {
-    const platId = String(toggleBtn.dataset.toggleSol || "");
-    const section = toggleBtn.closest(".inventario-item");
-    const content = section?.querySelector(`[data-sol-content="${platId}"]`);
-    if (!content) return;
-    content.classList.toggle("hidden");
-    section?.classList.toggle("open", !content.classList.contains("hidden"));
-    return;
-  }
-
   const btn = e.target.closest("button[data-action='detalle-sol']");
   if (!btn) return;
   const id = btn.dataset.id;
   const row = reportesSolById.get(String(id));
   if (row) openModalSol(row);
+});
+
+solFilterSelect?.addEventListener("change", () => {
+  renderSolucionadosList();
 });
 
 function openModalSol(row) {
