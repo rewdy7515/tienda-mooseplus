@@ -148,6 +148,34 @@
         gap: 8px;
         margin: 0 0 12px;
       }
+      .edit-cell-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .edit-cell-wrap .edit-field-text {
+        min-width: 0;
+        word-break: break-word;
+      }
+      .edit-cell-wrap .edit-field-input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .btn-edit-field {
+        flex: 0 0 auto;
+        min-width: 34px;
+        padding: 4px 8px;
+        line-height: 1.2;
+      }
+      .datos-confirm-lines {
+        display: grid;
+        gap: 6px;
+        margin: 4px 0 2px;
+      }
+      .datos-confirm-line {
+        font-size: 14px;
+      }
     </style>
   </head>
   <body>
@@ -178,10 +206,26 @@
         </div>
       </div>
     </div>
+    <div id="datos-confirm-modal" class="cliente-modal hidden" aria-hidden="true">
+      <div class="cliente-modal-card">
+        <strong>¿Seguro que quieres actualizar estos datos?</strong>
+        <div id="datos-confirm-lines" class="datos-confirm-lines"></div>
+        <div class="cliente-modal-actions">
+          <button type="button" class="btn-outline" id="datos-confirm-cancel">Cancelar</button>
+          <button type="button" class="btn-primary" id="datos-confirm-send">Enviar datos</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase, fetchVentasOrden } from "../scripts/api.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        supabase,
+        fetchVentasOrden,
+        fetchOrdenByVenta,
+      } from "../scripts/api.js";
       import { buildServiceCopyText } from "../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../scripts/date-format.js";
       import { buildNotification } from "../scripts/notification-templates.js";
@@ -200,17 +244,25 @@
       const clienteNombreInput = document.querySelector("#cliente-nombre-input");
       const btnClienteCancel = document.querySelector("#cliente-cancel");
       const btnClienteGuardar = document.querySelector("#cliente-guardar");
+      const datosConfirmModal = document.querySelector("#datos-confirm-modal");
+      const datosConfirmLines = document.querySelector("#datos-confirm-lines");
+      const btnDatosConfirmCancel = document.querySelector("#datos-confirm-cancel");
+      const btnDatosConfirmSend = document.querySelector("#datos-confirm-send");
       const FORCE_CLIENT_INPUTS = false;
       let canAnnotateCliente = false;
       let activeClienteVentaId = null;
+      let currentUserId = null;
+      let pendingDatosConfirm = null;
       let reemplazosCache = null;
       let reemplazosCachePromise = null;
 
       const params = new URLSearchParams(window.location.search);
       const idOrdenParam = params.get("id_orden");
+      const ventaParamRaw = params.get("id_venta") || params.get("venta");
+      const isModificarDatosMode = params.get("modificar_datos") === "1";
       let ventasById = {};
       let platById = {};
-      console.log("entregar_servicios init", { idOrdenParam });
+      console.log("entregar_servicios init", { idOrdenParam, ventaParamRaw, isModificarDatosMode });
 
       const setStatus = (msg) => {
         if (statusEl) statusEl.textContent = msg || "";
@@ -225,6 +277,30 @@
         const parsed = Number(value);
         if (!Number.isFinite(parsed) || parsed <= 0) return null;
         return Math.trunc(parsed);
+      };
+      const idVentaParam = toPositiveId(ventaParamRaw);
+      const normalizeCorreo = (value) => String(value || "").trim().toLowerCase();
+      const closeDatosConfirmModal = () => {
+        if (!datosConfirmModal) return;
+        datosConfirmModal.classList.add("hidden");
+        datosConfirmModal.setAttribute("aria-hidden", "true");
+        pendingDatosConfirm = null;
+        if (datosConfirmLines) datosConfirmLines.innerHTML = "";
+      };
+      const openDatosConfirmModal = (payload) => {
+        if (!datosConfirmModal || !datosConfirmLines) return;
+        const lines = [];
+        if (payload?.correoChanged) {
+          lines.push(`<div class="datos-confirm-line">Correo: ${escapeHtml(payload.correo)}</div>`);
+        }
+        if (payload?.claveChanged) {
+          lines.push(`<div class="datos-confirm-line">Clave: ${escapeHtml(payload.clave)}</div>`);
+        }
+        if (!lines.length) return;
+        pendingDatosConfirm = payload;
+        datosConfirmLines.innerHTML = lines.join("");
+        datosConfirmModal.classList.remove("hidden");
+        datosConfirmModal.setAttribute("aria-hidden", "false");
       };
       const loadReemplazosBloqueados = async (force = false) => {
         if (force) {
@@ -449,6 +525,23 @@
             const showPerfilColumn = !isGiftCard && !!(platObj.por_acceso || platObj.por_pantalla);
             const perfilHeader = platObj.por_acceso ? "Acceso" : "Perfil";
             const showTipoColumn = !isGiftCard && !isRenovacion && platId === 9;
+            const isReportesEditPlat9 = Boolean(
+              isModificarDatosMode && idVentaParam && !isRenovacion && !isGiftCard && platId === 9,
+            );
+            const buildEditableCell = (value = "", field = "") => {
+              const textValue = String(value || "").trim();
+              return `
+                <div class="edit-cell-wrap" data-field="${field}">
+                  <span class="edit-field-text">${escapeHtml(textValue || "-")}</span>
+                  <input
+                    type="${field === "clave" ? "text" : "email"}"
+                    class="form-input edit-field-input hidden input-${field}"
+                    value="${escapeHtml(textValue)}"
+                  />
+                  <button type="button" class="btn-outline btn-edit-field" data-field="${field}" aria-label="Editar ${field}">✎</button>
+                </div>
+              `;
+            };
             const body = rows
               .map((r) => {
                 const perfilTxt = r.perfil || "";
@@ -516,6 +609,24 @@
                 const annotateBtn = canAnnotateCliente
                   ? `<button type="button" class="btn-outline btn-anotar-cliente" data-venta="${r.id_venta}">Anotar cliente</button>`
                   : "";
+                if (isReportesEditPlat9) {
+                  const correoEdit = String(r.correo || "").trim();
+                  const claveEdit = String(r.clave || "").trim();
+                  return `
+                    <tr data-edit-row="1" data-venta="${r.id_venta}" data-original-correo="${escapeHtml(
+                      correoEdit,
+                    )}" data-original-clave="${escapeHtml(claveEdit)}">
+                      <td>#${String(r.id_venta || "").padStart(4, "0")}</td>
+                      <td>${buildEditableCell(correoEdit, "correo")}</td>
+                      <td>${buildEditableCell(claveEdit, "clave")}</td>
+                      <td>
+                        <div class="entrega-action-wrap">
+                          <button type="button" class="btn-outline btn-send-datos btn-send-datos-edit" data-venta="${r.id_venta}">Enviar datos</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }
                 if (isGiftCard) {
                   return `
                     <tr>
@@ -602,7 +713,13 @@
             return `
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${platObj.nombre}</h3>
-                ${showClientInputs && hasPendiente ? `<p class="status">Ingrese sus datos</p>` : ""}
+                ${
+                  isReportesEditPlat9
+                    ? ""
+                    : showClientInputs && hasPendiente
+                      ? `<p class="status">Ingrese sus datos</p>`
+                      : ""
+                }
                 ${
                   isGiftCard
                     ? `<div class="giftcard-tools">
@@ -627,14 +744,25 @@
                   <table class="table-base" style="${platObj.color_1 ? `--table-header-bg:${platObj.color_1};` : ""}">
                     <thead>
                       <tr>
-                        <th>ID Venta</th>
-                        ${isGiftCard ? "" : "<th>Correo</th>"}
-                        ${isGiftCard ? "" : isRenovacion ? "" : "<th>Clave</th>"}
-                        ${isGiftCard ? "" : showTipoColumn ? "<th>Tipo</th>" : ""}
-                        ${isGiftCard ? "" : isRenovacion ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
-                        ${showPinColumn ? "<th>PIN</th>" : ""}
-                        ${isGiftCard ? "" : "<th>Fecha de corte</th>"}
-                        <th>Acción</th>
+                        ${
+                          isReportesEditPlat9
+                            ? `
+                              <th>ID Venta</th>
+                              <th>Correo</th>
+                              <th>Clave</th>
+                              <th>Acción</th>
+                            `
+                            : `
+                              <th>ID Venta</th>
+                              ${isGiftCard ? "" : "<th>Correo</th>"}
+                              ${isGiftCard ? "" : isRenovacion ? "" : "<th>Clave</th>"}
+                              ${isGiftCard ? "" : showTipoColumn ? "<th>Tipo</th>" : ""}
+                              ${isGiftCard ? "" : isRenovacion ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
+                              ${showPinColumn ? "<th>PIN</th>" : ""}
+                              ${isGiftCard ? "" : "<th>Fecha de corte</th>"}
+                              <th>Acción</th>
+                            `
+                        }
                      </tr>
                    </thead>
                    <tbody>${body}</tbody>
@@ -652,7 +780,33 @@
 
       const loadServicios = async () => {
         try {
-          if (!idOrdenParam) {
+          if (ventaParamRaw && !idVentaParam) {
+            setStatus("El parámetro id_venta es inválido.");
+            if (tablasEl) tablasEl.innerHTML = "";
+            setVerificacionNoteVisible(false);
+            return;
+          }
+
+          let effectiveOrderId = toPositiveId(idOrdenParam);
+          if (idVentaParam) {
+            const ordenByVentaResp = await fetchOrdenByVenta(idVentaParam);
+            if (ordenByVentaResp?.error) {
+              setStatus(ordenByVentaResp.error || `No se pudo ubicar la venta #${idVentaParam}.`);
+              if (tablasEl) tablasEl.innerHTML = "";
+              setVerificacionNoteVisible(false);
+              return;
+            }
+            const ventaOrderId = toPositiveId(ordenByVentaResp?.id_orden);
+            if (!ventaOrderId) {
+              setStatus(`La venta #${idVentaParam} no tiene una orden válida asociada.`);
+              if (tablasEl) tablasEl.innerHTML = "";
+              setVerificacionNoteVisible(false);
+              return;
+            }
+            effectiveOrderId = ventaOrderId;
+          }
+
+          if (!effectiveOrderId) {
             if (tablasEl) tablasEl.innerHTML = "";
             setStatus("");
             setVerificacionNoteVisible(false);
@@ -661,9 +815,10 @@
             return;
           }
           const user = await loadCurrentUser();
+          currentUserId = toPositiveId(user?.id_usuario);
           canAnnotateCliente = user?.acceso_cliente === false;
           let ventas = [];
-          const resp = await fetchVentasOrden(idOrdenParam);
+          const resp = await fetchVentasOrden(effectiveOrderId);
           if (resp?.error) {
             setStatus(resp.error);
             if (tablasEl) tablasEl.innerHTML = "";
@@ -671,7 +826,10 @@
             return;
           }
           ventas = resp?.ventas || [];
-          console.log("entregar_servicios ventas por orden", { idOrdenParam, total: ventas.length });
+          console.log("entregar_servicios ventas por orden", {
+            idOrden: effectiveOrderId,
+            total: ventas.length,
+          });
 
           const platIds = Array.from(
             new Set(
@@ -696,6 +854,7 @@
 
           const onlyFaltantes = params.get("faltantes") === "1";
           const filteredVentas = (ventas || []).filter((v) => {
+            if (idVentaParam && Number(v?.id_venta) !== idVentaParam) return false;
             if (!onlyFaltantes) return true;
             if (!v.pendiente) return false;
             const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
@@ -724,7 +883,15 @@
             total: filteredVentas.length,
             pendientes: onlyPendientes.length,
             nuevas: onlyNuevas.length,
+            idVentaParam: idVentaParam || null,
           });
+
+          if (idVentaParam && !filteredVentas.length) {
+            setStatus(`No se encontró la venta #${idVentaParam} para mostrar.`);
+            if (tablasEl) tablasEl.innerHTML = "";
+            setVerificacionNoteVisible(false);
+            return;
+          }
 
           (onlyPendientes || []).forEach((v) => {
             const platId = v.cuentas?.id_plataforma || v.precios?.id_plataforma;
@@ -935,6 +1102,61 @@
         }
       };
 
+      const persistEditedDatosVenta = async ({
+        ventaId,
+        correo,
+        clave,
+        correoChanged = false,
+        claveChanged = false,
+      } = {}) => {
+        const ventaIdNum = toPositiveId(ventaId);
+        if (!ventaIdNum) throw new Error("id_venta inválido");
+        const venta = ventasById[String(ventaIdNum)] || {};
+        const ventaPayload = {};
+        if (correoChanged) ventaPayload.correo_miembro = normalizeCorreo(correo);
+        if (claveChanged) ventaPayload.clave_miembro = String(clave || "").trim();
+        if (Object.keys(ventaPayload).length) {
+          const { error: updVentaErr } = await supabase
+            .from("ventas")
+            .update(ventaPayload)
+            .eq("id_venta", ventaIdNum);
+          if (updVentaErr) throw updVentaErr;
+        }
+
+        const targetCuentaId = toPositiveId(
+          venta?.id_cuenta_miembro || venta?.cuentas_miembro?.id_cuenta || venta?.cuentas?.id_cuenta,
+        );
+        const cuentaPayload = {};
+        if (correoChanged) cuentaPayload.correo = normalizeCorreo(correo);
+        if (claveChanged) cuentaPayload.clave = String(clave || "").trim();
+        if (targetCuentaId && Object.keys(cuentaPayload).length) {
+          const { error: updCuentaErr } = await supabase
+            .from("cuentas")
+            .update(cuentaPayload)
+            .eq("id_cuenta", targetCuentaId);
+          if (updCuentaErr) throw updCuentaErr;
+        }
+
+        await markReportesDatosCorregidosByVenta(ventaIdNum);
+      };
+
+      const markReportesDatosCorregidosByVenta = async (ventaId) => {
+        const ventaIdNum = toPositiveId(ventaId);
+        if (!ventaIdNum) return;
+        let reportQuery = supabase
+          .from("reportes")
+          .update({
+            datos_corregidos: true,
+            datos_incorrectos: false,
+          })
+          .eq("id_venta", ventaIdNum)
+          .eq("en_revision", true)
+          .eq("solucionado", false);
+        if (currentUserId) reportQuery = reportQuery.eq("id_usuario", currentUserId);
+        const { error: updReporteErr } = await reportQuery;
+        if (updReporteErr) throw updReporteErr;
+      };
+
       tablasEl?.addEventListener("click", (e) => {
         const copyEl = e.target.closest(".copyable");
         if (copyEl) {
@@ -946,6 +1168,28 @@
         if (!btn) return;
         const text = decodeURIComponent(btn.dataset.copy || "");
         copyToClipboard(text, btn);
+      });
+      tablasEl?.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-edit-field");
+        if (!btn) return;
+        const wrap = btn.closest(".edit-cell-wrap");
+        if (!wrap) return;
+        const textEl = wrap.querySelector(".edit-field-text");
+        const inputEl = wrap.querySelector(".edit-field-input");
+        if (!textEl || !inputEl) return;
+        const opening = inputEl.classList.contains("hidden");
+        if (opening) {
+          inputEl.classList.remove("hidden");
+          textEl.classList.add("hidden");
+          btn.textContent = "✓";
+          inputEl.focus();
+          inputEl.select();
+          return;
+        }
+        textEl.textContent = String(inputEl.value || "").trim() || "-";
+        inputEl.classList.add("hidden");
+        textEl.classList.remove("hidden");
+        btn.textContent = "✎";
       });
       tablasEl?.addEventListener("click", (e) => {
         const btn = e.target.closest(".btn-copy-renew");
@@ -1002,6 +1246,37 @@
         const row = btn.closest("tr");
         const ventaId = btn.dataset.venta;
         if (!ventaId) return;
+        const isEditRow = row?.dataset?.editRow === "1";
+        if (isEditRow) {
+          const correoNuevoRaw = row?.querySelector(".input-correo")?.value?.trim() || "";
+          const claveNuevaRaw = row?.querySelector(".input-clave")?.value?.trim() || "";
+          const correoNuevo = normalizeCorreo(correoNuevoRaw);
+          const claveNueva = String(claveNuevaRaw || "").trim();
+          if (!correoNuevo) {
+            alert("Ingresa el correo.");
+            return;
+          }
+          if (!claveNueva) {
+            alert("Ingresa la clave.");
+            return;
+          }
+          const correoOriginal = normalizeCorreo(row?.dataset?.originalCorreo || "");
+          const claveOriginal = String(row?.dataset?.originalClave || "").trim();
+          const correoChanged = correoNuevo !== correoOriginal;
+          const claveChanged = claveNueva !== claveOriginal;
+          if (!correoChanged && !claveChanged) {
+            alert("No detectamos cambios en correo ni clave.");
+            return;
+          }
+          openDatosConfirmModal({
+            ventaId,
+            correo: correoNuevo,
+            clave: claveNueva,
+            correoChanged,
+            claveChanged,
+          });
+          return;
+        }
         const correoVal = row?.querySelector(".input-correo")?.value?.trim() || "";
         const claveVal = row?.querySelector(".input-clave")?.value?.trim() || "";
         const tipoVal = row?.querySelector(".input-tipo")?.value?.trim() || "";
@@ -1208,6 +1483,7 @@
             .update(payload)
             .eq("id_venta", ventaId);
           if (error) throw error;
+          await markReportesDatosCorregidosByVenta(ventaId);
           btn.classList.add("hidden");
           const status = document.createElement("span");
           status.className = "entrega-action-badge is-delivered";
@@ -1217,6 +1493,33 @@
         } catch (err) {
           console.error("enviar datos error", err);
           alert("No se pudieron enviar los datos.");
+        }
+      });
+
+      btnDatosConfirmCancel?.addEventListener("click", closeDatosConfirmModal);
+      datosConfirmModal?.addEventListener("click", (e) => {
+        if (e.target === datosConfirmModal) closeDatosConfirmModal();
+      });
+      btnDatosConfirmSend?.addEventListener("click", async () => {
+        if (!pendingDatosConfirm) return;
+        const btn = btnDatosConfirmSend;
+        if (btn) btn.disabled = true;
+        try {
+          await persistEditedDatosVenta({
+            ventaId: pendingDatosConfirm.ventaId,
+            correo: pendingDatosConfirm.correo,
+            clave: pendingDatosConfirm.clave,
+            correoChanged: pendingDatosConfirm.correoChanged,
+            claveChanged: pendingDatosConfirm.claveChanged,
+          });
+          closeDatosConfirmModal();
+          await loadServicios();
+          alert("Datos enviados.");
+        } catch (err) {
+          console.error("confirmar envio datos error", err);
+          alert("No se pudieron enviar los datos.");
+        } finally {
+          if (btn) btn.disabled = false;
         }
       });
 

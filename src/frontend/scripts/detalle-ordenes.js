@@ -23,10 +23,22 @@ const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
 };
 
+const toPositiveId = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.trunc(parsed);
+};
+
 const goToEntregarServiciosByOrden = (idOrden) => {
-  const idOrdenNum = Number(idOrden);
-  if (!Number.isFinite(idOrdenNum) || idOrdenNum <= 0) return;
+  const idOrdenNum = toPositiveId(idOrden);
+  if (!idOrdenNum) return;
   window.location.href = `entregar_servicios.html?id_orden=${encodeURIComponent(idOrdenNum)}`;
+};
+
+const goToEntregarServiciosByOrdenVenta = (idVenta) => {
+  const idVentaNum = toPositiveId(idVenta);
+  if (!idVentaNum) return;
+  window.location.href = `entregar_servicios.html?id_venta=${encodeURIComponent(idVentaNum)}`;
 };
 
 backBtn?.addEventListener("click", () => {
@@ -36,6 +48,11 @@ infoGridEl?.addEventListener("click", (event) => {
   const btn = event.target?.closest(".btn-ver-servicios-orden");
   if (!btn) return;
   goToEntregarServiciosByOrden(btn.dataset.idOrden);
+});
+itemsEl?.addEventListener("click", (event) => {
+  const btn = event.target?.closest(".btn-ver-venta-item");
+  if (!btn) return;
+  goToEntregarServiciosByOrdenVenta(btn.dataset.idVenta);
 });
 
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
@@ -401,7 +418,7 @@ const calcItemTotals = (
   };
 };
 
-const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
+const renderItems = (items, catalog, useMayor, giftCardLookups = null, { idOrden = null } = {}) => {
   if (!itemsEl) return;
   if (!Array.isArray(items) || !items.length) {
     itemsEl.innerHTML = '<p class="cart-empty">Esta orden no tiene items asociados.</p>';
@@ -462,6 +479,7 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
       const imagen = platform.imagen || "";
       const totalVenta = Number.isFinite(Number(item?.monto)) ? Number(item.monto) : totals.subtotal;
       const estadoVenta = isTrue(item?.pendiente) ? "Procesandose" : "Entregado";
+      const idVentaNum = toPositiveId(item?.id_venta);
       const itemMeta = [
         detalle ? `<p class="orden-item-meta">${detalle}</p>` : "",
         isGiftCard
@@ -484,8 +502,17 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
                   <img src="${imagen}" alt="${nombre}" loading="lazy" decoding="async" />
                 </div>
                 <div class="cart-product-text">
-                  <p class="cart-name">${nombre}</p>
-                  ${itemMeta}
+                  <div class="orden-item-head">
+                    <div class="orden-item-main">
+                      <p class="cart-name">${nombre}</p>
+                      ${itemMeta}
+                    </div>
+                    ${
+                      idVentaNum
+                        ? `<button type="button" class="btn-outline btn-small btn-ver-venta-item" data-id-venta="${idVentaNum}">Ver</button>`
+                        : ""
+                    }
+                  </div>
                 </div>
               </div>
             </div>
@@ -533,7 +560,7 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null) => {
   `;
 };
 
-const renderOrdenesItems = (items, giftCardLookups = null) => {
+const renderOrdenesItems = (items, giftCardLookups = null, { idOrden = null } = {}) => {
   if (!itemsEl) return;
   if (!Array.isArray(items) || !items.length) {
     itemsEl.innerHTML = '<p class="cart-empty">Esta orden no tiene items asociados.</p>';
@@ -548,6 +575,7 @@ const renderOrdenesItems = (items, giftCardLookups = null) => {
       const image = String(item?.plataformas?.imagen || "").trim();
       const isGiftCard = isTrue(item?.plataformas?.tarjeta_de_regalo);
       const tipo = isTrue(item?.renovacion) ? "Renovación" : "Nuevo";
+      const idVentaNum = toPositiveId(item?.id_venta);
       const itemMeta = isGiftCard
         ? `<p class="orden-item-meta">PIN: ${getGiftCardPinDisplay({
             item,
@@ -568,8 +596,17 @@ const renderOrdenesItems = (items, giftCardLookups = null) => {
                   }
                 </div>
                 <div class="cart-product-text">
-                  <p class="cart-name">${platformName}</p>
-                  ${itemMeta}
+                  <div class="orden-item-head">
+                    <div class="orden-item-main">
+                      <p class="cart-name">${platformName}</p>
+                      ${itemMeta}
+                    </div>
+                    ${
+                      idVentaNum
+                        ? `<button type="button" class="btn-outline btn-small btn-ver-venta-item" data-id-venta="${idVentaNum}">Ver</button>`
+                        : ""
+                    }
+                  </div>
                 </div>
               </div>
             </div>
@@ -743,7 +780,7 @@ const init = async () => {
     const snapshotItems = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
     const itemsSource = String(detalleResp?.items_source || "").trim();
     if (itemsSource === "ordenes_items" && snapshotItems.length) {
-      renderOrdenesItems(snapshotItems, giftCardLookups);
+      renderOrdenesItems(snapshotItems, giftCardLookups, { idOrden });
       setStatus("");
       return;
     }
@@ -766,7 +803,7 @@ const init = async () => {
     }
     if (!items.length) {
       setStatus("");
-      renderItems([], null, false);
+      renderItems([], null, false, null, { idOrden });
       return;
     }
 
@@ -782,7 +819,7 @@ const init = async () => {
       return;
     }
     const useMayor = currentUser ? !isTrue(currentUser.acceso_cliente) : false;
-    renderItems(items, catalog, useMayor, giftCardLookups);
+    renderItems(items, catalog, useMayor, giftCardLookups, { idOrden });
     setStatus("");
   } catch (err) {
     console.error("detalle ordenes error", err);

@@ -751,6 +751,8 @@ const renderReportesList = (plataformas = []) => {
               const correo = r.cuentas?.correo || "-";
               const correoText = escapeHtml(correo);
               const correoCopyAttr = escapeHtml(correo);
+              const datosCorregidos = isTrue(r?.datos_corregidos);
+              const datosIncorrectos = !datosCorregidos && isTrue(r?.datos_incorrectos);
               const madreCorreo = normalizeCopyValue(r?.cuenta_madre_correo);
               const madreCopyAttr = escapeHtml(madreCorreo);
               const cuentaInactiva = isTrue(r?.cuenta_inactiva_resuelta);
@@ -767,12 +769,18 @@ const renderReportesList = (plataformas = []) => {
                 : cuentaActivaTrasReemplazo
                   ? `<span class="reporte-activa-dot${activaDotExtraClass}" title="${escapeHtml(activaDotTitle)}" aria-label="${escapeHtml(activaDotTitle)}"></span>`
                   : "";
+              const datosBadge = datosCorregidos
+                ? '<span class="reporte-datos-badge is-corregido">Datos corregidos</span>'
+                : datosIncorrectos
+                  ? '<span class="reporte-datos-badge is-incorrecto">Datos incorrectos</span>'
+                  : "";
               const correoCell = normalizeCopyValue(correo)
                 ? `<span class="correo-actions-inline">
                     <span class="correo-main-inline">
                       <span class="copyable-field reporte-copy" data-copy="${correoCopyAttr}" title="Copiar correo">${correoText}</span>
                     </span>
                     <span class="correo-admin-actions">
+                      ${datosBadge}
                       ${estadoCuentaDot}
                       <button type="button" class="btn-outline btn-small btn-admin-inline" data-open-admin-correo="${correoCopyAttr}" title="Abrir en Admin Cuentas" aria-label="Abrir en Admin Cuentas">↗</button>
                       ${
@@ -784,7 +792,7 @@ const renderReportesList = (plataformas = []) => {
                   </span>`
                 : `<span class="correo-actions-inline">
                     <span class="correo-main-inline">${correoText}</span>
-                    <span class="correo-admin-actions">${estadoCuentaDot}</span>
+                    <span class="correo-admin-actions">${datosBadge}${estadoCuentaDot}</span>
                   </span>`;
               const motivo = getDescripcion(r);
               const canReactivate = platformId === 9;
@@ -940,14 +948,38 @@ const removeReporteRowFromUI = (reportIdRaw) => {
 };
 
 async function loadReportes() {
-  const { data, error } = await supabase
+  const baseSelect =
+    "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion";
+  const selectWithDatosFlags = `${baseSelect},datos_incorrectos,datos_corregidos`;
+  const isMissingDatosColumnError = (err) => {
+    const msg = String(err?.message || "").toLowerCase();
+    const details = String(err?.details || "").toLowerCase();
+    const hint = String(err?.hint || "").toLowerCase();
+    const blob = `${msg} ${details} ${hint}`;
+    return (
+      String(err?.code || "").trim() === "42703" ||
+      blob.includes("datos_incorrectos") ||
+      blob.includes("datos_corregidos")
+    );
+  };
+  let { data, error } = await supabase
     .from("reportes")
-    .select(
-      "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion"
-    )
+    .select(selectWithDatosFlags)
     .eq("solucionado", false);
+  if (error && isMissingDatosColumnError(error)) {
+    const fallbackResp = await supabase
+      .from("reportes")
+      .select(baseSelect)
+      .eq("solucionado", false);
+    data = fallbackResp.data || [];
+    error = fallbackResp.error || null;
+  }
   if (error) throw error;
-  const rows = data || [];
+  const rows = (data || []).map((row) => ({
+    ...row,
+    datos_incorrectos: isTrue(row?.datos_incorrectos),
+    datos_corregidos: isTrue(row?.datos_corregidos),
+  }));
 
   const ventaIds = Array.from(
     new Set(rows.map((row) => toPositiveId(row?.id_venta)).filter((value) => !!value)),

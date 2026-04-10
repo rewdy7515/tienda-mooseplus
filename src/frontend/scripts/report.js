@@ -94,6 +94,21 @@ const renderSolucionNota = (notaRaw = "") => {
   return escapeHtml(nota);
 };
 
+const toPositiveId = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.trunc(parsed);
+};
+
+const buildEntregarHrefByReporte = (row = {}) => {
+  const ventaId = toPositiveId(row?.id_venta);
+  if (!ventaId) return "";
+  const targetUrl = new URL("../entregar_servicios.html", window.location.href);
+  targetUrl.searchParams.set("id_venta", String(ventaId));
+  targetUrl.searchParams.set("modificar_datos", "1");
+  return targetUrl.toString();
+};
+
 async function init() {
   try {
     const userId = Number(requireSession() || 0);
@@ -153,15 +168,33 @@ function renderReportes(items = []) {
       const rows = (p.items || [])
         .map((r) => {
           const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
-          const correo = r.cuentas?.correo || "-";
+          const correoRaw = String(r.cuentas?.correo || "").trim();
+          const correo = correoRaw || "-";
           const fecha = r.fecha_creacion || "-";
-          const estado = r.en_revision ? "En revisión" : "Pendiente";
+          const hasDatosIncorrectos = isTrue(r.datos_incorrectos);
+          const estado = hasDatosIncorrectos
+            ? "Datos incorrectos"
+            : r.en_revision
+              ? "En revisión"
+              : "Pendiente";
+          const modifyHref = buildEntregarHrefByReporte(r);
+          const estadoCellClass = hasDatosIncorrectos ? ` class="estado-datos-incorrectos"` : "";
+          const modifyButton = hasDatosIncorrectos && modifyHref
+            ? `<button type="button" class="btn-outline btn-small btn-modificar-datos" data-action="modificar-datos" data-href="${escapeHtml(
+                modifyHref,
+              )}">Modificar datos</button>`
+            : "";
           return `
             <tr>
               <td>${escapeHtml(idReporte)}</td>
               <td>${escapeHtml(correo)}</td>
               <td>${escapeHtml(fecha)}</td>
-              <td>${escapeHtml(estado)}</td>
+              <td${estadoCellClass}>
+                <div class="reporte-estado-wrap">
+                  <span>${escapeHtml(estado)}</span>
+                  ${modifyButton}
+                </div>
+              </td>
             </tr>
           `;
         })
@@ -232,6 +265,12 @@ attachLogout(clearServerSession);
 attachLogoHome();
 
 pendientesListEl?.addEventListener("click", (e) => {
+  const modifyBtn = e.target.closest("button[data-action='modificar-datos']");
+  if (modifyBtn) {
+    const href = String(modifyBtn.dataset.href || "").trim();
+    if (href) window.location.href = href;
+    return;
+  }
   const btn = e.target.closest("button[data-toggle-plat]");
   if (!btn) return;
   const platId = String(btn.dataset.togglePlat || "");

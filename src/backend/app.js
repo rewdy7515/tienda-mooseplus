@@ -2227,7 +2227,7 @@ const fetchReporteWhatsappContextById = async (idReporte) => {
   const { data, error } = await supabaseAdmin
     .from("reportes")
     .select(
-      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, id_plataforma, descripcion, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
+      "id_reporte, id_usuario, id_venta, id_cuenta, id_perfil, id_plataforma, descripcion, en_revision, solucionado, plataformas:plataformas!reportes_id_plataforma_fkey(nombre), cuentas:cuentas!reportes_id_cuenta_fkey1(correo, clave), usuarios:usuarios!reportes_id_usuario_fkey(nombre, apellido), reporte_tipos:reporte_tipos!reportes_id_tipo_reporte_fkey(titulo)",
     )
     .eq("id_reporte", reportId)
     .maybeSingle();
@@ -2349,6 +2349,16 @@ const sendReporteCreatedToWhatsappGroup = async ({
   const reportId = toPositiveInt(reporte?.id_reporte);
   if (!reportId) {
     return { sent: false, skipped: true, reason: "invalid_report" };
+  }
+  if (isTrue(reporte?.solucionado) || reporte?.en_revision === false) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "report_not_pending_review",
+      id_reporte: reportId,
+      solucionado: isTrue(reporte?.solucionado),
+      en_revision: reporte?.en_revision === false ? false : true,
+    };
   }
 
   const nombre = String(reporte?.usuarios?.nombre || "").trim();
@@ -3225,6 +3235,8 @@ const processPendingReportesWhatsappAlerts = async () => {
     const { data: reportRows, error: reportErr } = await supabaseAdmin
       .from("reportes")
       .select("id_reporte")
+      .eq("solucionado", false)
+      .eq("en_revision", true)
       .not("enviado_whatsapp", "is", true)
       .order("id_reporte", { ascending: false })
       .limit(WHATSAPP_REPORTES_WATCHER_BATCH);
@@ -7433,7 +7445,39 @@ app.post("/api/whatsapp/reportes/notificar-datos-incorrectos", async (req, res) 
     });
 
     if (result?.skipped) return res.status(202).json({ ok: false, ...result });
-    if (result?.sent) return res.json({ ok: true, ...result });
+    if (result?.sent) {
+      let datosIncorrectosActualizado = true;
+      let warning = "";
+      const { error: markDatosErr } = await supabaseAdmin
+        .from("reportes")
+        .update({ datos_incorrectos: true, datos_corregidos: false })
+        .eq("id_reporte", reportId);
+
+      if (markDatosErr && !isMissingColumnError(markDatosErr, "datos_incorrectos")) {
+        console.error("[whatsapp/reportes/notificar-datos-incorrectos] mark datos_incorrectos error", {
+          id_reporte: reportId,
+          error: markDatosErr,
+        });
+        datosIncorrectosActualizado = false;
+        warning =
+          "Mensaje enviado, pero no se pudo actualizar el estado de datos incorrectos del reporte.";
+      }
+
+      if (markDatosErr && isMissingColumnError(markDatosErr, "datos_incorrectos")) {
+        console.warn(
+          "[whatsapp/reportes/notificar-datos-incorrectos] Falta columna reportes.datos_incorrectos. Continúa sin marcar estado.",
+        );
+        datosIncorrectosActualizado = false;
+        warning = "Falta columna reportes.datos_incorrectos. No se pudo marcar el estado.";
+      }
+
+      return res.json({
+        ok: true,
+        ...result,
+        datos_incorrectos_actualizado: datosIncorrectosActualizado,
+        warning: warning || undefined,
+      });
+    }
     return res.status(500).json({
       error: result?.error || "No se pudo enviar la alerta de datos incorrectos por WhatsApp",
       ...result,
@@ -14342,7 +14386,6 @@ app.get("/api/inventario", async (req, res) => {
   }
 });
 
-// Ventas por orden (para entregar_servicios con id_orden)
 app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
   try {
     await requireAdminSession(req);
@@ -14393,6 +14436,63 @@ app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
   }
 });
 
+app.get("/api/ventas/orden-por-venta", async (req, res) => {
+  try {
+    const idVenta = toPositiveInt(req.query?.id_venta);
+    if (!idVenta) {
+      return res.status(400).json({ error: "id_venta inválido" });
+    }
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    if (!idUsuarioSesion) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+
+    const { data: permRow, error: permErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("permiso_superadmin")
+      .eq("id_usuario", idUsuarioSesion)
+      .maybeSingle();
+    if (permErr) throw permErr;
+    const isSuper = isTrue(permRow?.permiso_superadmin);
+
+    const { data: ventaRow, error: ventaErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, id_orden, id_usuario")
+      .eq("id_venta", idVenta)
+      .maybeSingle();
+    if (ventaErr) throw ventaErr;
+    if (!ventaRow?.id_venta) {
+      return res.status(404).json({ error: "Venta no encontrada." });
+    }
+
+    const idOrden = toPositiveInt(ventaRow?.id_orden);
+    if (!idOrden) {
+      return res.status(409).json({ error: "La venta no tiene orden asociada." });
+    }
+
+    let ownerId = toPositiveInt(ventaRow?.id_usuario);
+    if (!ownerId) {
+      const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+        .from("ordenes")
+        .select("id_orden, id_usuario")
+        .eq("id_orden", idOrden)
+        .maybeSingle();
+      if (ordenErr) throw ordenErr;
+      ownerId = toPositiveInt(ordenRow?.id_usuario);
+    }
+
+    if (!isSuper && (!ownerId || Number(ownerId) !== Number(idUsuarioSesion))) {
+      return res.status(403).json({ error: "La venta no pertenece al usuario." });
+    }
+
+    return res.json({ id_venta: idVenta, id_orden: idOrden });
+  } catch (err) {
+    console.error("[ventas/orden-por-venta] error", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Ventas por orden (para entregar_servicios con id_orden)
 app.get("/api/ventas/orden", async (req, res) => {
   try {
     const idOrden = Number(req.query?.id_orden);

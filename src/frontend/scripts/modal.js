@@ -413,6 +413,7 @@ const readQtyDisplayValue = () => {
 const renderPrecios = (plataformaId, flags) => {
   const {
     modalPrecios,
+    modalPlanHint,
     modalQtyMonths,
     modalQtyItems,
     monthsDiscount,
@@ -425,6 +426,7 @@ const renderPrecios = (plataformaId, flags) => {
     btnMonthsPlus,
     btnAdd,
   } = modalEls;
+  const planHintEl = modalPlanHint || document.querySelector(".modal-plan-hint");
   const qtyGroupEl =
     modalQtyMonths?.closest?.(".modal-qty-group") ||
     modalQtyItems?.closest?.(".modal-qty-group") ||
@@ -505,6 +507,7 @@ const renderPrecios = (plataformaId, flags) => {
   if (!opciones.length) {
     modalPrecios.innerHTML =
       '<p class="sin-plataformas">Sin precios configurados.</p>';
+    if (planHintEl) planHintEl.classList.add("hidden");
     return;
   }
 
@@ -563,6 +566,7 @@ const renderPrecios = (plataformaId, flags) => {
   const groupedEntries = Object.entries(agrupados).sort(
     ([, itemsA], [, itemsB]) => sortByDisplayedPrice(itemsA?.[0], itemsB?.[0]),
   );
+  const selectableBlocks = [];
 
   groupedEntries.forEach(([plan, items]) => {
     const wrapper = document.createElement("div");
@@ -750,7 +754,16 @@ const renderPrecios = (plataformaId, flags) => {
       }
     });
     modalPrecios.appendChild(wrapper);
+    selectableBlocks.push({ handleSelect });
   });
+
+  if (selectableBlocks.length === 1) {
+    if (planHintEl) planHintEl.classList.add("hidden");
+    selectableBlocks[0].handleSelect();
+  } else if (planHintEl) {
+    planHintEl.textContent = "Seleccione un plan";
+    planHintEl.classList.remove("hidden");
+  }
 };
 
 const updateQtyItems = (delta) => {

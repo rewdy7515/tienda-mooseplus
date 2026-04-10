@@ -166,6 +166,7 @@ const modalEls = {
   modalName: document.querySelector("#modal-name"),
   modalCategory: document.querySelector("#modal-category"),
   modalBadge: document.querySelector("#modal-badge"),
+  modalPlanHint: document.querySelector(".modal-plan-hint"),
   modalPrecios: document.querySelector("#modal-precios"),
   modalQtyMonths: document.querySelectorAll(".modal-qty")[0],
   modalQtyItems: document.querySelectorAll(".modal-qty")[1],

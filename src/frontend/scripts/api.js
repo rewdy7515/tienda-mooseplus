@@ -1685,6 +1685,46 @@ export async function fetchVentasOrden(idOrden) {
   }
 }
 
+export async function fetchOrdenByVenta(idVenta) {
+  await ensureServerSession();
+  try {
+    const ventaIdNum = Number(idVenta);
+    if (!Number.isFinite(ventaIdNum) || ventaIdNum <= 0) {
+      return { error: "id_venta inválido" };
+    }
+    const res = await fetch(
+      `${API_BASE}/api/ventas/orden-por-venta?id_venta=${encodeURIComponent(ventaIdNum)}`,
+      {
+        credentials: "include",
+      }
+    );
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      if (!message && res.status === 403) {
+        message = "La venta no pertenece al usuario.";
+      }
+      if (!message && res.status === 404) {
+        message = "Venta no encontrada.";
+      }
+      if (!message && res.status === 401) {
+        message = "Usuario no autenticado.";
+      }
+      console.error("ventas/orden-por-venta response", res.status, message);
+      return { error: message || "No se pudo resolver la orden de la venta", status: res.status };
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("fetchOrdenByVenta error", err);
+    return { error: err.message };
+  }
+}
+
 export async function entregarGiftCardPendiente(idVenta) {
   await ensureServerSession();
   try {
