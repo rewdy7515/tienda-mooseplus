@@ -262,6 +262,8 @@
       const isModificarDatosMode = params.get("modificar_datos") === "1";
       let ventasById = {};
       let platById = {};
+      let shouldUseSignupHeaderOnCopy = false;
+      let signupHeaderShortUrl = "";
       console.log("entregar_servicios init", { idOrdenParam, ventaParamRaw, isModificarDatosMode });
 
       const setStatus = (msg) => {
@@ -616,6 +618,8 @@
                         region: r.region,
                         valorTarjeta: r.valor_tarjeta_de_regalo,
                         moneda: r.moneda,
+                        usuarioNoRegistrado: shouldUseSignupHeaderOnCopy,
+                        signupRegistroUrl: signupHeaderShortUrl,
                       });
                 const annotateBtn = canAnnotateCliente
                   ? `<button type="button" class="btn-outline btn-anotar-cliente" data-venta="${r.id_venta}">Anotar cliente</button>`
@@ -836,6 +840,10 @@
             setVerificacionNoteVisible(false);
             return;
           }
+          const usuarioOrden = resp?.usuario || {};
+          signupHeaderShortUrl = String(usuarioOrden?.signup_url_corto || "").trim();
+          shouldUseSignupHeaderOnCopy =
+            usuarioOrden?.registrado === false && !!signupHeaderShortUrl;
           ventas = resp?.ventas || [];
           console.log("entregar_servicios ventas por orden", {
             idOrden: effectiveOrderId,

@@ -2371,7 +2371,7 @@
           const { data: venta, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte",
+              "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, id_precio, fecha_corte",
             )
             .eq("id_venta", idNum)
             .maybeSingle();
@@ -2403,6 +2403,33 @@
               if (platErr) throw platErr;
               platFlags = getPlatFlags(platRow || {});
             }
+          }
+          if (!cuentaPlataformaId && venta.id_cuenta_miembro) {
+            const { data: cuentaMiembroRow, error: cuentaMiembroErr } = await supabase
+              .from("cuentas")
+              .select("id_plataforma")
+              .eq("id_cuenta", venta.id_cuenta_miembro)
+              .maybeSingle();
+            if (cuentaMiembroErr) throw cuentaMiembroErr;
+            cuentaPlataformaId = toPositiveId(cuentaMiembroRow?.id_plataforma);
+          }
+          if (!cuentaPlataformaId && venta.id_precio) {
+            const { data: precioRow, error: precioErr } = await supabase
+              .from("precios")
+              .select("id_plataforma")
+              .eq("id_precio", venta.id_precio)
+              .maybeSingle();
+            if (precioErr) throw precioErr;
+            cuentaPlataformaId = toPositiveId(precioRow?.id_plataforma);
+          }
+          if (cuentaPlataformaId) {
+            const { data: platRow, error: platErr } = await supabase
+              .from("plataformas")
+              .select("usa_pines, por_pantalla, por_acceso, correo_cliente, clave_cliente")
+              .eq("id_plataforma", cuentaPlataformaId)
+              .maybeSingle();
+            if (platErr) throw platErr;
+            platFlags = getPlatFlags(platRow || {});
           }
           let usuarioNombre = "Vacío";
           if (venta.id_usuario) {
@@ -3106,12 +3133,16 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_cuenta, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido, pendiente",
+              "id_venta, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido, pendiente",
             )
             .eq("id_usuario", idUsuario);
           if (error) throw error;
           const cuentasIds = [
-            ...new Set((ventas || []).map((v) => v.id_cuenta).filter(Boolean)),
+            ...new Set(
+              (ventas || [])
+                .flatMap((v) => [v.id_cuenta, v.id_cuenta_miembro])
+                .filter(Boolean),
+            ),
           ];
           const perfilesIds = [
             ...new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean)),
@@ -3168,6 +3199,7 @@
                 .map(
                   (v) =>
                     cuentaMap[v.id_cuenta]?.id_plataforma ||
+                    cuentaMap[v.id_cuenta_miembro]?.id_plataforma ||
                     precioMap[v.id_precio],
                 )
                 .filter(Boolean),
@@ -3196,8 +3228,12 @@
           const grouped = {};
           (ventas || []).forEach((v) => {
             const cuenta = cuentaMap[v.id_cuenta] || {};
+            const cuentaMiembro = cuentaMap[v.id_cuenta_miembro] || {};
             const platId =
-              cuenta.id_plataforma || precioMap[v.id_precio] || "desconocida";
+              cuenta.id_plataforma ||
+              cuentaMiembro.id_plataforma ||
+              precioMap[v.id_precio] ||
+              "desconocida";
             const platInfo = plataformaMap[platId] || {};
             const platName = platInfo.nombre || `Plataforma ${platId}`;
             if (!grouped[platName]) {

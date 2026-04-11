@@ -20,6 +20,8 @@ export function buildServiceCopyText({
   region = "",
   valorTarjeta = "",
   moneda = "",
+  usuarioNoRegistrado = false,
+  signupRegistroUrl = "",
 } = {}) {
   const isTrue = (value) =>
     value === true || value === 1 || value === "1" || value === "true" || value === "t";
@@ -29,10 +31,15 @@ export function buildServiceCopyText({
   const giftValueTxt =
     [String(valorTarjeta || "").trim(), String(moneda || "").trim()].filter(Boolean).join(" ") || "-";
   const pinTxt = String(pin || "").trim() || "Pendiente";
+  const signupUrl = String(signupRegistroUrl || "").trim();
+  const websiteLine =
+    isTrue(usuarioNoRegistrado) && signupUrl
+      ? `Registrate en nuestra Web: ${signupUrl}`
+      : "_Pagina Web: https://mooseplus.com_";
   if (esTarjetaDeRegalo) {
     lines.push(`*${platLabelRaw || "GIFT CARD"}* 🫎 \`ID Venta: #${idVenta || ""}\``);
     lines.push(`(Región: ${regionTxt})`);
-    lines.push("_Pagina Web: https://mooseplus.com_");
+    lines.push(websiteLine);
     lines.push("");
     lines.push(`\`${giftValueTxt}\``);
     lines.push(`PIN: ${pinTxt}`);
@@ -44,7 +51,7 @@ export function buildServiceCopyText({
   const platLabel = showHogar ? `${platLabelRaw} (HOGAR ACTUALIZADO)` : platLabelRaw;
   const fechaFmt = formatDDMMYYYY(fechaCorte);
   lines.push(`*${platLabel}* 🫎 \`ID Venta: #${idVenta || ""}\``);
-  lines.push("_Pagina Web: https://mooseplus.com_");
+  lines.push(websiteLine);
   lines.push("");
   lines.push(`*Correo:* ${correo || ""}`);
   lines.push(`*Clave:* ${clave || ""}`);

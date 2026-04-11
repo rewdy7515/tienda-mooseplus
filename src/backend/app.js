@@ -8322,6 +8322,12 @@ const buildSignupRegistrationUrl = (idUsuario, options = {}) => {
   return signupUrl.toString();
 };
 
+const buildSignupShortUrl = (idUsuario) => {
+  const token = buildSignupRegistrationToken(idUsuario);
+  const shortUrl = new URL(`/s/${encodeURIComponent(token)}`, PUBLIC_SITE_URL);
+  return shortUrl.toString();
+};
+
 const buildRenewalCartToken = ({ idUsuario, ventaIds = [] } = {}) => {
   const uid = toPositiveInt(idUsuario);
   if (!uid) throw tokenError("INVALID_UID", "id_usuario inválido.");
@@ -15137,6 +15143,32 @@ app.get("/api/ventas/orden", async (req, res) => {
     if (!isSuper && Number(ordenRow.id_usuario) !== Number(idUsuarioSesion)) {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
+
+    const usuarioIdOrden = toPositiveInt(ordenRow?.id_usuario);
+    let usuarioRegistrado = null;
+    let signupRegistroUrlCorto = "";
+    if (usuarioIdOrden) {
+      const { data: usuarioOrdenRow, error: usuarioOrdenErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("id_usuario, fecha_registro")
+        .eq("id_usuario", usuarioIdOrden)
+        .maybeSingle();
+      if (usuarioOrdenErr) throw usuarioOrdenErr;
+      if (usuarioOrdenRow) {
+        usuarioRegistrado = !!usuarioOrdenRow?.fecha_registro;
+        if (!usuarioRegistrado) {
+          try {
+            signupRegistroUrlCorto = buildSignupShortUrl(usuarioIdOrden);
+          } catch (signupUrlErr) {
+            console.warn("[ventas/orden] no se pudo generar signup short link", {
+              id_orden: idOrden,
+              id_usuario: usuarioIdOrden,
+              err: signupUrlErr?.message || signupUrlErr,
+            });
+          }
+        }
+      }
+    }
     console.log("[ventas/orden] request", { id_orden: idOrden });
     const { data, error } = await supabaseAdmin
       .from("ventas")
@@ -15226,7 +15258,14 @@ app.get("/api/ventas/orden", async (req, res) => {
       return bId - aId;
     });
     console.log("[ventas/orden] result", { id_orden: idOrden, ventas: ventas.length });
-    res.json({ ventas });
+    res.json({
+      ventas,
+      usuario: {
+        id_usuario: usuarioIdOrden || null,
+        registrado: usuarioRegistrado,
+        signup_url_corto: signupRegistroUrlCorto || "",
+      },
+    });
   } catch (err) {
     console.error("[ventas/orden] error", err);
     res.status(500).json({ error: err.message });
