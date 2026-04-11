@@ -400,16 +400,26 @@
       const normalizeForCompare = (value) => String(value || "").trim().toLowerCase();
       const resolveVentaCredentialTarget = async ({ idVenta = null, rowEl = null } = {}) => {
         const ventaId = toPositiveId(idVenta);
-        if (!ventaId) return { idVenta: null, idCuenta: null, idUsuario: null, plataforma: "" };
+        if (!ventaId) {
+          return {
+            idVenta: null,
+            idCuenta: null,
+            idCuentaMiembro: null,
+            idCuentaMadre: null,
+            idUsuario: null,
+            plataforma: "",
+          };
+        }
 
         const entregarBtn = rowEl?.querySelector?.(".btn-entregar") || null;
-        let idCuenta = toPositiveId(entregarBtn?.dataset?.idCuentaMiembro);
-        if (!idCuenta) idCuenta = toPositiveId(entregarBtn?.dataset?.idCuenta);
+        let idCuentaMiembro = toPositiveId(entregarBtn?.dataset?.idCuentaMiembro);
+        let idCuentaMadre = toPositiveId(entregarBtn?.dataset?.idCuenta);
+        let idCuenta = idCuentaMiembro || idCuentaMadre;
         let idUsuario = toPositiveId(entregarBtn?.dataset?.usuario);
         let plataforma = String(entregarBtn?.dataset?.plataforma || "").trim();
 
         if (idCuenta && idUsuario && plataforma) {
-          return { idVenta: ventaId, idCuenta, idUsuario, plataforma };
+          return { idVenta: ventaId, idCuenta, idCuentaMiembro, idCuentaMadre, idUsuario, plataforma };
         }
 
         const { data: ventaRow, error: ventaErr } = await supabase
@@ -421,12 +431,19 @@
           .maybeSingle();
         if (ventaErr) throw ventaErr;
         if (!ventaRow?.id_venta) {
-          return { idVenta: ventaId, idCuenta: idCuenta || null, idUsuario: idUsuario || null, plataforma };
+          return {
+            idVenta: ventaId,
+            idCuenta: idCuenta || null,
+            idCuentaMiembro: idCuentaMiembro || null,
+            idCuentaMadre: idCuentaMadre || null,
+            idUsuario: idUsuario || null,
+            plataforma,
+          };
         }
 
-        if (!idCuenta) {
-          idCuenta = toPositiveId(ventaRow?.id_cuenta_miembro) || toPositiveId(ventaRow?.id_cuenta);
-        }
+        if (!idCuentaMiembro) idCuentaMiembro = toPositiveId(ventaRow?.id_cuenta_miembro);
+        if (!idCuentaMadre) idCuentaMadre = toPositiveId(ventaRow?.id_cuenta);
+        if (!idCuenta) idCuenta = idCuentaMiembro || idCuentaMadre;
         if (!idUsuario) {
           idUsuario = toPositiveId(ventaRow?.id_usuario);
         }
@@ -440,7 +457,14 @@
           plataforma = String(plataformaRow?.nombre || "").trim();
         }
 
-        return { idVenta: ventaId, idCuenta: idCuenta || null, idUsuario: idUsuario || null, plataforma };
+        return {
+          idVenta: ventaId,
+          idCuenta: idCuenta || null,
+          idCuentaMiembro: idCuentaMiembro || null,
+          idCuentaMadre: idCuentaMadre || null,
+          idUsuario: idUsuario || null,
+          plataforma,
+        };
       };
       const notifyCorreoCambioCliente = async ({
         idUsuario = null,
@@ -1768,12 +1792,14 @@
                 .update({ correo_miembro: nextVal })
                 .eq("id_venta", idVenta),
             ];
-            if (toPositiveId(target?.idCuenta)) {
+            const cuentaMiembroId = toPositiveId(target?.idCuentaMiembro);
+            const cuentaMadreId = toPositiveId(target?.idCuentaMadre);
+            if (cuentaMiembroId && cuentaMiembroId !== cuentaMadreId) {
               updates.push(
                 supabase
                   .from("cuentas")
                   .update({ correo: nextVal })
-                  .eq("id_cuenta", Number(target.idCuenta)),
+                  .eq("id_cuenta", Number(cuentaMiembroId)),
               );
             }
             const results = await Promise.all(updates);

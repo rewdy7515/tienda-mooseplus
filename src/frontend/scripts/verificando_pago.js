@@ -53,6 +53,42 @@ let lastOrdenChannelWarnAt = 0;
 const MANUAL_VERIFICATION_PENDING_MSG =
   "Pago no detectado, se envió una notificación a un admin para que verifique manualmente";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const getReferenceMatchScore = (targetRef = "", candidateRef = "") => {
+  const target = normalizeReferenceDigits(targetRef);
+  const candidate = normalizeReferenceDigits(candidateRef);
+  if (target.length < 4 || candidate.length < 4) return 0;
+  if (candidate === target) return 5;
+  if (target.length > 4 || candidate.length > 4) {
+    if (candidate.endsWith(target) || target.endsWith(candidate)) return 4;
+  }
+  if (candidate.slice(-4) === target.slice(-4)) return 1;
+  return 0;
+};
+const resolveBestReferenceCandidate = (targetRef = "", refs = []) => {
+  const normalizedRefs = Array.from(
+    new Set(
+      (Array.isArray(refs) ? refs : [])
+        .map((ref) => normalizeReferenceDigits(ref))
+        .filter((ref) => ref.length >= 4),
+    ),
+  );
+  const target = normalizeReferenceDigits(targetRef);
+  if (target.length < 4 || !normalizedRefs.length) return { score: 0, ref: null };
+  let bestScore = 0;
+  let bestRef = null;
+  normalizedRefs.forEach((ref) => {
+    const score = getReferenceMatchScore(target, ref);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRef = ref;
+      return;
+    }
+    if (score > 0 && score === bestScore && bestRef && ref.length > bestRef.length) {
+      bestRef = ref;
+    }
+  });
+  return { score: bestScore, ref: bestRef };
+};
 const buildEntregaUrl = () => `entregar_servicios.html?id_orden=${encodeURIComponent(orden?.id_orden || idOrden)}`;
 const ORDEN_SELECT_FIELDS =
   "id_orden, id_carrito, id_usuario, referencia, total, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo";
@@ -309,29 +345,41 @@ const extractPagoRefs = (pagoRow = {}) => {
   return Array.from(refs);
 };
 
-const pagoMatchesLast4 = (pagoRow = {}, last4 = "") => {
-  const last4Digits = normalizeReferenceDigits(last4).slice(-4);
-  if (last4Digits.length !== 4) return false;
-  return extractPagoRefs(pagoRow).some((ref) => ref.slice(-4) === last4Digits);
-};
-
-const pickBestPagoMatch = (pagos = [], { last4 = "", montoBaseBs = null } = {}) => {
+const pickBestPagoMatch = (pagos = [], { reference = "", montoBaseBs = null } = {}) => {
+  const targetReference = normalizeReferenceDigits(reference);
+  if (targetReference.length < 4) return null;
   const candidates = (Array.isArray(pagos) ? pagos : [])
-    .map((row) => ({ row, pagoMonto: montoNum(row?.monto_bs) }))
-    .filter(({ row, pagoMonto }) => pagoMatchesLast4(row, last4) && Number.isFinite(pagoMonto));
+    .map((row) => {
+      const pagoMonto = montoNum(row?.monto_bs);
+      if (!Number.isFinite(pagoMonto)) return null;
+      const refResolution = resolveBestReferenceCandidate(targetReference, extractPagoRefs(row));
+      if (refResolution.score <= 0) return null;
+      return { row, pagoMonto, refResolution };
+    })
+    .filter(Boolean);
 
   if (!candidates.length) return null;
   if (!Number.isFinite(montoBaseBs)) {
-    return candidates[0].row;
+    const topByRef = [...candidates].sort((a, b) => {
+      if (b.refResolution.score !== a.refResolution.score) {
+        return b.refResolution.score - a.refResolution.score;
+      }
+      return (Number(b.row?.id) || 0) - (Number(a.row?.id) || 0);
+    })[0];
+    return topByRef ? { row: topByRef.row, refMatch: topByRef.refResolution.ref } : null;
   }
 
   candidates.sort((a, b) => {
+    if (b.refResolution.score !== a.refResolution.score) {
+      return b.refResolution.score - a.refResolution.score;
+    }
     const diffA = Math.abs(Number(a.pagoMonto) - Number(montoBaseBs));
     const diffB = Math.abs(Number(b.pagoMonto) - Number(montoBaseBs));
     if (diffA !== diffB) return diffA - diffB;
     return (Number(b.row?.id) || 0) - (Number(a.row?.id) || 0);
   });
-  return candidates[0].row;
+  const best = candidates[0];
+  return best ? { row: best.row, refMatch: best.refResolution.ref } : null;
 };
 
 const montoNum = (val) => {
@@ -388,7 +436,6 @@ const verifyPago = async () => {
     }
     return;
   }
-  const last4 = refDigits.slice(-4);
   const totalUsd = Number(orden.total);
   const tasaBs = await refreshCurrentRate();
   if (!Number.isFinite(tasaBs) || !Number.isFinite(totalUsd)) {
@@ -414,7 +461,8 @@ const verifyPago = async () => {
     .order("id", { ascending: false });
   if (resp.error) throw resp.error;
   const pagos = resp.data || [];
-  const match = pickBestPagoMatch(pagos, { last4, montoBaseBs });
+  const matchData = pickBestPagoMatch(pagos, { reference: refDigits, montoBaseBs });
+  const match = matchData?.row || null;
   if (!match) {
     if (countdownExpired) {
       setStatus(MANUAL_VERIFICATION_PENDING_MSG);
@@ -443,7 +491,7 @@ const verifyPago = async () => {
   }
 
   if (sessionUserId) {
-    const refMatch = extractPagoRefs(match).find((n) => n.slice(-4) === last4);
+    const refMatch = matchData?.refMatch || null;
     const updates = {
       saldo_acreditado_a: sessionUserId,
       saldo_acreditado: true,

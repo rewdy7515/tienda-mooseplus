@@ -310,6 +310,14 @@ const WHATSAPP_REPORTES_WATCHER_BATCH = Math.max(
 );
 const HOME_BANNERS_TABLE = "banners";
 const WEB_TRAFFIC_EVENTS_TABLE = "eventos_trafico_web";
+const MONTHLY_METRICS_TABLE = "metricas_mensuales";
+const MONTHLY_ACTIVE_CLIENTS_TABLE = "metricas_clientes_activos_mes";
+const MONTHLY_METRICS_CLOSURE_ENABLED =
+  process.env.MONTHLY_METRICS_CLOSURE !== "false" && process.env.VERCEL !== "1";
+const MONTHLY_METRICS_CLOSURE_INTERVAL_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.MONTHLY_METRICS_CLOSURE_INTERVAL_MS) || 60 * 60 * 1000,
+);
 let nuevoServicioNotifQueueInProgress = false;
 let nuevoServicioNotifQueueTableMissing = false;
 let nuevoServicioNotifQueueLastRunAt = null;
@@ -379,6 +387,13 @@ let webPushQueueLastError = null;
 let autoGiftCardPendingDeliveryInProgress = false;
 let autoGiftCardPendingDeliveryInitialized = false;
 let autoGiftCardPendingDeliveryCursor = 0;
+let monthlyMetricsClosureInProgress = false;
+let monthlyMetricsClosureSchedulerStarted = false;
+let monthlyMetricsClosureIntervalId = null;
+let monthlyMetricsClosureSchemaMissing = false;
+let monthlyMetricsClosureLastRunAt = null;
+let monthlyMetricsClosureLastError = null;
+let monthlyMetricsClosureLastMonthKey = "";
 
 if (WEB_PUSH_IS_CONFIGURED) {
   try {
@@ -5849,6 +5864,44 @@ const normalizeMontoBs = (value) => {
 };
 
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const getReferenceMatchScore = (targetRef, candidateRef) => {
+  const target = normalizeReferenceDigits(targetRef);
+  const candidate = normalizeReferenceDigits(candidateRef);
+  if (target.length < 4 || candidate.length < 4) return 0;
+  if (candidate === target) return 5;
+  if (target.length > 4 || candidate.length > 4) {
+    if (candidate.endsWith(target) || target.endsWith(candidate)) return 4;
+  }
+  if (candidate.slice(-4) === target.slice(-4)) return 1;
+  return 0;
+};
+const resolveBestReferenceCandidate = (targetRef, candidateRefs = []) => {
+  const refs = Array.from(
+    new Set(
+      (Array.isArray(candidateRefs) ? candidateRefs : [])
+        .map((value) => normalizeReferenceDigits(value))
+        .filter((value) => value.length >= 4),
+    ),
+  );
+  const target = normalizeReferenceDigits(targetRef);
+  if (target.length < 4 || !refs.length) {
+    return { score: 0, ref: null };
+  }
+  let bestScore = 0;
+  let bestRef = null;
+  refs.forEach((ref) => {
+    const score = getReferenceMatchScore(target, ref);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRef = ref;
+      return;
+    }
+    if (score > 0 && score === bestScore && bestRef && ref.length > bestRef.length) {
+      bestRef = ref;
+    }
+  });
+  return { score: bestScore, ref: bestRef };
+};
 const stripQuoteChars = (value) =>
   String(value || "").replace(/["'`“”‘’«»]/g, " ");
 const normalizeNotificationTextForParsing = (value) =>
@@ -5995,8 +6048,6 @@ const matchPagoMovilToOrder = async (orden = {}) => {
   if (refDigits.length < 4) {
     return { matched: false, reason: "referencia_invalida" };
   }
-
-  const refLast4 = refDigits.slice(-4);
   const montoOrdenBs = await computeOrderMontoBs(orden);
   if (!Number.isFinite(montoOrdenBs)) {
     return { matched: false, reason: "monto_orden_invalido" };
@@ -6011,21 +6062,32 @@ const matchPagoMovilToOrder = async (orden = {}) => {
   if (pagosErr) throw pagosErr;
 
   const pagos = Array.isArray(pagosRows) ? pagosRows : [];
-  const matchedPago = pagos.find((pago) => {
-    const refCandidates = [
-      ...extractRefCandidates(pago?.texto || ""),
-      ...extractRefCandidates(pago?.referencia || ""),
-    ];
-    const hasRefMatch = refCandidates
-      .map((value) => normalizeReferenceDigits(value))
-      .filter((value) => value.length >= 4)
-      .some((value) => value.slice(-4) === refLast4);
-    if (!hasRefMatch) return false;
-
-    const pagoMonto = normalizeMontoBs(pago?.monto_bs);
-    if (!Number.isFinite(pagoMonto)) return false;
-    return Math.abs(pagoMonto - montoOrdenBs) <= 0.01;
-  });
+  const matchedCandidates = pagos
+    .map((pago) => {
+      const refCandidates = [
+        ...extractRefCandidates(pago?.texto || ""),
+        ...extractRefCandidates(pago?.referencia || ""),
+      ];
+      const refResolution = resolveBestReferenceCandidate(refDigits, refCandidates);
+      if (refResolution.score <= 0) return null;
+      const pagoMonto = normalizeMontoBs(pago?.monto_bs);
+      if (!Number.isFinite(pagoMonto)) return null;
+      if (Math.abs(pagoMonto - montoOrdenBs) > 0.01) return null;
+      return {
+        pago,
+        refResolution,
+        pagoId: Number(pago?.id) || 0,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b.refResolution.score !== a.refResolution.score) {
+        return b.refResolution.score - a.refResolution.score;
+      }
+      return b.pagoId - a.pagoId;
+    });
+  const bestCandidate = matchedCandidates[0] || null;
+  const matchedPago = bestCandidate?.pago || null;
 
   if (!matchedPago?.id) {
     return {
@@ -6035,13 +6097,7 @@ const matchPagoMovilToOrder = async (orden = {}) => {
     };
   }
 
-  const referenciaMatch =
-    [
-      ...extractRefCandidates(matchedPago?.texto || ""),
-      ...extractRefCandidates(matchedPago?.referencia || ""),
-    ]
-      .map((value) => normalizeReferenceDigits(value))
-      .find((value) => value.length >= 4 && value.slice(-4) === refLast4) || null;
+  const referenciaMatch = bestCandidate?.refResolution?.ref || null;
 
   return {
     matched: true,
@@ -6370,17 +6426,17 @@ const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
   if (!pagoId) return { matched: false, reason: "invalid_pago_id" };
 
   const pagoMonto = normalizeMontoBs(pagoMovilRow?.monto_bs);
-  const refCandidates = [
-    ...extractRefCandidates(pagoMovilRow?.texto || ""),
-    ...extractRefCandidates(pagoMovilRow?.referencia || ""),
-  ];
-  const refLast4Set = new Set(
-    refCandidates
-      .map((r) => normalizeReferenceDigits(r))
-      .filter((r) => r.length >= 4)
-      .map((r) => r.slice(-4)),
+  const refCandidates = Array.from(
+    new Set(
+      [
+        ...extractRefCandidates(pagoMovilRow?.texto || ""),
+        ...extractRefCandidates(pagoMovilRow?.referencia || ""),
+      ]
+        .map((r) => normalizeReferenceDigits(r))
+        .filter((r) => r.length >= 4),
+    ),
   );
-  if (!refLast4Set.size || !Number.isFinite(pagoMonto)) {
+  if (!refCandidates.length || !Number.isFinite(pagoMonto)) {
     return { matched: false, reason: "missing_ref_or_amount" };
   }
 
@@ -6397,29 +6453,34 @@ const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
     .limit(400);
   if (ordErr) throw ordErr;
 
-  let matchedOrder = null;
+  const matchedOrders = [];
   for (const orden of pendingOrders || []) {
     const refDigits = normalizeReferenceDigits(orden?.referencia);
     if (refDigits.length < 4) continue;
-    const refLast4 = refDigits.slice(-4);
-    if (!refLast4Set.has(refLast4)) continue;
+    const refResolution = resolveBestReferenceCandidate(refDigits, refCandidates);
+    if (refResolution.score <= 0) continue;
     const montoOrdenBs = await computeOrderMontoBs(orden);
     if (!Number.isFinite(montoOrdenBs)) continue;
-    if (Math.abs(montoOrdenBs - pagoMonto) <= 0.01) {
-      matchedOrder = orden;
-      break;
-    }
+    if (Math.abs(montoOrdenBs - pagoMonto) > 0.01) continue;
+    matchedOrders.push({
+      orden,
+      refResolution,
+      orderId: Number(orden?.id_orden) || 0,
+    });
   }
 
-  if (!matchedOrder?.id_orden) {
+  if (!matchedOrders.length) {
     return { matched: false, reason: "no_order_match" };
   }
-
-  const refMatch =
-    refCandidates
-      .map((r) => normalizeReferenceDigits(r))
-      .find((r) => r.length >= 4 && r.slice(-4) === normalizeReferenceDigits(matchedOrder.referencia).slice(-4)) ||
-    null;
+  matchedOrders.sort((a, b) => {
+    if (b.refResolution.score !== a.refResolution.score) {
+      return b.refResolution.score - a.refResolution.score;
+    }
+    return b.orderId - a.orderId;
+  });
+  const selected = matchedOrders[0];
+  const matchedOrder = selected?.orden || null;
+  const refMatch = selected?.refResolution?.ref || null;
 
   return {
     matched: true,
@@ -11744,6 +11805,250 @@ const startTasaActualScheduler = () => {
   scheduleNext();
 };
 
+const isMissingMonthlyMetricsStorageError = (err) => {
+  return (
+    isMissingTableError(err, MONTHLY_METRICS_TABLE) ||
+    isMissingTableError(err, MONTHLY_ACTIVE_CLIENTS_TABLE) ||
+    isMissingColumnError(err, "periodo_mes") ||
+    isMissingColumnError(err, "clientes_activos") ||
+    isMissingColumnError(err, "ventas_activas") ||
+    isMissingColumnError(err, "id_usuario")
+  );
+};
+
+const getPreviousMonthEndDateFromCaracasDate = (dateStr = "") => {
+  const match = String(dateStr || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+  const prevMonthEnd = new Date(Date.UTC(year, month - 1, 0));
+  return [
+    prevMonthEnd.getUTCFullYear(),
+    pad2(prevMonthEnd.getUTCMonth() + 1),
+    pad2(prevMonthEnd.getUTCDate()),
+  ].join("-");
+};
+
+const getMonthKeyFromDate = (dateStr = "") => {
+  const value = String(dateStr || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  return value.slice(0, 7);
+};
+
+const isMonthlyMetricsMonthClosed = async ({ periodEnd }) => {
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from(MONTHLY_METRICS_TABLE)
+        .select("id")
+        .eq("periodo_mes", periodEnd)
+        .order("id", { ascending: true })
+        .limit(1),
+    `monthly_metrics:closed_check:${periodEnd}`,
+  );
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+};
+
+const computeMonthlyActiveMetricsSnapshot = async (periodEnd) => {
+  const ventasRows = await fetchAllSupabaseRows(
+    (from, to) =>
+      supabaseAdmin
+        .from("ventas")
+        .select(
+          "id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado",
+        )
+        .not("id_usuario", "is", null)
+        .not("fecha_pago", "is", null)
+        .lte("fecha_pago", periodEnd)
+        .range(from, to),
+    { label: `monthly_metrics:ventas:${periodEnd}` },
+  );
+
+  const activeRows = (ventasRows || []).filter((row) => {
+    const notSuspended = !isTrue(row?.suspendido);
+    const notPending = !isTrue(row?.pendiente);
+    const notRejected = !isTrue(row?.pago_rechazado);
+    const activeByDate =
+      isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= periodEnd);
+    return notSuspended && notPending && notRejected && activeByDate;
+  });
+
+  const activeUserIds = uniqPositiveIds((activeRows || []).map((row) => row?.id_usuario));
+
+  return {
+    periodo_mes: periodEnd,
+    monthKey: getMonthKeyFromDate(periodEnd),
+    clientes_activos: activeUserIds.length,
+    ventas_activas: activeRows.length,
+    activeUserIds,
+  };
+};
+
+const persistMonthlyActiveClientsSnapshot = async (snapshot = {}) => {
+  const periodEnd = String(snapshot?.periodo_mes || "").trim();
+  const activeUserIds = uniqPositiveIds(snapshot?.activeUserIds || []);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+    throw new Error("periodo_mes inválido para guardar clientes activos.");
+  }
+
+  const { error: deleteErr } = await runSupabaseQueryWithRetry(
+    () => supabaseAdmin.from(MONTHLY_ACTIVE_CLIENTS_TABLE).delete().eq("periodo_mes", periodEnd),
+    `monthly_metrics:active_clients:delete:${periodEnd}`,
+  );
+  if (deleteErr) throw deleteErr;
+
+  if (!activeUserIds.length) return;
+
+  const chunkSize = 500;
+  for (let i = 0; i < activeUserIds.length; i += chunkSize) {
+    const batchRows = activeUserIds.slice(i, i + chunkSize).map((idUsuario) => ({
+      periodo_mes: periodEnd,
+      id_usuario: idUsuario,
+    }));
+    const { error: insertErr } = await runSupabaseQueryWithRetry(
+      () => supabaseAdmin.from(MONTHLY_ACTIVE_CLIENTS_TABLE).insert(batchRows),
+      `monthly_metrics:active_clients:insert:${periodEnd}:chunk:${Math.floor(i / chunkSize) + 1}`,
+    );
+    if (insertErr) throw insertErr;
+  }
+};
+
+const persistMonthlyMetricsSummary = async (snapshot = {}) => {
+  const periodEnd = String(snapshot?.periodo_mes || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+    throw new Error("periodo_mes inválido para guardar métricas mensuales.");
+  }
+  const payload = {
+    periodo_mes: periodEnd,
+    clientes_activos: Number(snapshot?.clientes_activos) || 0,
+    ventas_activas: Number(snapshot?.ventas_activas) || 0,
+  };
+
+  const { data: existingRows, error: existingErr } = await runSupabaseQueryWithRetry(
+    () => supabaseAdmin.from(MONTHLY_METRICS_TABLE).select("id").eq("periodo_mes", periodEnd),
+    `monthly_metrics:summary:select:${periodEnd}`,
+  );
+  if (existingErr) throw existingErr;
+  const existingIds = uniqPositiveIds((existingRows || []).map((row) => row?.id));
+
+  if (existingIds.length) {
+    const { error: updateErr } = await runSupabaseQueryWithRetry(
+      () => supabaseAdmin.from(MONTHLY_METRICS_TABLE).update(payload).in("id", existingIds),
+      `monthly_metrics:summary:update:${periodEnd}`,
+    );
+    if (updateErr) throw updateErr;
+    return;
+  }
+
+  const { error: insertErr } = await runSupabaseQueryWithRetry(
+    () => supabaseAdmin.from(MONTHLY_METRICS_TABLE).insert(payload),
+    `monthly_metrics:summary:insert:${periodEnd}`,
+  );
+  if (insertErr) throw insertErr;
+};
+
+const runMonthlyMetricsClosureIfNeeded = async ({ reason = "scheduler", force = false } = {}) => {
+  if (!MONTHLY_METRICS_CLOSURE_ENABLED) {
+    return { ok: false, skipped: true, reason: "disabled" };
+  }
+  if (monthlyMetricsClosureSchemaMissing) {
+    return { ok: false, skipped: true, reason: "schema_missing" };
+  }
+  if (monthlyMetricsClosureInProgress) {
+    return { ok: false, skipped: true, reason: "in_progress" };
+  }
+
+  monthlyMetricsClosureInProgress = true;
+  monthlyMetricsClosureLastRunAt = new Date().toISOString();
+  monthlyMetricsClosureLastError = null;
+
+  try {
+    const { dateStr } = getCaracasClock();
+    const periodEnd = getPreviousMonthEndDateFromCaracasDate(dateStr);
+    if (!periodEnd) {
+      return { ok: false, skipped: true, reason: "invalid_date" };
+    }
+    const monthKey = getMonthKeyFromDate(periodEnd);
+
+    if (!force && monthKey && monthKey === monthlyMetricsClosureLastMonthKey) {
+      return { ok: true, skipped: true, reason: "already_processed_runtime", periodEnd, monthKey };
+    }
+
+    const alreadyClosed = await isMonthlyMetricsMonthClosed({ periodEnd });
+    if (alreadyClosed && !force) {
+      monthlyMetricsClosureLastMonthKey = monthKey;
+      return { ok: true, skipped: true, reason: "already_closed", periodEnd, monthKey };
+    }
+
+    const snapshot = await computeMonthlyActiveMetricsSnapshot(periodEnd);
+    await persistMonthlyActiveClientsSnapshot(snapshot);
+    await persistMonthlyMetricsSummary(snapshot);
+
+    monthlyMetricsClosureLastMonthKey = snapshot.monthKey || monthKey;
+    console.log(
+      `[Metricas] Cierre mensual ${snapshot.monthKey || monthKey} guardado (${reason}): clientes_activos=${snapshot.clientes_activos}, ventas_activas=${snapshot.ventas_activas}`,
+    );
+
+    return {
+      ok: true,
+      skipped: false,
+      reason,
+      periodEnd: snapshot.periodo_mes,
+      monthKey: snapshot.monthKey || monthKey,
+      clientesActivos: snapshot.clientes_activos,
+      ventasActivas: snapshot.ventas_activas,
+    };
+  } catch (err) {
+    monthlyMetricsClosureLastError = err?.message || String(err);
+    if (isMissingMonthlyMetricsStorageError(err)) {
+      monthlyMetricsClosureSchemaMissing = true;
+      console.warn(
+        `[Metricas] Worker de cierre mensual desactivado: faltan tablas/columnas (${err?.message || err}).`,
+      );
+      return {
+        ok: false,
+        skipped: true,
+        reason: "schema_missing",
+        error: err?.message || String(err),
+      };
+    }
+    console.error("[Metricas] Error al guardar cierre mensual", err);
+    return {
+      ok: false,
+      skipped: false,
+      reason: "error",
+      error: err?.message || String(err),
+    };
+  } finally {
+    monthlyMetricsClosureInProgress = false;
+  }
+};
+
+const triggerMonthlyMetricsClosureCheck = (label = "tick") => {
+  runMonthlyMetricsClosureIfNeeded({ reason: label }).catch((err) => {
+    console.error(`[Metricas] Scheduler cierre mensual ${label} error`, err);
+  });
+};
+
+const startMonthlyMetricsClosureScheduler = () => {
+  if (!MONTHLY_METRICS_CLOSURE_ENABLED) return;
+  if (monthlyMetricsClosureSchedulerStarted) return;
+  monthlyMetricsClosureSchedulerStarted = true;
+  console.log(
+    `[Metricas] Worker de cierre mensual activo (cada ${Math.round(
+      MONTHLY_METRICS_CLOSURE_INTERVAL_MS / 1000,
+    )}s).`,
+  );
+  monthlyMetricsClosureIntervalId = setInterval(() => {
+    triggerMonthlyMetricsClosureCheck("tick");
+  }, MONTHLY_METRICS_CLOSURE_INTERVAL_MS);
+  triggerMonthlyMetricsClosureCheck("init");
+};
+
 // Tasa Binance P2P USDT/VES (promedio top ofertas BUY) con markup global aplicado.
 app.get("/api/p2p/rate", async (_req, res) => {
   try {
@@ -16489,6 +16794,7 @@ app.get("/api/ventas/entregadas", async (req, res) => {
 });
 
 startTasaActualScheduler();
+startMonthlyMetricsClosureScheduler();
 
 if (require.main === module) {
   app.listen(port, () => {

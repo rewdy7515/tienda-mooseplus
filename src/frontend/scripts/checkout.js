@@ -922,7 +922,7 @@ const verifyPagoMovil = async () => {
     return { ok: false };
   }
 
-  const refLast4 = refDigits.slice(-4);
+  const targetReference = refDigits;
   let montoBs = Math.round(totalUsd * tasaBs * 100) / 100;
   let cartMontoBs = null;
   try {
@@ -942,7 +942,7 @@ const verifyPagoMovil = async () => {
     alert("No se pudo obtener el monto o la tasa del carrito.");
     return { ok: false };
   }
-  console.log("[pago movil] input", { refDigits, refLast4, montoBs, tasaBs, totalUsd, cartId });
+  console.log("[pago movil] input", { refDigits, montoBs, tasaBs, totalUsd, cartId });
 
   const resp = await supabase
     .from("pagomoviles")
@@ -972,21 +972,82 @@ const verifyPagoMovil = async () => {
     const raw = String(text || "");
     return raw.match(/\d{4,}/g) || [];
   };
-  const match = (pagos || []).find((p) => {
-    const textoRefs = extractRefMatches(p.texto || "");
-    const pagoMonto = montoNum(p.monto_bs);
-    console.log("[pago movil] eval", {
-      id: p.id,
-      textoRefs,
-      pagoMonto,
-      montoBs,
-      diff: Number.isFinite(pagoMonto) ? Math.abs(pagoMonto - montoBs) : null,
-      saldo_acreditado: p.saldo_acreditado,
+  const extractPagoRefs = (pagoRow = {}) => {
+    const refs = new Set();
+    const refCol = normalizeReferenceDigits(pagoRow?.referencia);
+    if (refCol.length >= 4) refs.add(refCol);
+    extractRefMatches(pagoRow?.texto || "").forEach((refRaw) => {
+      const refDigitsFound = normalizeReferenceDigits(refRaw);
+      if (refDigitsFound.length >= 4) refs.add(refDigitsFound);
     });
-    const refMatch = textoRefs.some((n) => n.slice(-4) === refLast4);
-    if (!refMatch) return false;
-    return Number.isFinite(pagoMonto);
-  });
+    return Array.from(refs);
+  };
+  const getReferenceMatchScore = (targetRef = "", candidateRef = "") => {
+    const target = normalizeReferenceDigits(targetRef);
+    const candidate = normalizeReferenceDigits(candidateRef);
+    if (target.length < 4 || candidate.length < 4) return 0;
+    if (candidate === target) return 5;
+    if (target.length > 4 || candidate.length > 4) {
+      if (candidate.endsWith(target) || target.endsWith(candidate)) return 4;
+    }
+    if (candidate.slice(-4) === target.slice(-4)) return 1;
+    return 0;
+  };
+  const resolveBestReferenceCandidate = (targetRef = "", refs = []) => {
+    const normalizedRefs = Array.from(
+      new Set(
+        (Array.isArray(refs) ? refs : [])
+          .map((ref) => normalizeReferenceDigits(ref))
+          .filter((ref) => ref.length >= 4),
+      ),
+    );
+    const target = normalizeReferenceDigits(targetRef);
+    if (target.length < 4 || !normalizedRefs.length) return { score: 0, ref: null };
+    let bestScore = 0;
+    let bestRef = null;
+    normalizedRefs.forEach((ref) => {
+      const score = getReferenceMatchScore(target, ref);
+      if (score > bestScore) {
+        bestScore = score;
+        bestRef = ref;
+        return;
+      }
+      if (score > 0 && score === bestScore && bestRef && ref.length > bestRef.length) {
+        bestRef = ref;
+      }
+    });
+    return { score: bestScore, ref: bestRef };
+  };
+
+  const rankedMatches = (pagos || [])
+    .map((p) => {
+      const pagoMonto = montoNum(p.monto_bs);
+      const refs = extractPagoRefs(p);
+      const refResolution = resolveBestReferenceCandidate(targetReference, refs);
+      console.log("[pago movil] eval", {
+        id: p.id,
+        refs,
+        refScore: refResolution.score,
+        pagoMonto,
+        montoBs,
+        diff: Number.isFinite(pagoMonto) ? Math.abs(pagoMonto - montoBs) : null,
+        saldo_acreditado: p.saldo_acreditado,
+      });
+      if (refResolution.score <= 0 || !Number.isFinite(pagoMonto)) return null;
+      return { row: p, pagoMonto, refResolution };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b.refResolution.score !== a.refResolution.score) {
+        return b.refResolution.score - a.refResolution.score;
+      }
+      const diffA = Math.abs(Number(a.pagoMonto) - Number(montoBs));
+      const diffB = Math.abs(Number(b.pagoMonto) - Number(montoBs));
+      if (diffA !== diffB) return diffA - diffB;
+      return (Number(b.row?.id) || 0) - (Number(a.row?.id) || 0);
+    });
+  const bestMatch = rankedMatches[0] || null;
+  const match = bestMatch?.row || null;
   if (!match) {
     alert("Pago no encontrado");
     return { ok: false };
@@ -1004,8 +1065,7 @@ const verifyPagoMovil = async () => {
   }
 
   if (sessionUserId) {
-    const textoRefs = extractRefMatches(match.texto || "");
-    const refMatch = textoRefs.find((n) => n.slice(-4) === refLast4);
+    const refMatch = bestMatch?.refResolution?.ref || null;
     const updates = {
       saldo_acreditado_a: sessionUserId,
       saldo_acreditado: true,
