@@ -130,6 +130,7 @@ let homeBannersWheelAccumX = 0;
 let homeBannersWheelResetTimer = null;
 let homeBannersWheelLastSlideAt = 0;
 let homeBannersWheelDidSlideInGesture = false;
+let allCatalogPlataformas = [];
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
@@ -1222,6 +1223,49 @@ const applyInPageHashNavigation = (hashValue = "") => {
   return true;
 };
 
+const getModalPlatformIdFromUrl = () => {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search || "");
+  const rawCandidates = [
+    params.get("plataforma"),
+    params.get("id_plataforma"),
+    params.get("modal_plataforma"),
+    params.get("open_platform"),
+  ];
+  for (const raw of rawCandidates) {
+    const val = Number(raw);
+    if (Number.isFinite(val) && val > 0) return Math.trunc(val);
+  }
+  return null;
+};
+
+const openPlatformModalById = (targetId, plataformas = [], categorias = []) => {
+  const idNum = Number(targetId);
+  if (!Number.isFinite(idNum) || idNum <= 0) return false;
+  const id = Math.trunc(idNum);
+  const currentList = Array.isArray(plataformas) ? plataformas : [];
+  const fallbackList = Array.isArray(allCatalogPlataformas) ? allCatalogPlataformas : [];
+  const plataforma =
+    currentList.find((item) => Number(item?.id_plataforma) === id) ||
+    fallbackList.find((item) => Number(item?.id_plataforma) === id) ||
+    null;
+  if (!plataforma) return false;
+  const categoria = (Array.isArray(categorias) ? categorias : []).find(
+    (cat) => Number(cat?.id_categoria) === Number(plataforma?.id_categoria),
+  )?.nombre;
+  openModal({
+    ...plataforma,
+    categoria: categoria || "",
+  });
+  return true;
+};
+
+const openPlatformModalFromUrl = (plataformas = [], categorias = []) => {
+  const targetId = getModalPlatformIdFromUrl();
+  if (!targetId) return false;
+  return openPlatformModalById(targetId, plataformas, categorias);
+};
+
 const navigateBannerRedirect = (value = "") => {
   const raw = String(value || "").trim();
   if (!raw) return false;
@@ -1249,6 +1293,33 @@ const navigateBannerRedirect = (value = "") => {
   }
 
   window.location.href = redirectHref;
+  return true;
+};
+
+const tryOpenPlatformModalFromRedirect = (value = "", plataformas = [], categorias = []) => {
+  if (typeof window === "undefined") return false;
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  const redirectHref = normalizeBannerRedirect(raw);
+  if (!redirectHref) return false;
+  let target;
+  try {
+    target = new URL(redirectHref, window.location.href);
+  } catch (_err) {
+    return false;
+  }
+  if (target.origin !== window.location.origin) return false;
+  if (!isIndexLikePath(target.pathname)) return false;
+  const targetId =
+    Number(target.searchParams.get("plataforma")) ||
+    Number(target.searchParams.get("id_plataforma")) ||
+    Number(target.searchParams.get("modal_plataforma")) ||
+    Number(target.searchParams.get("open_platform"));
+  if (!Number.isFinite(targetId) || targetId <= 0) return false;
+  const opened = openPlatformModalById(targetId, plataformas, categorias);
+  if (!opened) return false;
+  const nextUrl = `${target.pathname}${target.search}${target.hash}`;
+  window.history.replaceState(null, "", nextUrl);
   return true;
 };
 
@@ -1838,6 +1909,9 @@ const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []
         bannerItem?.redirect || card.dataset.redirectUrl || "",
       ).trim();
       if (redirectRaw) {
+        if (tryOpenPlatformModalFromRedirect(redirectRaw, source, categorias)) {
+          return;
+        }
         if (navigateBannerRedirect(redirectRaw)) {
           return;
         }
@@ -2444,6 +2518,7 @@ async function init() {
       fetchHomeBanners(),
     ]);
     const { categorias, plataformas, precios, descuentos } = catalog;
+    allCatalogPlataformas = Array.isArray(plataformas) ? plataformas : [];
     const plataformasDisponibles = (plataformas || []).filter(
       (plat) => !isTrue(plat?.no_disponible),
     );
@@ -2504,6 +2579,7 @@ async function init() {
     setEstado("");
     renderCategorias(contenedor, categorias, plataformasPorCategoria, preciosMinByPlat);
     attachPlatformClicks(openModal);
+    openPlatformModalFromUrl(plataformas, categorias);
 
     initCart({
       drawerEl: cartDrawer,
