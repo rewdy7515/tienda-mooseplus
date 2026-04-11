@@ -8384,7 +8384,8 @@ const verifyRenewalCartToken = (tokenValue, options = {}) => {
 
 const buildRenewalCartUrl = ({ idUsuario, ventaIds = [] } = {}) => {
   const token = buildRenewalCartToken({ idUsuario, ventaIds });
-  const renewUrl = new URL(`/r/${encodeURIComponent(token)}`, PUBLIC_SITE_URL);
+  const renewUrl = new URL("/cart.html", PUBLIC_SITE_URL);
+  renewUrl.searchParams.set("rr", token);
   return renewUrl.toString();
 };
 
@@ -10356,9 +10357,69 @@ const processOrderFromItems = async ({
     lineDistributedAmountsByItemId.set(itemId, buildDistributedAmounts(lineAmount, itemRows.length));
   });
 
-  const sourceRowsForVentas = [...asignaciones, ...pendientes];
+  const sourceRowsForVentas = [...asignaciones, ...pendientes].map((row, index) => ({
+    ...row,
+    __source_row_idx: index,
+    __is_asignacion: index < asignaciones.length,
+  }));
+  const sourceRowsConvertedToRenewals = new Set();
+  const sourceRowsForInsertedVentas = [];
   const spotifyComprasCompletasParaProveedor = [];
-  const ventasToInsert = sourceRowsForVentas.map((a) => {
+  const spotifyImplicitRenewals = [];
+  const implicitResolvedVentaByItemId = new Map();
+  const implicitRenewalItemIds = new Set();
+  const normalizeComparableEmail = (value) => String(value || "").trim().toLowerCase();
+  const explicitRenewalVentaIdsSet = new Set(
+    idsVentasRenovar.map((id) => toPositiveInt(id)).filter((id) => id > 0),
+  );
+  const spotifyRenewalLookupEmails = Array.from(
+    new Set(
+      sourceRowsForVentas
+        .map((row) => {
+          const priceInfo = priceMap[row?.id_precio] || {};
+          const platId = Number(priceInfo?.id_plataforma) || null;
+          if (platId !== 9) return "";
+          if (isTrue(row?.pendiente)) return "";
+          const cuentaId = toPositiveInt(row?.id_cuenta);
+          if (!cuentaId) return "";
+          return normalizeComparableEmail(cuentaFlagsById[cuentaId]?.correo);
+        })
+        .filter(Boolean),
+    ),
+  );
+  const spotifyRenewalLookupEmailSet = new Set(spotifyRenewalLookupEmails);
+  const spotifyCandidateSalesByCorreo = new Map();
+  if (spotifyRenewalLookupEmails.length && toPositiveInt(idUsuarioVentas)) {
+    const spotifyCandidateSalesRows = await fetchAllSupabaseRows(
+      (from, to) =>
+        supabaseAdmin
+          .from("ventas")
+          .select(
+            "id_venta, id_usuario, id_precio, fecha_corte, id_cuenta, id_cuenta_miembro, suspendido, pendiente, pago_rechazado, completa, correo_miembro, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), precios:precios!ventas_id_precio_fkey(id_plataforma)",
+          )
+          .eq("id_usuario", toPositiveInt(idUsuarioVentas))
+          .not("correo_miembro", "is", null)
+          .order("id_venta", { ascending: false })
+          .range(from, to),
+      { label: `checkout:spotify_implicit_renewal_candidates:${ordenId}` },
+    );
+
+    (spotifyCandidateSalesRows || []).forEach((sale) => {
+      const saleId = toPositiveInt(sale?.id_venta);
+      if (!saleId || explicitRenewalVentaIdsSet.has(saleId)) return;
+      if (isTrue(sale?.pendiente) || isTrue(sale?.pago_rechazado)) return;
+      const salePlatId = Number(sale?.precios?.id_plataforma) || null;
+      if (salePlatId !== 9) return;
+      const correoNorm = normalizeComparableEmail(sale?.correo_miembro);
+      if (!correoNorm || !spotifyRenewalLookupEmailSet.has(correoNorm)) return;
+      const bucket = spotifyCandidateSalesByCorreo.get(correoNorm) || [];
+      bucket.push(sale);
+      spotifyCandidateSalesByCorreo.set(correoNorm, bucket);
+    });
+  }
+  const usedImplicitRenewVentaIds = new Set();
+  const ventasToInsert = [];
+  for (const a of sourceRowsForVentas) {
     const mesesValRaw = a.meses || 1;
     const mesesVal =
       Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
@@ -10367,7 +10428,6 @@ const processOrderFromItems = async ({
     const fechaCorte = a.pendiente ? null : addMonthsKeepDay(isoHoy, mesesVal);
     const priceInfo = priceMap[a.id_precio] || {};
     const platId = priceInfo.id_plataforma || null;
-    const platInfo = platInfoById[platId] || {};
     const isCompleta =
       priceInfo.completa === true ||
       priceInfo.completa === "true" ||
@@ -10379,6 +10439,43 @@ const processOrderFromItems = async ({
       ? isCuentaCompletaByFlags(cuentaFlags)
       : isCompleta && !isTrue(priceInfo.sub_cuenta);
     const isSpotifyCompletaCompra = isCuentaCompletaVenta && Number(platId) === 9;
+    const itemId = toPositiveInt(a?.id_item_carrito);
+    const montoLinea = (() => {
+      if (itemId && lineDistributedAmountsByItemId.has(itemId)) {
+        const bucket = lineDistributedAmountsByItemId.get(itemId) || [];
+        const nextAmount = bucket.length ? bucket.shift() : null;
+        lineDistributedAmountsByItemId.set(itemId, bucket);
+        if (Number.isFinite(Number(nextAmount))) return Number(nextAmount);
+      }
+      return Number(a.monto) || 0;
+    })();
+
+    const correoCuentaNorm = normalizeComparableEmail(cuentaFlags?.correo);
+    if (Number(platId) === 9 && !isTrue(a?.pendiente) && correoCuentaNorm) {
+      const saleCandidates = spotifyCandidateSalesByCorreo.get(correoCuentaNorm) || [];
+      const matchedSale = saleCandidates.find((sale) => {
+        const saleId = toPositiveInt(sale?.id_venta);
+        return !!saleId && !usedImplicitRenewVentaIds.has(saleId);
+      });
+      const matchedSaleId = toPositiveInt(matchedSale?.id_venta);
+      if (matchedSaleId) {
+        usedImplicitRenewVentaIds.add(matchedSaleId);
+        sourceRowsConvertedToRenewals.add(a.__source_row_idx);
+        spotifyImplicitRenewals.push({
+          id_item_carrito: itemId || null,
+          id_venta: matchedSaleId,
+          id_precio: a.id_precio,
+          meses: mesesVal,
+          monto: montoLinea,
+        });
+        if (itemId) {
+          implicitResolvedVentaByItemId.set(itemId, matchedSaleId);
+          implicitRenewalItemIds.add(itemId);
+        }
+        continue;
+      }
+    }
+
     if (isSpotifyCompletaCompra) {
       const correoCuenta = String(cuentaFlags?.correo || "").trim();
       const claveCuenta = String(cuentaFlags?.clave || "").trim();
@@ -10388,7 +10485,8 @@ const processOrderFromItems = async ({
         clave: claveCuenta || "-",
       });
     }
-    return {
+
+    ventasToInsert.push({
       id_usuario: idUsuarioVentas,
       id_precio: a.id_precio,
       id_tarjeta_de_regalo: toPositiveInt(a.id_tarjeta_de_regalo) || null,
@@ -10396,16 +10494,7 @@ const processOrderFromItems = async ({
       id_perfil: a.id_perfil,
       // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
       id_orden: ordenId,
-      monto: (() => {
-        const itemId = toPositiveInt(a?.id_item_carrito);
-        if (itemId && lineDistributedAmountsByItemId.has(itemId)) {
-          const bucket = lineDistributedAmountsByItemId.get(itemId) || [];
-          const nextAmount = bucket.length ? bucket.shift() : null;
-          lineDistributedAmountsByItemId.set(itemId, bucket);
-          if (Number.isFinite(Number(nextAmount))) return Number(nextAmount);
-        }
-        return Number(a.monto) || 0;
-      })(),
+      monto: montoLinea,
       pendiente: !!a.pendiente,
       meses_contratados: mesesVal,
       fecha_corte: fechaCorte,
@@ -10416,8 +10505,9 @@ const processOrderFromItems = async ({
       aviso_admin: false,
       completa: isCompleta ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? (isSpotifyCompletaCompra ? true : false) : null,
-    };
-  });
+    });
+    sourceRowsForInsertedVentas.push(a);
+  }
   console.log("[checkout] asignaciones", asignaciones);
   console.log("[checkout] pendientes", pendientes);
   console.log("[checkout] ventasToInsert", ventasToInsert);
@@ -10430,6 +10520,106 @@ const processOrderFromItems = async ({
       .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
     if (ventaErr) throw ventaErr;
     insertedVentas = ventasRes || [];
+  }
+  let implicitRenovacionesPendientesCount = 0;
+  const implicitRenewalHistRows = [];
+  const spotifyImplicitRenovacionesParaProveedor = [];
+  if (spotifyImplicitRenewals.length) {
+    const implicitVentaIds = uniqPositiveIds(spotifyImplicitRenewals.map((row) => row?.id_venta));
+    const implicitVentaMap = {};
+    if (implicitVentaIds.length) {
+      const { data: implicitVentas, error: implicitVentasErr } = await supabaseAdmin
+        .from("ventas")
+        .select(
+          "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)",
+        )
+        .in("id_venta", implicitVentaIds);
+      if (implicitVentasErr) throw implicitVentasErr;
+      (implicitVentas || []).forEach((row) => {
+        const ventaId = toPositiveInt(row?.id_venta);
+        if (ventaId) implicitVentaMap[ventaId] = row;
+      });
+    }
+
+    for (const row of spotifyImplicitRenewals) {
+      const ventaId = toPositiveInt(row?.id_venta);
+      if (!ventaId) continue;
+      const price = priceMap[row?.id_precio] || {};
+      const platId = Number(price?.id_plataforma) || 9;
+      const platformInfo = platInfoById[platId] || {};
+      const monto = Number(row?.monto) || 0;
+      const mesesValRaw = row?.meses || 1;
+      const mesesVal =
+        Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
+          ? Math.max(1, Math.round(Number(mesesValRaw)))
+          : 1;
+      const ventaAnt = implicitVentaMap[ventaId] || {};
+      const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
+      const entregaInmediataRenov = isTrue(platformInfo?.entrega_inmediata);
+      const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
+      if (renovarPendiente) implicitRenovacionesPendientesCount += 1;
+      const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
+      const sourceAccountRenov =
+        ventaAnt?.cuenta_miembro?.id_cuenta ? ventaAnt.cuenta_miembro : ventaAnt?.cuenta_principal || null;
+      const correoRenovacion = String(sourceAccountRenov?.correo || "").trim();
+      const claveRenovacion = String(sourceAccountRenov?.clave || "").trim();
+      const isCuentaCompletaRenov =
+        isCuentaCompletaByFlags(cuentaVenta) ||
+        (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
+      const isVentaCompletaRenov = isTrue(ventaAnt?.completa);
+      const fechaBaseSrc = ventaAnt?.fecha_corte || isoHoy;
+      const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
+      const updatePayload = {
+        fecha_pago: isoHoy,
+        fecha_corte,
+        monto,
+        id_orden: ordenId,
+        renovacion: true,
+        recordatorio_enviado: false,
+        recordatorio_corte_enviado: false,
+        aviso_admin: false,
+        pendiente: renovarPendiente,
+        suspendido: false,
+      };
+      if (isSuspendidaAnt) {
+        updatePayload.cuenta_nueva = false;
+      }
+      if (isCuentaCompletaRenov || isVentaCompletaRenov) {
+        if (platId === 9) {
+          updatePayload.cuenta_pagada_admin = true;
+          spotifyImplicitRenovacionesParaProveedor.push({
+            id_venta: ventaId,
+            correo: correoRenovacion || "-",
+            clave: claveRenovacion || "-",
+          });
+        } else {
+          updatePayload.cuenta_pagada_admin = false;
+        }
+      }
+      const { error: implicitUpdErr } = await supabaseAdmin
+        .from("ventas")
+        .update(updatePayload)
+        .eq("id_venta", ventaId);
+      if (implicitUpdErr) throw implicitUpdErr;
+
+      implicitRenewalHistRows.push({
+        id_usuario_cliente: ventaAnt?.id_usuario || idUsuarioVentas,
+        id_proveedor: null,
+        monto,
+        fecha_pago: isoHoy,
+        venta_cliente: true,
+        renovacion: true,
+        id_venta: ventaId,
+        id_orden: ordenId,
+        id_plataforma: platId,
+        id_cuenta: ventaAnt?.id_cuenta || null,
+        registrado_por: historialRegistradoPorId,
+        id_metodo_de_pago,
+        referencia: referenciaNum,
+        comprobante: comprobanteHist,
+        hora_pago: null,
+      });
+    }
   }
   if (insertedVentas.length && spotifyComprasCompletasParaProveedor.length) {
     const waComprasSpotifyResult = await sendSpotifyRenewalsToProviderWhatsapp({
@@ -10448,6 +10638,26 @@ const processOrderFromItems = async ({
       console.warn("[checkout] spotify compras completas proveedor no enviadas", waComprasSpotifyResult);
     }
   }
+  if (spotifyImplicitRenovacionesParaProveedor.length) {
+    const waSpotifyImplicitRenov = await sendSpotifyRenewalsToProviderWhatsapp({
+      renewals: spotifyImplicitRenovacionesParaProveedor,
+      providerId: 11,
+      source: "processOrderFromItems_new_sale_to_renewal",
+      idOrden: ordenId,
+    });
+    if (waSpotifyImplicitRenov?.sent) {
+      console.log("[checkout] spotify compras nuevas convertidas a renovacion notificadas a proveedor", {
+        id_orden: ordenId,
+        id_proveedor: waSpotifyImplicitRenov?.id_proveedor || 11,
+        total: waSpotifyImplicitRenov?.total || spotifyImplicitRenovacionesParaProveedor.length,
+      });
+    } else {
+      console.warn(
+        "[checkout] spotify compras nuevas convertidas a renovacion proveedor no enviadas",
+        waSpotifyImplicitRenov,
+      );
+    }
+  }
 
   const resolvedVentaByItemId = new Map();
   (items || []).forEach((item) => {
@@ -10458,11 +10668,18 @@ const processOrderFromItems = async ({
     }
   });
   insertedVentas.forEach((venta, idx) => {
-    const source = sourceRowsForVentas[idx] || {};
+    const source = sourceRowsForInsertedVentas[idx] || {};
     const itemId = toPositiveInt(source?.id_item_carrito);
     const ventaId = toPositiveInt(venta?.id_venta);
     if (itemId && ventaId && !resolvedVentaByItemId.has(itemId)) {
       resolvedVentaByItemId.set(itemId, ventaId);
+    }
+  });
+  implicitResolvedVentaByItemId.forEach((ventaId, itemId) => {
+    const itemIdNum = toPositiveInt(itemId);
+    const ventaIdNum = toPositiveInt(ventaId);
+    if (itemIdNum && ventaIdNum && !resolvedVentaByItemId.has(itemIdNum)) {
+      resolvedVentaByItemId.set(itemIdNum, ventaIdNum);
     }
   });
 
@@ -10557,6 +10774,12 @@ const processOrderFromItems = async ({
       hora_pago: horaPago,
     });
   });
+  if (implicitRenewalHistRows.length) {
+    implicitRenewalHistRows.forEach((row) => {
+      row.hora_pago = horaPago;
+    });
+    histRows.push(...implicitRenewalHistRows);
+  }
   if (histRows.length) {
     let historialGiftCardLinkFallback = false;
     const targetHistTotalNum = hasCustomItemAmounts ? Number.NaN : Number(montoHistorialTotalOverride);
@@ -10617,6 +10840,14 @@ const processOrderFromItems = async ({
     const itemId = toPositiveInt(item?.id_item);
     if (!itemId) return item;
     const resolvedVentaId = toPositiveInt(resolvedVentaByItemId.get(itemId));
+    const forceRenewal = implicitRenewalItemIds.has(itemId);
+    if (forceRenewal) {
+      return {
+        ...item,
+        id_venta: resolvedVentaId || toPositiveInt(item?.id_venta) || null,
+        renovacion: true,
+      };
+    }
     if (!resolvedVentaId || resolvedVentaId === toPositiveInt(item?.id_venta)) return item;
     return { ...item, id_venta: resolvedVentaId };
   });
@@ -10638,14 +10869,17 @@ const processOrderFromItems = async ({
   });
 
   // marca recursos como ocupados
-  const perfilesIds = uniqPositiveIds(asignaciones.map((a) => a.id_perfil));
+  const asignacionesEfectivas = sourceRowsForVentas.filter(
+    (row) => row.__is_asignacion && !sourceRowsConvertedToRenewals.has(row.__source_row_idx),
+  );
+  const perfilesIds = uniqPositiveIds(asignacionesEfectivas.map((a) => a.id_perfil));
   const cuentasIds = uniqPositiveIds(
-    asignaciones
+    asignacionesEfectivas
       .filter((a) => a.id_perfil === null && a.id_cuenta)
       .map((a) => a.id_cuenta),
   );
   const cuentasCompletasIds = uniqPositiveIds(
-    asignaciones
+    asignacionesEfectivas
       .filter((a) => {
         if (a?.id_perfil !== null && a?.id_perfil !== undefined) return false;
         const cuentaId = toPositiveInt(a?.id_cuenta);
@@ -10683,7 +10917,8 @@ const processOrderFromItems = async ({
   await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
 
   const idUsuarioVenta = toPositiveInt(idUsuarioVentas);
-  const huboVentasProcesadas = insertedVentas.length > 0 || renovaciones.length > 0;
+  const huboVentasProcesadas =
+    insertedVentas.length > 0 || renovaciones.length > 0 || spotifyImplicitRenewals.length > 0;
   if (idUsuarioVenta && huboVentasProcesadas) {
     const { error: updUserErr } = await supabaseAdmin
       .from("usuarios")
@@ -10701,11 +10936,11 @@ const processOrderFromItems = async ({
   console.log("[checkout] processOrderFromItems end", {
     ordenId,
     ventasCount: ventasToInsert.length,
-    pendientesCount: pendientes.length + renovacionesPendientesCount,
+    pendientesCount: pendientes.length + renovacionesPendientesCount + implicitRenovacionesPendientesCount,
   });
   return {
     ventasCount: ventasToInsert.length,
-    pendientesCount: pendientes.length + renovacionesPendientesCount,
+    pendientesCount: pendientes.length + renovacionesPendientesCount + implicitRenovacionesPendientesCount,
   };
 };
 

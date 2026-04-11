@@ -6,6 +6,8 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/r/(.*)", "dest": "/api/index.js" },
+    { "src": "/s/(.*)", "dest": "/api/index.js" },
     { "src": "^/$", "dest": "/api/index.js" },
     { "handle": "filesystem" },
     { "src": "/service-worker.js", "dest": "/src/frontend/public/service-worker.js" },

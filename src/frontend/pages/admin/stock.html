@@ -648,6 +648,9 @@
         return "estable";
       };
 
+      const getCoverageStockValue = (row = {}) =>
+        Number(row?.stock || 0) + Number(row?.vencidos || 0);
+
       const formatCoverage = (value) => {
         const numeric = Number(value);
         if (!Number.isFinite(numeric)) return "Sin consumo";
@@ -757,8 +760,9 @@
 
         const rows = Array.from(map.values()).map((row) => {
           const avgDiario = Number((Number(row.ventas_periodo || 0) / Math.max(1, dayDivisor)).toFixed(2));
-          const stockConVencidas = Number(row.stock || 0) + Number(row.vencidos || 0);
-          const cobertura = avgDiario > 0 ? Number((stockConVencidas / avgDiario).toFixed(2)) : Number.POSITIVE_INFINITY;
+          const stockConVencidas = getCoverageStockValue(row);
+          const cobertura =
+            avgDiario > 0 ? Number((stockConVencidas / avgDiario).toFixed(2)) : Number.POSITIVE_INFINITY;
           const estado = getStatusByCoverage(cobertura);
           return {
             ...row,
@@ -846,7 +850,7 @@
       const renderAlerts = (rows = []) => {
         if (!alertsEl) return;
 
-        const lowStock = rows.filter((r) => Number(r.stock || 0) <= 5);
+        const lowStock = rows.filter((r) => getCoverageStockValue(r) <= 5);
         const highExpired = rows.filter((r) => Number(r.vencidos || 0) >= 5);
         const highRotation = rows.filter((r) => Number(r.avg_diario || 0) >= 1);
         const criticalCoverage = rows.filter((r) => r.estado === "critico");
@@ -861,7 +865,7 @@
         }
         if (lowStock.length) {
           lines.push(
-            `<li>Stock bajo (<= 5): ${escapeHtml(
+            `<li>Stock util bajo (stock + vencidas <= 5): ${escapeHtml(
               lowStock.slice(0, 6).map((r) => getRowLabel(r)).join(", "),
             )}${lowStock.length > 6 ? "..." : ""}</li>`,
           );
@@ -888,7 +892,7 @@
         const totalStock = rows.reduce((sum, row) => sum + Number(row.stock || 0), 0);
         const totalVencidos = rows.reduce((sum, row) => sum + Number(row.vencidos || 0), 0);
         const totalAvg = rows.reduce((sum, row) => sum + Number(row.avg_diario || 0), 0);
-        const coverageBase = totalStock + totalVencidos;
+        const coverageBase = rows.reduce((sum, row) => sum + getCoverageStockValue(row), 0);
         const coverage = totalAvg > 0 ? coverageBase / totalAvg : Number.POSITIVE_INFINITY;
         const criticos = rows.filter((r) => r.estado === "critico").length;
 
@@ -1106,7 +1110,6 @@
                 "id_venta, fecha_corte, cuentas:cuentas!ventas_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro), perfiles:perfiles(id_perfil, perfil_hogar)",
               )
               .lte("fecha_corte", end)
-              .eq("recordatorio_enviado", true)
               .or("reportado.is.null,reportado.eq.false")
               .or("suspendido.is.null,suspendido.eq.false")
               .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" }),
