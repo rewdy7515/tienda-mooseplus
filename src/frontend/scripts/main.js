@@ -2579,7 +2579,6 @@ async function init() {
     setEstado("");
     renderCategorias(contenedor, categorias, plataformasPorCategoria, preciosMinByPlat);
     attachPlatformClicks(openModal);
-    openPlatformModalFromUrl(plataformas, categorias);
 
     initCart({
       drawerEl: cartDrawer,
