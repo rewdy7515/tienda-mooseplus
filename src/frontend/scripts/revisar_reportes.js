@@ -102,6 +102,7 @@ const datosIncorrectosImagenInput = document.querySelector("#datos-incorrectos-i
 const datosIncorrectosImagenPreview = document.querySelector("#datos-incorrectos-imagen-preview");
 const datosIncorrectosCheckCorreo = document.querySelector("#datos-incorrectos-check-correo");
 const datosIncorrectosCheckClave = document.querySelector("#datos-incorrectos-check-clave");
+const datosIncorrectosMensajePreview = document.querySelector("#datos-incorrectos-mensaje-preview");
 const btnEnviarDatosIncorrectos = document.querySelector("#btn-enviar-datos-incorrectos");
 
 let currentRow = null;
@@ -266,6 +267,31 @@ const syncDatosIncorrectosButtonForRow = (row) => {
   if (btnDatosIncorrectos) btnDatosIncorrectos.classList.toggle("hidden", !showButton);
 };
 
+const buildDatosIncorrectosPreviewMessage = () => {
+  const reportId = toPositiveId(currentRow?.id_reporte) || "-";
+  const correoMarcado = datosIncorrectosCheckCorreo?.checked === true;
+  const claveMarcada = datosIncorrectosCheckClave?.checked === true;
+  const hasImage = Boolean((datosIncorrectosImagenInput?.files || [])[0]);
+  if (!correoMarcado && !claveMarcada) {
+    return "Selecciona Correo o Contraseña para ver el mensaje.";
+  }
+  const bullets = [];
+  if (correoMarcado) bullets.push("* Correo");
+  if (claveMarcada) bullets.push("* Contraseña");
+  const bodyBullets = bullets.length ? bullets.join("\n") : "* -";
+  const resetClaveMsg =
+    claveMarcada
+      ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
+      : "";
+  const imageSection = hasImage ? "[Imagen adjunta]\n" : "";
+  return `${imageSection}\`Reporte #${reportId}\`\nRespuesta:\nDatos erroneos:\n${bodyBullets}${resetClaveMsg}`;
+};
+
+const updateDatosIncorrectosMessagePreview = () => {
+  if (!datosIncorrectosMensajePreview) return;
+  datosIncorrectosMensajePreview.textContent = buildDatosIncorrectosPreviewMessage();
+};
+
 const resetDatosIncorrectosModalState = () => {
   if (datosIncorrectosImagenInput) datosIncorrectosImagenInput.value = "";
   if (datosIncorrectosImagenPreview) {
@@ -273,6 +299,7 @@ const resetDatosIncorrectosModalState = () => {
   }
   if (datosIncorrectosCheckCorreo) datosIncorrectosCheckCorreo.checked = false;
   if (datosIncorrectosCheckClave) datosIncorrectosCheckClave.checked = false;
+  updateDatosIncorrectosMessagePreview();
 };
 
 const closeDatosIncorrectosModal = () => {
@@ -1479,6 +1506,7 @@ async function init() {
     if (getReportePlatformId(currentRow) !== 9) return;
     resetDatosIncorrectosModalState();
     modalDatosIncorrectos?.classList.remove("hidden");
+    updateDatosIncorrectosMessagePreview();
   });
 
   modalDatosIncorrectos?.addEventListener("click", (e) => {
@@ -1498,7 +1526,11 @@ async function init() {
     if (datosIncorrectosImagenPreview) {
       datosIncorrectosImagenPreview.textContent = file ? file.name : "Sin imagen seleccionada.";
     }
+    updateDatosIncorrectosMessagePreview();
   });
+
+  datosIncorrectosCheckCorreo?.addEventListener("change", updateDatosIncorrectosMessagePreview);
+  datosIncorrectosCheckClave?.addEventListener("change", updateDatosIncorrectosMessagePreview);
 
   btnEnviarDatosIncorrectos?.addEventListener("click", async () => {
     if (!currentRow) return;

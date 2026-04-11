@@ -479,6 +479,18 @@
         flex-direction: column;
         gap: 8px;
       }
+      .datos-incorrectos-mensaje-preview {
+        margin: 0;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f9fafb;
+        color: #111827;
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
       .datos-incorrectos-preview {
         min-height: 30px;
         margin: 0;
@@ -668,6 +680,8 @@
               <label><input type="checkbox" id="datos-incorrectos-check-correo" /> Correo</label>
               <label><input type="checkbox" id="datos-incorrectos-check-clave" /> Contraseña</label>
             </div>
+            <p class="datos-incorrectos-subtitle">Mensaje que recibirá el cliente</p>
+            <pre id="datos-incorrectos-mensaje-preview" class="datos-incorrectos-mensaje-preview"></pre>
             <div class="modal-actions-column" style="margin-top:4px;">
               <button class="btn-primary" id="btn-enviar-datos-incorrectos">Enviar</button>
             </div>
