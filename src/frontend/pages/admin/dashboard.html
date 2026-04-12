@@ -1043,7 +1043,6 @@
       const JANUARY_SHEETS_EXTRA_NEW_SALES = 104;
       const JANUARY_SHEETS_EXTRA_RENEWALS = 28;
       const JANUARY_SHEETS_EXTRA_DAY_LIMIT = 15;
-      const GIFT_PLATFORM_REMAP_SOURCE_ID = 21;
       const GIFT_PLATFORM_REMAP_TARGET_ID = 1;
       const GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME = "Plataforma 1";
       const NOMINA_START_MONTH_KEY = "2026-03";
@@ -1317,8 +1316,6 @@
         const cost = Number(row?.costo);
         return Number.isFinite(cost) && cost > 0;
       };
-      const isNonSaleGiftExpenseRow = (row) =>
-        !isTrue(row?.para_venta) && hasPositiveGiftCost(row);
       const hasLinkedGiftCard = (row) => {
         const giftId = Number(row?.id_tarjeta_de_regalo);
         return Number.isFinite(giftId) && giftId > 0;
@@ -2478,12 +2475,7 @@
         const rowsRenovIngreso = [];
         const rowsRenovGasto = [];
         const ventasDiariasPorDia = {};
-        const scopedGiftRows = (giftRows || []).filter((row) => {
-          if (isNonSaleGiftExpenseRow(row)) return true;
-          const rawPlatformId = Number(row?.id_plataforma);
-          if (rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID) return true;
-          return isTrue(toJoinedField(row?.plataformas, "tarjeta_de_regalo", false));
-        });
+        const scopedGiftRows = (giftRows || []).filter((row) => hasPositiveGiftCost(row));
 
         historial.forEach((row) => {
           const isIngreso = isHistorialIngresoRow(row);
@@ -2543,16 +2535,8 @@
         });
 
         scopedGiftRows.forEach((row) => {
-          const rawPlatformId = Number(row?.id_plataforma);
-          const shouldRemapGiftPlatform =
-            rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID &&
-            !isTrue(row?.para_venta);
-          const mappedPlatformId = shouldRemapGiftPlatform
-            ? GIFT_PLATFORM_REMAP_TARGET_ID
-            : row?.id_plataforma ?? null;
-          const mappedPlatformName = shouldRemapGiftPlatform
-            ? GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME
-            : toName(row?.plataformas, "Sin plataforma");
+          const mappedPlatformId = GIFT_PLATFORM_REMAP_TARGET_ID;
+          const mappedPlatformName = GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME;
           const entry = upsertPlatform(mappedPlatformId, mappedPlatformName);
           entry.gastos += toNumber(row?.costo);
           entry.movimientos += 1;
