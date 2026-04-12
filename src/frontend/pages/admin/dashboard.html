@@ -1256,6 +1256,22 @@
           end: `${year}-${mm}-${String(day).padStart(2, "0")}`,
         };
       };
+      const addDaysToIsoDate = (isoDate, daysToAdd = 0) => {
+        const normalized = normalizeIsoDate(isoDate);
+        const m = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return "";
+        const year = Number(m[1]);
+        const month = Number(m[2]);
+        const day = Number(m[3]);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return "";
+        const utcDate = new Date(Date.UTC(year, month - 1, day));
+        if (Number.isNaN(utcDate.valueOf())) return "";
+        utcDate.setUTCDate(utcDate.getUTCDate() + (Number(daysToAdd) || 0));
+        const y = utcDate.getUTCFullYear();
+        const mo = String(utcDate.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(utcDate.getUTCDate()).padStart(2, "0");
+        return `${y}-${mo}-${d}`;
+      };
       const buildCompareContext = (monthVal) => {
         const currentCaracas = getCaracasDateParts();
         const currentMonthKey = `${currentCaracas.year}-${currentCaracas.month}`;
@@ -2649,6 +2665,7 @@
       };
 
       const fetchMonthData = async (range) => {
+        const endExclusive = addDaysToIsoDate(range?.end, 1) || range?.end;
         const [historialData, giftData] = await Promise.all([
           fetchAllPages(() =>
             supabase
@@ -2657,7 +2674,7 @@
                 "id_historial_ventas, monto, fecha_pago, venta_cliente, renovacion, id_plataforma, id_proveedor, id_tarjeta_de_regalo, plataformas(nombre, tarjeta_de_regalo), proveedores(nombre)",
               )
               .gte("fecha_pago", range.start)
-              .lte("fecha_pago", range.end)
+              .lt("fecha_pago", endExclusive)
               .order("fecha_pago", { ascending: true })
               .order("id_historial_ventas", { ascending: true }),
           ),
@@ -2668,7 +2685,7 @@
                 "id_tarjeta_de_regalo, costo, para_venta, usado, fecha_compra, id_plataforma, id_proveedor, plataformas(nombre, tarjeta_de_regalo), proveedores(nombre)",
               )
               .gte("fecha_compra", range.start)
-              .lte("fecha_compra", range.end)
+              .lt("fecha_compra", endExclusive)
               .order("fecha_compra", { ascending: true })
               .order("id_tarjeta_de_regalo", { ascending: true }),
           ),
