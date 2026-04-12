@@ -1043,8 +1043,6 @@
       const JANUARY_SHEETS_EXTRA_NEW_SALES = 104;
       const JANUARY_SHEETS_EXTRA_RENEWALS = 28;
       const JANUARY_SHEETS_EXTRA_DAY_LIMIT = 15;
-      const GIFT_PLATFORM_REMAP_TARGET_ID = 1;
-      const GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME = "Plataforma 1";
       const NOMINA_START_MONTH_KEY = "2026-03";
       const NOMINA_QUINCENA_AMOUNT = 80;
 
@@ -1077,8 +1075,13 @@
         const caracas = getCaracasDateParts();
         return `${caracas.year}-${caracas.month}`;
       };
+      const normalizeIsoDate = (dateVal) => {
+        const match = String(dateVal || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!match) return "";
+        return `${match[1]}-${match[2]}-${match[3]}`;
+      };
       const monthKeyFromDate = (dateVal) => {
-        const m = String(dateVal || "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+        const m = normalizeIsoDate(dateVal).match(/^(\d{4})-(\d{2})-\d{2}$/);
         return m ? `${m[1]}-${m[2]}` : null;
       };
       const monthToIndex = (key) => {
@@ -1321,9 +1324,13 @@
         return Number.isFinite(giftId) && giftId > 0;
       };
       const isHistorialIngresoRow = (row) => {
+        const ventaClienteRaw = row?.venta_cliente;
+        if (ventaClienteRaw === true || ventaClienteRaw === false) {
+          return ventaClienteRaw;
+        }
         if (isGiftPlatformRow(row)) return true;
         if (hasLinkedGiftCard(row)) return true;
-        return isTrue(row?.venta_cliente);
+        return false;
       };
 
       const formatMoney = (v) => moneyFmt.format(toNumber(v));
@@ -1347,7 +1354,8 @@
       };
 
       const formatDDMMYYYY = (isoDate) => {
-        const m = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        const normalized = normalizeIsoDate(isoDate);
+        const m = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (!m) return isoDate || "-";
         return `${m[3]}-${m[2]}-${m[1]}`;
       };
@@ -2535,9 +2543,8 @@
         });
 
         scopedGiftRows.forEach((row) => {
-          const mappedPlatformId = GIFT_PLATFORM_REMAP_TARGET_ID;
-          const mappedPlatformName = GIFT_PLATFORM_REMAP_TARGET_FALLBACK_NAME;
-          const entry = upsertPlatform(mappedPlatformId, mappedPlatformName);
+          const giftPlatformName = toName(row?.plataformas, "Sin plataforma");
+          const entry = upsertPlatform(row?.id_plataforma ?? null, giftPlatformName);
           entry.gastos += toNumber(row?.costo);
           entry.movimientos += 1;
         });
@@ -2592,7 +2599,7 @@
         };
 
         historial.forEach((row) => {
-          const day = upsertDay(row?.fecha_pago);
+          const day = upsertDay(normalizeIsoDate(row?.fecha_pago));
           if (!day) return;
           const monto = toNumber(row?.monto);
           if (isHistorialIngresoRow(row)) day.ingresos += monto;
@@ -2600,7 +2607,7 @@
         });
 
         scopedGiftRows.forEach((row) => {
-          const day = upsertDay(row?.fecha_compra);
+          const day = upsertDay(normalizeIsoDate(row?.fecha_compra));
           if (!day) return;
           day.gastos += toNumber(row?.costo);
         });
