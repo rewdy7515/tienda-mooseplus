@@ -131,6 +131,7 @@ let homeBannersWheelResetTimer = null;
 let homeBannersWheelLastSlideAt = 0;
 let homeBannersWheelDidSlideInGesture = false;
 let allCatalogPlataformas = [];
+let homeBannerModalSequenceToken = 0;
 const recordatoriosPendientesWrap = document.querySelector("#recordatorios-pendientes-wrap");
 const recordatoriosPendientesList = document.querySelector("#recordatorios-pendientes-list");
 const recordatoriosPendientesEmpty = document.querySelector("#recordatorios-pendientes-empty");
@@ -1239,9 +1240,9 @@ const getModalPlatformIdFromUrl = () => {
   return null;
 };
 
-const openPlatformModalById = (targetId, plataformas = [], categorias = []) => {
+const resolvePlatformForModalById = (targetId, plataformas = []) => {
   const idNum = Number(targetId);
-  if (!Number.isFinite(idNum) || idNum <= 0) return false;
+  if (!Number.isFinite(idNum) || idNum <= 0) return null;
   const id = Math.trunc(idNum);
   const currentList = Array.isArray(plataformas) ? plataformas : [];
   const fallbackList = Array.isArray(allCatalogPlataformas) ? allCatalogPlataformas : [];
@@ -1249,7 +1250,14 @@ const openPlatformModalById = (targetId, plataformas = [], categorias = []) => {
     currentList.find((item) => Number(item?.id_plataforma) === id) ||
     fallbackList.find((item) => Number(item?.id_plataforma) === id) ||
     null;
-  if (!plataforma) return false;
+  if (!plataforma) return null;
+  return { id, plataforma };
+};
+
+const openPlatformModalById = (targetId, plataformas = [], categorias = []) => {
+  const resolved = resolvePlatformForModalById(targetId, plataformas);
+  if (!resolved) return false;
+  const { plataforma } = resolved;
   const categoria = (Array.isArray(categorias) ? categorias : []).find(
     (cat) => Number(cat?.id_categoria) === Number(plataforma?.id_categoria),
   )?.nombre;
@@ -1257,6 +1265,52 @@ const openPlatformModalById = (targetId, plataformas = [], categorias = []) => {
     ...plataforma,
     categoria: categoria || "",
   });
+  return true;
+};
+
+const clearBannerHoverPreview = () => {
+  document
+    .querySelectorAll(".plataforma-card.is-banner-hover-preview")
+    .forEach((el) => el.classList.remove("is-banner-hover-preview"));
+};
+
+const previewPlatformCardAndOpenModal = (targetId, plataformas = [], categorias = []) => {
+  const resolved = resolvePlatformForModalById(targetId, plataformas);
+  if (!resolved) return false;
+  const { id } = resolved;
+  const seqToken = ++homeBannerModalSequenceToken;
+  const cardEl = document.querySelector(`.plataforma-card[data-id-plataforma="${id}"]`);
+  const prefersReducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const scrollDelayMs = prefersReducedMotion ? 20 : 420;
+  const hoverDurationMs = prefersReducedMotion ? 120 : 420;
+  const openModalSafe = () => {
+    if (seqToken !== homeBannerModalSequenceToken) return;
+    openPlatformModalById(id, plataformas, categorias);
+  };
+
+  if (!cardEl) {
+    openModalSafe();
+    return true;
+  }
+
+  cardEl.scrollIntoView({
+    behavior: prefersReducedMotion ? "auto" : "smooth",
+    block: "center",
+    inline: "nearest",
+  });
+  window.setTimeout(() => {
+    if (seqToken !== homeBannerModalSequenceToken) return;
+    clearBannerHoverPreview();
+    cardEl.classList.add("is-banner-hover-preview");
+    window.setTimeout(() => {
+      cardEl.classList.remove("is-banner-hover-preview");
+      openModalSafe();
+    }, hoverDurationMs);
+  }, scrollDelayMs);
+
   return true;
 };
 
@@ -1316,7 +1370,7 @@ const tryOpenPlatformModalFromRedirect = (value = "", plataformas = [], categori
     Number(target.searchParams.get("modal_plataforma")) ||
     Number(target.searchParams.get("open_platform"));
   if (!Number.isFinite(targetId) || targetId <= 0) return false;
-  const opened = openPlatformModalById(targetId, plataformas, categorias);
+  const opened = previewPlatformCardAndOpenModal(targetId, plataformas, categorias);
   if (!opened) return false;
   const nextUrl = `${target.pathname}${target.search}${target.hash}`;
   window.history.replaceState(null, "", nextUrl);

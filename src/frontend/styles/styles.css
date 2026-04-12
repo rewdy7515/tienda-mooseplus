@@ -3612,6 +3612,11 @@ input[type="number"].input-inline {
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
 }
 
+.plataforma-card.is-banner-hover-preview {
+  transform: scale(1.03);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
+}
+
 .plataforma-thumb {
   position: relative;
   width: 100%;
