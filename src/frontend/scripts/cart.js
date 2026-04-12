@@ -1,5 +1,5 @@
 import { sendCartDelta, fetchCart, loadCatalog, ensureServerSession, loadCurrentUser } from "./api.js";
-import { requireSession } from "./session.js";
+import { requireSession, getSessionRoles } from "./session.js";
 
 let cartItems = [];
 let drawer;
@@ -19,7 +19,15 @@ let userAcceso = null;
 let cartRawItems = [];
 let refreshFromServerFn = null;
 let cartBound = false;
+let canAssignClient = false;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const isTrue = (value) =>
+  value === true ||
+  value === 1 ||
+  value === "1" ||
+  value === "true" ||
+  value === "t" ||
+  value === "on";
 
 const getClosestDiscountPct = (rows, value, column) => {
   const key = Number(value) || 0;
@@ -293,7 +301,7 @@ const toggleActions = (hasItems) => {
   if (actionsEl) actionsEl.classList.toggle("hidden", !hasItems);
   btnCheckout?.classList.toggle("hidden", !hasItems);
   btnViewCart?.classList.toggle("hidden", !hasItems);
-  btnAssign?.classList.toggle("hidden", !hasItems);
+  btnAssign?.classList.toggle("hidden", !hasItems || !canAssignClient);
   totalBarEl?.classList.toggle("hidden", !hasItems);
 };
 
@@ -383,6 +391,22 @@ export function initCart({
   cartRawItems = (initialRawItems || []).map((it) => normalizeRawItem(it));
   renderCart();
 
+  const resolveAssignVisibility = async () => {
+    try {
+      const sessionRoles = getSessionRoles();
+      let allowAssign = isTrue(sessionRoles?.permiso_superadmin);
+      if (!allowAssign && requireSession()) {
+        const currentUser = await loadCurrentUser();
+        allowAssign = isTrue(currentUser?.permiso_superadmin);
+      }
+      canAssignClient = allowAssign;
+    } catch (_err) {
+      canAssignClient = false;
+    }
+    toggleActions(cartItems.length > 0);
+  };
+  resolveAssignVisibility();
+
   const refreshFromServer = async () => {
     try {
       if (!requireSession()) {
@@ -419,11 +443,6 @@ export function initCart({
     return;
   }
   cartBound = true;
-
-  if (btnAssign) {
-    btnAssign.style.display = "block";
-    btnAssign.classList.remove("hidden");
-  }
 
   iconBtn?.addEventListener("click", async () => {
     await refreshFromServer();
