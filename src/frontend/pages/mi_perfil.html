@@ -147,6 +147,9 @@
             id="perfil-nombre-input"
             type="text"
             class="form-input"
+            autocomplete="given-name"
+            pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*"
+            title="Solo se permiten letras."
             placeholder="Nombre"
           />
 
@@ -155,6 +158,9 @@
             id="perfil-apellido-input"
             type="text"
             class="form-input"
+            autocomplete="family-name"
+            pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*"
+            title="Solo se permiten letras."
             placeholder="Apellido"
           />
 

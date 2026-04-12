@@ -65,6 +65,16 @@ const signupNextTarget = normalizeSignupNextTarget(signupPageParams.get("next"))
 let signupTokenContext = null;
 const SIGNUP_CONFIRM_REDIRECT_URL = "https://mooseplus.com/login.html";
 const DEFAULT_DIAL_CODE = "58";
+const NAME_ALLOWED_CHARS_REGEX = /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]/g;
+const NAME_VALIDATION_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$/;
+
+const sanitizePersonName = (value = "") =>
+  String(value || "")
+    .replace(NAME_ALLOWED_CHARS_REGEX, "")
+    .replace(/\s+/g, " ")
+    .replace(/^\s+/, "");
+
+const isValidPersonName = (value = "") => NAME_VALIDATION_REGEX.test(String(value || "").trim());
 
 function getLoginPageUrl() {
   const params = new URLSearchParams();
@@ -328,8 +338,10 @@ async function handleSubmit(e) {
   e.preventDefault();
   clearMessages();
 
-  const nombre = fields.nombre.value.trim();
-  const apellido = fields.apellido.value.trim();
+  const nombre = sanitizePersonName(fields.nombre.value).trim();
+  const apellido = sanitizePersonName(fields.apellido.value).trim();
+  fields.nombre.value = nombre;
+  fields.apellido.value = apellido;
   const phoneDial = iti?.getSelectedCountryData?.()?.dialCode || DEFAULT_DIAL_CODE;
   const phoneDialDigits = normalizePhoneDigits(phoneDial || "");
   const telefonoRawDigits = String(fields.telefono.value || "").replace(/\D+/g, "");
@@ -347,9 +359,17 @@ async function handleSubmit(e) {
     errors.nombre.textContent = "El nombre es obligatorio.";
     fields.nombre.classList.add("input-error");
     hasError = true;
+  } else if (!isValidPersonName(nombre)) {
+    errors.nombre.textContent = "El nombre solo puede contener letras.";
+    fields.nombre.classList.add("input-error");
+    hasError = true;
   }
   if (!apellido) {
     errors.apellido.textContent = "El apellido es obligatorio.";
+    fields.apellido.classList.add("input-error");
+    hasError = true;
+  } else if (!isValidPersonName(apellido)) {
+    errors.apellido.textContent = "El apellido solo puede contener letras.";
     fields.apellido.classList.add("input-error");
     hasError = true;
   }
@@ -645,22 +665,41 @@ function init() {
     window.location.href = getLoginPageUrl();
   });
 
-  const capitalizeField = (input) => {
+  const bindNameFieldValidation = (input, errorEl, fieldLabel) => {
     input?.addEventListener("input", () => {
       const { selectionStart, selectionEnd, value } = input;
-      if (!value) return;
-      const capped = value.charAt(0).toUpperCase() + value.slice(1);
-      if (capped !== value) {
-        input.value = capped;
+      const sanitizedValue = sanitizePersonName(value);
+      const normalizedValue = sanitizedValue
+        ? sanitizedValue.charAt(0).toUpperCase() + sanitizedValue.slice(1)
+        : "";
+      if (normalizedValue !== value) {
+        input.value = normalizedValue;
         if (selectionStart !== null && selectionEnd !== null) {
-          input.setSelectionRange(selectionStart, selectionEnd);
+          const nextCursor = Math.min(normalizedValue.length, selectionStart);
+          input.setSelectionRange(nextCursor, nextCursor);
         }
+      }
+
+      const trimmedValue = input.value.trim();
+      if (!trimmedValue || isValidPersonName(trimmedValue)) {
+        if (errorEl) errorEl.textContent = "";
+        input.classList.remove("input-error");
+      }
+    });
+
+    input?.addEventListener("blur", () => {
+      const trimmedValue = sanitizePersonName(input.value).trim();
+      input.value = trimmedValue;
+      if (!trimmedValue) return;
+      if (!isValidPersonName(trimmedValue)) {
+        if (errorEl) errorEl.textContent = `El ${fieldLabel} solo puede contener letras.`;
+        input.classList.add("input-error");
       }
     });
   };
 
-  capitalizeField(fields.nombre);
-  capitalizeField(fields.apellido);
+  bindNameFieldValidation(fields.nombre, errors.nombre, "nombre");
+  bindNameFieldValidation(fields.apellido, errors.apellido, "apellido");
 
   toggleButtons.forEach((btn) => {
     const targetId = btn.dataset.target;

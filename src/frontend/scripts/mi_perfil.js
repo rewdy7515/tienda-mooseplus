@@ -15,6 +15,8 @@ const DEFAULT_BG_COLOR = AVATAR_RANDOM_COLORS[0] || "#ffa4a4";
 const AVATAR_PALETTE_COLORS = AVATAR_RANDOM_COLORS;
 const DEFAULT_MODAL_COLOR = AVATAR_PALETTE_COLORS[0];
 const DEFAULT_DIAL_CODE = "58";
+const NAME_ALLOWED_CHARS_REGEX = /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]/g;
+const NAME_VALIDATION_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$/;
 
 const statusEl = document.querySelector("#perfil-status");
 const cardEl = document.querySelector("#perfil-card");
@@ -55,6 +57,12 @@ const setInput = (el, value) => {
 };
 
 const normalizeTextValue = (value) => String(value ?? "").trim();
+const sanitizePersonName = (value = "") =>
+  String(value || "")
+    .replace(NAME_ALLOWED_CHARS_REGEX, "")
+    .replace(/\s+/g, " ")
+    .replace(/^\s+/, "");
+const isValidPersonName = (value = "") => NAME_VALIDATION_REGEX.test(normalizeTextValue(value));
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -473,11 +481,24 @@ const init = async () => {
 const saveProfile = async () => {
   if (!currentUserId || saveProfileInProgress) return;
 
-  const nombre = normalizeTextValue(nombreInputEl?.value);
-  const apellido = normalizeTextValue(apellidoInputEl?.value);
+  const nombre = sanitizePersonName(normalizeTextValue(nombreInputEl?.value));
+  const apellido = sanitizePersonName(normalizeTextValue(apellidoInputEl?.value));
+  if (nombreInputEl) nombreInputEl.value = nombre;
+  if (apellidoInputEl) apellidoInputEl.value = apellido;
   const correo = normalizeTextValue(correoInputEl?.value);
   const telefono = getTelefonoDigitsForSave();
   const parsedRecordatorio = parseRecordatorioDias(recordatorioDiasInputEl?.value);
+
+  if (nombre && !isValidPersonName(nombre)) {
+    setProfileSaveStatus("El nombre solo puede contener letras.", true);
+    nombreInputEl?.focus();
+    return;
+  }
+  if (apellido && !isValidPersonName(apellido)) {
+    setProfileSaveStatus("El apellido solo puede contener letras.", true);
+    apellidoInputEl?.focus();
+    return;
+  }
 
   if (correoInputEl && !correoInputEl.checkValidity()) {
     correoInputEl.reportValidity?.();
@@ -551,6 +572,27 @@ const saveProfile = async () => {
     btnPerfilSaveEl && (btnPerfilSaveEl.disabled = false);
   }
 };
+
+const bindPersonNameInput = (inputEl) => {
+  inputEl?.addEventListener("input", () => {
+    const rawValue = String(inputEl.value || "");
+    const sanitizedValue = sanitizePersonName(rawValue);
+    if (sanitizedValue !== rawValue) {
+      const cursorPos = inputEl.selectionStart;
+      inputEl.value = sanitizedValue;
+      if (cursorPos !== null) {
+        const nextCursor = Math.min(sanitizedValue.length, cursorPos);
+        inputEl.setSelectionRange(nextCursor, nextCursor);
+      }
+    }
+  });
+  inputEl?.addEventListener("blur", () => {
+    inputEl.value = sanitizePersonName(normalizeTextValue(inputEl.value));
+  });
+};
+
+bindPersonNameInput(nombreInputEl);
+bindPersonNameInput(apellidoInputEl);
 
 btnEditarFotoEl?.addEventListener("click", async () => {
   openAvatarModal();
