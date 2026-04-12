@@ -936,7 +936,7 @@
                           ? `<span class="pedido-asignado">Asignado a: ${escapeHtml(getPedidoAsignadoLabel(r))}</span>`
                           : `<button class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
                       }
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
+                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-pendiente="${r.pendiente ? "true" : "false"}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
                       <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
                       ${
                         r.cuenta_madre
@@ -1265,6 +1265,7 @@
         const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
         const forceCuentaCompleta = isCompleta || idPlataformaNum === 11;
         const wasReportado = btn?.dataset?.reportado === "true";
+        const wasPendiente = btn?.dataset?.pendiente !== "false";
         const cuentaMadreFlag =
           btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
         const requireMadreActiva = idPlataformaNum === 9;
@@ -1584,7 +1585,14 @@
           });
           if (histErr) throw histErr;
         }
-        await notifyVentaDeliveredWhatsappBestEffort(idVenta);
+        if (!wasReportado && wasPendiente) {
+          await notifyVentaDeliveredWhatsappBestEffort(idVenta);
+        } else {
+          console.log("[pedidos_pendientes] whatsapp servicio entregado omitido por cierre de reporte", {
+            id_venta: idVenta,
+            reason: wasReportado ? "sale_was_reported" : "sale_not_pending_before_update",
+          });
+        }
 
         const status = document.createElement("span");
         status.className = "badge badge-processing";

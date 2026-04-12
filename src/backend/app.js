@@ -8819,24 +8819,10 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         .update(updateVenta)
         .eq("id_venta", ventaId);
       if (updVentaErr) throw updVentaErr;
-      try {
-        const waDeliveredRes = await sendVentaServicioEntregadaToWhatsappOwner({
-          idVenta: ventaId,
-          manageWhatsappLifecycle: true,
-        });
-        if (!waDeliveredRes?.sent) {
-          console.warn("[autoAssignReportedPendingVentas] whatsapp orden entregada skipped", {
-            id_venta: ventaId,
-            reason: waDeliveredRes?.reason || "unknown",
-            error: waDeliveredRes?.error || null,
-          });
-        }
-      } catch (waDeliveredErr) {
-        console.error("[autoAssignReportedPendingVentas] whatsapp orden entregada error", {
-          id_venta: ventaId,
-          error: waDeliveredErr?.message || waDeliveredErr,
-        });
-      }
+      console.log("[autoAssignReportedPendingVentas] whatsapp servicio entregado omitido", {
+        id_venta: ventaId,
+        reason: "sale_was_reported",
+      });
 
       if (nuevoPerfilId) {
         const { error: occPerfilErr } = await supabaseAdmin
