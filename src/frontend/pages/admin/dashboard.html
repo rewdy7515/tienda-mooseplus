@@ -351,6 +351,9 @@
         flex-wrap: wrap;
         margin-bottom: 10px;
       }
+      .dashboard-subchart-header.spaced-top {
+        margin-top: 12px;
+      }
       .dashboard-subchart-title {
         margin: 0;
         font-size: 14px;
@@ -370,6 +373,28 @@
       .dashboard-subchart-control label {
         font-size: 12px;
         color: var(--dash-muted);
+      }
+      .dashboard-subchart-control select[multiple] {
+        min-height: 118px;
+      }
+      .dashboard-line-legend {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 10px;
+      }
+      .dashboard-line-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #334155;
+      }
+      .dashboard-line-legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        display: inline-block;
       }
       .dashboard-vertical-chart {
         display: flex;
@@ -498,10 +523,12 @@
         border-radius: 12px;
         overflow: auto;
         max-height: 360px;
+        position: relative;
       }
       .dashboard-block .table-base {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         min-width: 520px;
         background: #fff;
       }
@@ -513,12 +540,17 @@
         font-size: 13px;
       }
       .dashboard-block .table-base th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
+        position: static;
         background: #f8fbff;
         color: #455670;
         font-weight: 700;
+      }
+      .dashboard-block .table-base thead th {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #f8fbff;
+        box-shadow: inset 0 -1px 0 #dbe3ec;
       }
       .dashboard-block .table-base thead th,
       .dashboard-block .table-base thead th * {
@@ -790,6 +822,29 @@
               <p class="dashboard-vertical-chart-empty hidden" id="empty-platform-monthly-chart">
                 Sin ventas para graficar en esta plataforma.
               </p>
+
+              <div class="dashboard-subchart-header spaced-top">
+                <div>
+                  <p class="dashboard-subchart-title">Ventas diarias por plataforma</p>
+                  <p class="dashboard-subchart-note" id="platform-daily-note">
+                    Selecciona una o varias plataformas para visualizar su tendencia diaria (Ctrl/Cmd para múltiple).
+                  </p>
+                </div>
+                <div class="dashboard-subchart-control">
+                  <label for="platform-daily-select">Plataformas (múltiple)</label>
+                  <select id="platform-daily-select" class="form-input" multiple></select>
+                </div>
+              </div>
+              <svg
+                id="platform-daily-chart"
+                class="dashboard-line-chart hidden"
+                viewBox="0 0 1000 240"
+                preserveAspectRatio="none"
+              ></svg>
+              <p class="dashboard-line-chart-empty hidden" id="empty-platform-daily-chart">
+                Sin ventas diarias por plataforma para este periodo.
+              </p>
+              <div id="platform-daily-legend" class="dashboard-line-legend hidden"></div>
             </div>
           </article>
 
@@ -985,6 +1040,10 @@
       const activeByPlatformChart = document.querySelector("#chart-activas-plataforma");
       const platformMonthlySelect = document.querySelector("#platform-monthly-select");
       const platformMonthlyChart = document.querySelector("#platform-monthly-chart");
+      const platformDailySelect = document.querySelector("#platform-daily-select");
+      const platformDailyChart = document.querySelector("#platform-daily-chart");
+      const platformDailyNoteEl = document.querySelector("#platform-daily-note");
+      const platformDailyLegend = document.querySelector("#platform-daily-legend");
 
       const emptyPlataformas = document.querySelector("#empty-plataformas");
       const emptyProveedores = document.querySelector("#empty-proveedores");
@@ -992,6 +1051,7 @@
       const emptyDiario = document.querySelector("#empty-diario");
       const emptyChartActivasPlataforma = document.querySelector("#empty-chart-activas-plataforma");
       const emptyPlatformMonthlyChart = document.querySelector("#empty-platform-monthly-chart");
+      const emptyPlatformDailyChart = document.querySelector("#empty-platform-daily-chart");
       const ventasTrendChart = document.querySelector("#ventas-trend-chart");
       const ventasTrendSummary = document.querySelector("#ventas-trend-summary");
       const ventasTrendEmpty = document.querySelector("#ventas-trend-empty");
@@ -1025,6 +1085,19 @@
       let authDailyLastMonthKey = "";
       let platformSalesMonthlyRows = [];
       let selectedPlatformMonthlyKey = "";
+      let platformSalesDailyRows = [];
+      let selectedPlatformDailyKeys = [];
+      let platformDailyLastRange = null;
+      const PLATFORM_DAILY_LINE_COLORS = [
+        "#0f766e",
+        "#2563eb",
+        "#dc2626",
+        "#d97706",
+        "#7c3aed",
+        "#0891b2",
+        "#059669",
+        "#b91c1c",
+      ];
       const MONTH_NAMES_ES = [
         "Enero",
         "Febrero",
@@ -1889,6 +1962,193 @@
           platformMonthlyChart.appendChild(bar);
         });
       };
+      const buildPlatformDailyOptionLabel = (row) => {
+        const nombre = String(row?.nombre || "Sin plataforma").trim() || "Sin plataforma";
+        const total = Math.max(0, Number(row?.total) || 0);
+        return `${nombre} (${intFmt.format(total)})`;
+      };
+      const getSelectedOptionValues = (selectEl) =>
+        Array.from(selectEl?.selectedOptions || [])
+          .map((opt) => String(opt?.value || "").trim())
+          .filter(Boolean);
+      const syncPlatformDailySelect = (rows, preferredKeys = []) => {
+        if (!platformDailySelect) return [];
+        const prevValues =
+          Array.isArray(preferredKeys) && preferredKeys.length
+            ? preferredKeys
+            : getSelectedOptionValues(platformDailySelect);
+        const prevSet = new Set(prevValues.map((value) => String(value)));
+        platformDailySelect.innerHTML = "";
+        if (!rows.length) {
+          platformDailySelect.disabled = true;
+          return [];
+        }
+        rows.forEach((row) => {
+          const option = document.createElement("option");
+          option.value = String(row?.key || "");
+          option.textContent = buildPlatformDailyOptionLabel(row);
+          platformDailySelect.appendChild(option);
+        });
+        platformDailySelect.disabled = false;
+        let nextValues = rows
+          .filter((row) => prevSet.has(String(row?.key || "")))
+          .map((row) => String(row?.key || ""));
+        if (!nextValues.length) {
+          nextValues = rows
+            .slice(0, Math.min(3, rows.length))
+            .map((row) => String(row?.key || ""));
+        }
+        Array.from(platformDailySelect.options).forEach((option) => {
+          option.selected = nextValues.includes(String(option.value || ""));
+        });
+        return nextValues;
+      };
+      const getPlatformDailyLineColor = (row, idx = 0) => {
+        const configuredColor = String(row?.color_1 || "").trim();
+        if (configuredColor) return configuredColor;
+        return PLATFORM_DAILY_LINE_COLORS[idx % PLATFORM_DAILY_LINE_COLORS.length];
+      };
+      const renderPlatformDailyLineChart = (rows, selectedKeys = [], range = null) => {
+        if (!platformDailyChart) return;
+        platformDailyChart.innerHTML = "";
+        const normalizedRows = Array.isArray(rows) ? rows : [];
+        if (!normalizedRows.length) {
+          platformDailyChart.classList.add("hidden");
+          emptyPlatformDailyChart?.classList.remove("hidden");
+          platformDailyLegend?.classList.add("hidden");
+          if (platformDailySelect) {
+            platformDailySelect.innerHTML = "";
+            platformDailySelect.disabled = true;
+          }
+          if (platformDailyNoteEl) {
+            platformDailyNoteEl.textContent =
+              "Sin ventas diarias por plataforma para el mes seleccionado.";
+          }
+          return;
+        }
+
+        const activeKeys = syncPlatformDailySelect(normalizedRows, selectedKeys);
+        selectedPlatformDailyKeys = activeKeys;
+        const activeRows = normalizedRows.filter((row) =>
+          activeKeys.includes(String(row?.key || "")),
+        );
+        if (!activeRows.length) {
+          platformDailyChart.classList.add("hidden");
+          emptyPlatformDailyChart?.classList.remove("hidden");
+          platformDailyLegend?.classList.add("hidden");
+          if (platformDailyNoteEl) {
+            platformDailyNoteEl.textContent =
+              "Selecciona al menos una plataforma para visualizar la línea diaria.";
+          }
+          return;
+        }
+
+        const startDay = Math.max(1, Number(isoDay(range?.start)) || 1);
+        const endDay = Math.max(startDay, Number(isoDay(range?.end)) || 31);
+        const days = Array.from({ length: endDay - startDay + 1 }, (_, idx) => startDay + idx);
+        const values = activeRows.flatMap((row) =>
+          days.map((day) => Number(row?.dailyCounts?.[day] || 0)),
+        );
+        const maxY = Math.max(1, ...values);
+        const w = 1000;
+        const h = 240;
+        const px = 44;
+        const pyTop = 16;
+        const pyBottom = 34;
+        const innerW = w - px * 2;
+        const innerH = h - pyTop - pyBottom;
+        const toX = (idx) =>
+          px + (days.length <= 1 ? innerW / 2 : (idx / (days.length - 1)) * innerW);
+        const toY = (value) => pyTop + innerH - (Math.max(0, Number(value) || 0) / maxY) * innerH;
+        const pointRxScale = getPointRxScale(platformDailyChart, w, h);
+        const xLabelStep = days.length > 22 ? 3 : days.length > 14 ? 2 : 1;
+        const gridLines = [0, 0.25, 0.5, 0.75, 1]
+          .map((ratio) => {
+            const y = pyTop + innerH - innerH * ratio;
+            return `<line x1="${px}" y1="${y}" x2="${w - px}" y2="${y}" stroke="#e2e8f0" stroke-width="1" />`;
+          })
+          .join("");
+        const yTicks = [0, 0.25, 0.5, 0.75, 1]
+          .map((ratio) => {
+            const y = pyTop + innerH - innerH * ratio;
+            const value = Math.round(maxY * ratio);
+            return `<text x="${(px - 8).toFixed(2)}" y="${(y + 3).toFixed(2)}" text-anchor="end" fill="#64748b" font-size="10">${value}</text>`;
+          })
+          .join("");
+        const xLabels = days
+          .map((day, idx) => {
+            const x = toX(idx);
+            const showLabel =
+              idx === 0 ||
+              idx === days.length - 1 ||
+              day % xLabelStep === 0;
+            return showLabel
+              ? `<text x="${x.toFixed(2)}" y="${(pyTop + innerH + 16).toFixed(2)}" text-anchor="middle" fill="#6b7280" font-size="9">${day}</text>`
+              : "";
+          })
+          .join("");
+        const lines = activeRows
+          .map((row, rowIdx) => {
+            const color = getPlatformDailyLineColor(row, rowIdx);
+            const path = days
+              .map((day, dayIdx) => {
+                const value = Number(row?.dailyCounts?.[day] || 0);
+                return `${dayIdx === 0 ? "M" : "L"}${toX(dayIdx).toFixed(2)},${toY(value).toFixed(2)}`;
+              })
+              .join(" ");
+            const points = days
+              .map((day, dayIdx) =>
+                buildEllipsePoint(
+                  toX(dayIdx),
+                  toY(Number(row?.dailyCounts?.[day] || 0)),
+                  2.1,
+                  color,
+                  pointRxScale,
+                ),
+              )
+              .join("");
+            return `
+              <path d="${path}" fill="none" stroke="${escapeHtml(color)}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+              ${points}
+            `;
+          })
+          .join("");
+
+        platformDailyChart.innerHTML = `
+          <rect x="0" y="0" width="${w}" height="${h}" fill="transparent" />
+          ${gridLines}
+          <line x1="${px}" y1="${(pyTop + innerH).toFixed(2)}" x2="${w - px}" y2="${(pyTop + innerH).toFixed(2)}" stroke="#cbd5e1" stroke-width="1.2" />
+          ${yTicks}
+          ${xLabels}
+          ${lines}
+        `;
+        platformDailyChart.classList.remove("hidden");
+        emptyPlatformDailyChart?.classList.add("hidden");
+
+        if (platformDailyLegend) {
+          platformDailyLegend.innerHTML = activeRows
+            .map((row, rowIdx) => {
+              const color = getPlatformDailyLineColor(row, rowIdx);
+              const name = String(row?.nombre || "Sin plataforma").trim() || "Sin plataforma";
+              return `
+                <span class="dashboard-line-legend-item">
+                  <span class="dashboard-line-legend-dot" style="background:${escapeHtml(color)};"></span>
+                  ${escapeHtml(name)}
+                </span>
+              `;
+            })
+            .join("");
+          platformDailyLegend.classList.toggle("hidden", !activeRows.length);
+        }
+
+        if (platformDailyNoteEl) {
+          const monthLabel = formatMonthLabel(monthKeyFromDate(range?.start) || "");
+          const startText = formatDDMMYYYY(range?.start);
+          const endText = formatDDMMYYYY(range?.end);
+          platformDailyNoteEl.textContent =
+            `Tendencia diaria de ${activeRows.length} plataforma(s) para ${monthLabel} (${startText} a ${endText}).`;
+        }
+      };
       const renderSimpleVerticalChart = (
         container,
         emptyEl,
@@ -2232,13 +2492,39 @@
               cantidad: Number(row?.cantidad) || 0,
             }))
           : [];
-        const horaRows = Array.isArray(traficoActual?.por_hora)
-          ? traficoActual.por_hora.map((row) => ({
-              label: formatHourLabel12(row?.hora),
-              cantidad: Number(row?.cantidad) || 0,
-              hora: Number(row?.hora),
-            }))
-          : [];
+        const horaRowsMap = new Map(
+          Array.from({ length: 24 }, (_, hour) => [
+            hour,
+            {
+              hora: hour,
+              weightedTotal: 0,
+              dias: 0,
+            },
+          ]),
+        );
+        const accumulateHoraRows = (rows = []) => {
+          (Array.isArray(rows) ? rows : []).forEach((row) => {
+            const hora = Number(row?.hora);
+            if (!Number.isInteger(hora) || hora < 0 || hora > 23) return;
+            const dias = Math.max(0, Number(row?.dias) || 0);
+            if (!dias) return;
+            const cantidad = Number(row?.cantidad) || 0;
+            const entry = horaRowsMap.get(hora);
+            if (!entry) return;
+            entry.weightedTotal += cantidad * dias;
+            entry.dias += dias;
+          });
+        };
+        accumulateHoraRows(traficoActual?.por_hora || []);
+        accumulateHoraRows(traficoPrev?.por_hora || []);
+        const horaRows = Array.from(horaRowsMap.values())
+          .sort((a, b) => a.hora - b.hora)
+          .map((row) => ({
+            label: formatHourLabel12(row?.hora),
+            cantidad: row.dias > 0 ? row.weightedTotal / row.dias : 0,
+            hora: Number(row?.hora),
+            dias: row.dias,
+          }));
         renderSimpleHorizontalChart(traficoSemanaChart, emptyTraficoSemanaChart, semanaRows, {
           color: "#2563eb",
           valueFormatter: formatAverageValue,
@@ -2260,8 +2546,9 @@
             `Promedio diario de clientes únicos en ${formatMonthLabel(monthVal)}: ${formatAverageValue(promedioDiarioActual)} (mes anterior: ${formatAverageValue(promedioDiarioPrev)}). Cada barra promedia todas las ocurrencias de ese día dentro del mes.`;
         }
         if (traficoHoraNoteEl) {
+          const monthPrev = previousMonthKey(monthVal) || "";
           traficoHoraNoteEl.textContent =
-            `Cada barra muestra el promedio de clientes únicos por hora usando todos los días de ${formatMonthLabel(monthVal)} en formato 12h.`;
+            `Cada barra muestra el promedio de clientes únicos por hora usando los últimos 2 meses (${formatMonthLabel(monthPrev)} y ${formatMonthLabel(monthVal)}), ponderado por la cantidad de días de cada mes, en formato 12h.`;
         }
       };
       const renderVentasTrendChart = (stats, prevStats, range) => {
@@ -2663,6 +2950,52 @@
         });
         return { ventasDiariasPorDia };
       };
+      const buildPlatformDailySeries = (historial, range) => {
+        const startDay = Math.max(1, Number(isoDay(range?.start)) || 1);
+        const endDay = Math.max(startDay, Number(isoDay(range?.end)) || 31);
+        const platformMap = new Map();
+        (historial || []).forEach((row) => {
+          if (!isHistorialIngresoRow(row)) return;
+          const day = Number(isoDay(row?.fecha_pago));
+          if (!Number.isInteger(day) || day < startDay || day > endDay) return;
+          const platformId = row?.id_plataforma ?? null;
+          const platformName = toName(row?.plataformas, "Sin plataforma");
+          const key = String(platformId ?? "sin-plataforma");
+          if (!platformMap.has(key)) {
+            platformMap.set(key, {
+              key,
+              id: platformId,
+              nombre: platformName,
+              color_1: toJoinedField(row?.plataformas, "color_1", null),
+              total: 0,
+              dayMap: new Map(),
+            });
+          }
+          const entry = platformMap.get(key);
+          entry.total += 1;
+          entry.dayMap.set(day, (entry.dayMap.get(day) || 0) + 1);
+        });
+        return Array.from(platformMap.values())
+          .map((entry) => {
+            const dailyCounts = {};
+            for (let day = startDay; day <= endDay; day += 1) {
+              dailyCounts[day] = entry.dayMap.get(day) || 0;
+            }
+            return {
+              key: entry.key,
+              id: entry.id,
+              nombre: entry.nombre,
+              color_1: entry.color_1,
+              total: entry.total,
+              dailyCounts,
+            };
+          })
+          .sort((a, b) => {
+            const totalDiff = Number(b.total || 0) - Number(a.total || 0);
+            if (totalDiff !== 0) return totalDiff;
+            return String(a.nombre || "").localeCompare(String(b.nombre || ""));
+          });
+      };
 
       const fetchMonthData = async (range) => {
         const endExclusive = addDaysToIsoDate(range?.end, 1) || range?.end;
@@ -2823,6 +3156,7 @@
         prevTrendStats,
         activeByPlatformRows,
         platformMonthlyData,
+        platformDailyData,
         analiticaWeb,
         range,
         prevRange,
@@ -2840,6 +3174,12 @@
         renderActiveByPlatform(activeByPlatformRows || []);
         renderActiveByPlatformChart(activeByPlatformRows || []);
         renderPlatformMonthlyChart(platformMonthlyData || [], selectedPlatformMonthlyKey);
+        platformDailyLastRange = range || null;
+        renderPlatformDailyLineChart(
+          platformDailyData || [],
+          selectedPlatformDailyKeys,
+          platformDailyLastRange,
+        );
         renderVentasTrendChart(trendStats, prevTrendStats, range);
         renderDaily(stats.dailyRows);
         renderAnaliticaWeb(
@@ -2940,6 +3280,7 @@
             fetchActiveByPlatform(range.end),
           ]);
           platformSalesMonthlyRows = monthlyPlatformData || [];
+          platformSalesDailyRows = buildPlatformDailySeries(historial, range);
           const stats = computeStats(historial, gifts);
           const prevStats = computeStats(prevData.historial || [], prevData.gifts || []);
           const trendStats = buildVentasTrendStats(historial);
@@ -2963,6 +3304,7 @@
             prevTrendStats,
             activeByPlatformRows,
             platformSalesMonthlyRows,
+            platformSalesDailyRows,
             analiticaWebData || getEmptyAnaliticaWeb(),
             range,
             prevRange || range,
@@ -3017,6 +3359,14 @@
       platformMonthlySelect?.addEventListener("change", () => {
         selectedPlatformMonthlyKey = platformMonthlySelect.value || "";
         renderPlatformMonthlyChart(platformSalesMonthlyRows || [], selectedPlatformMonthlyKey);
+      });
+      platformDailySelect?.addEventListener("change", () => {
+        selectedPlatformDailyKeys = getSelectedOptionValues(platformDailySelect);
+        renderPlatformDailyLineChart(
+          platformSalesDailyRows || [],
+          selectedPlatformDailyKeys,
+          platformDailyLastRange,
+        );
       });
       btnBack?.addEventListener("click", () => {
         window.location.href = "admin.html";

@@ -365,6 +365,7 @@
       import {
         clearServerSession,
         loadCurrentUser,
+        notifyVentaDeliveredWhatsapp,
         supabase,
         procesarOrden,
       } from "../../scripts/api.js";
@@ -749,13 +750,49 @@
         const id = Number(idOrden);
         if (!Number.isFinite(id)) return;
 
+        const notifyVentaDeliveredWhatsappBestEffort = async (idVenta) => {
+          const ventaId = Number(idVenta);
+          if (!Number.isFinite(ventaId) || ventaId <= 0) return null;
+          try {
+            const waResult = await notifyVentaDeliveredWhatsapp(ventaId);
+            if (waResult?.error) {
+              console.warn("[ordenes] whatsapp servicio entregado error", {
+                id_venta: ventaId,
+                error: waResult.error,
+                status: waResult.status || null,
+              });
+              return { sent: false, reason: "request_error", error: waResult.error };
+            }
+            if (waResult?.sent) return { sent: true, reason: null, ...waResult };
+            if (waResult?.ok === false) {
+              console.warn("[ordenes] whatsapp servicio entregado omitido", {
+                id_venta: ventaId,
+                reason: waResult?.reason || "unknown",
+              });
+              return { sent: false, skipped: true, reason: waResult?.reason || "unknown" };
+            }
+            return { sent: true, reason: null, ...waResult };
+          } catch (err) {
+            const message = err?.message || String(err);
+            console.warn("[ordenes] whatsapp servicio entregado exception", {
+              id_venta: ventaId,
+              error: message,
+            });
+            return { sent: false, reason: "exception", error: message };
+          }
+        };
+
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
-            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), perfiles:perfiles(n_perfil)"
+            "id_venta, id_usuario, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_orden, renovacion, pendiente, reportado, correo_miembro, clave_miembro, cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, id_plataforma, plataformas:plataformas(nombre, correo_cliente, clave_cliente, entrega_inmediata)), perfiles:perfiles(n_perfil)"
           )
           .eq("id_orden", id);
         if (ventasOrdErr) throw ventasOrdErr;
+
+        const ventaEntregadaParaWhatsapp = (ventasOrden || []).find(
+          (venta) => venta?.pendiente === false && !isTrue(venta?.reportado)
+        );
 
         const nuevosServiciosPorUsuario = new Map();
         const serviciosEnProcesoPorUsuario = new Map();
@@ -854,6 +891,10 @@
           if (flagErr) {
             console.error("notificacion_inventario update error", flagErr);
           }
+        }
+
+        if (ventaEntregadaParaWhatsapp?.id_venta) {
+          await notifyVentaDeliveredWhatsappBestEffort(ventaEntregadaParaWhatsapp.id_venta);
         }
       };
 
