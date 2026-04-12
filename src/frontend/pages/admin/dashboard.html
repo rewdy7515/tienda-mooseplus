@@ -520,6 +520,10 @@
         color: #455670;
         font-weight: 700;
       }
+      .dashboard-block .table-base thead th,
+      .dashboard-block .table-base thead th * {
+        color: #455670 !important;
+      }
       .dashboard-block .table-base tbody tr:hover {
         background: #f8fbff;
       }
@@ -1309,6 +1313,12 @@
       };
       const isGiftPlatformRow = (row) =>
         isTrue(toJoinedField(row?.plataformas, "tarjeta_de_regalo", false));
+      const hasPositiveGiftCost = (row) => {
+        const cost = Number(row?.costo);
+        return Number.isFinite(cost) && cost > 0;
+      };
+      const isNonSaleGiftExpenseRow = (row) =>
+        !isTrue(row?.para_venta) && hasPositiveGiftCost(row);
       const hasLinkedGiftCard = (row) => {
         const giftId = Number(row?.id_tarjeta_de_regalo);
         return Number.isFinite(giftId) && giftId > 0;
@@ -2469,6 +2479,7 @@
         const rowsRenovGasto = [];
         const ventasDiariasPorDia = {};
         const scopedGiftRows = (giftRows || []).filter((row) => {
+          if (isNonSaleGiftExpenseRow(row)) return true;
           const rawPlatformId = Number(row?.id_plataforma);
           if (rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID) return true;
           return isTrue(toJoinedField(row?.plataformas, "tarjeta_de_regalo", false));
@@ -2535,8 +2546,7 @@
           const rawPlatformId = Number(row?.id_plataforma);
           const shouldRemapGiftPlatform =
             rawPlatformId === GIFT_PLATFORM_REMAP_SOURCE_ID &&
-            !isTrue(row?.para_venta) &&
-            isTrue(row?.usado);
+            !isTrue(row?.para_venta);
           const mappedPlatformId = shouldRemapGiftPlatform
             ? GIFT_PLATFORM_REMAP_TARGET_ID
             : row?.id_plataforma ?? null;

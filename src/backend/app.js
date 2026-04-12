@@ -2539,16 +2539,6 @@ const sendReporteSolvedToWhatsappOwner = async ({
       id_usuario_destino: targetUserId,
     };
   }
-  if (ventaAsociada?.pendiente !== false) {
-    return {
-      sent: false,
-      skipped: true,
-      reason: "associated_sale_pending_flag_not_false",
-      id_reporte: reportId,
-      id_venta: ventaAsociadaId,
-      id_usuario_destino: targetUserId,
-    };
-  }
 
   const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
   if (!targetPhone) {

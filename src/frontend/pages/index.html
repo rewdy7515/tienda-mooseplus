@@ -1,9 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://ojigtjcwhcrnawdbtqkl.supabase.co" crossorigin />
+    <link
+      rel="preconnect"
+      href="https://ojigtjcwhcrnawdbtqkl.supabase.co"
+      crossorigin
+    />
     <meta
       name="description"
       content="Compra cuentas de streaming y gift cards al instante en MoosePlus, con pago móvil y atención rápida."
@@ -60,7 +64,11 @@
 
       <!-- CONTENEDOR DE CATEGORÍAS -->
       <main>
-        <section id="home-banners" class="home-banners hidden" aria-label="Banners destacados">
+        <section
+          id="home-banners"
+          class="home-banners hidden"
+          aria-label="Banners destacados"
+        >
           <div class="home-banners-viewport">
             <div id="home-banners-track" class="home-banners-track"></div>
             <div
@@ -70,18 +78,32 @@
             ></div>
           </div>
         </section>
-        <div id="whatsapp-hetzner-toggle-wrap" class="whatsapp-hetzner-toggle-wrap hidden">
-          <label class="whatsapp-hetzner-toggle" for="whatsapp-hetzner-toggle-input">
-            <span class="whatsapp-hetzner-toggle-label">Whatsapp - Hetzner</span>
+        <div
+          id="whatsapp-hetzner-toggle-wrap"
+          class="whatsapp-hetzner-toggle-wrap hidden"
+        >
+          <label
+            class="whatsapp-hetzner-toggle"
+            for="whatsapp-hetzner-toggle-input"
+          >
+            <span class="whatsapp-hetzner-toggle-label"
+              >Whatsapp - Hetzner</span
+            >
             <input
               id="whatsapp-hetzner-toggle-input"
               type="checkbox"
               role="switch"
               aria-label="Activar bot persistente de Whatsapp en Hetzner"
             />
-            <span class="whatsapp-hetzner-toggle-slider" aria-hidden="true"></span>
+            <span
+              class="whatsapp-hetzner-toggle-slider"
+              aria-hidden="true"
+            ></span>
           </label>
-          <p id="whatsapp-hetzner-toggle-status" class="status whatsapp-hetzner-toggle-status"></p>
+          <p
+            id="whatsapp-hetzner-toggle-status"
+            class="status whatsapp-hetzner-toggle-status"
+          ></p>
         </div>
         <div id="missing-data-wrap" class="missing-data-wrap hidden">
           <button id="missing-data-btn" class="btn-outline">
@@ -90,7 +112,10 @@
         </div>
         <div id="push-permission-wrap" class="push-permission-wrap hidden">
           <div class="push-permission-card">
-            <p id="push-permission-message" class="status push-permission-message"></p>
+            <p
+              id="push-permission-message"
+              class="status push-permission-message"
+            ></p>
             <div class="push-permission-actions">
               <button
                 id="btn-push-permission"
@@ -195,7 +220,10 @@
           <div class="modal-top">
             <div class="modal-mobile-header">
               <h3 id="modal-name-mobile" class="modal-name-mobile"></h3>
-              <p id="modal-category-mobile" class="modal-category modal-category-mobile"></p>
+              <p
+                id="modal-category-mobile"
+                class="modal-category modal-category-mobile"
+              ></p>
             </div>
             <div class="modal-media-wrap">
               <div class="modal-media">
@@ -218,7 +246,7 @@
                   <p id="modal-badge" class="modal-badge"></p>
                 </div>
                 <p id="modal-title-mobile" class="modal-title-mobile"></p>
-                <p class="modal-plan-hint">Seleccione un plan</p>
+                <p class="modal-plan-hint">Selecciona un plan</p>
                 <div id="modal-precios" class="modal-precios"></div>
               </div>
             </div>
@@ -355,7 +383,11 @@
 
     <div id="login-required-modal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop" data-login-required-close></div>
-      <div class="modal-card modal-card-login-required" role="dialog" aria-modal="true">
+      <div
+        class="modal-card modal-card-login-required"
+        role="dialog"
+        aria-modal="true"
+      >
         <button
           type="button"
           id="login-required-modal-close"
@@ -376,9 +408,17 @@
       </div>
     </div>
 
-    <div id="whatsapp-toggle-confirm-modal" class="modal hidden" aria-hidden="true">
+    <div
+      id="whatsapp-toggle-confirm-modal"
+      class="modal hidden"
+      aria-hidden="true"
+    >
       <div class="modal-backdrop" data-whatsapp-toggle-close></div>
-      <div class="modal-card whatsapp-toggle-confirm-card" role="dialog" aria-modal="true">
+      <div
+        class="modal-card whatsapp-toggle-confirm-card"
+        role="dialog"
+        aria-modal="true"
+      >
         <button
           type="button"
           id="whatsapp-toggle-confirm-close"
@@ -388,14 +428,25 @@
           ×
         </button>
         <div class="modal-body whatsapp-toggle-confirm-body">
-          <p id="whatsapp-toggle-confirm-message" class="whatsapp-toggle-confirm-message">
+          <p
+            id="whatsapp-toggle-confirm-message"
+            class="whatsapp-toggle-confirm-message"
+          >
             ¿Quieres activar el bot de whatsapp?
           </p>
           <div class="whatsapp-toggle-confirm-actions">
-            <button type="button" id="whatsapp-toggle-confirm-yes" class="btn-primary">
+            <button
+              type="button"
+              id="whatsapp-toggle-confirm-yes"
+              class="btn-primary"
+            >
               Sí
             </button>
-            <button type="button" id="whatsapp-toggle-confirm-no" class="btn-outline">
+            <button
+              type="button"
+              id="whatsapp-toggle-confirm-no"
+              class="btn-outline"
+            >
               No
             </button>
           </div>

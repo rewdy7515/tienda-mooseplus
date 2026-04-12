@@ -633,32 +633,6 @@ async function notifyReporteSolvedWhatsappBestEffort(
   const reportId = toPositiveId(idReporte);
   if (!reportId) return { ok: false, skipped: true, reason: "invalid_report" };
   try {
-    let pendingValue = pendingState;
-    if (pendingValue === undefined) {
-      let resolvedVentaId = toPositiveId(ventaId);
-      if (!resolvedVentaId && row) {
-        const ventaInfo = await findVentaAsociadaFromReporte(row);
-        resolvedVentaId = toPositiveId(ventaInfo?.id_venta);
-      }
-      if (!resolvedVentaId) {
-        return { ok: false, skipped: true, reason: "venta_not_found" };
-      }
-      const { data: ventaRow, error: ventaErr } = await supabase
-        .from("ventas")
-        .select("id_venta, pendiente")
-        .eq("id_venta", resolvedVentaId)
-        .maybeSingle();
-      if (ventaErr) {
-        console.error("whatsapp reporte solucionado venta lookup error", ventaErr);
-        return { ok: false, skipped: true, reason: "venta_lookup_error", error: ventaErr.message };
-      }
-      pendingValue = ventaRow?.pendiente;
-    }
-
-    if (pendingValue !== false) {
-      return { ok: false, skipped: true, reason: "venta_pending_flag_not_false" };
-    }
-
     const waResult = await notifyReporteSolvedWhatsapp(reportId);
     if (waResult?.error) {
       console.error("whatsapp reporte solucionado error", waResult);
