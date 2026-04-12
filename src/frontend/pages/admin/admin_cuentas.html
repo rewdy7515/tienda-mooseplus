@@ -950,6 +950,16 @@
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) =>
         v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const getCaracasTodayIso = () => {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(new Date());
+        const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+        return `${pick("year")}-${pick("month")}-${pick("day")}`;
+      };
       const formatPerfilLabel = (value) => {
         if (value === null || value === undefined || value === "") return "";
         const raw = String(value).trim();
@@ -6728,7 +6738,7 @@
             alert("No se pudo identificar la cuenta.");
             return;
           }
-          const today = new Date().toISOString().slice(0, 10);
+          const today = getCaracasTodayIso();
           const { error: updErr } = await supabase
             .from("cuentas")
             .update({ fecha_corte: nuevaFecha })
@@ -6788,7 +6798,7 @@
             Number.isFinite(adminInvolucradoIdRaw) && adminInvolucradoIdRaw > 0
               ? Math.trunc(adminInvolucradoIdRaw)
               : null;
-          const today = new Date().toISOString().slice(0, 10);
+          const today = getCaracasTodayIso();
           // Actualizar fecha_corte de cuenta
           const { error: updErr } = await supabase
             .from("cuentas")

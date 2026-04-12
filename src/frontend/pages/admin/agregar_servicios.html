@@ -534,6 +534,17 @@
         }
       });
 
+      const getCaracasTodayIso = () => {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(new Date());
+        const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+        return `${pick("year")}-${pick("month")}-${pick("day")}`;
+      };
+
       const setFechaCorteDefault = (meses) => {
         const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
         const base = new Date();
@@ -825,7 +836,7 @@
           // Marcar pin de recarga como usado si aplica
           if (requierePinRecarga && cuentaInserted?.id_cuenta && pinRecargaSeleccionado?.id_tarjeta_de_regalo) {
             try {
-              const todayMark = new Date().toISOString().slice(0, 10);
+              const todayMark = getCaracasTodayIso();
               const { error: updPinErr } = await supabase
                 .from("tarjetas_de_regalo")
                 .update({
