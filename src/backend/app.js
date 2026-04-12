@@ -9768,8 +9768,78 @@ const processOrderFromItems = async ({
   };
 
   // Renovaciones (no asignan stock nuevo)
-  const renovaciones = (items || []).filter((it) => it.renovacion === true && it.id_venta);
-  const idsVentasRenovar = renovaciones.map((r) => r.id_venta).filter(Boolean);
+  // Se consolidan por id_venta para evitar dobles updates de la misma venta.
+  const renovacionesRaw = (items || []).filter((it) => it.renovacion === true && it.id_venta);
+  const renewalGroupsByVenta = new Map();
+  for (const renewalItem of renovacionesRaw) {
+    const ventaId = toPositiveInt(renewalItem?.id_venta);
+    if (!ventaId) continue;
+    const price = priceMap[renewalItem.id_precio] || {};
+    const platId = Number(price?.id_plataforma) || null;
+    const platformInfo = platId ? platInfoById?.[platId] || {} : {};
+    const montoLinea = getLineAmountForItem(
+      renewalItem,
+      computeCheckoutItemBaseAmount({
+        item: renewalItem,
+        priceInfo: price,
+        platformInfo,
+        pickPrecio,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        isCliente,
+      }),
+    );
+    const qtyVal =
+      Number.isFinite(Number(renewalItem?.cantidad)) && Number(renewalItem?.cantidad) > 0
+        ? Math.max(1, Math.round(Number(renewalItem.cantidad)))
+        : 1;
+    const mesesVal =
+      Number.isFinite(Number(renewalItem?.meses)) && Number(renewalItem?.meses) > 0
+        ? Math.max(1, Math.round(Number(renewalItem.meses)))
+        : 1;
+    const mesesContribution = qtyVal * mesesVal;
+    const precioId = toPositiveInt(renewalItem?.id_precio);
+
+    if (renewalGroupsByVenta.has(ventaId)) {
+      const existing = renewalGroupsByVenta.get(ventaId);
+      if (
+        existing?.id_precio &&
+        precioId &&
+        Number(existing.id_precio) !== Number(precioId)
+      ) {
+        console.warn("[checkout] renovacion con id_precio distinto para misma venta; se acumula", {
+          ordenId,
+          id_venta: ventaId,
+          id_precio_prev: existing.id_precio,
+          id_precio_new: precioId,
+        });
+      }
+      existing.meses += mesesContribution;
+      existing.monto = roundCheckoutMoney((Number(existing?.monto) || 0) + (Number(montoLinea) || 0));
+      existing.items_count += 1;
+      if (!existing.id_precio && precioId) existing.id_precio = precioId;
+      if (!existing.id_plataforma && platId) existing.id_plataforma = platId;
+    } else {
+      renewalGroupsByVenta.set(ventaId, {
+        id_venta: ventaId,
+        id_precio: precioId,
+        id_plataforma: platId,
+        meses: mesesContribution,
+        monto: roundCheckoutMoney(montoLinea),
+        items_count: 1,
+      });
+    }
+  }
+  const renovaciones = Array.from(renewalGroupsByVenta.values()).map((row) => ({
+    ...row,
+    meses:
+      Number.isFinite(Number(row?.meses)) && Number(row?.meses) > 0
+        ? Math.max(1, Math.round(Number(row.meses)))
+        : 1,
+    monto: roundCheckoutMoney(row?.monto),
+  }));
+  const idsVentasRenovar = renovaciones.map((r) => toPositiveInt(r?.id_venta)).filter(Boolean);
   const ventaMap = {};
   if (idsVentasRenovar.length) {
     const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
@@ -9788,21 +9858,9 @@ const processOrderFromItems = async ({
   const spotifyRenovacionesParaProveedor = [];
   const renovPromises = renovaciones.map((it) => {
     const price = priceMap[it.id_precio] || {};
-    const platId = Number(price?.id_plataforma) || null;
+    const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
     const platformInfo = platId ? platInfoById?.[platId] || {} : {};
-    const monto = getLineAmountForItem(
-      it,
-      computeCheckoutItemBaseAmount({
-        item: it,
-        priceInfo: price,
-        platformInfo,
-        pickPrecio,
-        descuentos,
-        discountColumns,
-        discountColumnById,
-        isCliente,
-      }),
-    );
+    const monto = roundCheckoutMoney(Number(it?.monto) || 0);
     const mesesVal =
       Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
     const ventaAnt = ventaMap[it.id_venta] || {};
@@ -9827,6 +9885,7 @@ const processOrderFromItems = async ({
       monto,
       id_orden: ordenId,
       renovacion: true,
+      meses_contratados: mesesVal,
       recordatorio_enviado: false,
       recordatorio_corte_enviado: false,
       aviso_admin: false,
@@ -10557,6 +10616,7 @@ const processOrderFromItems = async ({
         monto,
         id_orden: ordenId,
         renovacion: true,
+        meses_contratados: mesesVal,
         recordatorio_enviado: false,
         recordatorio_corte_enviado: false,
         aviso_admin: false,
@@ -10719,25 +10779,12 @@ const processOrderFromItems = async ({
   });
   // Renovaciones
   renovaciones.forEach((it) => {
-    const platId = priceMap[it.id_precio]?.id_plataforma || null;
+    const price = priceMap[it.id_precio] || {};
+    const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
     const ventaAnt = ventaMap[it.id_venta] || {};
     const cuentaAnt = ventaAnt.id_cuenta || null;
     const usuarioAnt = ventaAnt.id_usuario || idUsuarioVentas;
-    const price = priceMap[it.id_precio] || {};
-    const platformInfo = platInfoById[Number(price?.id_plataforma) || 0] || {};
-    const monto = getLineAmountForItem(
-      it,
-      computeCheckoutItemBaseAmount({
-        item: it,
-        priceInfo: price,
-        platformInfo,
-        pickPrecio,
-        descuentos,
-        discountColumns,
-        discountColumnById,
-        isCliente,
-      }),
-    );
+    const monto = roundCheckoutMoney(Number(it?.monto) || 0);
     histRows.push({
       id_usuario_cliente: usuarioAnt,
       id_proveedor: null,
@@ -12329,15 +12376,15 @@ app.put("/api/p2p/markup", async (req, res) => {
 app.post("/api/cart/item", async (req, res) => {
   console.log("[cart:item] body", req.body);
   const {
-    id_precio,
+    id_precio: idPrecioRaw,
     delta,
     meses,
     renovacion = false,
-    id_venta = null,
-    id_cuenta = null,
-    id_perfil = null,
+    id_venta: idVentaRaw,
+    id_cuenta: idCuentaRaw,
+    id_perfil: idPerfilRaw,
   } = req.body || {};
-  if (!id_precio || delta === undefined) {
+  if (!idPrecioRaw || delta === undefined) {
     return res
       .status(400)
       .json({ error: "id_precio y delta son requeridos" });
@@ -12347,6 +12394,30 @@ app.post("/api/cart/item", async (req, res) => {
   if (Number.isNaN(parsedDelta)) {
     return res.status(400).json({ error: "delta debe ser numérico" });
   }
+  const idPrecio = toPositiveInt(idPrecioRaw);
+  if (!idPrecio) {
+    return res.status(400).json({ error: "id_precio inválido" });
+  }
+
+  const normalizeCartNullableBodyId = (rawValue, fieldName) => {
+    if (rawValue === undefined) return { ok: true, value: undefined };
+    if (rawValue === null) return { ok: true, value: null };
+    if (typeof rawValue === "string" && rawValue.trim() === "") return { ok: true, value: null };
+    const parsed = toPositiveInt(rawValue);
+    if (!parsed) {
+      return { ok: false, error: `${fieldName} inválido` };
+    }
+    return { ok: true, value: parsed };
+  };
+  const parsedVentaId = normalizeCartNullableBodyId(idVentaRaw, "id_venta");
+  if (!parsedVentaId.ok) return res.status(400).json({ error: parsedVentaId.error });
+  const parsedCuentaId = normalizeCartNullableBodyId(idCuentaRaw, "id_cuenta");
+  if (!parsedCuentaId.ok) return res.status(400).json({ error: parsedCuentaId.error });
+  const parsedPerfilId = normalizeCartNullableBodyId(idPerfilRaw, "id_perfil");
+  if (!parsedPerfilId.ok) return res.status(400).json({ error: parsedPerfilId.error });
+  const idVenta = parsedVentaId.value;
+  const idCuenta = parsedCuentaId.value;
+  const idPerfil = parsedPerfilId.value;
 
   try {
     const idUsuario = await getOrCreateUsuario(req);
@@ -12354,7 +12425,7 @@ app.post("/api/cart/item", async (req, res) => {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
     const idCarrito = await getOrCreateCarrito(idUsuario);
-    const bodyIdItem = req.body?.id_item ? Number(req.body.id_item) : null;
+    const bodyIdItem = toPositiveInt(req.body?.id_item);
     const mesesVal = (() => {
       const num = Number(meses);
       if (Number.isFinite(num) && num > 0) return Math.max(1, Math.round(num));
@@ -12378,48 +12449,95 @@ app.post("/api/cart/item", async (req, res) => {
         .from("carrito_items")
         .select("id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
         .eq("id_carrito", idCarrito)
-        .eq("id_precio", id_precio)
+        .eq("id_precio", idPrecio)
         .eq("renovacion", renovacion === true);
       if (mesesVal != null) {
         selQuery = selQuery.eq("meses", mesesVal);
       }
       selQuery =
-        id_venta === undefined || id_venta === null
+        idVenta === undefined || idVenta === null
           ? selQuery.is("id_venta", null)
-          : selQuery.eq("id_venta", id_venta);
+          : selQuery.eq("id_venta", idVenta);
       selQuery =
-        id_cuenta === undefined || id_cuenta === null
+        idCuenta === undefined || idCuenta === null
           ? selQuery.is("id_cuenta", null)
-          : selQuery.eq("id_cuenta", id_cuenta);
+          : selQuery.eq("id_cuenta", idCuenta);
       selQuery =
-        id_perfil === undefined || id_perfil === null
+        idPerfil === undefined || idPerfil === null
           ? selQuery.is("id_perfil", null)
-          : selQuery.eq("id_perfil", id_perfil);
-      const { data, error: selErr } = await selQuery.maybeSingle();
+          : selQuery.eq("id_perfil", idPerfil);
+      const { data, error: selErr } = await selQuery.order("id_item", { ascending: true });
       if (selErr) throw selErr;
-      existing = data || null;
+      const matchedRows = Array.isArray(data) ? data : [];
+      if (matchedRows.length > 1) {
+        const [primaryRow, ...duplicateRows] = matchedRows;
+        const primaryItemId = toPositiveInt(primaryRow?.id_item);
+        const mergedCantidad = Math.max(
+          0,
+          Math.round(
+            matchedRows.reduce((acc, row) => {
+              const qty = Number(row?.cantidad);
+              return acc + (Number.isFinite(qty) ? qty : 0);
+            }, 0),
+          ),
+        );
+        if (primaryItemId) {
+          const primaryQty = Number(primaryRow?.cantidad);
+          if (!Number.isFinite(primaryQty) || Math.round(primaryQty) !== mergedCantidad) {
+            const { error: mergeUpdErr } = await supabaseAdmin
+              .from("carrito_items")
+              .update({ cantidad: mergedCantidad })
+              .eq("id_item", primaryItemId);
+            if (mergeUpdErr) throw mergeUpdErr;
+          }
+          const duplicateIds = uniqPositiveIds(duplicateRows.map((row) => row?.id_item));
+          if (duplicateIds.length) {
+            const { error: mergeDelErr } = await supabaseAdmin
+              .from("carrito_items")
+              .delete()
+              .in("id_item", duplicateIds);
+            if (mergeDelErr) throw mergeDelErr;
+          }
+          existing = { ...primaryRow, cantidad: mergedCantidad };
+          console.warn("[cart:item] consolidando duplicados", {
+            id_carrito: idCarrito,
+            id_precio: idPrecio,
+            id_venta: idVenta ?? null,
+            duplicates_removed: duplicateRows.length,
+            merged_qty: mergedCantidad,
+          });
+        } else {
+          existing = primaryRow || null;
+        }
+      } else {
+        existing = matchedRows[0] || null;
+      }
     }
     // Filtra por id_venta según sea null o definido
+    const existingVentaId = toPositiveInt(existing?.id_venta);
+    const existingCuentaId = toPositiveInt(existing?.id_cuenta);
+    const existingPerfilId = toPositiveInt(existing?.id_perfil);
     const matchesVenta =
-      id_venta === undefined || id_venta === null
-        ? existing?.id_venta === null || existing?.id_venta === undefined
-        : existing?.id_venta === id_venta;
+      idVenta === undefined || idVenta === null
+        ? !existingVentaId
+        : existingVentaId === idVenta;
     const matchesMeses =
       mesesVal == null ? true : Number(existing?.meses) === Number(mesesVal);
     const matchesCuenta =
-      id_cuenta === undefined || id_cuenta === null
-        ? existing?.id_cuenta === null || existing?.id_cuenta === undefined
-        : existing?.id_cuenta === id_cuenta;
+      idCuenta === undefined || idCuenta === null
+        ? !existingCuentaId
+        : existingCuentaId === idCuenta;
     const matchesPerfil =
-      id_perfil === undefined || id_perfil === null
-        ? existing?.id_perfil === null || existing?.id_perfil === undefined
-        : existing?.id_perfil === id_perfil;
+      idPerfil === undefined || idPerfil === null
+        ? !existingPerfilId
+        : existingPerfilId === idPerfil;
     // Si llega id_item, siempre tratamos ese registro como el existente (aunque cambien meses).
     const matchExisting =
       existing &&
       (bodyIdItem ? true : matchesVenta && matchesCuenta && matchesPerfil && matchesMeses);
-    
-    const newQty = (matchExisting ? existing.cantidad : 0) + parsedDelta;
+
+    const existingQty = Number(matchExisting ? existing?.cantidad : 0) || 0;
+    const newQty = existingQty + parsedDelta;
 
     // Permite delta=0 para sincronizar solo meses (u otros campos) de un item existente.
     if (matchExisting && parsedDelta === 0) {
@@ -12428,9 +12546,9 @@ app.post("/api/cart/item", async (req, res) => {
         .update({
           meses: mesesVal ?? existing.meses ?? null,
           renovacion: renovacion === true,
-          id_venta: id_venta ?? existing.id_venta ?? null,
-          id_cuenta: id_cuenta ?? existing.id_cuenta ?? null,
-          id_perfil: id_perfil ?? existing.id_perfil ?? null,
+          id_venta: idVenta ?? existingVentaId ?? null,
+          id_cuenta: idCuenta ?? existingCuentaId ?? null,
+          id_perfil: idPerfil ?? existingPerfilId ?? null,
         })
         .eq("id_item", existing.id_item);
       if (updErr) throw updErr;
@@ -12449,9 +12567,9 @@ app.post("/api/cart/item", async (req, res) => {
           cantidad: newQty,
           meses: mesesVal ?? existing.meses ?? null,
           renovacion: renovacion === true,
-          id_venta: id_venta ?? existing.id_venta ?? null,
-          id_cuenta: id_cuenta ?? existing.id_cuenta ?? null,
-          id_perfil: id_perfil ?? existing.id_perfil ?? null,
+          id_venta: idVenta ?? existingVentaId ?? null,
+          id_cuenta: idCuenta ?? existingCuentaId ?? null,
+          id_perfil: idPerfil ?? existingPerfilId ?? null,
         })
         .eq("id_item", existing.id_item);
       if (updErr) throw updErr;
@@ -12460,13 +12578,13 @@ app.post("/api/cart/item", async (req, res) => {
         .from("carrito_items")
         .insert({
           id_carrito: idCarrito,
-          id_precio,
+          id_precio: idPrecio,
           cantidad: newQty,
           meses: mesesVal,
           renovacion: renovacion === true,
-          id_venta: id_venta ?? null,
-          id_cuenta: id_cuenta ?? null,
-          id_perfil: id_perfil ?? null,
+          id_venta: idVenta ?? null,
+          id_cuenta: idCuenta ?? null,
+          id_perfil: idPerfil ?? null,
         });
       if (insErr) throw insErr;
     }
@@ -12483,7 +12601,7 @@ app.post("/api/cart/item", async (req, res) => {
       console.log("[cart:item] carrito vacío, eliminado", idCarrito);
     }
 
-    console.log("[cart:item] usuario", idUsuario, "carrito", idCarrito, "delta", parsedDelta, "id_precio", id_precio, "remaining", remaining);
+    console.log("[cart:item] usuario", idUsuario, "carrito", idCarrito, "delta", parsedDelta, "id_precio", idPrecio, "remaining", remaining);
     res.json({ ok: true, id_carrito: idCarrito, remaining });
   } catch (err) {
     console.error("[cart:item] error", err);
@@ -12537,12 +12655,67 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
       : { data: [], error: null };
     if (existingRows.error) throw existingRows.error;
 
-    const existingByVenta = (existingRows.data || []).reduce((acc, row) => {
+    const existingRowsByVenta = (existingRows.data || []).reduce((acc, row) => {
       const ventaId = toPositiveInt(row?.id_venta);
       if (!ventaId) return acc;
-      acc[ventaId] = row;
+      if (!acc[ventaId]) acc[ventaId] = [];
+      acc[ventaId].push(row);
       return acc;
     }, {});
+    const existingByVenta = {};
+    for (const [ventaIdKey, rows] of Object.entries(existingRowsByVenta)) {
+      const ventaIdNum = toPositiveInt(ventaIdKey);
+      if (!ventaIdNum) continue;
+      const sortedRows = [...(rows || [])].sort((a, b) => {
+        const ida = toPositiveInt(a?.id_item) || Number.MAX_SAFE_INTEGER;
+        const idb = toPositiveInt(b?.id_item) || Number.MAX_SAFE_INTEGER;
+        return ida - idb;
+      });
+      const [primaryRow, ...duplicateRows] = sortedRows;
+      if (!primaryRow) continue;
+      if (duplicateRows.length) {
+        const primaryItemId = toPositiveInt(primaryRow?.id_item);
+        const mergedCantidad = Math.max(
+          0,
+          Math.round(
+            sortedRows.reduce((acc, row) => {
+              const qty = Number(row?.cantidad);
+              return acc + (Number.isFinite(qty) ? qty : 0);
+            }, 0),
+          ),
+        );
+        if (primaryItemId) {
+          const primaryQty = Number(primaryRow?.cantidad);
+          if (!Number.isFinite(primaryQty) || Math.round(primaryQty) !== mergedCantidad) {
+            const { error: mergeUpdErr } = await supabaseAdmin
+              .from("carrito_items")
+              .update({ cantidad: mergedCantidad })
+              .eq("id_item", primaryItemId);
+            if (mergeUpdErr) throw mergeUpdErr;
+          }
+        }
+        const duplicateIds = uniqPositiveIds(duplicateRows.map((row) => row?.id_item));
+        if (duplicateIds.length) {
+          const { error: mergeDelErr } = await supabaseAdmin
+            .from("carrito_items")
+            .delete()
+            .in("id_item", duplicateIds);
+          if (mergeDelErr) throw mergeDelErr;
+        }
+        existingByVenta[ventaIdNum] = {
+          ...primaryRow,
+          cantidad: mergedCantidad,
+        };
+        console.warn("[cart/renewal-link/apply] consolidando duplicados de renovacion", {
+          id_carrito: carritoId,
+          id_venta: ventaIdNum,
+          duplicates_removed: duplicateRows.length,
+          merged_qty: mergedCantidad,
+        });
+      } else {
+        existingByVenta[ventaIdNum] = primaryRow;
+      }
+    }
 
     const normalizeNullableId = (value) => toPositiveInt(value) || null;
     const toInsert = [];
