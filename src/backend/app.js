@@ -9768,12 +9768,41 @@ const processOrderFromItems = async ({
     itemsCount: items?.length || 0,
     carritoId,
   });
-  const saldoConsumption = await consumeSaldoFromCarritoIfNeeded({
+  let saldoConsumption = await consumeSaldoFromCarritoIfNeeded({
     carritoId,
     source: "processOrderFromItems",
     saldoAplicadoFallback: saldoAplicadoExpectedUsd,
     idUsuarioFallback: idUsuarioVentas,
   });
+  const saldoExpected = toFiniteMoney(saldoAplicadoExpectedUsd);
+  if (!saldoConsumption?.consumed && Number.isFinite(saldoExpected) && saldoExpected > 0) {
+    const skipReason = String(saldoConsumption?.reason || "");
+    const canForceDebit = skipReason === "saldo_not_enabled" || skipReason === "saldo_amount_zero";
+    if (canForceDebit) {
+      const forcedDebit = await debitSaldoUsdFromUser({
+        idUsuario: idUsuarioVentas,
+        montoUsd: saldoExpected,
+        source: `processOrderFromItems:forced_${skipReason || "unknown"}`,
+      });
+      saldoConsumption = {
+        consumed: !!forcedDebit?.debitado,
+        id_carrito: Number.isFinite(Number(carritoId)) ? Number(carritoId) : null,
+        id_usuario: forcedDebit?.id_usuario || toPositiveInt(idUsuarioVentas) || null,
+        monto: Number(forcedDebit?.monto) || 0,
+        saldo_aplicado: saldoExpected,
+        saldo_nuevo: forcedDebit?.saldoNuevo ?? null,
+        saldo_origen: `forced_${skipReason || "unknown"}`,
+      };
+      console.log("[checkout] saldo forzado por monto esperado", {
+        ordenId,
+        id_carrito: carritoId,
+        reason: skipReason || "unknown",
+        id_usuario: saldoConsumption?.id_usuario || null,
+        monto: saldoConsumption?.monto || 0,
+        saldo_nuevo: saldoConsumption?.saldo_nuevo ?? null,
+      });
+    }
+  }
   if (saldoConsumption?.consumed) {
     console.log("[checkout] saldo consumido en procesamiento", {
       ordenId,

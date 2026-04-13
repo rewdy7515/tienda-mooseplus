@@ -155,16 +155,42 @@ const getTotalUsdMostrado = (baseUsd, metodoId) => {
   return round2(montoBase);
 };
 
-const applyCheckoutSummaryTotals = async () => {
+const resolveCheckoutTotalsFromCart = (cartData = null) => {
+  const useSaldo = isTrue(cartData?.usa_saldo);
+  const montoUsdRaw = Number(cartData?.monto_usd);
+  const montoFinalRaw = Number(cartData?.monto_final);
+  const montoBsRaw = Number(cartData?.monto_bs);
+  const totalNeto = useSaldo && Number.isFinite(montoFinalRaw)
+    ? Number(montoFinalRaw)
+    : Number.isFinite(montoUsdRaw)
+      ? Number(montoUsdRaw)
+      : null;
+
+  return {
+    totalNeto: Number.isFinite(totalNeto) ? round2(totalNeto) : null,
+    montoUsdBruto: Number.isFinite(montoUsdRaw) ? round2(montoUsdRaw) : null,
+    montoBs: Number.isFinite(montoBsRaw) ? round2(montoBsRaw) : null,
+  };
+};
+
+const applyCheckoutSummaryTotals = async ({ cartData = null, preserveCartNetTotal = false } = {}) => {
   const summary = await fetchCheckoutSummary();
   if (summary?.error) return false;
   const summaryTotalUsd = Number(summary?.total_usd);
   const summaryMontoBs = Number(summary?.monto_bs);
-  if (Number.isFinite(summaryTotalUsd)) {
+
+  const cartTotals = resolveCheckoutTotalsFromCart(cartData);
+  if (preserveCartNetTotal && Number.isFinite(cartTotals.totalNeto)) {
+    totalUsd = cartTotals.totalNeto;
+    fixedMontoUsd = cartTotals.totalNeto;
+  } else if (Number.isFinite(summaryTotalUsd)) {
     totalUsd = summaryTotalUsd;
     fixedMontoUsd = summaryTotalUsd;
   }
-  if (Number.isFinite(summaryMontoBs)) {
+
+  if (preserveCartNetTotal && Number.isFinite(cartTotals.montoBs)) {
+    fixedMontoBs = cartTotals.montoBs;
+  } else if (Number.isFinite(summaryMontoBs)) {
     fixedMontoBs = summaryMontoBs;
   }
   return Number.isFinite(summaryTotalUsd);
@@ -1224,7 +1250,10 @@ async function init() {
       fixedFecha = cartData?.fecha ?? null;
 
       try {
-        await applyCheckoutSummaryTotals();
+        await applyCheckoutSummaryTotals({
+          cartData,
+          preserveCartNetTotal: true,
+        });
       } catch (summaryErr) {
         console.warn("checkout summary load error", summaryErr);
       }
@@ -1389,7 +1418,10 @@ btnSendPayment?.addEventListener("click", async () => {
         fixedHora = cartData?.hora ?? null;
         fixedFecha = cartData?.fecha ?? null;
         try {
-          await applyCheckoutSummaryTotals();
+          await applyCheckoutSummaryTotals({
+            cartData,
+            preserveCartNetTotal: true,
+          });
         } catch (summaryErr) {
           console.warn("checkout summary before submit error", summaryErr);
         }
