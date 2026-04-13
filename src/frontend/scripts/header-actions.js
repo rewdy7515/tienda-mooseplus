@@ -993,17 +993,12 @@ if (!window.__headerActionsInit) {
           referencia: "SALDO",
           comprobantes: [],
           total: montoUsd,
-          };
+        };
         const resp = await submitCheckout(payload);
         if (resp?.error) {
           alert(`Error al procesar: ${resp.error}`);
           return;
         }
-        const nuevoSaldo = Math.max(0, Math.round((saldo - montoUsd) * 100) / 100);
-        await supabase
-          .from("usuarios")
-          .update({ saldo: nuevoSaldo })
-          .eq("id_usuario", user.id_usuario);
         const dest = resp?.id_orden
           ? `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
           : "entregar_servicios.html";

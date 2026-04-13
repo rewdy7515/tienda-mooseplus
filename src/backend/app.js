@@ -6201,7 +6201,7 @@ const autoProcessMatchedOrder = async (match = {}) => {
   const { data: orden, error: ordErr } = await supabaseAdmin
     .from("ordenes")
     .select(
-      "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, pago_verificado, en_espera, orden_cancelada",
+      "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada",
     )
     .eq("id_orden", idOrden)
     .maybeSingle();
@@ -6249,12 +6249,45 @@ const autoProcessMatchedOrder = async (match = {}) => {
 
   if ((ventasExist || []).length) {
     const pendientesCount = (ventasExist || []).filter((row) => isTrue(row?.pendiente)).length;
+    let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
+    let saldoReconciliacionError = null;
+    const saldoEsperadoOrden = resolveSaldoAplicadoFromOrderSnapshot({
+      usaSaldo: orden?.usa_saldo,
+      saldoAplicadoUsd: orden?.saldo_aplicado_usd,
+      totalBrutoUsd: orden?.total_bruto_usd,
+      totalUsd: orden?.total,
+      referencia: orden?.referencia,
+    });
+    const ordenUpdate = {
+      pago_verificado: true,
+      en_espera: pendientesCount > 0,
+    };
+    if (!(toFiniteMoney(orden?.saldo_aplicado_usd) > 0) && saldoEsperadoOrden > 0) {
+      try {
+        const saldoDebitRes = await debitSaldoUsdFromUser({
+          idUsuario: idUsuarioVentas,
+          montoUsd: saldoEsperadoOrden,
+          source: "auto_process_order:already_processed",
+        });
+        saldoReconciliado = {
+          debitado: !!saldoDebitRes?.debitado,
+          monto: Number(saldoDebitRes?.monto) || 0,
+          saldoNuevo: saldoDebitRes?.saldoNuevo ?? null,
+        };
+        ordenUpdate.saldo_aplicado_usd = saldoEsperadoOrden;
+      } catch (saldoErr) {
+        saldoReconciliacionError = saldoErr?.message || "saldo_reconciliation_failed";
+        console.error("[autoProcessMatchedOrder] saldo reconciliation error", {
+          id_orden: idOrden,
+          id_usuario: idUsuarioVentas,
+          expected_saldo_usd: saldoEsperadoOrden,
+          error: saldoReconciliacionError,
+        });
+      }
+    }
     const { error: updOrdErr } = await supabaseAdmin
       .from("ordenes")
-      .update({
-        pago_verificado: true,
-        en_espera: pendientesCount > 0,
-      })
+      .update(ordenUpdate)
       .eq("id_orden", idOrden);
     if (updOrdErr) throw updOrdErr;
     try {
@@ -6284,6 +6317,10 @@ const autoProcessMatchedOrder = async (match = {}) => {
       pendientes: pendientesCount,
       pago_sync_ok: pagoSync.ok,
       pago_sync_error: pagoSync.error,
+      saldo_debitado: saldoReconciliado.debitado,
+      saldo_debitado_usd: saldoReconciliado.monto,
+      saldo_usuario_nuevo: saldoReconciliado.saldoNuevo,
+      saldo_debitado_error: saldoReconciliacionError,
     };
   }
 
@@ -6373,6 +6410,13 @@ const autoProcessMatchedOrder = async (match = {}) => {
     snapshotTotalUsd: orden?.total ?? context?.total ?? null,
     snapshotMontoBsTotal: orden?.monto_bs ?? null,
     snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
+    saldoAplicadoExpectedUsd: resolveSaldoAplicadoFromOrderSnapshot({
+      usaSaldo: orden?.usa_saldo,
+      saldoAplicadoUsd: orden?.saldo_aplicado_usd,
+      totalBrutoUsd: orden?.total_bruto_usd,
+      totalUsd: orden?.total,
+      referencia: orden?.referencia,
+    }),
   });
 
   const { error: updOrdErr } = await supabaseAdmin
@@ -9715,6 +9759,7 @@ const processOrderFromItems = async ({
   snapshotTotalUsd = null,
   snapshotMontoBsTotal = null,
   snapshotTasaBs = null,
+  saldoAplicadoExpectedUsd = 0,
 }) => {
   console.log("[checkout] processOrderFromItems start", {
     ordenId,
@@ -9726,6 +9771,8 @@ const processOrderFromItems = async ({
   const saldoConsumption = await consumeSaldoFromCarritoIfNeeded({
     carritoId,
     source: "processOrderFromItems",
+    saldoAplicadoFallback: saldoAplicadoExpectedUsd,
+    idUsuarioFallback: idUsuarioVentas,
   });
   if (saldoConsumption?.consumed) {
     console.log("[checkout] saldo consumido en procesamiento", {
@@ -11427,11 +11474,99 @@ const resolveSaldoAplicadoFromCarrito = ({ montoUsd, montoFinal }) => {
   return aplicado > 0 ? aplicado : 0;
 };
 
-const consumeSaldoFromCarritoIfNeeded = async ({ carritoId, source = "checkout_process" } = {}) => {
+const resolveSaldoAplicadoFromOrderSnapshot = ({
+  usaSaldo = false,
+  saldoAplicadoUsd = null,
+  totalBrutoUsd = null,
+  totalUsd = null,
+  referencia = null,
+} = {}) => {
+  if (!isTrue(usaSaldo)) return 0;
+
+  const storedSaldoAplicado = toFiniteMoney(saldoAplicadoUsd);
+  if (Number.isFinite(storedSaldoAplicado) && storedSaldoAplicado > 0) {
+    return storedSaldoAplicado;
+  }
+
+  const totalBruto = toFiniteMoney(totalBrutoUsd);
+  const totalNeto = toFiniteMoney(totalUsd);
+  if (Number.isFinite(totalBruto) && Number.isFinite(totalNeto)) {
+    const diff = roundMoney(totalBruto - totalNeto);
+    if (diff > 0) return diff;
+  }
+
+  if (String(referencia || "").trim().toUpperCase() === "SALDO") {
+    if (Number.isFinite(totalBruto) && totalBruto > 0) return totalBruto;
+    if (Number.isFinite(totalNeto) && totalNeto > 0) return totalNeto;
+  }
+
+  return 0;
+};
+
+const debitSaldoUsdFromUser = async ({
+  idUsuario = null,
+  montoUsd = 0,
+  source = "saldo_debit",
+} = {}) => {
+  const targetUserId = toPositiveInt(idUsuario);
+  const amount = toFiniteMoney(montoUsd);
+  if (!targetUserId || !(amount > 0)) {
+    return { debitado: false, monto: 0, saldoNuevo: null };
+  }
+
+  const { data: userRow, error: userErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("saldo")
+    .eq("id_usuario", targetUserId)
+    .maybeSingle();
+  if (userErr) throw userErr;
+
+  const saldoActual = toFiniteMoney(userRow?.saldo);
+  const saldoDisponible = Number.isFinite(saldoActual) && saldoActual > 0 ? saldoActual : 0;
+  const saldoADebitar = Math.min(amount, saldoDisponible);
+  if (!(saldoADebitar > 0) || roundMoney(saldoADebitar) < roundMoney(amount)) {
+    const err = new Error("Saldo insuficiente para aplicar el descuento del carrito.");
+    err.code = "SALDO_INSUFICIENTE";
+    err.httpStatus = 409;
+    throw err;
+  }
+
+  const saldoNuevo = roundMoney(Math.max(0, saldoDisponible - saldoADebitar));
+  const { error: updSaldoErr } = await supabaseAdmin
+    .from("usuarios")
+    .update({ saldo: saldoNuevo })
+    .eq("id_usuario", targetUserId);
+  if (updSaldoErr) throw updSaldoErr;
+
+  console.log("[checkout][saldo] debitado", {
+    source,
+    id_usuario: targetUserId,
+    saldo_aplicado: amount,
+    saldo_debitado: saldoADebitar,
+    saldo_nuevo: saldoNuevo,
+  });
+
+  return {
+    debitado: true,
+    id_usuario: targetUserId,
+    monto: saldoADebitar,
+    saldoAplicado: amount,
+    saldoNuevo,
+  };
+};
+
+const consumeSaldoFromCarritoIfNeeded = async ({
+  carritoId,
+  source = "checkout_process",
+  saldoAplicadoFallback = 0,
+  idUsuarioFallback = null,
+} = {}) => {
   const carritoNum = Number(carritoId);
   if (!Number.isFinite(carritoNum) || carritoNum <= 0) {
     return { consumed: false, skipped: true, reason: "invalid_carrito" };
   }
+  const saldoFallback = toFiniteMoney(saldoAplicadoFallback);
+  const fallbackUserId = toPositiveInt(idUsuarioFallback);
 
   const { data: claimedRows, error: claimErr } = await supabaseAdmin
     .from("carritos")
@@ -11455,16 +11590,24 @@ const consumeSaldoFromCarritoIfNeeded = async ({ carritoId, source = "checkout_p
     }
   };
 
-  const targetUserId = Number(claimedRow?.id_usuario);
+  let targetUserId = Number(claimedRow?.id_usuario);
+  if ((!Number.isFinite(targetUserId) || targetUserId <= 0) && fallbackUserId) {
+    targetUserId = fallbackUserId;
+  }
   if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
     await rollbackSaldoFlag();
     throw new Error("No se pudo debitar saldo: carrito sin usuario válido.");
   }
 
-  const saldoAplicado = resolveSaldoAplicadoFromCarrito({
+  let saldoAplicado = resolveSaldoAplicadoFromCarrito({
     montoUsd: claimedRow?.monto_usd,
     montoFinal: claimedRow?.monto_final,
   });
+  let saldoOrigen = "carrito";
+  if (!(saldoAplicado > 0) && Number.isFinite(saldoFallback) && saldoFallback > 0) {
+    saldoAplicado = saldoFallback;
+    saldoOrigen = "fallback";
+  }
   if (!(saldoAplicado > 0)) {
     return {
       consumed: false,
@@ -11475,53 +11618,26 @@ const consumeSaldoFromCarritoIfNeeded = async ({ carritoId, source = "checkout_p
     };
   }
 
-  const { data: userRow, error: userErr } = await supabaseAdmin
-    .from("usuarios")
-    .select("saldo")
-    .eq("id_usuario", targetUserId)
-    .maybeSingle();
-  if (userErr) {
+  let debitResult = null;
+  try {
+    debitResult = await debitSaldoUsdFromUser({
+      idUsuario: targetUserId,
+      montoUsd: saldoAplicado,
+      source: `${source}:${saldoOrigen}`,
+    });
+  } catch (err) {
     await rollbackSaldoFlag();
-    throw userErr;
-  }
-
-  const saldoActual = toFiniteMoney(userRow?.saldo);
-  const saldoDisponible = Number.isFinite(saldoActual) && saldoActual > 0 ? saldoActual : 0;
-  const saldoADebitar = Math.min(saldoAplicado, saldoDisponible);
-  if (!(saldoADebitar > 0) || roundMoney(saldoADebitar) < roundMoney(saldoAplicado)) {
-    await rollbackSaldoFlag();
-    const err = new Error("Saldo insuficiente para aplicar el descuento del carrito.");
-    err.code = "SALDO_INSUFICIENTE";
-    err.httpStatus = 409;
     throw err;
   }
-
-  const saldoNuevo = roundMoney(Math.max(0, saldoDisponible - saldoADebitar));
-  const { error: updSaldoErr } = await supabaseAdmin
-    .from("usuarios")
-    .update({ saldo: saldoNuevo })
-    .eq("id_usuario", targetUserId);
-  if (updSaldoErr) {
-    await rollbackSaldoFlag();
-    throw updSaldoErr;
-  }
-
-  console.log("[checkout][saldo] debitado", {
-    source,
-    id_carrito: carritoNum,
-    id_usuario: targetUserId,
-    saldo_aplicado: saldoAplicado,
-    saldo_debitado: saldoADebitar,
-    saldo_nuevo: saldoNuevo,
-  });
 
   return {
     consumed: true,
     id_carrito: carritoNum,
-    id_usuario: targetUserId,
-    monto: saldoADebitar,
+    id_usuario: debitResult?.id_usuario || targetUserId,
+    monto: debitResult?.monto || 0,
     saldo_aplicado: saldoAplicado,
-    saldo_nuevo: saldoNuevo,
+    saldo_nuevo: debitResult?.saldoNuevo ?? null,
+    saldo_origen: saldoOrigen,
   };
 };
 const resolveMontoFinal = ({ montoUsd, usaSaldo, saldoUsuario }) => {
@@ -16326,6 +16442,7 @@ app.post("/api/checkout", async (req, res) => {
         })
       : null;
     const totalServidor = Number.isFinite(Number(total)) ? roundCheckoutMoney(total) : 0;
+    const referenciaTrim = String(referencia || "").trim();
     let carritoSnapshot = null;
     if (!hasCustomItemAmounts) {
       const { data: carritoSnapshotData, error: carritoSnapshotErr } = await supabaseAdmin
@@ -16338,16 +16455,31 @@ app.post("/api/checkout", async (req, res) => {
     }
     const usaSaldoCarrito = !hasCustomItemAmounts && isTrue(carritoSnapshot?.usa_saldo);
     const montoFinalCarrito = parseOptionalCheckoutNumber(carritoSnapshot?.monto_final);
-    const checkoutTotal = hasCustomItemAmounts
-      ? customSummary?.totalUsd || 0
-      : usaSaldoCarrito && Number.isFinite(montoFinalCarrito)
-        ? roundCheckoutMoney(montoFinalCarrito)
-        : totalServidor;
+    let checkoutTotal = hasCustomItemAmounts ? customSummary?.totalUsd || 0 : totalServidor;
+    let saldoAplicadoUsd = 0;
+    if (!hasCustomItemAmounts && usaSaldoCarrito) {
+      if (Number.isFinite(montoFinalCarrito)) {
+        checkoutTotal = roundCheckoutMoney(montoFinalCarrito);
+        saldoAplicadoUsd = roundCheckoutMoney(Math.max(0, totalServidor - checkoutTotal));
+      } else {
+        const { data: saldoUserRow, error: saldoUserErr } = await supabaseAdmin
+          .from("usuarios")
+          .select("saldo")
+          .eq("id_usuario", idUsuarioSesion)
+          .maybeSingle();
+        if (saldoUserErr) throw saldoUserErr;
+        const saldoDisponible = toFiniteMoney(saldoUserRow?.saldo);
+        if (Number.isFinite(saldoDisponible) && saldoDisponible > 0) {
+          saldoAplicadoUsd = roundCheckoutMoney(Math.min(totalServidor, saldoDisponible));
+        }
+        checkoutTotal = roundCheckoutMoney(Math.max(0, totalServidor - saldoAplicadoUsd));
+      }
+      if (referenciaTrim.toUpperCase() === "SALDO") {
+        saldoAplicadoUsd = roundCheckoutMoney(totalServidor);
+        checkoutTotal = 0;
+      }
+    }
     const montoBaseCobrado = checkoutTotal;
-    const saldoAplicadoUsd =
-      !hasCustomItemAmounts && usaSaldoCarrito
-        ? roundCheckoutMoney(Math.max(0, totalServidor - checkoutTotal))
-        : 0;
     const ordenSaldoUsage = {
       usaSaldo: !!usaSaldoCarrito,
       saldoAplicadoUsd,
@@ -16361,7 +16493,6 @@ app.post("/api/checkout", async (req, res) => {
     const hora_orden = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
       caracasNow.getSeconds()
     )}`;
-    const referenciaTrim = String(referencia || "").trim();
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
       .select("id_metodo_de_pago, nombre, verificacion_automatica, bolivares")
@@ -16582,6 +16713,7 @@ app.post("/api/checkout", async (req, res) => {
       snapshotTotalUsd: checkoutTotal,
       snapshotMontoBsTotal: monto_bs,
       snapshotTasaBs: tasaBs,
+      saldoAplicadoExpectedUsd: ordenSaldoUsage.saldoAplicadoUsd,
     });
     console.log("[checkout] procesado", {
       id_orden: ordenId,
@@ -16869,7 +17001,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, tasa_bs, monto_bs, monto_transferido, monto_mayor, pago_verificado, en_espera, orden_cancelada"
+        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, tasa_bs, monto_bs, monto_transferido, monto_mayor, pago_verificado, en_espera, orden_cancelada"
       )
       .eq("id_orden", idOrden)
       .single();
@@ -16989,6 +17121,38 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     if (ventasErr) throw ventasErr;
     if (ventasExist?.length) {
       const ordenPatch = {};
+      let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
+      let saldoReconciliacionError = null;
+      const saldoEsperadoOrden = resolveSaldoAplicadoFromOrderSnapshot({
+        usaSaldo: orden?.usa_saldo,
+        saldoAplicadoUsd: orden?.saldo_aplicado_usd,
+        totalBrutoUsd: orden?.total_bruto_usd,
+        totalUsd: orden?.total,
+        referencia: orden?.referencia,
+      });
+      if (!(toFiniteMoney(orden?.saldo_aplicado_usd) > 0) && saldoEsperadoOrden > 0) {
+        try {
+          const saldoDebitRes = await debitSaldoUsdFromUser({
+            idUsuario: idUsuarioVentas,
+            montoUsd: saldoEsperadoOrden,
+            source: "ordenes_procesar:already_processed",
+          });
+          saldoReconciliado = {
+            debitado: !!saldoDebitRes?.debitado,
+            monto: Number(saldoDebitRes?.monto) || 0,
+            saldoNuevo: saldoDebitRes?.saldoNuevo ?? null,
+          };
+          ordenPatch.saldo_aplicado_usd = saldoEsperadoOrden;
+        } catch (saldoErr) {
+          saldoReconciliacionError = saldoErr?.message || "saldo_reconciliation_failed";
+          console.error("[ordenes/procesar] saldo reconciliation error", {
+            id_orden: idOrden,
+            id_usuario: idUsuarioVentas,
+            expected_saldo_usd: saldoEsperadoOrden,
+            error: saldoReconciliacionError,
+          });
+        }
+      }
       if (!orden?.pago_verificado) {
         const { data: pendRows, error: pendErr } = await supabaseAdmin
           .from("ventas")
@@ -17046,6 +17210,10 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         saldo_acreditado: false,
         excedente_acreditado: 0,
         saldo_nuevo: null,
+        saldo_debitado: saldoReconciliado.debitado,
+        saldo_debitado_usd: saldoReconciliado.monto,
+        saldo_usuario_nuevo: saldoReconciliado.saldoNuevo,
+        saldo_debitado_error: saldoReconciliacionError,
       });
     }
     if (!orden?.id_carrito) {
@@ -17109,6 +17277,13 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       snapshotTotalUsd: orden?.total ?? context?.total ?? null,
       snapshotMontoBsTotal: orden?.monto_bs ?? null,
       snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
+      saldoAplicadoExpectedUsd: resolveSaldoAplicadoFromOrderSnapshot({
+        usaSaldo: orden?.usa_saldo,
+        saldoAplicadoUsd: orden?.saldo_aplicado_usd,
+        totalBrutoUsd: orden?.total_bruto_usd,
+        totalUsd: orden?.total,
+        referencia: orden?.referencia,
+      }),
     });
     console.log("[ordenes/procesar] procesado", {
       id_orden: idOrden,
