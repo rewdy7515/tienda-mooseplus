@@ -9395,6 +9395,29 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
   };
 };
 
+const resolveCarritoMontoUsdFromItems = async ({
+  idUsuarioVentas,
+  carritoId,
+  fallbackMontoUsd = null,
+} = {}) => {
+  const carritoNum = toPositiveInt(carritoId);
+  const usuarioNum = toPositiveInt(idUsuarioVentas);
+  const fallback = parseOptionalCheckoutNumber(fallbackMontoUsd);
+  if (!carritoNum || !usuarioNum) {
+    return Number.isFinite(fallback) ? roundCheckoutMoney(fallback) : 0;
+  }
+  const context = await buildCheckoutContext({
+    idUsuarioVentas: usuarioNum,
+    carritoId: carritoNum,
+    totalCliente: null,
+  });
+  const totalFromItems = parseOptionalCheckoutNumber(context?.total);
+  if (Number.isFinite(totalFromItems)) {
+    return roundCheckoutMoney(totalFromItems);
+  }
+  return Number.isFinite(fallback) ? roundCheckoutMoney(fallback) : 0;
+};
+
 const buildOrdenItemDetalle = ({
   item,
   priceInfo,
@@ -11664,11 +11687,8 @@ const consumeSaldoFromCarritoIfNeeded = async ({
     }
   };
 
-  let targetUserId = Number(claimedRow?.id_usuario);
-  if ((!Number.isFinite(targetUserId) || targetUserId <= 0) && fallbackUserId) {
-    targetUserId = fallbackUserId;
-  }
-  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+  let targetUserId = fallbackUserId || toPositiveInt(claimedRow?.id_usuario);
+  if (!targetUserId) {
     await rollbackSaldoFlag();
     throw new Error("No se pudo debitar saldo: carrito sin usuario válido.");
   }
@@ -13197,7 +13217,7 @@ app.post("/api/cart/montos", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
-    const { data: carritoInfo, error: carritoErr } = await supabaseAdmin
+    let { data: carritoInfo, error: carritoErr } = await supabaseAdmin
       .from("carritos")
       .select("monto_usd, monto_bs, tasa_bs, usa_saldo, monto_final, saldo_usado, fecha, hora")
       .eq("id_carrito", carritoId)
@@ -13209,6 +13229,22 @@ app.post("/api/cart/montos", async (req, res) => {
       .eq("id_usuario", idUsuario)
       .maybeSingle();
     if (usuarioErr) throw usuarioErr;
+    const montoUsdResolved = await resolveCarritoMontoUsdFromItems({
+      idUsuarioVentas: idUsuario,
+      carritoId,
+      fallbackMontoUsd: carritoInfo?.monto_usd,
+    });
+    if (!areCloseNumbers(parseOptionalCheckoutNumber(carritoInfo?.monto_usd), montoUsdResolved, 0.01)) {
+      const { error: updMontoErr } = await supabaseAdmin
+        .from("carritos")
+        .update({ monto_usd: montoUsdResolved })
+        .eq("id_carrito", carritoId);
+      if (updMontoErr) throw updMontoErr;
+    }
+    carritoInfo = {
+      ...(carritoInfo || {}),
+      monto_usd: montoUsdResolved,
+    };
     const carritoRateState = await syncCarritoOfficialRate({
       carritoId,
       idUsuario,
@@ -13219,6 +13255,7 @@ app.post("/api/cart/montos", async (req, res) => {
     return res.json({
       ok: true,
       id_carrito: carritoId,
+      monto_usd: Number.isFinite(montoUsdResolved) ? montoUsdResolved : null,
       tasa_bs: carritoRateState?.tasaBs ?? null,
       monto_bs: carritoRateState?.montoBs ?? null,
       monto_final: carritoRateState?.montoFinal ?? null,
@@ -13244,7 +13281,7 @@ app.post("/api/cart/flags", async (req, res) => {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
     const usa_saldo = isTrue(req.body?.usa_saldo);
-    const { data: carritoInfo, error: cartErr } = await supabaseAdmin
+    let { data: carritoInfo, error: cartErr } = await supabaseAdmin
       .from("carritos")
       .select("monto_usd, monto_bs, tasa_bs, monto_final, saldo_usado, fecha, hora")
       .eq("id_carrito", carritoId)
@@ -13256,20 +13293,34 @@ app.post("/api/cart/flags", async (req, res) => {
       .eq("id_usuario", idUsuario)
       .maybeSingle();
     if (userErr) throw userErr;
+    const montoUsdResolved = await resolveCarritoMontoUsdFromItems({
+      idUsuarioVentas: idUsuario,
+      carritoId,
+      fallbackMontoUsd: carritoInfo?.monto_usd,
+    });
     const montoFinal = resolveMontoFinal({
-      montoUsd: carritoInfo?.monto_usd,
+      montoUsd: montoUsdResolved,
       usaSaldo: usa_saldo,
       saldoUsuario: usuarioInfo?.saldo,
     });
     const saldoUsado = resolveSaldoAplicadoFromCarrito({
-      montoUsd: carritoInfo?.monto_usd,
+      montoUsd: montoUsdResolved,
       montoFinal,
     });
     const { error: updErr } = await supabaseAdmin
       .from("carritos")
-      .update({ usa_saldo, monto_final: montoFinal, saldo_usado: saldoUsado })
+      .update({
+        usa_saldo,
+        monto_usd: montoUsdResolved,
+        monto_final: montoFinal,
+        saldo_usado: saldoUsado,
+      })
       .eq("id_carrito", carritoId);
     if (updErr) throw updErr;
+    carritoInfo = {
+      ...(carritoInfo || {}),
+      monto_usd: montoUsdResolved,
+    };
     const carritoRateState = await syncCarritoOfficialRate({
       carritoId,
       idUsuario,
@@ -13285,6 +13336,7 @@ app.post("/api/cart/flags", async (req, res) => {
       ok: true,
       id_carrito: carritoId,
       usa_saldo,
+      monto_usd: Number.isFinite(montoUsdResolved) ? montoUsdResolved : null,
       monto_final: carritoRateState?.montoFinal ?? montoFinal,
       saldo_usado: carritoRateState?.saldoUsado ?? saldoUsado,
       monto_bs: carritoRateState?.montoBs ?? null,
@@ -16585,7 +16637,7 @@ app.post("/api/checkout", async (req, res) => {
         const { data: saldoUserRow, error: saldoUserErr } = await supabaseAdmin
           .from("usuarios")
           .select("saldo")
-          .eq("id_usuario", idUsuarioSesion)
+          .eq("id_usuario", idUsuarioVentas)
           .maybeSingle();
         if (saldoUserErr) throw saldoUserErr;
         const saldoDisponible = toFiniteMoney(saldoUserRow?.saldo);
