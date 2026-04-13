@@ -11651,55 +11651,35 @@ const consumeSaldoFromCarritoIfNeeded = async ({
   const saldoFallback = toFiniteMoney(saldoAplicadoFallback);
   const fallbackUserId = toPositiveInt(idUsuarioFallback);
 
-  const { data: claimedRows, error: claimErr } = await supabaseAdmin
+  const { data: carritoRow, error: carritoErr } = await supabaseAdmin
     .from("carritos")
-    .update({ usa_saldo: false })
     .eq("id_carrito", carritoNum)
-    .eq("usa_saldo", true)
-    .select("id_carrito, id_usuario, monto_usd, monto_final, saldo_usado")
-    .limit(1);
-  if (claimErr) throw claimErr;
+    .select("id_carrito, id_usuario, usa_saldo, monto_usd, monto_final, saldo_usado")
+    .maybeSingle();
+  if (carritoErr) throw carritoErr;
+  if (!carritoRow?.id_carrito) {
+    return { consumed: false, skipped: true, reason: "carrito_not_found" };
+  }
 
-  const claimedRow = Array.isArray(claimedRows) ? claimedRows[0] || null : claimedRows || null;
-  if (!claimedRow?.id_carrito) {
+  const usaSaldoCarrito = isTrue(carritoRow?.usa_saldo);
+  const saldoUsadoRaw = toFiniteMoney(carritoRow?.saldo_usado);
+  const saldoFallbackEnabled = Number.isFinite(saldoFallback) && saldoFallback > 0;
+  const saldoUsadoEnabled = Number.isFinite(saldoUsadoRaw) && saldoUsadoRaw > 0;
+  if (!usaSaldoCarrito && !saldoUsadoEnabled && !saldoFallbackEnabled) {
     return { consumed: false, skipped: true, reason: "saldo_not_enabled" };
   }
 
-  const rollbackSaldoFlag = async () => {
-    try {
-      const rollbackSaldoUsadoRaw = toFiniteMoney(claimedRow?.saldo_usado);
-      const rollbackSaldoUsado =
-        Number.isFinite(rollbackSaldoUsadoRaw) && rollbackSaldoUsadoRaw > 0
-          ? rollbackSaldoUsadoRaw
-          : resolveSaldoAplicadoFromCarrito({
-              montoUsd: claimedRow?.monto_usd,
-              montoFinal: claimedRow?.monto_final,
-            });
-      await supabaseAdmin
-        .from("carritos")
-        .update({
-          usa_saldo: true,
-          saldo_usado: Number.isFinite(rollbackSaldoUsado) ? rollbackSaldoUsado : 0,
-        })
-        .eq("id_carrito", carritoNum);
-    } catch (_rollbackErr) {
-      // Best-effort rollback only.
-    }
-  };
-
-  let targetUserId = fallbackUserId || toPositiveInt(claimedRow?.id_usuario);
+  let targetUserId = fallbackUserId || toPositiveInt(carritoRow?.id_usuario);
   if (!targetUserId) {
-    await rollbackSaldoFlag();
     throw new Error("No se pudo debitar saldo: carrito sin usuario válido.");
   }
 
-  const saldoUsadoRaw = toFiniteMoney(claimedRow?.saldo_usado);
   let saldoAplicado =
     Number.isFinite(saldoUsadoRaw) && saldoUsadoRaw > 0
       ? saldoUsadoRaw
       : resolveSaldoAplicadoFromCarrito({
-          montoUsd: claimedRow?.monto_usd,
-          montoFinal: claimedRow?.monto_final,
+          montoUsd: carritoRow?.monto_usd,
+          montoFinal: carritoRow?.monto_final,
         });
   let saldoOrigen =
     Number.isFinite(saldoUsadoRaw) && saldoUsadoRaw > 0 ? "saldo_usado" : "carrito";
@@ -11717,29 +11697,11 @@ const consumeSaldoFromCarritoIfNeeded = async ({
     };
   }
 
-  let debitResult = null;
-  try {
-    debitResult = await debitSaldoUsdFromUser({
-      idUsuario: targetUserId,
-      montoUsd: saldoAplicado,
-      source: `${source}:${saldoOrigen}`,
-    });
-  } catch (err) {
-    await rollbackSaldoFlag();
-    throw err;
-  }
-
-  try {
-    await supabaseAdmin
-      .from("carritos")
-      .update({ saldo_usado: 0 })
-      .eq("id_carrito", carritoNum);
-  } catch (clearErr) {
-    console.warn("[checkout][saldo] no se pudo limpiar saldo_usado del carrito", {
-      id_carrito: carritoNum,
-      error: clearErr?.message || clearErr,
-    });
-  }
+  const debitResult = await debitSaldoUsdFromUser({
+    idUsuario: targetUserId,
+    montoUsd: saldoAplicado,
+    source: `${source}:${saldoOrigen}`,
+  });
 
   return {
     consumed: true,
@@ -16843,18 +16805,6 @@ app.post("/api/checkout", async (req, res) => {
             error: notifyErr?.message || notifyErr,
           });
         }
-      }
-      try {
-        await supabaseAdmin
-          .from("carritos")
-          .insert({
-            id_usuario: idUsuarioSesion,
-            fecha_creacion: new Date().toISOString(),
-            usa_saldo: false,
-            saldo_usado: 0,
-          });
-      } catch (cartErr) {
-        console.error("[checkout] crear carrito nuevo error", cartErr);
       }
       return res.json({
         ok: true,
