@@ -5,7 +5,6 @@ import {
   loadCatalog,
   submitCheckout,
   fetchCheckoutDraft,
-  updateCartMontos,
   uploadComprobantes,
   fetchP2PRate,
   loadCurrentUser,
@@ -302,24 +301,6 @@ const parseCaracasClock = (horaStr) => {
   return { hh, mm, ss };
 };
 
-const getCurrentRateWindowStartDate = () => {
-  const nowVz = getCaracasNow();
-  const nowDt = parseCaracasDate(nowVz.fecha, nowVz.hora);
-  const clock = parseCaracasClock(nowVz.hora);
-  if (!nowDt || !clock) return null;
-  const secSinceMidnight = clock.hh * 3600 + clock.mm * 60 + clock.ss;
-  const elapsedInWindow = secSinceMidnight % RATE_SLOT_SECONDS;
-  return new Date(nowDt.getTime() - elapsedInWindow * 1000);
-};
-
-const shouldRefreshMonto = (fechaStr, horaStr) => {
-  const dt = parseCaracasDate(fechaStr, horaStr);
-  if (!dt) return true;
-  const windowStart = getCurrentRateWindowStartDate();
-  if (!windowStart) return true;
-  return dt.getTime() < windowStart.getTime();
-};
-
 const getNextRateUpdateDate = () => {
   const nowVz = getCaracasNow();
   const nowDt = parseCaracasDate(nowVz.fecha, nowVz.hora);
@@ -409,66 +390,27 @@ const startSaldoWatcher = () => {
 };
 
 const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
-  if (!cartId || !Number.isFinite(totalUsdVal)) return;
+  if (!Number.isFinite(totalUsdVal)) return;
   const storedUsd = Number(cartData?.monto_usd);
   const storedBs = Number(cartData?.monto_bs);
   const storedHora = cartData?.hora ?? null;
   const storedFecha = cartData?.fecha ?? null;
-  const sameUsd = Number.isFinite(storedUsd) && Math.abs(storedUsd - totalUsdVal) < 0.01;
   const montoBsCalc = Number.isFinite(tasaVal)
     ? Math.round(totalUsdVal * tasaVal * 100) / 100
     : null;
 
-  if (!sameUsd) {
-    fixedMontoUsd = totalUsdVal;
-    fixedMontoBs = Number.isFinite(montoBsCalc) ? montoBsCalc : null;
-    const nowVz = getCaracasNow();
-    fixedFecha = nowVz.fecha;
-    fixedHora = nowVz.hora;
-    try {
-      const resp = await updateCartMontos(totalUsdVal, tasaVal);
-      if (resp?.error) {
-        console.warn("checkout cart monto update error", resp.error);
-      } else {
-
-        fixedMontoBs = Number.isFinite(Number(resp?.monto_bs)) ? Number(resp.monto_bs) : fixedMontoBs;
-        fixedFecha = resp?.fecha ?? fixedFecha;
-        fixedHora = resp?.hora ?? fixedHora;
-      }
-    } catch (err) {
-      console.warn("checkout cart monto update error", err);
-    }
-    scheduleMontoRefresh(totalUsdVal);
-    return;
-  }
-
-  fixedMontoUsd = storedUsd;
+  fixedMontoUsd = Number.isFinite(storedUsd) ? storedUsd : totalUsdVal;
   fixedMontoBs = Number.isFinite(storedBs) ? storedBs : montoBsCalc;
   fixedHora = storedHora;
   fixedFecha = storedFecha;
 
-  if (shouldRefreshMonto(fixedFecha, fixedHora) && Number.isFinite(montoBsCalc)) {
+  if (!Number.isFinite(fixedMontoBs) && Number.isFinite(montoBsCalc)) {
     fixedMontoBs = montoBsCalc;
     const nowVz = getCaracasNow();
     fixedFecha = nowVz.fecha;
     fixedHora = nowVz.hora;
-    try {
-      const resp = await updateCartMontos(totalUsdVal, tasaVal);
-      if (resp?.error) {
-        console.warn("checkout cart monto update error", resp.error);
-      } else {
-
-        fixedMontoBs = Number.isFinite(Number(resp?.monto_bs)) ? Number(resp.monto_bs) : fixedMontoBs;
-        fixedFecha = resp?.fecha ?? fixedFecha;
-        fixedHora = resp?.hora ?? fixedHora;
-      }
-    } catch (err) {
-      console.warn("checkout cart monto update error", err);
-    }
-    scheduleMontoRefresh(totalUsdVal);
-  } else {
-    scheduleMontoRefresh(totalUsdVal);
   }
+  scheduleMontoRefresh(totalUsdVal);
 };
 
 const renderDetalle = () => {
