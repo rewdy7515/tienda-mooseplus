@@ -52,11 +52,13 @@ let cartMontoUsd = null;
 let cartMontoBs = null;
 let cartTasaBs = null;
 let cartMontoFinal = null;
+let cartSaldoUsado = null;
 let cartDescuento = null;
 let cartNeedsSync = false;
 let cartUseSaldo = false;
 let dbUseSaldo = false;
 let dbCartSnapshot = new Map();
+let saldoToggleSyncInFlight = false;
 let currentUserIsCliente = true;
 let discountColumns = [];
 let discountColumnById = {};
@@ -90,6 +92,27 @@ const calcDisplayTotalBs = (totalUsd) => {
   const tasa = resolveActiveRateBs();
   if (!Number.isFinite(tasa) || tasa <= 0) return null;
   return round2(total * tasa);
+};
+
+const applyCartServerTotals = (cartData = {}) => {
+  cartMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
+    ? Number(cartData.monto_usd)
+    : cartMontoUsd;
+  cartMontoBs = Number.isFinite(Number(cartData?.monto_bs))
+    ? Number(cartData.monto_bs)
+    : cartMontoBs;
+  cartTasaBs = Number.isFinite(Number(cartData?.tasa_bs))
+    ? Number(cartData.tasa_bs)
+    : cartTasaBs;
+  cartMontoFinal = Number.isFinite(Number(cartData?.monto_final))
+    ? Number(cartData.monto_final)
+    : cartMontoFinal;
+  cartSaldoUsado = Number.isFinite(Number(cartData?.saldo_usado))
+    ? Number(cartData.saldo_usado)
+    : cartSaldoUsado;
+  cartDescuento = Number.isFinite(Number(cartData?.descuento))
+    ? Number(cartData.descuento)
+    : cartDescuento;
 };
 
 const positionRatePopover = (btn, popover) => {
@@ -164,13 +187,15 @@ const updateUseSaldoButton = () => {
   );
   const saldoToggleWrap = document.querySelector(".cart-saldo-toggle");
   if (saldoToggleInput) {
-    saldoToggleInput.disabled = !canUseSaldo;
+    saldoToggleInput.disabled = !canUseSaldo || saldoToggleSyncInFlight;
     saldoToggleInput.checked = canUseSaldo && !!cartUseSaldo;
   }
   if (saldoToggleWrap) {
     saldoToggleWrap.classList.toggle("is-active", canUseSaldo && !!cartUseSaldo);
-    saldoToggleWrap.classList.toggle("is-disabled", !canUseSaldo);
-    saldoToggleWrap.title = canUseSaldo
+    saldoToggleWrap.classList.toggle("is-disabled", !canUseSaldo || saldoToggleSyncInFlight);
+    saldoToggleWrap.title = saldoToggleSyncInFlight
+      ? "Aplicando saldo..."
+      : canUseSaldo
       ? "Aplicar saldo al total"
       : "No tienes saldo disponible";
   }
@@ -499,21 +524,7 @@ const syncCartWithServer = async ({ refreshBtn = null, alertOnError = false } = 
     dbUseSaldo = isTrue(freshCart?.usa_saldo);
     cartUseSaldo = dbUseSaldo;
     updateUseSaldoButton();
-    cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
-      ? Number(freshCart.monto_usd)
-      : cartMontoUsd;
-    cartMontoBs = Number.isFinite(Number(freshCart?.monto_bs))
-      ? Number(freshCart.monto_bs)
-      : cartMontoBs;
-    cartTasaBs = Number.isFinite(Number(freshCart?.tasa_bs))
-      ? Number(freshCart.tasa_bs)
-      : cartTasaBs;
-    cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
-      ? Number(freshCart.monto_final)
-      : cartMontoFinal;
-    cartDescuento = Number.isFinite(Number(freshCart?.descuento))
-      ? Number(freshCart.descuento)
-      : cartDescuento;
+    applyCartServerTotals(freshCart);
     try {
       await refreshCanonicalCheckoutSummary();
     } catch (summaryErr) {
@@ -691,7 +702,7 @@ const updateCartSummaryUI = () => {
   }
   const showSaldoRow = cartUseSaldo && userSaldo > 0;
   const totalAntesSaldo = round2(subtotalMostrar - descuentoMostrar);
-  const saldoAplicado = showSaldoRow
+  let saldoAplicado = showSaldoRow
     ? round2(
         Math.min(
           Math.max(0, Number(userSaldo) || 0),
@@ -699,6 +710,15 @@ const updateCartSummaryUI = () => {
         ),
       )
     : 0;
+  if (
+    showSaldoRow &&
+    !cartNeedsSync &&
+    Number.isFinite(Number(cartSaldoUsado))
+  ) {
+    saldoAplicado = round2(
+      Math.min(Math.max(0, Number(cartSaldoUsado)), Math.max(0, totalAntesSaldo)),
+    );
+  }
   const totalMostrar = round2(totalAntesSaldo - saldoAplicado);
   const totalBsMostrar = calcDisplayTotalBs(totalMostrar);
 
@@ -1163,6 +1183,29 @@ const handleCartChange = (e) => {
   updateUseSaldoButton();
   updateCartSummaryUI();
   updateCartNeedsSync();
+  if (saldoToggleSyncInFlight) return;
+  saldoToggleSyncInFlight = true;
+  updateUseSaldoButton();
+  setStatus("Aplicando saldo al carrito...");
+  (async () => {
+    try {
+      const syncOk = await syncCartWithServer({ alertOnError: false });
+      if (!syncOk) {
+        throw new Error("saldo_toggle_sync_failed");
+      }
+      setStatus("");
+    } catch (err) {
+      console.error("cart saldo toggle sync error", err);
+      cartUseSaldo = dbUseSaldo;
+      updateUseSaldoButton();
+      updateCartSummaryUI();
+      updateCartNeedsSync();
+      setStatus("No se pudo aplicar el saldo al carrito.");
+    } finally {
+      saldoToggleSyncInFlight = false;
+      updateUseSaldoButton();
+    }
+  })();
 };
 
 removeModalBackdropEl?.addEventListener("click", closeRemoveModal);
@@ -1279,21 +1322,13 @@ async function init() {
       dbUseSaldo = false;
     }
     updateUseSaldoButton();
-    cartMontoUsd = Number.isFinite(Number(cartData?.monto_usd))
-      ? Number(cartData.monto_usd)
-      : null;
-    cartMontoBs = Number.isFinite(Number(cartData?.monto_bs))
-      ? Number(cartData.monto_bs)
-      : null;
-    cartTasaBs = Number.isFinite(Number(cartData?.tasa_bs))
-      ? Number(cartData.tasa_bs)
-      : null;
-    cartMontoFinal = Number.isFinite(Number(cartData?.monto_final))
-      ? Number(cartData.monto_final)
-      : null;
-    cartDescuento = Number.isFinite(Number(cartData?.descuento))
-      ? Number(cartData.descuento)
-      : null;
+    cartMontoUsd = null;
+    cartMontoBs = null;
+    cartTasaBs = null;
+    cartMontoFinal = null;
+    cartSaldoUsado = null;
+    cartDescuento = null;
+    applyCartServerTotals(cartData);
     setCachedCart(cartData);
     const esCliente =
       isTrue(sessionRoles?.acceso_cliente) ||
@@ -1394,8 +1429,17 @@ const syncCartValuesBeforeCheckout = async () => {
   }
 
   if (cartUseSaldo !== dbUseSaldo) {
-    await updateCartFlags({ usa_saldo: cartUseSaldo });
-    dbUseSaldo = cartUseSaldo;
+    const flagsResp = await updateCartFlags({ usa_saldo: cartUseSaldo });
+    if (flagsResp?.error) {
+      throw new Error(flagsResp.error);
+    }
+    const resolvedUseSaldo =
+      flagsResp && Object.prototype.hasOwnProperty.call(flagsResp, "usa_saldo")
+        ? isTrue(flagsResp.usa_saldo)
+        : cartUseSaldo;
+    dbUseSaldo = resolvedUseSaldo;
+    cartUseSaldo = resolvedUseSaldo;
+    applyCartServerTotals(flagsResp || {});
   }
 };
 
@@ -1413,21 +1457,7 @@ btnPay?.addEventListener("click", () => {
       await syncCartValuesBeforeCheckout();
       const freshCart = await fetchCart();
       cartItems = freshCart.items || cartItems;
-      cartMontoUsd = Number.isFinite(Number(freshCart?.monto_usd))
-        ? Number(freshCart.monto_usd)
-        : cartMontoUsd;
-      cartMontoBs = Number.isFinite(Number(freshCart?.monto_bs))
-        ? Number(freshCart.monto_bs)
-        : cartMontoBs;
-      cartTasaBs = Number.isFinite(Number(freshCart?.tasa_bs))
-        ? Number(freshCart.tasa_bs)
-        : cartTasaBs;
-      cartMontoFinal = Number.isFinite(Number(freshCart?.monto_final))
-        ? Number(freshCart.monto_final)
-        : cartMontoFinal;
-      cartDescuento = Number.isFinite(Number(freshCart?.descuento))
-        ? Number(freshCart.descuento)
-        : cartDescuento;
+      applyCartServerTotals(freshCart);
       if (!currentUser) {
         window.location.href = "checkout.html";
         return;
