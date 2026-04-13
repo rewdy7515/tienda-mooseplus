@@ -1431,6 +1431,9 @@ export async function procesarOrden(id_orden, options = {}) {
     if (Number.isFinite(saldoNum) && saldoNum > 0) {
       payload.saldo_a_favor = saldoNum;
     }
+    if (options?.force_whatsapp_pago_verificado === true) {
+      payload.force_whatsapp_pago_verificado = true;
+    }
     const res = await fetch(`${API_BASE}/api/ordenes/procesar`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

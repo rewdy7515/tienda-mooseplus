@@ -365,7 +365,6 @@
       import {
         clearServerSession,
         loadCurrentUser,
-        notifyVentaDeliveredWhatsapp,
         supabase,
         procesarOrden,
       } from "../../scripts/api.js";
@@ -659,7 +658,7 @@
           const accionesCell = canManageOrdenes
             ? `
                 <button type="button" class="btn-primary btn-entregar" data-orden="${orden.id_orden}" ${canEntregar ? "" : "disabled"}>
-                  ${canEntregar ? "Entregar servicio" : cancelada ? "Rechazada" : "Entregado"}
+                  ${canEntregar ? "Verificar pago" : cancelada ? "Rechazada" : "Verificado"}
                 </button>
                 <button type="button" class="btn-outline btn-rechazar" data-orden="${orden.id_orden}" ${canRechazar ? "" : "disabled"}>
                   Rechazar servicio
@@ -750,38 +749,6 @@
         const id = Number(idOrden);
         if (!Number.isFinite(id)) return;
 
-        const notifyVentaDeliveredWhatsappBestEffort = async (idVenta) => {
-          const ventaId = Number(idVenta);
-          if (!Number.isFinite(ventaId) || ventaId <= 0) return null;
-          try {
-            const waResult = await notifyVentaDeliveredWhatsapp(ventaId);
-            if (waResult?.error) {
-              console.warn("[ordenes] whatsapp servicio entregado error", {
-                id_venta: ventaId,
-                error: waResult.error,
-                status: waResult.status || null,
-              });
-              return { sent: false, reason: "request_error", error: waResult.error };
-            }
-            if (waResult?.sent) return { sent: true, reason: null, ...waResult };
-            if (waResult?.ok === false) {
-              console.warn("[ordenes] whatsapp servicio entregado omitido", {
-                id_venta: ventaId,
-                reason: waResult?.reason || "unknown",
-              });
-              return { sent: false, skipped: true, reason: waResult?.reason || "unknown" };
-            }
-            return { sent: true, reason: null, ...waResult };
-          } catch (err) {
-            const message = err?.message || String(err);
-            console.warn("[ordenes] whatsapp servicio entregado exception", {
-              id_venta: ventaId,
-              error: message,
-            });
-            return { sent: false, reason: "exception", error: message };
-          }
-        };
-
         const { data: ventasOrden, error: ventasOrdErr } = await supabase
           .from("ventas")
           .select(
@@ -789,10 +756,6 @@
           )
           .eq("id_orden", id);
         if (ventasOrdErr) throw ventasOrdErr;
-
-        const ventaEntregadaParaWhatsapp = (ventasOrden || []).find(
-          (venta) => venta?.pendiente === false && !isTrue(venta?.reportado)
-        );
 
         const nuevosServiciosPorUsuario = new Map();
         const serviciosEnProcesoPorUsuario = new Map();
@@ -893,9 +856,6 @@
           }
         }
 
-        if (ventaEntregadaParaWhatsapp?.id_venta) {
-          await notifyVentaDeliveredWhatsappBestEffort(ventaEntregadaParaWhatsapp.id_venta);
-        }
       };
 
       const loadOrdenes = async () => {
@@ -1065,10 +1025,9 @@
           entregarBtn.textContent = "Procesando...";
           setStatus(`Procesando orden #${idOrden}...`);
           try {
-            const resp =
-              saldoAFavor > 0
-                ? await procesarOrden(idOrden, { saldo_a_favor: saldoAFavor })
-                : await procesarOrden(idOrden);
+            const processOptions = { force_whatsapp_pago_verificado: true };
+            if (saldoAFavor > 0) processOptions.saldo_a_favor = saldoAFavor;
+            const resp = await procesarOrden(idOrden, processOptions);
             if (resp?.error) {
               console.error("procesar orden error", resp);
               window.alert(resp.error || "No se pudo procesar la orden.");
@@ -1101,7 +1060,7 @@
             [currentBtn, currentBtnComprobantes].forEach((btn) => {
               if (btn && !processedOk) {
                 btn.disabled = false;
-                btn.textContent = prevText || "Entregar servicio";
+                btn.textContent = prevText || "Verificar pago";
               }
             });
           }

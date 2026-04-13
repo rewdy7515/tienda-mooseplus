@@ -1226,6 +1226,7 @@
               id_cuenta: v.id_cuenta || null,
               id_cuenta_miembro: v.id_cuenta_miembro || null,
               id_perfil: v.id_perfil || null,
+              pendiente: v.pendiente === true,
               reportado: v.reportado === true,
               asignado_a: v.asignado_a || null,
               asignado: v.asignado || null,
@@ -1265,7 +1266,8 @@
         const hasIdPlataforma = Number.isFinite(idPlataformaNum) && idPlataformaNum > 0;
         const forceCuentaCompleta = isCompleta || idPlataformaNum === 11;
         const wasReportado = btn?.dataset?.reportado === "true";
-        const wasPendiente = btn?.dataset?.pendiente !== "false";
+        const hasPendienteFlag = Object.prototype.hasOwnProperty.call(btn?.dataset || {}, "pendiente");
+        const wasPendiente = hasPendienteFlag ? btn?.dataset?.pendiente === "true" : true;
         const cuentaMadreFlag =
           btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
         const requireMadreActiva = idPlataformaNum === 9;

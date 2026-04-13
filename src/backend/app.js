@@ -2806,6 +2806,7 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   venta = null,
   manageWhatsappLifecycle = true,
   verifiedByAdmin = false,
+  forceResend = false,
 } = {}) => {
   const ventaId = toPositiveInt(idVenta || venta?.id_venta);
   if (!ventaId) {
@@ -2902,7 +2903,7 @@ const sendVentaEntregadaToWhatsappOwner = async ({
       id_usuario_destino: targetUserId,
     };
   }
-  if (isTrue(ordenRow?.aviso_verificacion_pago)) {
+  if (isTrue(ordenRow?.aviso_verificacion_pago) && forceResend !== true) {
     return {
       sent: false,
       skipped: true,
@@ -3203,6 +3204,7 @@ const notifyVentaEntregadaAfterOrderVerified = async ({
   idOrden = null,
   manageWhatsappLifecycle = true,
   verifiedByAdmin = false,
+  forceResend = false,
 } = {}) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) {
@@ -3234,6 +3236,7 @@ const notifyVentaEntregadaAfterOrderVerified = async ({
     idVenta: ventaId,
     manageWhatsappLifecycle,
     verifiedByAdmin,
+    forceResend,
   });
 };
 
@@ -16848,6 +16851,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
   if (!Number.isFinite(saldoAFavor) || saldoAFavor < 0) {
     return res.status(400).json({ error: "saldo_a_favor inválido. Debe ser mayor o igual a 0." });
   }
+  const forceWhatsappPagoVerificado = isTrue(req.body?.force_whatsapp_pago_verificado);
 
   try {
     const idUsuarioSesion = await getOrCreateUsuario(req);
@@ -17007,13 +17011,17 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       console.log("[ordenes/procesar] ya procesada", { id_orden: idOrden, ventas: ventasExist.length });
       await syncPagoMovilCredito();
       const shouldNotifyPagoVerificado =
-        ordenPatch.pago_verificado === true || isTrue(orden?.pago_verificado);
+        forceWhatsappPagoVerificado === true ||
+        ordenPatch.pago_verificado === true ||
+        isTrue(orden?.pago_verificado);
       if (shouldNotifyPagoVerificado) {
         try {
           const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
             idOrden,
             manageWhatsappLifecycle: true,
-            verifiedByAdmin: verifiedByAdminInThisProcess,
+            verifiedByAdmin:
+              forceWhatsappPagoVerificado === true ? true : verifiedByAdminInThisProcess,
+            forceResend: forceWhatsappPagoVerificado === true,
           });
           if (!waDeliveredRes?.sent) {
             console.log("[ordenes/procesar] whatsapp pago verificado skipped", {
@@ -17128,7 +17136,8 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
         idOrden,
         manageWhatsappLifecycle: true,
-        verifiedByAdmin: verifiedByAdminInThisProcess,
+        verifiedByAdmin: forceWhatsappPagoVerificado === true ? true : verifiedByAdminInThisProcess,
+        forceResend: forceWhatsappPagoVerificado === true,
       });
       if (!waDeliveredRes?.sent) {
         console.log("[ordenes/procesar] whatsapp pago verificado post-procesado skipped", {
