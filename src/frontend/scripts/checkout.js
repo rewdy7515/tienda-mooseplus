@@ -1325,6 +1325,16 @@ const getMetodoIdSeleccionado = () => {
   return metodoId;
 };
 
+const redirectAfterCheckoutSubmit = (url) => {
+  const target = String(url || "").trim();
+  if (!target) return;
+  try {
+    window.location.replace(target);
+  } catch (_err) {
+    window.location.href = target;
+  }
+};
+
 const ensureOrderIdForMetodoPersist = async () => {
   if (Number.isFinite(checkoutOrderId) && checkoutOrderId > 0) return checkoutOrderId;
 
@@ -1386,8 +1396,12 @@ const persistMetodoSeleccionadoEnOrden = async ({ force = false } = {}) => {
 btnSendPayment?.addEventListener("click", async () => {
   if (checkoutSubmitInProgress) return;
   let willNavigate = false;
+  const sendPaymentOriginalText = btnSendPayment ? String(btnSendPayment.textContent || "").trim() : "";
   checkoutSubmitInProgress = true;
-  if (btnSendPayment) btnSendPayment.disabled = true;
+  if (btnSendPayment) {
+    btnSendPayment.disabled = true;
+    btnSendPayment.textContent = "Cargando...";
+  }
 
   // Toma montos guardados en BD, sin recálculo en frontend
   try {
@@ -1527,7 +1541,7 @@ btnSendPayment?.addEventListener("click", async () => {
         ? `verificando_pago.html?id_orden=${encodeURIComponent(saldoOrderId)}`
         : `entregar_servicios.html?id_orden=${encodeURIComponent(saldoOrderId)}`;
       willNavigate = true;
-      window.location.href = saldoNextUrl;
+      redirectAfterCheckoutSubmit(saldoNextUrl);
       return;
     }
     const payload = {
@@ -1694,35 +1708,40 @@ btnSendPayment?.addEventListener("click", async () => {
     }
 
     const entregaManual = resp?.entrega_manual === true;
+    const resolvedOrderId = Number(resp?.id_orden ?? checkoutOrderId);
+    const hasResolvedOrderId = Number.isFinite(resolvedOrderId) && resolvedOrderId > 0;
     if (entregaManual) {
       alert("Pago enviado. Tu orden será revisada y procesada manualmente por un admin.");
-      const manualUrl = resp?.id_orden
-        ? `historial_ordenes.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+      const manualUrl = hasResolvedOrderId
+        ? `historial_ordenes.html?id_orden=${encodeURIComponent(resolvedOrderId)}`
         : "historial_ordenes.html";
       willNavigate = true;
-      window.location.href = manualUrl;
+      redirectAfterCheckoutSubmit(manualUrl);
       return;
     }
 
     alert("Pago enviado correctamente.");
     const pendienteVerificacion =
       resp?.pendiente_verificacion === true || isMetodoVerificacionAutomatica(metodo);
-    const nextUrl = resp?.id_orden
+    const nextUrl = hasResolvedOrderId
       ? pendienteVerificacion
-        ? `verificando_pago.html?id_orden=${encodeURIComponent(resp.id_orden)}`
-        : `entregar_servicios.html?id_orden=${encodeURIComponent(resp.id_orden)}`
+        ? `verificando_pago.html?id_orden=${encodeURIComponent(resolvedOrderId)}`
+        : `entregar_servicios.html?id_orden=${encodeURIComponent(resolvedOrderId)}`
       : pendienteVerificacion
       ? "verificando_pago.html"
       : "entregar_servicios.html";
     willNavigate = true;
-    window.location.href = nextUrl;
+    redirectAfterCheckoutSubmit(nextUrl);
   } catch (err) {
     console.error("checkout submit error", err);
     alert(getCheckoutSubmitErrorMessage(err));
   } finally {
     if (!willNavigate) {
       checkoutSubmitInProgress = false;
-      if (btnSendPayment) btnSendPayment.disabled = false;
+      if (btnSendPayment) {
+        btnSendPayment.disabled = false;
+        btnSendPayment.textContent = sendPaymentOriginalText || "Enviar pago";
+      }
     }
   }
 });
