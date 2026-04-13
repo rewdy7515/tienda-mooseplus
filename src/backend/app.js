@@ -11030,11 +11030,6 @@ const processOrderFromItems = async ({
     if (updCompletaErr) throw updCompletaErr;
   }
 
-  // limpia carrito (desvincula orden para evitar FK)
-  await supabaseAdmin.from("ordenes").update({ id_carrito: null }).eq("id_orden", ordenId);
-  await supabaseAdmin.from("carrito_items").delete().eq("id_carrito", carritoId);
-  await supabaseAdmin.from("carritos").delete().eq("id_carrito", carritoId);
-
   const idUsuarioVenta = toPositiveInt(idUsuarioVentas);
   const huboVentasProcesadas =
     insertedVentas.length > 0 || renovaciones.length > 0 || spotifyImplicitRenewals.length > 0;
@@ -11653,8 +11648,8 @@ const consumeSaldoFromCarritoIfNeeded = async ({
 
   const { data: carritoRow, error: carritoErr } = await supabaseAdmin
     .from("carritos")
-    .eq("id_carrito", carritoNum)
     .select("id_carrito, id_usuario, usa_saldo, monto_usd, monto_final, saldo_usado")
+    .eq("id_carrito", carritoNum)
     .maybeSingle();
   if (carritoErr) throw carritoErr;
   if (!carritoRow?.id_carrito) {
@@ -16510,10 +16505,6 @@ app.post("/api/checkout", async (req, res) => {
         : idUsuarioSesion;
     const carritoId = await getCurrentCarrito(idUsuarioSesion);
     if (!carritoId) return res.status(400).json({ error: "No hay carrito activo" });
-    const carritoRateState = await syncCarritoOfficialRate({
-      carritoId,
-      idUsuario: idUsuarioSesion,
-    });
     console.log("[checkout] session", {
       idUsuarioSesion,
       sessionUserId,

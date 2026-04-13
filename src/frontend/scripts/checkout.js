@@ -1,7 +1,6 @@
 import {
   supabase,
   fetchCart,
-  fetchCheckoutSummary,
   loadCatalog,
   submitCheckout,
   fetchCheckoutDraft,
@@ -155,44 +154,29 @@ const getTotalUsdMostrado = (baseUsd, metodoId) => {
 };
 
 const resolveCheckoutTotalsFromCart = (cartData = null) => {
-  const useSaldo = isTrue(cartData?.usa_saldo);
   const montoUsdRaw = Number(cartData?.monto_usd);
   const montoFinalRaw = Number(cartData?.monto_final);
   const montoBsRaw = Number(cartData?.monto_bs);
-  const totalNeto = useSaldo && Number.isFinite(montoFinalRaw)
+  const tasaBsRaw = Number(cartData?.tasa_bs);
+  const totalNeto = Number.isFinite(montoFinalRaw)
     ? Number(montoFinalRaw)
     : Number.isFinite(montoUsdRaw)
       ? Number(montoUsdRaw)
+      : null;
+  const montoBsCalc =
+    Number.isFinite(totalNeto) && Number.isFinite(tasaBsRaw) && tasaBsRaw > 0
+      ? round2(totalNeto * tasaBsRaw)
       : null;
 
   return {
     totalNeto: Number.isFinite(totalNeto) ? round2(totalNeto) : null,
     montoUsdBruto: Number.isFinite(montoUsdRaw) ? round2(montoUsdRaw) : null,
-    montoBs: Number.isFinite(montoBsRaw) ? round2(montoBsRaw) : null,
+    montoBs: Number.isFinite(montoBsCalc)
+      ? montoBsCalc
+      : Number.isFinite(montoBsRaw)
+        ? round2(montoBsRaw)
+        : null,
   };
-};
-
-const applyCheckoutSummaryTotals = async ({ cartData = null, preserveCartNetTotal = false } = {}) => {
-  const summary = await fetchCheckoutSummary();
-  if (summary?.error) return false;
-  const summaryTotalUsd = Number(summary?.total_usd);
-  const summaryMontoBs = Number(summary?.monto_bs);
-
-  const cartTotals = resolveCheckoutTotalsFromCart(cartData);
-  if (preserveCartNetTotal && Number.isFinite(cartTotals.totalNeto)) {
-    totalUsd = cartTotals.totalNeto;
-    fixedMontoUsd = cartTotals.totalNeto;
-  } else if (Number.isFinite(summaryTotalUsd)) {
-    totalUsd = summaryTotalUsd;
-    fixedMontoUsd = summaryTotalUsd;
-  }
-
-  if (preserveCartNetTotal && Number.isFinite(cartTotals.montoBs)) {
-    fixedMontoBs = cartTotals.montoBs;
-  } else if (Number.isFinite(summaryMontoBs)) {
-    fixedMontoBs = summaryMontoBs;
-  }
-  return Number.isFinite(summaryTotalUsd);
 };
 
 const readFileAsDataUrl = (file) =>
@@ -391,15 +375,18 @@ const startSaldoWatcher = () => {
 
 const syncCartMontosIfNeeded = async (cartData, totalUsdVal, tasaVal) => {
   if (!Number.isFinite(totalUsdVal)) return;
-  const storedUsd = Number(cartData?.monto_usd);
-  const storedBs = Number(cartData?.monto_bs);
+  const cartTotals = resolveCheckoutTotalsFromCart(cartData);
+  const storedUsd = Number(cartTotals?.totalNeto);
+  const storedBs = Number(cartTotals?.montoBs);
   const storedHora = cartData?.hora ?? null;
   const storedFecha = cartData?.fecha ?? null;
-  const montoBsCalc = Number.isFinite(tasaVal)
-    ? Math.round(totalUsdVal * tasaVal * 100) / 100
+  const cartRate = Number(cartData?.tasa_bs);
+  const tasaForCalc = Number.isFinite(cartRate) && cartRate > 0 ? cartRate : tasaVal;
+  const montoBsCalc = Number.isFinite(tasaForCalc)
+    ? Math.round(totalUsdVal * tasaForCalc * 100) / 100
     : null;
 
-  fixedMontoUsd = Number.isFinite(storedUsd) ? storedUsd : totalUsdVal;
+  fixedMontoUsd = Number.isFinite(storedUsd) ? storedUsd : round2(totalUsdVal);
   fixedMontoBs = Number.isFinite(storedBs) ? storedBs : montoBsCalc;
   fixedHora = storedHora;
   fixedFecha = storedFecha;
@@ -724,15 +711,6 @@ const updateSelection = (idx) => {
   syncMetodoButtonsState();
   updateMetodoContinueState();
   renderTotal();
-  if (
-    seleccionado !== null &&
-    checkoutMainContent &&
-    !checkoutMainContent.classList.contains("hidden")
-  ) {
-    persistMetodoSeleccionadoEnOrden().catch((err) => {
-      console.warn("checkout persist metodo on selection change error", err);
-    });
-  }
 };
 
 metodoSelect?.addEventListener("change", (e) => {
@@ -749,17 +727,7 @@ btnMetodoContinue?.addEventListener("click", async () => {
     alert("Selecciona un método de pago para continuar.");
     return;
   }
-  try {
-    const persisted = await persistMetodoSeleccionadoEnOrden({ force: true });
-    if (!persisted?.ok) {
-      alert("No se pudo guardar el método de pago en la orden. Intenta de nuevo.");
-      return;
-    }
-    await showMetodoMenu(false, { animate: true });
-  } catch (err) {
-    console.error("checkout persist metodo before continue error", err);
-    alert("No se pudo guardar el método de pago en la orden. Intenta de nuevo.");
-  }
+  await showMetodoMenu(false, { animate: true });
 });
 
 btnBackMetodo?.addEventListener("click", async () => {
@@ -896,8 +864,16 @@ const verifyPagoMovil = async () => {
   try {
     const cartData = await fetchCart();
     cartId = cartData.id_carrito || cartId;
-    if (Number.isFinite(cartData?.monto_bs)) {
-      montoBs = Number(cartData.monto_bs);
+    const cartTotals = resolveCheckoutTotalsFromCart(cartData);
+    const cartRate = Number(cartData?.tasa_bs);
+    if (Number.isFinite(cartRate) && cartRate > 0) {
+      tasaBs = cartRate;
+    }
+    if (Number.isFinite(cartTotals?.totalNeto)) {
+      totalUsd = Number(cartTotals.totalNeto);
+    }
+    if (Number.isFinite(cartTotals?.montoBs)) {
+      montoBs = Number(cartTotals.montoBs);
       cartMontoBs = montoBs;
     } else if (Number.isFinite(fixedMontoBs)) {
       montoBs = fixedMontoBs;
@@ -1168,23 +1144,16 @@ async function init() {
       precios = catalog.precios;
       plataformas = catalog.plataformas;
       descuentos = catalog.descuentos || [];
-      const useSaldo = isTrue(cartData?.usa_saldo);
-      const montoUsdRaw = Number(cartData?.monto_usd);
-      const montoFinalRaw = Number(cartData?.monto_final);
-      totalUsd =
-        useSaldo && Number.isFinite(montoFinalRaw)
-          ? Number(montoFinalRaw)
-          : Number.isFinite(montoUsdRaw)
-          ? Number(montoUsdRaw)
-          : 0;
+      const cartTotals = resolveCheckoutTotalsFromCart(cartData);
+      const cartRate = Number(cartData?.tasa_bs);
+      if (Number.isFinite(cartRate) && cartRate > 0) {
+        tasaBs = cartRate;
+      }
+      totalUsd = Number.isFinite(cartTotals?.totalNeto) ? Number(cartTotals.totalNeto) : 0;
 
       precioTierLabel = "";
-      fixedMontoUsd = Number.isFinite(montoUsdRaw)
-        ? Number(montoUsdRaw)
-        : totalUsd;
-      fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
-        ? Number(cartData.monto_bs)
-        : null;
+      fixedMontoUsd = totalUsd;
+      fixedMontoBs = Number.isFinite(cartTotals?.montoBs) ? Number(cartTotals.montoBs) : null;
       if (Number.isFinite(fixedMontoBs) && fixedMontoBs <= 0 && totalUsd > 0) {
         fixedMontoBs = null;
       }
@@ -1192,27 +1161,9 @@ async function init() {
       fixedFecha = cartData?.fecha ?? null;
 
       try {
-        await applyCheckoutSummaryTotals({
-          cartData,
-          preserveCartNetTotal: true,
-        });
-      } catch (summaryErr) {
-        console.warn("checkout summary load error", summaryErr);
-      }
-
-      try {
         await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
       } catch (syncErr) {
         console.warn("checkout sync cart montos error", syncErr);
-      }
-      if (!checkoutOrderId) {
-        const draftResp = await fetchCheckoutDraft();
-        if (!draftResp?.error) {
-          const draftId = Number(draftResp?.id_orden);
-          if (Number.isFinite(draftId) && draftId > 0) {
-            setCheckoutOrderId(draftId);
-          }
-        }
       }
     }
 
@@ -1352,35 +1303,20 @@ btnSendPayment?.addEventListener("click", async () => {
         const cartData = await fetchCart();
         cartItems = cartData.items || [];
         cartId = cartData.id_carrito || null;
-        const useSaldo = isTrue(cartData?.usa_saldo);
-        const montoUsdRaw = Number(cartData?.monto_usd);
-        const montoFinalRaw = Number(cartData?.monto_final);
-        totalUsd =
-          useSaldo && Number.isFinite(montoFinalRaw)
-            ? Number(montoFinalRaw)
-            : Number.isFinite(montoUsdRaw)
-            ? Number(montoUsdRaw)
-            : 0;
+        const cartTotals = resolveCheckoutTotalsFromCart(cartData);
+        const cartRate = Number(cartData?.tasa_bs);
+        if (Number.isFinite(cartRate) && cartRate > 0) {
+          tasaBs = cartRate;
+        }
+        totalUsd = Number.isFinite(cartTotals?.totalNeto) ? Number(cartTotals.totalNeto) : 0;
         precioTierLabel = "";
-        fixedMontoUsd = Number.isFinite(montoUsdRaw)
-          ? Number(montoUsdRaw)
-          : totalUsd;
-        fixedMontoBs = Number.isFinite(Number(cartData?.monto_bs))
-          ? Number(cartData.monto_bs)
-          : null;
+        fixedMontoUsd = totalUsd;
+        fixedMontoBs = Number.isFinite(cartTotals?.montoBs) ? Number(cartTotals.montoBs) : null;
         if (Number.isFinite(fixedMontoBs) && fixedMontoBs <= 0 && totalUsd > 0) {
           fixedMontoBs = null;
         }
         fixedHora = cartData?.hora ?? null;
         fixedFecha = cartData?.fecha ?? null;
-        try {
-          await applyCheckoutSummaryTotals({
-            cartData,
-            preserveCartNetTotal: true,
-          });
-        } catch (summaryErr) {
-          console.warn("checkout summary before submit error", summaryErr);
-        }
         renderTotal();
       } else if (saldoOrder) {
         totalUsd = Number.isFinite(Number(saldoOrder?.total))
