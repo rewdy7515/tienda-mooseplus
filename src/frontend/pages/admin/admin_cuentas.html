@@ -1866,6 +1866,15 @@
       const btnReemplazoConfirmNo = document.querySelector(
         "#btn-reemplazo-confirm-no",
       );
+      const modalReemplazoMiembroExtra = document.querySelector(
+        "#modal-reemplazo-miembro-extra",
+      );
+      const btnReemplazoMiembroExtraSi = document.querySelector(
+        "#btn-reemplazo-miembro-extra-si",
+      );
+      const btnReemplazoMiembroExtraNo = document.querySelector(
+        "#btn-reemplazo-miembro-extra-no",
+      );
       const modalReemplazarCuenta = document.querySelector(
         "#modal-reemplazar-cuenta",
       );
@@ -1929,6 +1938,7 @@
       let reemplazarCuentaTargetId = null;
       let reemplazoRelacionadosContext = null;
       let pendingReemplazoBtn = null;
+      let pendingReemplazoMiembroExtraBtn = null;
       const confirmarCambioCorreo = (nuevoCorreo) =>
         new Promise((resolve) => {
           if (!modalConfirmCorreo) {
@@ -7113,6 +7123,20 @@
         pendingReemplazoBtn = null;
       };
 
+      const closeReemplazoMiembroExtraModal = () => {
+        if (!modalReemplazoMiembroExtra) return;
+        modalReemplazoMiembroExtra.classList.add("hidden");
+        modalReemplazoMiembroExtra.setAttribute("aria-hidden", "true");
+        pendingReemplazoMiembroExtraBtn = null;
+      };
+
+      const openReemplazoMiembroExtraModal = (btnRepl) => {
+        if (!modalReemplazoMiembroExtra || !btnRepl || btnRepl.disabled) return;
+        pendingReemplazoMiembroExtraBtn = btnRepl;
+        modalReemplazoMiembroExtra.classList.remove("hidden");
+        modalReemplazoMiembroExtra.setAttribute("aria-hidden", "false");
+      };
+
       const openReemplazoConfirmModal = (btnRepl) => {
         if (!btnRepl || btnRepl.disabled) return;
         const clienteNombre = getClienteNameForReemplazoBtn(btnRepl);
@@ -7129,7 +7153,40 @@
         modalReemplazoConfirm.setAttribute("aria-hidden", "false");
       };
 
-      const handleReemplazoClick = async (btnRepl) => {
+      const shouldPromptReemplazoMiembroExtra = async (btnRepl) => {
+        if (!btnRepl) return false;
+        const perfilId = toPositiveId(btnRepl.dataset.perfil);
+        if (perfilId) {
+          const { data: perfilData, error: perfilErr } = await supabase
+            .from("perfiles")
+            .select("perfil_hogar")
+            .eq("id_perfil", perfilId)
+            .maybeSingle();
+          if (perfilErr) throw perfilErr;
+          return perfilData?.perfil_hogar === true;
+        }
+
+        const ventaId = toPositiveId(btnRepl.dataset.idventa || btnRepl.dataset.idVenta);
+        if (!ventaId) return false;
+        const { data: ventaData, error: ventaErr } = await supabase
+          .from("ventas")
+          .select("id_perfil")
+          .eq("id_venta", ventaId)
+          .maybeSingle();
+        if (ventaErr) throw ventaErr;
+        const ventaPerfilId = toPositiveId(ventaData?.id_perfil);
+        if (!ventaPerfilId) return false;
+
+        const { data: perfilVentaData, error: perfilVentaErr } = await supabase
+          .from("perfiles")
+          .select("perfil_hogar")
+          .eq("id_perfil", ventaPerfilId)
+          .maybeSingle();
+        if (perfilVentaErr) throw perfilVentaErr;
+        return perfilVentaData?.perfil_hogar === true;
+      };
+
+      const handleReemplazoClick = async (btnRepl, { forceMemberExtra = false } = {}) => {
         if (!btnRepl || btnRepl.disabled) return;
         const labelInicial = btnRepl.textContent || "Reemplazar";
         const fromClienteTable = !!btnRepl.closest("#cliente-ventas");
@@ -7235,6 +7292,7 @@
           let nuevoPerfil = null;
           let dataDestino = {};
           const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
+          const shouldForceCuentaMiembro = forceMemberExtra === true && perfilHogar;
 
           console.log("[reemplazo] request", {
             plataformaId,
@@ -7242,6 +7300,7 @@
             perfilHogar,
             ventaPerfil,
             ventaMiembro,
+            forceMemberExtra: shouldForceCuentaMiembro,
             allowBlockedFallback,
           });
           const tryAsignarPerfil = async (isHogar) => {
@@ -7270,6 +7329,7 @@
             const { data: cuentaDestino, error: cuentaErr } =
               await findCuentaMiembroLibre(plataformaId, cuentaOrigenId, {
                 allowBlockedFallback,
+                onlyActiveFalse: shouldForceCuentaMiembro,
               });
             if (cuentaErr) {
               console.error(
@@ -7290,9 +7350,13 @@
 
           let assigned = false;
           if (perfilAnteriorId) {
-            assigned = await tryAsignarPerfil(perfilHogar);
-            if (!assigned && isPlanMiembroEquivalente) {
+            if (shouldForceCuentaMiembro) {
               assigned = await tryAsignarCuentaMiembro();
+            } else {
+              assigned = await tryAsignarPerfil(perfilHogar);
+              if (!assigned && isPlanMiembroEquivalente) {
+                assigned = await tryAsignarCuentaMiembro();
+              }
             }
           } else if (ventaMiembro && !ventaPerfil) {
             assigned = await tryAsignarCuentaMiembro();
@@ -8012,10 +8076,43 @@
         if (btnReemplazoConfirmNo) btnReemplazoConfirmNo.disabled = true;
         closeReemplazoConfirmModal();
         try {
+          const askMiembroExtra = await shouldPromptReemplazoMiembroExtra(targetBtn);
+          if (askMiembroExtra) {
+            openReemplazoMiembroExtraModal(targetBtn);
+            return;
+          }
           await handleReemplazoClick(targetBtn);
+        } catch (err) {
+          console.error("confirmar reemplazo error", err);
+          alert("No se pudo iniciar el reemplazo.");
         } finally {
           if (btnReemplazoConfirmSi) btnReemplazoConfirmSi.disabled = false;
           if (btnReemplazoConfirmNo) btnReemplazoConfirmNo.disabled = false;
+        }
+      });
+      modalReemplazoMiembroExtra?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop")) {
+          closeReemplazoMiembroExtraModal();
+        }
+      });
+      btnReemplazoMiembroExtraNo?.addEventListener(
+        "click",
+        closeReemplazoMiembroExtraModal,
+      );
+      btnReemplazoMiembroExtraSi?.addEventListener("click", async () => {
+        const targetBtn = pendingReemplazoMiembroExtraBtn;
+        if (!targetBtn) {
+          closeReemplazoMiembroExtraModal();
+          return;
+        }
+        if (btnReemplazoMiembroExtraSi) btnReemplazoMiembroExtraSi.disabled = true;
+        if (btnReemplazoMiembroExtraNo) btnReemplazoMiembroExtraNo.disabled = true;
+        closeReemplazoMiembroExtraModal();
+        try {
+          await handleReemplazoClick(targetBtn, { forceMemberExtra: true });
+        } finally {
+          if (btnReemplazoMiembroExtraSi) btnReemplazoMiembroExtraSi.disabled = false;
+          if (btnReemplazoMiembroExtraNo) btnReemplazoMiembroExtraNo.disabled = false;
         }
       });
 
@@ -8862,7 +8959,7 @@
       const findCuentaMiembroLibre = async (
         plataformaId,
         excludeCuenta,
-        { allowBlockedFallback = false } = {},
+        { allowBlockedFallback = false, onlyActiveFalse = false } = {},
       ) => {
         const { data: bloqueados, error: replErr } = await loadReemplazosCache(true);
         if (replErr) return { error: replErr };
@@ -8875,7 +8972,11 @@
           .eq("venta_miembro", true)
           .eq("ocupado", false)
           .order("id_cuenta", { ascending: true });
-        query = query.or("inactiva.is.null,inactiva.eq.false");
+        if (onlyActiveFalse) {
+          query = query.eq("inactiva", false);
+        } else {
+          query = query.or("inactiva.is.null,inactiva.eq.false");
+        }
         if (excludeCuentaId) query = query.neq("id_cuenta", excludeCuentaId);
         const { data, error } = await query;
         if (error) return { error };
@@ -9498,6 +9599,19 @@
           <div style="display: flex; gap: 10px; justify-content: center">
             <button type="button" class="btn-primary" id="btn-reemplazo-confirm-si">Sí</button>
             <button type="button" class="btn-outline" id="btn-reemplazo-confirm-no">No</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-reemplazo-miembro-extra" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-resumen" style="max-width: 360px; text-align: center">
+        <div class="modal-body">
+          <p style="margin: 0 0 14px 0; font-weight: 700">¿Reemplazar a miembro extra?</p>
+          <div style="display: flex; gap: 10px; justify-content: center">
+            <button type="button" class="btn-primary" id="btn-reemplazo-miembro-extra-si">Sí</button>
+            <button type="button" class="btn-outline" id="btn-reemplazo-miembro-extra-no">No</button>
           </div>
         </div>
       </div>

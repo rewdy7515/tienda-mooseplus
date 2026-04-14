@@ -9395,6 +9395,239 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
   };
 };
 
+const parseOrdenSnapshotPrecioIdFromDetalle = (detalle = "") => {
+  const text = String(detalle || "");
+  const match = text.match(/precio\s*#\s*(\d+)/i);
+  return toPositiveInt(match?.[1]) || null;
+};
+
+const parseOrdenSnapshotCantidadFromDetalle = (detalle = "") => {
+  const text = String(detalle || "");
+  const match = text.match(/(\d+)\s+(?:tarjeta|tarjetas|pantalla|pantallas|acceso|accesos|item|items)\b/i);
+  const qty = toPositiveInt(match?.[1]);
+  return qty || 1;
+};
+
+const parseOrdenSnapshotMesesFromDetalle = (detalle = "") => {
+  const text = String(detalle || "");
+  const match = text.match(/(\d+)\s+mes(?:es)?\b/i);
+  const meses = toPositiveInt(match?.[1]);
+  return meses || 1;
+};
+
+const resolveOrderProcessingContextFromSnapshot = async ({
+  ordenId,
+  totalCliente = null,
+  fallbackContext = null,
+} = {}) => {
+  const orderIdNum = toPositiveInt(ordenId);
+  if (!orderIdNum) {
+    return {
+      source: "carrito_items",
+      context: fallbackContext || null,
+      itemAmountMapById: null,
+    };
+  }
+
+  const { data: snapshotRows, error: snapshotErr } = await supabaseAdmin
+    .from("ordenes_items")
+    .select("id_item_orden, id_plataforma, id_venta, renovacion, detalle, monto_usd")
+    .eq("id_orden", orderIdNum)
+    .order("id_item_orden", { ascending: true });
+  if (snapshotErr) throw snapshotErr;
+
+  if (!Array.isArray(snapshotRows) || !snapshotRows.length) {
+    return {
+      source: "carrito_items",
+      context: fallbackContext || null,
+      itemAmountMapById: null,
+    };
+  }
+
+  const renewalVentaIds = uniqPositiveIds(
+    snapshotRows.map((row) => toPositiveInt(row?.id_venta)).filter(Boolean),
+  );
+  const renewalPriceByVenta = {};
+  if (renewalVentaIds.length) {
+    const { data: renewalSalesRows, error: renewalSalesErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, id_precio")
+      .in("id_venta", renewalVentaIds);
+    if (renewalSalesErr) throw renewalSalesErr;
+    (renewalSalesRows || []).forEach((row) => {
+      const ventaId = toPositiveInt(row?.id_venta);
+      const precioId = toPositiveInt(row?.id_precio);
+      if (ventaId && precioId) renewalPriceByVenta[ventaId] = precioId;
+    });
+  }
+
+  const parseErrors = [];
+  const snapshotItemAmountMap = new Map();
+  const snapshotItems = snapshotRows.map((row, index) => {
+    const itemId = toPositiveInt(row?.id_item_orden) || index + 1;
+    const ventaId = toPositiveInt(row?.id_venta) || null;
+    const renew = isTrue(row?.renovacion);
+    const detalle = String(row?.detalle || "");
+    const parsedPriceId = parseOrdenSnapshotPrecioIdFromDetalle(detalle);
+    const fallbackRenewalPriceId = renew && ventaId ? toPositiveInt(renewalPriceByVenta[ventaId]) : null;
+    const priceId = parsedPriceId || fallbackRenewalPriceId || null;
+    if (!priceId) {
+      parseErrors.push({
+        id_item_orden: itemId,
+        id_venta: ventaId,
+        detalle,
+        reason: "precio_no_detectado_en_snapshot",
+      });
+    }
+
+    const cantidad = parseOrdenSnapshotCantidadFromDetalle(detalle);
+    const meses = parseOrdenSnapshotMesesFromDetalle(detalle);
+    const montoUsd = parseOptionalCheckoutNumber(row?.monto_usd);
+    if (Number.isFinite(montoUsd)) {
+      snapshotItemAmountMap.set(itemId, roundCheckoutMoney(montoUsd));
+    }
+
+    return {
+      id_item: itemId,
+      id_precio: priceId,
+      cantidad: Math.max(1, Number(cantidad) || 1),
+      meses: Math.max(1, Number(meses) || 1),
+      renovacion: renew,
+      id_venta: ventaId,
+      id_cuenta: null,
+      id_perfil: null,
+    };
+  });
+
+  if (parseErrors.length) {
+    const err = new Error(
+      "No se pudo reconstruir la orden desde el snapshot. Revisa los items de la orden antes de procesar.",
+    );
+    err.code = "ORDEN_SNAPSHOT_INVALID";
+    err.httpStatus = 409;
+    err.details = {
+      id_orden: orderIdNum,
+      errors: parseErrors.slice(0, 10),
+    };
+    throw err;
+  }
+
+  const snapshotPriceIds = uniqPositiveIds(snapshotItems.map((item) => item?.id_precio).filter(Boolean));
+  const fallbackPriceMap = fallbackContext?.priceMap || {};
+  const missingPriceIds = snapshotPriceIds.filter((priceId) => !fallbackPriceMap[priceId]);
+  let fetchedPrices = [];
+  if (missingPriceIds.length) {
+    const { data: pricesRows, error: pricesErr } = await supabaseAdmin
+      .from("precios")
+      .select(
+        "id_precio, cantidad, duracion, precio_usd_detal, precio_usd_mayor, id_plataforma, completa, sub_cuenta, valor_tarjeta_de_regalo",
+      )
+      .in("id_precio", missingPriceIds);
+    if (pricesErr) throw pricesErr;
+    fetchedPrices = pricesRows || [];
+  }
+  const mergedPriceMap = { ...fallbackPriceMap };
+  fetchedPrices.forEach((row) => {
+    const priceId = toPositiveInt(row?.id_precio);
+    if (priceId) mergedPriceMap[priceId] = row;
+  });
+
+  const unresolvedPriceIds = snapshotPriceIds.filter((priceId) => !mergedPriceMap[priceId]);
+  if (unresolvedPriceIds.length) {
+    const err = new Error(
+      `No se encontraron precios del snapshot para la orden: ${unresolvedPriceIds.join(", ")}`,
+    );
+    err.code = "ORDEN_SNAPSHOT_INVALID";
+    err.httpStatus = 409;
+    err.details = { id_orden: orderIdNum, missing_price_ids: unresolvedPriceIds };
+    throw err;
+  }
+
+  const platformMismatch = snapshotItems.find((item, index) => {
+    const snapshotPlatformId = toPositiveInt(snapshotRows[index]?.id_plataforma);
+    const pricePlatformId = toPositiveInt(mergedPriceMap[item?.id_precio]?.id_plataforma);
+    return snapshotPlatformId && pricePlatformId && snapshotPlatformId !== pricePlatformId;
+  });
+  if (platformMismatch) {
+    const mismatchIdx = snapshotItems.findIndex((item, index) => {
+      const snapshotPlatformId = toPositiveInt(snapshotRows[index]?.id_plataforma);
+      const pricePlatformId = toPositiveInt(mergedPriceMap[item?.id_precio]?.id_plataforma);
+      return snapshotPlatformId && pricePlatformId && snapshotPlatformId !== pricePlatformId;
+    });
+    const err = new Error(
+      "Conflicto de plataforma detectado entre ordenes_items y precios. Se bloquea la entrega para evitar asignaciones incorrectas.",
+    );
+    err.code = "ORDEN_SNAPSHOT_PLATFORM_MISMATCH";
+    err.httpStatus = 409;
+    err.details = {
+      id_orden: orderIdNum,
+      id_item_orden: toPositiveInt(snapshotRows?.[mismatchIdx]?.id_item_orden) || null,
+      id_precio: toPositiveInt(platformMismatch?.id_precio) || null,
+      id_plataforma_snapshot: toPositiveInt(snapshotRows?.[mismatchIdx]?.id_plataforma) || null,
+      id_plataforma_precio: toPositiveInt(
+        mergedPriceMap[platformMismatch?.id_precio]?.id_plataforma,
+      ) || null,
+    };
+    throw err;
+  }
+
+  const mergedPlatInfoById = { ...(fallbackContext?.platInfoById || {}) };
+  const mergedPlatNameById = { ...(fallbackContext?.platNameById || {}) };
+  const requiredPlatformIds = uniqPositiveIds([
+    ...snapshotRows.map((row) => toPositiveInt(row?.id_plataforma)).filter(Boolean),
+    ...Object.values(mergedPriceMap)
+      .map((price) => toPositiveInt(price?.id_plataforma))
+      .filter(Boolean),
+  ]);
+  const missingPlatformIds = requiredPlatformIds.filter((platId) => !mergedPlatInfoById[platId]);
+  if (missingPlatformIds.length) {
+    const { data: platformsRows, error: platformsErr } = await supabaseAdmin
+      .from("plataformas")
+      .select("*")
+      .in("id_plataforma", missingPlatformIds);
+    if (platformsErr) throw platformsErr;
+    (platformsRows || []).forEach((row) => {
+      const normalized = normalizeCheckoutPlatformRow(row);
+      const platformId = toPositiveInt(normalized?.id_plataforma);
+      if (!platformId) return;
+      mergedPlatInfoById[platformId] = normalized;
+      mergedPlatNameById[platformId] = normalized?.nombre || `Plataforma ${platformId}`;
+    });
+  }
+
+  const totalClienteParsed = parseOptionalCheckoutNumber(totalCliente);
+  const snapshotHasCompleteAmounts =
+    snapshotRows.length > 0 &&
+    snapshotRows.every((row) => Number.isFinite(parseOptionalCheckoutNumber(row?.monto_usd)));
+  const snapshotTotalUsd = snapshotHasCompleteAmounts
+    ? roundCheckoutMoney(
+        snapshotRows.reduce(
+          (sum, row) => sum + (parseOptionalCheckoutNumber(row?.monto_usd) || 0),
+          0,
+        ),
+      )
+    : null;
+  const fallbackTotalParsed = parseOptionalCheckoutNumber(fallbackContext?.total);
+  const resolvedTotal = Number.isFinite(totalClienteParsed)
+    ? roundCheckoutMoney(totalClienteParsed)
+    : Number.isFinite(snapshotTotalUsd)
+      ? snapshotTotalUsd
+      : roundCheckoutMoney(fallbackTotalParsed || 0);
+
+  return {
+    source: "ordenes_items",
+    context: {
+      ...(fallbackContext || {}),
+      items: snapshotItems,
+      priceMap: mergedPriceMap,
+      platInfoById: mergedPlatInfoById,
+      platNameById: mergedPlatNameById,
+      total: resolvedTotal,
+    },
+    itemAmountMapById: snapshotItemAmountMap.size ? snapshotItemAmountMap : null,
+  };
+};
+
 const resolveCarritoMontoUsdFromItems = async ({
   idUsuarioVentas,
   carritoId,
@@ -11496,6 +11729,44 @@ const getCurrentCarrito = async (idUsuario) => {
   return data?.id_carrito || null;
 };
 
+const buildCarritoLockedError = (pendingOrderId = null) => {
+  const err = new Error(
+    "Este carrito tiene una orden en verificacion. No se puede modificar hasta que se procese o cancele.",
+  );
+  err.code = "CARRITO_BLOQUEADO_POR_ORDEN";
+  err.httpStatus = 409;
+  err.id_orden = toPositiveInt(pendingOrderId) || null;
+  return err;
+};
+
+const findPendingUnverifiedOrderByCarrito = async (carritoId) => {
+  const carritoNum = toPositiveInt(carritoId);
+  if (!carritoNum) return null;
+  const { data: orderRows, error: orderErr } = await supabaseAdmin
+    .from("ordenes")
+    .select("id_orden, id_carrito, checkout_finalizado, pago_verificado, orden_cancelada")
+    .eq("id_carrito", carritoNum)
+    .eq("checkout_finalizado", true)
+    .eq("pago_verificado", false)
+    .order("id_orden", { ascending: false })
+    .limit(1);
+  if (orderErr) throw orderErr;
+  const orderRow = Array.isArray(orderRows) ? orderRows[0] : null;
+  if (!orderRow?.id_orden || isTrue(orderRow?.orden_cancelada)) return null;
+  return orderRow;
+};
+
+const assertCarritoUnlockedForMutation = async ({ carritoId, source = "cart_mutation" } = {}) => {
+  const pendingOrder = await findPendingUnverifiedOrderByCarrito(carritoId);
+  if (!pendingOrder) return null;
+  console.warn("[cart] bloqueo por orden pendiente", {
+    source,
+    id_carrito: toPositiveInt(carritoId) || null,
+    id_orden: toPositiveInt(pendingOrder?.id_orden) || null,
+  });
+  throw buildCarritoLockedError(pendingOrder?.id_orden);
+};
+
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const toFiniteMoney = (value) => {
   const num = Number(value);
@@ -12625,6 +12896,10 @@ app.post("/api/cart/item", async (req, res) => {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
     const idCarrito = await getOrCreateCarrito(idUsuario);
+    await assertCarritoUnlockedForMutation({
+      carritoId: idCarrito,
+      source: "api/cart/item",
+    });
     const bodyIdItem = toPositiveInt(req.body?.id_item);
     const mesesVal = (() => {
       const num = Number(meses);
@@ -12808,6 +13083,12 @@ app.post("/api/cart/item", async (req, res) => {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
+    if (err?.code === "CARRITO_BLOQUEADO_POR_ORDEN") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error: err?.message || "Carrito bloqueado por orden pendiente de verificación.",
+        id_orden: err?.id_orden || null,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -12842,6 +13123,10 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
     }, {});
 
     const carritoId = await getOrCreateCarrito(payload.uid);
+    await assertCarritoUnlockedForMutation({
+      carritoId,
+      source: "api/cart/renewal-link/apply",
+    });
     const existingVentaIds = uniqPositiveIds(
       ventas.map((venta) => venta?.id_venta),
     );
@@ -13005,6 +13290,12 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
       err?.code === "SIGNUP_TOKEN_SECRET_MISSING"
     ) {
       return res.status(signupTokenErrorStatus(err.code)).json({ error: err.message });
+    }
+    if (err?.code === "CARRITO_BLOQUEADO_POR_ORDEN") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error: err?.message || "Carrito bloqueado por orden pendiente de verificación.",
+        id_orden: err?.id_orden || null,
+      });
     }
     console.error("[cart/renewal-link/apply] error", err);
     return res.status(500).json({ error: err?.message || "No se pudieron agregar las renovaciones al carrito." });
@@ -13174,6 +13465,10 @@ app.post("/api/cart/montos", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
+    await assertCarritoUnlockedForMutation({
+      carritoId,
+      source: "api/cart/montos",
+    });
     let { data: carritoInfo, error: carritoErr } = await supabaseAdmin
       .from("carritos")
       .select("monto_usd, monto_bs, tasa_bs, usa_saldo, monto_final, saldo_usado, fecha, hora")
@@ -13225,6 +13520,12 @@ app.post("/api/cart/montos", async (req, res) => {
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
+    if (err?.code === "CARRITO_BLOQUEADO_POR_ORDEN") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error: err?.message || "Carrito bloqueado por orden pendiente de verificación.",
+        id_orden: err?.id_orden || null,
+      });
+    }
     return res.status(500).json({ error: err.message });
   }
 });
@@ -13237,6 +13538,10 @@ app.post("/api/cart/flags", async (req, res) => {
     if (!carritoId) {
       return res.status(400).json({ error: "Carrito no encontrado" });
     }
+    await assertCarritoUnlockedForMutation({
+      carritoId,
+      source: "api/cart/flags",
+    });
     const usa_saldo = isTrue(req.body?.usa_saldo);
     let { data: carritoInfo, error: cartErr } = await supabaseAdmin
       .from("carritos")
@@ -13305,6 +13610,12 @@ app.post("/api/cart/flags", async (req, res) => {
     console.error("[cart:flags] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
       return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "CARRITO_BLOQUEADO_POR_ORDEN") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error: err?.message || "Carrito bloqueado por orden pendiente de verificación.",
+        id_orden: err?.id_orden || null,
+      });
     }
     return res.status(500).json({ error: err.message });
   }
@@ -17339,20 +17650,37 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       });
     }
 
-    const context = await buildCheckoutContext({
+    const fallbackContext = await buildCheckoutContext({
       idUsuarioVentas,
       carritoId: orden.id_carrito,
       totalCliente: orden.total,
     });
-    const montoBaseCobrado = await resolveMontoBaseCarrito({
+    const processingSnapshot = await resolveOrderProcessingContextFromSnapshot({
+      ordenId: idOrden,
+      totalCliente: orden?.total ?? fallbackContext?.total ?? null,
+      fallbackContext,
+    });
+    const context = processingSnapshot?.context || fallbackContext;
+    const processingSource = String(processingSnapshot?.source || "carrito_items");
+    const processingItemAmountMap =
+      processingSnapshot?.itemAmountMapById instanceof Map &&
+      processingSnapshot.itemAmountMapById.size > 0
+        ? processingSnapshot.itemAmountMapById
+        : null;
+    const montoBaseCobradoFallback = await resolveMontoBaseCarrito({
       carritoId: orden.id_carrito,
       fallbackTotal: context.total,
     });
+    const montoBaseCobrado =
+      processingSource === "ordenes_items" && Number.isFinite(Number(orden?.total))
+        ? roundCheckoutMoney(Number(orden.total))
+        : montoBaseCobradoFallback;
     if (!context.items?.length) {
       console.log("[ordenes/procesar] carrito vacío; se acredita saldo", {
         id_orden: idOrden,
         carritoId: orden?.id_carrito,
         montoBaseCobrado,
+        source: processingSource,
       });
       return processNoItemsOrder({
         montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
@@ -17364,6 +17692,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       itemsCount: context.items?.length || 0,
       total: context.total,
       tasaBs: context.tasaBs,
+      source: processingSource,
     });
 
     const archivos = normalizeFilesArray(orden?.comprobante);
@@ -17384,7 +17713,8 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       archivos,
       id_metodo_de_pago: orden?.id_metodo_de_pago,
       carritoId: orden.id_carrito,
-      montoHistorialTotalOverride: montoBaseCobrado,
+      montoHistorialTotalOverride: processingItemAmountMap ? null : montoBaseCobrado,
+      itemAmountMapById: processingItemAmountMap,
       adminInvolucradoId: idAdminEntrega,
       snapshotTotalUsd: orden?.total ?? context?.total ?? null,
       snapshotMontoBsTotal: orden?.monto_bs ?? null,
@@ -17458,6 +17788,17 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     if (err?.code === "SALDO_INSUFICIENTE") {
       return res.status(Number(err?.httpStatus) || 409).json({
         error: err?.message || "Saldo insuficiente para procesar la orden.",
+      });
+    }
+    if (
+      err?.code === "ORDEN_SNAPSHOT_INVALID" ||
+      err?.code === "ORDEN_SNAPSHOT_PLATFORM_MISMATCH"
+    ) {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error:
+          err?.message ||
+          "No se pudo procesar la orden por conflicto con el snapshot de checkout.",
+        details: err?.details || null,
       });
     }
     res.status(500).json({ error: err.message });

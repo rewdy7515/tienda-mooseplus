@@ -1791,6 +1791,7 @@ async function reemplazarServicio(options = {}) {
       toPositiveId(selectedRow?.cuentas?.id_cuenta_madre) ||
       null;
     const cuentaMiembroVentaId = toPositiveId(ventaInfo?.id_cuenta_miembro);
+    const plataformaUsaCuentaMadre = Number(plataformaId) === 9;
 
     let cuentaMadreActualInactiva = false;
     if (cuentaMadreActualId) {
@@ -1802,7 +1803,8 @@ async function reemplazarServicio(options = {}) {
       if (cuentaMadreActualErr) throw cuentaMadreActualErr;
       cuentaMadreActualInactiva = isTrue(cuentaMadreActual?.inactiva);
     }
-    const forceCambiarCuentaMadre = !!cuentaMiembroVentaId && cuentaMadreActualInactiva;
+    const forceCambiarCuentaMadre =
+      plataformaUsaCuentaMadre && !!cuentaMiembroVentaId && cuentaMadreActualInactiva;
 
     const loadReemplazosBloqueados = async () => {
       const { data, error } = await supabase.from("reemplazos").select("id_cuenta, id_perfil");
