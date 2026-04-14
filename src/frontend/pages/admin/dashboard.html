@@ -1971,6 +1971,14 @@
         Array.from(selectEl?.selectedOptions || [])
           .map((opt) => String(opt?.value || "").trim())
           .filter(Boolean);
+      const normalizeDashboardColor = (value = "") => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        if (/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(raw)) return raw;
+        if (/^[0-9a-f]{6}$/i.test(raw)) return `#${raw}`;
+        if (/^(rgb|rgba|hsl|hsla)\(/i.test(raw)) return raw;
+        return "";
+      };
       const syncPlatformDailySelect = (rows, preferredKeys = []) => {
         if (!platformDailySelect) return [];
         const prevValues =
@@ -2004,7 +2012,7 @@
         return nextValues;
       };
       const getPlatformDailyLineColor = (row, idx = 0) => {
-        const configuredColor = String(row?.color_1 || "").trim();
+        const configuredColor = normalizeDashboardColor(row?.color_1);
         if (configuredColor) return configuredColor;
         return PLATFORM_DAILY_LINE_COLORS[idx % PLATFORM_DAILY_LINE_COLORS.length];
       };
