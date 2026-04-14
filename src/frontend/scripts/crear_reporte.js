@@ -479,10 +479,7 @@ const findPerfilLibre = async (
     const cuentaId = toPositiveId(perfil?.id_cuenta);
     if (!perfilId || !cuentaId) return false;
     if (!reemplazosBloqueados) return true;
-    return (
-      !reemplazosBloqueados.perfiles.has(perfilId) &&
-      !reemplazosBloqueados.cuentas.has(cuentaId)
-    );
+    return !reemplazosBloqueados.perfiles.has(perfilId);
   });
   return { data: libre || null };
 };

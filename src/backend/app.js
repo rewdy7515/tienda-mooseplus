@@ -4269,75 +4269,78 @@ const processPendingManualVerificationAlerts = async () => {
 
   let managedWhatsappForRun = false;
   try {
-    const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
-      .from("ordenes")
-      .select(
-        "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, en_espera, pago_verificado, orden_cancelada, aviso_verificacion_manual",
-      )
-      .eq("marcado_pago", true)
-      .eq("checkout_finalizado", true)
-      .eq("pago_verificado", false)
-      .or("orden_cancelada.eq.false,orden_cancelada.is.null")
-      .order("id_orden", { ascending: false })
-      .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
-    if (pendingErr) throw pendingErr;
+    const { data: manualMetodoRows, error: manualMetodoErr } = await supabaseAdmin
+      .from("metodos_de_pago")
+      .select("id_metodo_de_pago")
+      .eq("verificacion_automatica", false);
+    if (manualMetodoErr) throw manualMetodoErr;
 
-    const orders = Array.isArray(pendingOrders) ? pendingOrders : [];
-    result.fetched = orders.length;
+    const manualMetodoIds = (manualMetodoRows || [])
+      .map((row) => toPositiveInt(row?.id_metodo_de_pago))
+      .filter((id) => !!id);
 
-    for (const ordenRow of orders) {
-      const ordenId = toPositiveInt(ordenRow?.id_orden);
-      if (!ordenId) {
-        result.failed += 1;
-        continue;
-      }
-      if (isTrue(ordenRow?.aviso_verificacion_manual)) {
-        result.alreadyNotified += 1;
-        continue;
-      }
+    if (manualMetodoIds.length) {
+      const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
+        .from("ordenes")
+        .select(
+          "id_orden, marcado_pago, checkout_finalizado, en_espera, pago_verificado, orden_cancelada, aviso_verificacion_manual",
+        )
+        .eq("marcado_pago", true)
+        .eq("checkout_finalizado", true)
+        .eq("pago_verificado", false)
+        .in("id_metodo_de_pago", manualMetodoIds)
+        .or("orden_cancelada.eq.false,orden_cancelada.is.null")
+        .order("id_orden", { ascending: false })
+        .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
+      if (pendingErr) throw pendingErr;
 
-      const isExpired = hasManualVerificationWindowElapsed(ordenRow);
-      if (isExpired === null) {
-        result.skippedNoDate += 1;
-        continue;
-      }
-      if (isExpired !== true) {
-        result.skippedRecent += 1;
-        continue;
-      }
+      const orders = Array.isArray(pendingOrders) ? pendingOrders : [];
+      result.fetched = orders.length;
 
-      try {
-        const notifyRes = await notifyManualVerificationToWhatsappAdmin({
-          idOrden: ordenId,
-          source: "manual_verification_watcher",
-          manageWhatsappLifecycle: false,
-        });
-        if (!managedWhatsappForRun && isWhatsappClientActive()) {
-          managedWhatsappForRun = true;
-        }
-        const notifCreated = notifyRes?.inbox_notification?.created === true;
-        if (notifCreated) result.notifCreated += 1;
-        if (notifyRes?.sent) {
-          result.sentWhatsapp += 1;
+      for (const ordenRow of orders) {
+        const ordenId = toPositiveInt(ordenRow?.id_orden);
+        if (!ordenId) {
+          result.failed += 1;
           continue;
         }
-        console.warn("[manual_verification_watcher] not sent", {
-          id_orden: ordenId,
-          reason: notifyRes?.reason || "unknown",
-          skipped: !!notifyRes?.skipped,
-          notif_created: notifCreated,
-          target_user: notifyRes?.id_usuario_destino || null,
-          phone: notifyRes?.phone || null,
-          error: notifyRes?.error || null,
-        });
-        if (notifCreated) continue;
-        result.failed += 1;
-      } catch (notifyErr) {
-        result.failed += 1;
-        console.error("[manual_verification_watcher] notify error", {
-          id_orden: ordenId,
-          error: notifyErr?.message || notifyErr,
-        });
+        if (isTrue(ordenRow?.aviso_verificacion_manual)) {
+          result.alreadyNotified += 1;
+          continue;
+        }
+
+        try {
+          const notifyRes = await notifyManualVerificationToWhatsappAdmin({
+            idOrden: ordenId,
+            source: "manual_verification_watcher",
+            manageWhatsappLifecycle: false,
+          });
+          if (!managedWhatsappForRun && isWhatsappClientActive()) {
+            managedWhatsappForRun = true;
+          }
+          const notifCreated = notifyRes?.inbox_notification?.created === true;
+          if (notifCreated) result.notifCreated += 1;
+          if (notifyRes?.sent) {
+            result.sentWhatsapp += 1;
+            continue;
+          }
+          console.warn("[manual_verification_watcher] not sent", {
+            id_orden: ordenId,
+            reason: notifyRes?.reason || "unknown",
+            skipped: !!notifyRes?.skipped,
+            notif_created: notifCreated,
+            target_user: notifyRes?.id_usuario_destino || null,
+            phone: notifyRes?.phone || null,
+            error: notifyRes?.error || null,
+          });
+          if (notifCreated) continue;
+          result.failed += 1;
+        } catch (notifyErr) {
+          result.failed += 1;
+          console.error("[manual_verification_watcher] notify error", {
+            id_orden: ordenId,
+            error: notifyErr?.message || notifyErr,
+          });
+        }
       }
     }
 
@@ -7186,6 +7189,257 @@ app.post("/api/sandbox/giftcards/simulate-sale", async (req, res) => {
   }
 });
 
+app.get("/api/precios-especiales/me", async (req, res) => {
+  try {
+    const idUsuario = await getSessionUsuario(req);
+    const rows = await listUserSpecialPrices({ idUsuario });
+    return res.json({
+      items: (rows || []).map((row) => ({
+        id: row.id,
+        id_precio: row.id_precio,
+        monto: row.monto,
+      })),
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    console.error("[precios-especiales/me] error", err);
+    return res.status(500).json({ error: "No se pudieron cargar los precios especiales." });
+  }
+});
+
+app.get("/api/admin/precios-especiales/clientes", async (req, res) => {
+  try {
+    await requireSuperadminSession(req);
+    const query = String(req.query?.q || "").trim();
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(80, Math.trunc(limitRaw))) : 30;
+
+    let usersQuery = supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, nombre, apellido, correo, acceso_cliente")
+      .order("nombre", { ascending: true })
+      .limit(limit);
+    if (query) {
+      const like = `%${query}%`;
+      usersQuery = usersQuery.or(
+        `nombre.ilike.${like},apellido.ilike.${like},correo.ilike.${like},id_usuario.eq.${toPositiveInt(query) || 0}`,
+      );
+    }
+    const { data, error } = await usersQuery;
+    if (error) throw error;
+
+    return res.json({
+      items: (data || []).map((row) => ({
+        id_usuario: toPositiveInt(row?.id_usuario) || null,
+        nombre: String(row?.nombre || "").trim(),
+        apellido: String(row?.apellido || "").trim(),
+        correo: String(row?.correo || "").trim(),
+        acceso_cliente: row?.acceso_cliente,
+      })),
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    console.error("[admin/precios-especiales/clientes] error", err);
+    return res.status(500).json({ error: "No se pudo buscar clientes." });
+  }
+});
+
+app.get("/api/admin/precios-especiales", async (req, res) => {
+  try {
+    await requireSuperadminSession(req);
+    const idUsuario = toPositiveInt(req.query?.id_usuario);
+    if (!idUsuario) {
+      return res.status(400).json({ error: "id_usuario inválido." });
+    }
+
+    const { data: userRow, error: userErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("id_usuario, nombre, apellido, correo, acceso_cliente")
+      .eq("id_usuario", idUsuario)
+      .maybeSingle();
+    if (userErr) throw userErr;
+    if (!userRow) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+
+    const isMayorista =
+      userRow?.acceso_cliente === false ||
+      userRow?.acceso_cliente === "false" ||
+      userRow?.acceso_cliente === 0 ||
+      userRow?.acceso_cliente === "0";
+
+    const [pricesRes, specialRows] = await Promise.all([
+      supabaseAdmin
+        .from("precios")
+        .select(
+          "id_precio, id_plataforma, plan, cantidad, completa, sub_cuenta, precio_usd_detal, precio_usd_mayor",
+        )
+        .order("id_plataforma", { ascending: true })
+        .order("id_precio", { ascending: true }),
+      listUserSpecialPrices({ idUsuario }),
+    ]);
+    if (pricesRes.error) throw pricesRes.error;
+
+    const prices = pricesRes.data || [];
+    const platformIds = uniqPositiveIds(prices.map((row) => row?.id_plataforma));
+    const platformRes = platformIds.length
+      ? await supabaseAdmin
+          .from("plataformas")
+          .select("id_plataforma, nombre, por_pantalla, por_acceso")
+          .in("id_plataforma", platformIds)
+      : { data: [], error: null };
+    const { data: platforms, error: platErr } = platformRes;
+    if (platErr) throw platErr;
+    const platformById = (platforms || []).reduce((acc, row) => {
+      const platformId = toPositiveInt(row?.id_plataforma);
+      if (!platformId) return acc;
+      acc[platformId] = row;
+      return acc;
+    }, {});
+    const specialLookup = buildSpecialPriceLookup(specialRows || []);
+
+    const items = prices.map((price) => {
+      const idPrecio = toPositiveInt(price?.id_precio);
+      const idPlataforma = toPositiveInt(price?.id_plataforma);
+      const platformInfo = platformById[idPlataforma] || {};
+      const montoBaseRaw = isMayorista
+        ? parseOptionalCheckoutNumber(price?.precio_usd_mayor)
+        : parseOptionalCheckoutNumber(price?.precio_usd_detal);
+      const montoBaseFallback = isMayorista
+        ? parseOptionalCheckoutNumber(price?.precio_usd_detal)
+        : parseOptionalCheckoutNumber(price?.precio_usd_mayor);
+      const montoBase = Number.isFinite(montoBaseRaw)
+        ? roundCheckoutMoney(montoBaseRaw)
+        : Number.isFinite(montoBaseFallback)
+          ? roundCheckoutMoney(montoBaseFallback)
+          : 0;
+      const specialRow = specialLookup.byPrecioId?.[idPrecio] || null;
+      return {
+        id_precio: idPrecio,
+        id_plataforma: idPlataforma,
+        plataforma: String(platformInfo?.nombre || `Plataforma ${idPlataforma || "-"}`).trim(),
+        tipo: resolvePrecioTipoLabel(price, platformInfo),
+        precio_base: montoBase,
+        id_precio_especial: toPositiveInt(specialRow?.id) || null,
+        precio_especial: Number.isFinite(parseOptionalCheckoutNumber(specialRow?.monto))
+          ? roundCheckoutMoney(specialRow.monto)
+          : null,
+      };
+    });
+
+    return res.json({
+      cliente: {
+        id_usuario: toPositiveInt(userRow?.id_usuario) || null,
+        nombre: String(userRow?.nombre || "").trim(),
+        apellido: String(userRow?.apellido || "").trim(),
+        correo: String(userRow?.correo || "").trim(),
+        acceso_cliente: userRow?.acceso_cliente,
+      },
+      items,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    console.error("[admin/precios-especiales:get] error", err);
+    return res.status(500).json({ error: "No se pudieron cargar los precios especiales." });
+  }
+});
+
+app.put("/api/admin/precios-especiales", async (req, res) => {
+  try {
+    await requireSuperadminSession(req);
+    const idUsuario = toPositiveInt(req.body?.id_usuario);
+    const idPrecio = toPositiveInt(req.body?.id_precio);
+    if (!idUsuario || !idPrecio) {
+      return res.status(400).json({ error: "id_usuario e id_precio son obligatorios." });
+    }
+    const montoRaw = String(req.body?.monto ?? "").trim().replace(",", ".");
+    const montoParsed = montoRaw ? Number(montoRaw) : null;
+    if (montoRaw && (!Number.isFinite(montoParsed) || montoParsed < 0)) {
+      return res.status(400).json({ error: "monto inválido." });
+    }
+
+    const existingRows = await listUserSpecialPrices({
+      idUsuario,
+      idPrecios: [idPrecio],
+    });
+    const current = existingRows[0] || null;
+    const duplicateIds = existingRows
+      .slice(1)
+      .map((row) => toPositiveInt(row?.id))
+      .filter(Boolean);
+    if (duplicateIds.length) {
+      const { error: duplicateDelErr } = await supabaseAdmin
+        .from("precios_especiales")
+        .delete()
+        .in("id", duplicateIds);
+      if (duplicateDelErr) throw duplicateDelErr;
+    }
+
+    if (!Number.isFinite(montoParsed)) {
+      if (current?.id) {
+        const { error: delErr } = await supabaseAdmin
+          .from("precios_especiales")
+          .delete()
+          .eq("id", current.id);
+        if (delErr) throw delErr;
+      }
+      return res.json({
+        ok: true,
+        removed: true,
+        id_usuario: idUsuario,
+        id_precio: idPrecio,
+      });
+    }
+
+    const monto = roundCheckoutMoney(montoParsed);
+    if (current?.id) {
+      const { data: updated, error: updErr } = await supabaseAdmin
+        .from("precios_especiales")
+        .update({ monto })
+        .eq("id", current.id)
+        .select("id, id_precio, id_usuario, monto")
+        .single();
+      if (updErr) throw updErr;
+      const normalized = normalizeSpecialPriceRow(updated);
+      return res.json({ ok: true, item: normalized });
+    }
+
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from("precios_especiales")
+      .insert({
+        id_usuario: idUsuario,
+        id_precio: idPrecio,
+        monto,
+      })
+      .select("id, id_precio, id_usuario, monto")
+      .single();
+    if (insErr) throw insErr;
+    const normalized = normalizeSpecialPriceRow(inserted);
+    return res.json({ ok: true, item: normalized });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === SUPERADMIN_REQUIRED || err?.message === SUPERADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo superadmin" });
+    }
+    console.error("[admin/precios-especiales:put] error", err);
+    return res.status(500).json({ error: "No se pudo guardar el precio especial." });
+  }
+});
+
 app.get("/api/whatsapp/status", (req, res) => {
   const qrState = getWhatsappQrState();
   const ready = isWhatsappReady();
@@ -8733,8 +8987,7 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         !!cuentaId &&
         !excludeIds.has(cuentaId) &&
         !isInactive(perfil?.cuentas?.inactiva) &&
-        !reemplazosBloqueados.perfiles.has(perfilId) &&
-        !reemplazosBloqueados.cuentas.has(cuentaId)
+        !reemplazosBloqueados.perfiles.has(perfilId)
       );
     });
     const ordenados =
@@ -8945,6 +9198,124 @@ const normalizeFilesArray = (value) => {
     return [trimmed];
   }
   return [];
+};
+
+const normalizeSpecialPriceRow = (row = {}) => {
+  const id = toPositiveInt(row?.id);
+  const idPrecio = toPositiveInt(row?.id_precio);
+  const idUsuario = toPositiveInt(row?.id_usuario);
+  const monto = parseOptionalCheckoutNumber(row?.monto);
+  if (!id || !idPrecio || !idUsuario) return null;
+  return {
+    id,
+    id_precio: idPrecio,
+    id_usuario: idUsuario,
+    monto: Number.isFinite(monto) ? roundCheckoutMoney(monto) : null,
+  };
+};
+
+const listUserSpecialPrices = async ({
+  idUsuario,
+  idPrecios = null,
+  idEspeciales = null,
+} = {}) => {
+  const usuarioId = toPositiveInt(idUsuario);
+  if (!usuarioId) return [];
+  const precioIds = uniqPositiveIds(idPrecios || []);
+  const especialIds = uniqPositiveIds(idEspeciales || []);
+
+  let query = supabaseAdmin
+    .from("precios_especiales")
+    .select("id, id_precio, id_usuario, monto")
+    .eq("id_usuario", usuarioId)
+    .order("id", { ascending: false });
+  if (precioIds.length) {
+    query = query.in("id_precio", precioIds);
+  }
+  if (especialIds.length) {
+    query = query.in("id", especialIds);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map((row) => normalizeSpecialPriceRow(row)).filter(Boolean);
+};
+
+const buildSpecialPriceLookup = (rows = []) => {
+  const byId = {};
+  const byPrecioId = {};
+  (rows || []).forEach((row) => {
+    const normalized = normalizeSpecialPriceRow(row);
+    if (!normalized) return;
+    if (!Number.isFinite(parseOptionalCheckoutNumber(normalized?.monto))) return;
+    byId[normalized.id] = normalized;
+    if (!byPrecioId[normalized.id_precio]) {
+      byPrecioId[normalized.id_precio] = normalized;
+    }
+  });
+  return { byId, byPrecioId };
+};
+
+const resolveCartSpecialPriceForUser = async ({
+  idUsuario,
+  idPrecio,
+  requestedIdPrecioEspecial = undefined,
+} = {}) => {
+  const usuarioId = toPositiveInt(idUsuario);
+  const precioId = toPositiveInt(idPrecio);
+  if (!usuarioId || !precioId) return null;
+
+  if (requestedIdPrecioEspecial === null) {
+    return null;
+  }
+
+  const requestedSpecialId = toPositiveInt(requestedIdPrecioEspecial);
+  if (requestedSpecialId) {
+    const rows = await listUserSpecialPrices({
+      idUsuario: usuarioId,
+      idEspeciales: [requestedSpecialId],
+    });
+    const selected = rows.find((row) => row?.id === requestedSpecialId) || null;
+    if (!selected) {
+      const err = new Error("id_precio_especial inválido para este usuario.");
+      err.code = "INVALID_PRECIO_ESPECIAL";
+      err.httpStatus = 400;
+      throw err;
+    }
+    if (Number(selected.id_precio) !== Number(precioId)) {
+      const err = new Error("id_precio_especial no corresponde al id_precio enviado.");
+      err.code = "INVALID_PRECIO_ESPECIAL";
+      err.httpStatus = 400;
+      throw err;
+    }
+    if (!Number.isFinite(parseOptionalCheckoutNumber(selected?.monto))) {
+      return null;
+    }
+    return selected;
+  }
+
+  const rows = await listUserSpecialPrices({
+    idUsuario: usuarioId,
+    idPrecios: [precioId],
+  });
+  return (
+    rows.find(
+      (row) =>
+        Number(row?.id_precio) === Number(precioId) &&
+        Number.isFinite(parseOptionalCheckoutNumber(row?.monto)),
+    ) || null
+  );
+};
+
+const resolvePrecioTipoLabel = (priceRow = {}, platformRow = {}) => {
+  const plan = String(priceRow?.plan || "").trim();
+  if (plan) return plan;
+  if (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) {
+    return "Cuenta completa";
+  }
+  if (isTrue(platformRow?.por_pantalla)) return "Pantalla";
+  if (isTrue(platformRow?.por_acceso)) return "Acceso";
+  if (isTrue(priceRow?.sub_cuenta)) return "Subcuenta";
+  return "Plan";
 };
 
 const getPrecioPicker = async (idUsuarioVentas) => {
@@ -9185,7 +9556,7 @@ const computeCheckoutItemPricing = ({
   const mesesVal = isGiftCard
     ? 1
     : Math.max(1, Number(item?.meses || priceInfo?.duracion || 1) || 1);
-  const unitPrice = Number(pickPrecio?.(priceInfo)) || 0;
+  const unitPrice = Number(pickPrecio?.(priceInfo, item)) || 0;
   const baseSubtotalUsd = roundCheckoutMoney(unitPrice * qty * (isGiftCard ? 1 : mesesVal));
   const monthEnabled =
     !!platformInfo?.descuento_meses &&
@@ -9283,13 +9654,17 @@ const normalizeCheckoutCustomItemAmounts = (input = []) => {
 };
 
 const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }) => {
-  const { accesoCliente, esMayorista, pickPrecio } = await getPrecioPicker(idUsuarioVentas);
+  const { accesoCliente, esMayorista, pickPrecio: pickPrecioBase } = await getPrecioPicker(
+    idUsuarioVentas,
+  );
   const isCliente = !esMayorista;
   const totalClienteParsed = parseOptionalCheckoutNumber(totalCliente);
   const tasaBsParsed = await getStrictStoredTasaActual();
   const { data: items, error: itemErr } = await supabaseAdmin
     .from("carrito_items")
-    .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
+    .select(
+      "id_item, id_precio, id_precio_especial, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil",
+    )
     .eq("id_carrito", carritoId);
   if (itemErr) throw itemErr;
   const itemsWithDiscountQty = applyRenewalDiscountQtyContext(items || []);
@@ -9302,7 +9677,7 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
       priceMap: {},
       platInfoById: {},
       platNameById: {},
-      pickPrecio,
+      pickPrecio: pickPrecioBase,
       total,
       tasaBs,
       accesoCliente,
@@ -9321,6 +9696,33 @@ const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }
   }
 
   assertItemsValidPrecioId(itemsWithDiscountQty);
+  const specialPriceIds = uniqPositiveIds(
+    (itemsWithDiscountQty || []).map((item) => item?.id_precio_especial),
+  );
+  const specialPriceRows = specialPriceIds.length
+    ? await listUserSpecialPrices({
+        idUsuario: idUsuarioVentas,
+        idEspeciales: specialPriceIds,
+      })
+    : [];
+  const specialPriceLookup = buildSpecialPriceLookup(specialPriceRows);
+  const pickPrecio = (priceInfo = {}, item = null) => {
+    const specialId = toPositiveInt(item?.id_precio_especial);
+    if (specialId) {
+      const special = specialPriceLookup.byId?.[specialId] || null;
+      const specialPriceId = toPositiveInt(special?.id_precio);
+      const priceId = toPositiveInt(priceInfo?.id_precio);
+      const specialAmount = parseOptionalCheckoutNumber(special?.monto);
+      if (
+        special &&
+        Number.isFinite(specialAmount) &&
+        (!specialPriceId || !priceId || Number(specialPriceId) === Number(priceId))
+      ) {
+        return roundCheckoutMoney(specialAmount);
+      }
+    }
+    return pickPrecioBase(priceInfo);
+  };
 
   const preciosIds = (itemsWithDiscountQty || []).map((i) => i.id_precio).filter(Boolean);
   const { data: precios, error: precioErr } = await supabaseAdmin
@@ -10359,7 +10761,7 @@ const processOrderFromItems = async ({
         asignaciones.push({
           id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
-          monto: pickPrecio(price),
+          monto: pickPrecio(price, it),
           id_cuenta: null,
           id_perfil: null,
           id_sub_cuenta: null,
@@ -10373,7 +10775,7 @@ const processOrderFromItems = async ({
           pendientes.push({
             id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
-            monto: pickPrecio(price),
+            monto: pickPrecio(price, it),
             id_cuenta: null,
             id_perfil: null,
             id_sub_cuenta: null,
@@ -10412,7 +10814,7 @@ const processOrderFromItems = async ({
         asignaciones.push({
           id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
-          monto: pickPrecio(price),
+          monto: pickPrecio(price, it),
           id_cuenta: cta.id_cuenta,
           id_perfil: null,
           id_sub_cuenta: null,
@@ -10425,7 +10827,7 @@ const processOrderFromItems = async ({
           pendientes.push({
             id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
-            monto: pickPrecio(price),
+            monto: pickPrecio(price, it),
             id_cuenta: null,
             id_perfil: null,
             id_sub_cuenta: null,
@@ -10464,7 +10866,7 @@ const processOrderFromItems = async ({
         asignaciones.push({
           id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
-          monto: pickPrecio(price),
+          monto: pickPrecio(price, it),
           id_cuenta: p.id_cuenta,
           id_perfil: p.id_perfil,
           id_sub_cuenta: null,
@@ -10500,7 +10902,7 @@ const processOrderFromItems = async ({
           asignaciones.push({
             id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
-            monto: pickPrecio(price),
+            monto: pickPrecio(price, it),
             id_cuenta: cta.id_cuenta,
             id_perfil: null,
             id_sub_cuenta: null,
@@ -10514,7 +10916,7 @@ const processOrderFromItems = async ({
             pendientes.push({
               id_item_carrito: toPositiveInt(it?.id_item) || null,
               id_precio: price.id_precio,
-              monto: pickPrecio(price),
+              monto: pickPrecio(price, it),
               id_cuenta: null,
               id_perfil: null,
               id_sub_cuenta: null,
@@ -10602,7 +11004,7 @@ const processOrderFromItems = async ({
         asignaciones.push({
           id_item_carrito: toPositiveInt(it?.id_item) || null,
           id_precio: price.id_precio,
-          monto: pickPrecio(price),
+          monto: pickPrecio(price, it),
           id_cuenta: p.id_cuenta,
           id_perfil: p.id_perfil,
           id_sub_cuenta: null,
@@ -10615,7 +11017,7 @@ const processOrderFromItems = async ({
           pendientes.push({
             id_item_carrito: toPositiveInt(it?.id_item) || null,
             id_precio: price.id_precio,
-            monto: pickPrecio(price),
+            monto: pickPrecio(price, it),
             id_cuenta: null,
             id_perfil: null,
             id_sub_cuenta: null,
@@ -12848,6 +13250,7 @@ app.post("/api/cart/item", async (req, res) => {
   console.log("[cart:item] body", req.body);
   const {
     id_precio: idPrecioRaw,
+    id_precio_especial: idPrecioEspecialRaw,
     delta,
     meses,
     renovacion = false,
@@ -12886,15 +13289,29 @@ app.post("/api/cart/item", async (req, res) => {
   if (!parsedCuentaId.ok) return res.status(400).json({ error: parsedCuentaId.error });
   const parsedPerfilId = normalizeCartNullableBodyId(idPerfilRaw, "id_perfil");
   if (!parsedPerfilId.ok) return res.status(400).json({ error: parsedPerfilId.error });
+  const parsedPrecioEspecialId = normalizeCartNullableBodyId(
+    idPrecioEspecialRaw,
+    "id_precio_especial",
+  );
+  if (!parsedPrecioEspecialId.ok) {
+    return res.status(400).json({ error: parsedPrecioEspecialId.error });
+  }
   const idVenta = parsedVentaId.value;
   const idCuenta = parsedCuentaId.value;
   const idPerfil = parsedPerfilId.value;
+  const requestedIdPrecioEspecial = parsedPrecioEspecialId.value;
 
   try {
     const idUsuario = await getOrCreateUsuario(req);
     if (!idUsuario) {
       return res.status(401).json({ error: "Usuario no autenticado" });
     }
+    const specialPriceRow = await resolveCartSpecialPriceForUser({
+      idUsuario,
+      idPrecio,
+      requestedIdPrecioEspecial,
+    });
+    const idPrecioEspecial = toPositiveInt(specialPriceRow?.id) || null;
     const idCarrito = await getOrCreateCarrito(idUsuario);
     await assertCarritoUnlockedForMutation({
       carritoId: idCarrito,
@@ -12912,7 +13329,9 @@ app.post("/api/cart/item", async (req, res) => {
     if (bodyIdItem) {
       const { data, error } = await supabaseAdmin
         .from("carrito_items")
-        .select("id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
+        .select(
+          "id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil, id_precio_especial",
+        )
         .eq("id_carrito", idCarrito)
         .eq("id_item", bodyIdItem)
         .maybeSingle();
@@ -12922,7 +13341,9 @@ app.post("/api/cart/item", async (req, res) => {
     if (!existing) {
       let selQuery = supabaseAdmin
         .from("carrito_items")
-        .select("id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
+        .select(
+          "id_item, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil, id_precio_especial",
+        )
         .eq("id_carrito", idCarrito)
         .eq("id_precio", idPrecio)
         .eq("renovacion", renovacion === true);
@@ -12941,6 +13362,10 @@ app.post("/api/cart/item", async (req, res) => {
         idPerfil === undefined || idPerfil === null
           ? selQuery.is("id_perfil", null)
           : selQuery.eq("id_perfil", idPerfil);
+      selQuery =
+        idPrecioEspecial === undefined || idPrecioEspecial === null
+          ? selQuery.is("id_precio_especial", null)
+          : selQuery.eq("id_precio_especial", idPrecioEspecial);
       const { data, error: selErr } = await selQuery.order("id_item", { ascending: true });
       if (selErr) throw selErr;
       const matchedRows = Array.isArray(data) ? data : [];
@@ -12992,6 +13417,7 @@ app.post("/api/cart/item", async (req, res) => {
     const existingVentaId = toPositiveInt(existing?.id_venta);
     const existingCuentaId = toPositiveInt(existing?.id_cuenta);
     const existingPerfilId = toPositiveInt(existing?.id_perfil);
+    const existingPrecioEspecialId = toPositiveInt(existing?.id_precio_especial);
     const matchesVenta =
       idVenta === undefined || idVenta === null
         ? !existingVentaId
@@ -13006,10 +13432,20 @@ app.post("/api/cart/item", async (req, res) => {
       idPerfil === undefined || idPerfil === null
         ? !existingPerfilId
         : existingPerfilId === idPerfil;
+    const matchesPrecioEspecial =
+      idPrecioEspecial === undefined || idPrecioEspecial === null
+        ? !existingPrecioEspecialId
+        : existingPrecioEspecialId === idPrecioEspecial;
     // Si llega id_item, siempre tratamos ese registro como el existente (aunque cambien meses).
     const matchExisting =
       existing &&
-      (bodyIdItem ? true : matchesVenta && matchesCuenta && matchesPerfil && matchesMeses);
+      (bodyIdItem
+        ? true
+        : matchesVenta &&
+          matchesCuenta &&
+          matchesPerfil &&
+          matchesMeses &&
+          matchesPrecioEspecial);
 
     const existingQty = Number(matchExisting ? existing?.cantidad : 0) || 0;
     const newQty = existingQty + parsedDelta;
@@ -13024,6 +13460,7 @@ app.post("/api/cart/item", async (req, res) => {
           id_venta: idVenta ?? existingVentaId ?? null,
           id_cuenta: idCuenta ?? existingCuentaId ?? null,
           id_perfil: idPerfil ?? existingPerfilId ?? null,
+          id_precio_especial: idPrecioEspecial ?? null,
         })
         .eq("id_item", existing.id_item);
       if (updErr) throw updErr;
@@ -13045,6 +13482,7 @@ app.post("/api/cart/item", async (req, res) => {
           id_venta: idVenta ?? existingVentaId ?? null,
           id_cuenta: idCuenta ?? existingCuentaId ?? null,
           id_perfil: idPerfil ?? existingPerfilId ?? null,
+          id_precio_especial: idPrecioEspecial ?? null,
         })
         .eq("id_item", existing.id_item);
       if (updErr) throw updErr;
@@ -13060,6 +13498,7 @@ app.post("/api/cart/item", async (req, res) => {
           id_venta: idVenta ?? null,
           id_cuenta: idCuenta ?? null,
           id_perfil: idPerfil ?? null,
+          id_precio_especial: idPrecioEspecial ?? null,
         });
       if (insErr) throw insErr;
     }
@@ -13076,7 +13515,20 @@ app.post("/api/cart/item", async (req, res) => {
       console.log("[cart:item] carrito vacío, eliminado", idCarrito);
     }
 
-    console.log("[cart:item] usuario", idUsuario, "carrito", idCarrito, "delta", parsedDelta, "id_precio", idPrecio, "remaining", remaining);
+    console.log(
+      "[cart:item] usuario",
+      idUsuario,
+      "carrito",
+      idCarrito,
+      "delta",
+      parsedDelta,
+      "id_precio",
+      idPrecio,
+      "id_precio_especial",
+      idPrecioEspecial,
+      "remaining",
+      remaining,
+    );
     res.json({ ok: true, id_carrito: idCarrito, remaining });
   } catch (err) {
     console.error("[cart:item] error", err);
@@ -13087,6 +13539,11 @@ app.post("/api/cart/item", async (req, res) => {
       return res.status(Number(err?.httpStatus) || 409).json({
         error: err?.message || "Carrito bloqueado por orden pendiente de verificación.",
         id_orden: err?.id_orden || null,
+      });
+    }
+    if (err?.code === "INVALID_PRECIO_ESPECIAL") {
+      return res.status(Number(err?.httpStatus) || 400).json({
+        error: err?.message || "id_precio_especial inválido.",
       });
     }
     res.status(500).json({ error: err.message });
@@ -13115,6 +13572,14 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
     if (ventasErr) throw ventasErr;
 
     const ventas = Array.isArray(ventasRows) ? ventasRows : [];
+    const renewalPriceIds = uniqPositiveIds((ventas || []).map((venta) => venta?.id_precio));
+    const renewalSpecialRows = renewalPriceIds.length
+      ? await listUserSpecialPrices({
+          idUsuario: payload.uid,
+          idPrecios: renewalPriceIds,
+        })
+      : [];
+    const renewalSpecialLookup = buildSpecialPriceLookup(renewalSpecialRows || []);
     const ventasById = ventas.reduce((acc, venta) => {
       const ventaId = toPositiveInt(venta?.id_venta);
       if (!ventaId) return acc;
@@ -13133,7 +13598,9 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
     const existingRows = existingVentaIds.length
       ? await supabaseAdmin
           .from("carrito_items")
-          .select("id_item, id_venta, id_precio, cantidad, meses, renovacion, id_cuenta, id_perfil")
+          .select(
+            "id_item, id_venta, id_precio, id_precio_especial, cantidad, meses, renovacion, id_cuenta, id_perfil",
+          )
           .eq("id_carrito", carritoId)
           .eq("renovacion", true)
           .in("id_venta", existingVentaIds)
@@ -13222,6 +13689,8 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
       }
       const cuentaId = normalizeNullableId(venta?.id_cuenta) || normalizeNullableId(venta?.id_cuenta_miembro);
       const perfilId = normalizeNullableId(venta?.id_perfil);
+      const precioEspecialId =
+        toPositiveInt(renewalSpecialLookup?.byPrecioId?.[precioId]?.id) || null;
       const existing = existingByVenta[ventaId] || null;
 
       if (existing) {
@@ -13233,6 +13702,9 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
         if (!Number.isFinite(existingMeses) || existingMeses <= 0) patch.meses = 1;
         if (existing?.renovacion !== true) patch.renovacion = true;
         if (toPositiveInt(existing?.id_precio) !== precioId) patch.id_precio = precioId;
+        if (normalizeNullableId(existing?.id_precio_especial) !== precioEspecialId) {
+          patch.id_precio_especial = precioEspecialId;
+        }
         if (normalizeNullableId(existing?.id_cuenta) !== cuentaId) patch.id_cuenta = cuentaId;
         if (normalizeNullableId(existing?.id_perfil) !== perfilId) patch.id_perfil = perfilId;
         if (Object.keys(patch).length) {
@@ -13256,6 +13728,7 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
         meses: 1,
         renovacion: true,
         id_venta: ventaId,
+        id_precio_especial: precioEspecialId,
         id_cuenta: cuentaId,
         id_perfil: perfilId,
       });
@@ -13357,14 +13830,24 @@ app.get("/api/cart", async (_req, res) => {
     });
 
     const { data: items, error: itemErr } = await runSupabaseQueryWithRetry(
-      () =>
-        supabaseAdmin
-          .from("carrito_items")
-          .select("id_item, id_precio, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil")
-          .eq("id_carrito", carritoId),
+        () =>
+          supabaseAdmin
+            .from("carrito_items")
+            .select(
+              "id_item, id_precio, id_precio_especial, cantidad, meses, renovacion, id_venta, id_cuenta, id_perfil",
+            )
+            .eq("id_carrito", carritoId),
       "cart:get:items",
     );
     if (itemErr) throw itemErr;
+    const cartSpecialIds = uniqPositiveIds((items || []).map((item) => item?.id_precio_especial));
+    const cartSpecialRows = cartSpecialIds.length
+      ? await listUserSpecialPrices({
+          idUsuario,
+          idEspeciales: cartSpecialIds,
+        })
+      : [];
+    const cartSpecialLookup = buildSpecialPriceLookup(cartSpecialRows || []);
 
     // Enriquecer con datos de venta/cuenta/perfil para renovaciones
     const cuentaIds = Array.from(
@@ -13425,6 +13908,13 @@ app.get("/api/cart", async (_req, res) => {
         ...it,
         correo: correoResolved,
         n_perfil: ventaInfo?.perfiles?.n_perfil || null,
+        precio_especial_monto: Number.isFinite(
+          parseOptionalCheckoutNumber(cartSpecialLookup?.byId?.[toPositiveInt(it?.id_precio_especial)]?.monto),
+        )
+          ? roundCheckoutMoney(
+              cartSpecialLookup.byId[toPositiveInt(it?.id_precio_especial)]?.monto,
+            )
+          : null,
       };
     });
 
@@ -17003,6 +17493,10 @@ app.post("/api/checkout", async (req, res) => {
     const parsedOrderId = Number(id_orden);
     const checkoutOrderPayload = {
       id_usuario: idUsuarioVentas,
+      id_admin:
+        sessionIsSuper && Number.isFinite(Number(adminCandidate)) && Number(adminCandidate) > 0
+          ? Number(adminCandidate)
+          : null,
       total: checkoutTotal,
       tasa_bs: tasaBs,
       monto_bs,

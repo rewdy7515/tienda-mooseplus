@@ -2014,6 +2014,13 @@ const mapCartItems = (items, precios, plataformas) => {
   return (items || []).map((item) => {
     const price = priceById[item.id_precio] || {};
     const platform = platformById[price.id_plataforma] || {};
+    const specialUnitRaw = item?.precio_especial_monto;
+    const specialUnit = Number(specialUnitRaw);
+    const hasSpecialUnit =
+      specialUnitRaw !== null && specialUnitRaw !== undefined && Number.isFinite(specialUnit);
+    const unit = hasSpecialUnit
+      ? specialUnit
+      : Number(price?.precio_usd_detal) || 0;
     const flags = {
       por_pantalla: platform.por_pantalla,
       por_acceso: platform.por_acceso,
@@ -2022,7 +2029,7 @@ const mapCartItems = (items, precios, plataformas) => {
     const detalle = (() => {
       if (flags.tarjeta_de_regalo) {
         const region = price.region || "-";
-        const monto = `${price.valor_tarjeta_de_regalo || ""} ${price.moneda || ""} $${price.precio_usd_detal}`;
+        const monto = `${price.valor_tarjeta_de_regalo || ""} ${price.moneda || ""} $${unit}`;
         return `Región: ${region} · Monto: ${monto}`;
       }
       const qty = item.cantidad || price.cantidad || 1;
@@ -2034,18 +2041,20 @@ const mapCartItems = (items, precios, plataformas) => {
         : "mes";
       const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
       const mesesTxt = baseUnit === "mes" ? ` · ${meses} mes${meses === 1 ? "" : "es"}` : "";
-      return `${qty} ${baseUnit}${plural}${mesesTxt} $${price.precio_usd_detal || ""}`;
+      return `${qty} ${baseUnit}${plural}${mesesTxt} $${unit || ""}`;
     })();
 
     return {
       id_precio: item.id_precio,
+      id_precio_especial: item.id_precio_especial ?? null,
+      precio_especial_monto: hasSpecialUnit ? specialUnit : null,
       id_item: item.id_item,
       id_venta: item.id_venta,
       id_plataforma: price.id_plataforma,
       nombre: platform.nombre || `Precio ${item.id_precio}`,
       imagen: platform.imagen,
       plan: price.plan,
-      precio: price.precio_usd_detal,
+      precio: unit,
       cantidad: item.cantidad,
       meses: item.meses,
       detalle,

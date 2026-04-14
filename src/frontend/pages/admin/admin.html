@@ -188,6 +188,7 @@
         <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
         <button class="btn-primary admin-action" id="btn-agregar-pines">Agregar pines</button>
         <button class="btn-primary admin-action" id="btn-sandbox-giftcards">Sandbox Gift Cards</button>
+        <button class="btn-primary admin-action hidden" id="btn-precios-especiales">Precios especiales</button>
       </div>
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
@@ -296,6 +297,7 @@
       const btnImportarDatos = document.querySelector("#btn-importar-datos");
       const btnEditarLogos = document.querySelector("#btn-editar-logos");
       const btnRecordatorios = document.querySelector("#btn-recordatorios");
+      const btnPreciosEspeciales = document.querySelector("#btn-precios-especiales");
       const dashDashboardAction = document.querySelector("#dash-dashboard-action");
       const modalRenovarSpotify = document.querySelector("#modal-renovar-spotify");
       const modalRenovarList = document.querySelector("#spotify-renovar-list");
@@ -896,6 +898,7 @@
             btnImportarDatos,
             btnEditarLogos,
             btnRecordatorios,
+            btnPreciosEspeciales,
           ].forEach((btn) => {
             if (!btn) return;
             btn.classList.toggle("hidden", !isSuperAdmin);
@@ -950,6 +953,10 @@
 
       document.querySelector("#btn-sandbox-giftcards")?.addEventListener("click", () => {
         window.location.href = "sandbox_giftcards.html";
+      });
+
+      document.querySelector("#btn-precios-especiales")?.addEventListener("click", () => {
+        window.location.href = "precios_especiales.html";
       });
 
       document.querySelector("#btn-editar-precios")?.addEventListener("click", () => {

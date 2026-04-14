@@ -1164,6 +1164,8 @@ export const initModal = (elements) => {
       refresh: false,
       optimisticItem: {
         id_precio: selectedPrecio.id_precio,
+        id_precio_especial: selectedPrecio.id_precio_especial ?? null,
+        precio_especial_monto: selectedPrecio.id_precio_especial ? unitPrice : null,
         cantidad: currentQty,
         meses: monthsToSend,
         renovacion: false,
@@ -1181,6 +1183,7 @@ export const initModal = (elements) => {
     sendCartDelta(selectedPrecio.id_precio, currentQty, monthsToSend, {
       renovacion: false,
       id_venta: null,
+      id_precio_especial: selectedPrecio.id_precio_especial ?? null,
     }).finally(() => {
       refreshCartFromServer();
     });

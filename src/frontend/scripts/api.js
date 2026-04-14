@@ -893,6 +893,19 @@ const isTransientCartBackendError = (status, bodyText = "") => {
   return hasTransientNetworkMessage(bodyText);
 };
 
+const fetchMySpecialPrices = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/api/precios-especiales/me`, {
+      credentials: "include",
+    });
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({}));
+    return Array.isArray(data?.items) ? data.items : [];
+  } catch (_err) {
+    return [];
+  }
+};
+
 export async function loadCatalog() {
   const startedAt = getDebugNow();
   logApiDebug("loadCatalog:start", {});
@@ -935,6 +948,7 @@ export async function loadCatalog() {
     { data: plataformas, error: errPlat },
     { data: precios, error: errPre },
     { data: descuentos, error: errDesc },
+    preciosEspeciales,
   ] = await Promise.all([
     supabase.from("categorias").select("id_categoria, nombre").order("id_categoria"),
     fetchPlataformasCatalog(),
@@ -945,6 +959,7 @@ export async function loadCatalog() {
       )
       .order("id_precio"),
     supabase.from("descuentos").select("*").order("meses", { ascending: true }),
+    fetchMySpecialPrices(),
   ]);
 
   if (errCat || errPlat || errPre || errDesc) {
@@ -958,14 +973,118 @@ export async function loadCatalog() {
     throw new Error(errCat?.message || errPlat?.message || errPre?.message || errDesc?.message);
   }
 
+  const specialByPrecio = (preciosEspeciales || []).reduce((acc, row) => {
+    const precioId = Number(row?.id_precio);
+    const specialId = Number(row?.id);
+    const monto = Number(row?.monto);
+    if (!Number.isFinite(precioId) || precioId <= 0) return acc;
+    if (!Number.isFinite(monto)) return acc;
+    acc[precioId] = {
+      id: Number.isFinite(specialId) && specialId > 0 ? Math.trunc(specialId) : null,
+      monto,
+    };
+    return acc;
+  }, {});
+  const preciosResolved = (precios || []).map((price) => {
+    const precioId = Number(price?.id_precio);
+    const special = Number.isFinite(precioId) ? specialByPrecio[precioId] : null;
+    if (!special || !Number.isFinite(Number(special?.monto))) {
+      return {
+        ...price,
+        id_precio_especial: null,
+      };
+    }
+    const montoEspecial = Number(special.monto);
+    return {
+      ...price,
+      id_precio_especial: special.id,
+      precio_usd_detal: montoEspecial,
+      precio_usd_mayor: montoEspecial,
+    };
+  });
+
   logApiDebug("loadCatalog:done", {
     ms: getElapsedMs(startedAt),
     categorias: Array.isArray(categorias) ? categorias.length : 0,
     plataformas: Array.isArray(plataformas) ? plataformas.length : 0,
-    precios: Array.isArray(precios) ? precios.length : 0,
+    precios: Array.isArray(preciosResolved) ? preciosResolved.length : 0,
     descuentos: Array.isArray(descuentos) ? descuentos.length : 0,
   });
-  return { categorias, plataformas, precios, descuentos };
+  return { categorias, plataformas, precios: preciosResolved, descuentos };
+}
+
+export async function searchSpecialPriceClients(query = "", limit = 30) {
+  try {
+    await ensureServerSession();
+    const url = new URL(`${API_BASE}/api/admin/precios-especiales/clientes`);
+    const q = String(query || "").trim();
+    if (q) url.searchParams.set("q", q);
+    if (Number.isFinite(Number(limit))) {
+      url.searchParams.set("limit", String(Math.max(1, Math.trunc(Number(limit)))));
+    }
+    const res = await fetch(url.toString(), {
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo buscar clientes.", items: [] };
+    }
+    return {
+      items: Array.isArray(data?.items) ? data.items : [],
+    };
+  } catch (err) {
+    console.error("searchSpecialPriceClients error", err);
+    return { error: err.message, items: [] };
+  }
+}
+
+export async function fetchSpecialPricesForClient(idUsuario) {
+  try {
+    await ensureServerSession();
+    const idUsuarioNum = Number(idUsuario);
+    if (!Number.isFinite(idUsuarioNum) || idUsuarioNum <= 0) {
+      return { error: "id_usuario inválido." };
+    }
+    const url = new URL(`${API_BASE}/api/admin/precios-especiales`);
+    url.searchParams.set("id_usuario", String(Math.trunc(idUsuarioNum)));
+    const res = await fetch(url.toString(), {
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudieron cargar los precios especiales." };
+    }
+    return data;
+  } catch (err) {
+    console.error("fetchSpecialPricesForClient error", err);
+    return { error: err.message };
+  }
+}
+
+export async function saveSpecialPriceForClient({ id_usuario, id_precio, monto }) {
+  try {
+    await ensureServerSession();
+    const res = await fetch(`${API_BASE}/api/admin/precios-especiales`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        id_usuario,
+        id_precio,
+        monto,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data?.error || "No se pudo guardar el precio especial." };
+    }
+    return data;
+  } catch (err) {
+    console.error("saveSpecialPriceForClient error", err);
+    return { error: err.message };
+  }
 }
 
 export async function fetchHomeBanners(options = {}) {

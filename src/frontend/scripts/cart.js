@@ -175,10 +175,15 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
     const mesesTxt = `${meses} mes${meses === 1 ? "" : "es"}`;
     const useMayor = acceso === false;
     const isCliente = acceso === false ? false : true;
+    const specialUnitRaw = item?.precio_especial_monto;
+    const specialUnit = Number(specialUnitRaw);
+    const hasSpecialUnit = specialUnitRaw !== null && specialUnitRaw !== undefined && Number.isFinite(specialUnit);
     const unit =
-      useMayor && price.precio_usd_mayor != null && price.precio_usd_mayor !== undefined
-        ? Number(price.precio_usd_mayor) || 0
-        : Number(price.precio_usd_detal) || 0;
+      hasSpecialUnit
+        ? specialUnit
+        : useMayor && price.precio_usd_mayor != null && price.precio_usd_mayor !== undefined
+          ? Number(price.precio_usd_mayor) || 0
+          : Number(price.precio_usd_detal) || 0;
     const baseSubtotal = round2(unit * qty * (flags.tarjeta_de_regalo ? 1 : meses));
     const monthEnabled =
       !!platform?.descuento_meses &&
@@ -218,6 +223,8 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
     })();
     return {
       id_precio: item.id_precio,
+      id_precio_especial: item.id_precio_especial ?? null,
+      precio_especial_monto: hasSpecialUnit ? specialUnit : null,
       id_item: item.id_item,
       id_plataforma: price.id_plataforma,
       id_cuenta: item.id_cuenta || null,
@@ -244,6 +251,8 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
 const normalizeRawItem = (item = {}) => ({
   id_item: item.id_item ?? null,
   id_precio: item.id_precio ?? null,
+  id_precio_especial: item.id_precio_especial ?? null,
+  precio_especial_monto: item.precio_especial_monto ?? null,
   cantidad: Number(item.cantidad) || 1,
   meses: item.meses ?? null,
   renovacion: item.renovacion === true,
@@ -258,6 +267,7 @@ const isSameCartLine = (a, b) => {
   const mesesB = Number(b.meses || 0);
   return (
     a.id_precio === b.id_precio &&
+    (a.id_precio_especial ?? null) === (b.id_precio_especial ?? null) &&
     a.renovacion === b.renovacion &&
     (a.id_venta ?? null) === (b.id_venta ?? null) &&
     (a.id_cuenta ?? null) === (b.id_cuenta ?? null) &&
@@ -470,6 +480,7 @@ export function initCart({
           id_venta: idVenta,
           id_item: idItem,
           renovacion: item?.renovacion,
+          id_precio_especial: item?.id_precio_especial ?? null,
           id_cuenta: item?.id_cuenta || null,
           id_perfil: item?.id_perfil || null,
         }).finally(

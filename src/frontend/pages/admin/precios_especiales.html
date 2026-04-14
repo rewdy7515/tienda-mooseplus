@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Precios especiales</title>
+    <link rel="stylesheet" href="../../styles/styles.css" />
+    <style>
+      .special-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .special-search-box {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-width: 620px;
+      }
+      .special-search-input {
+        width: 100%;
+      }
+      .special-results {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .special-result-btn {
+        border: 1px solid #d1d5db;
+        background: #fff;
+        color: #111827;
+        border-radius: 10px;
+        padding: 8px 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .special-result-btn:hover {
+        border-color: #9ca3af;
+        background: #f9fafb;
+      }
+      .special-selected {
+        font-size: 13px;
+        color: #374151;
+      }
+      .special-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+      }
+      .special-table {
+        width: max-content;
+        min-width: 100%;
+      }
+      .special-table th,
+      .special-table td {
+        padding: 8px 10px;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+      .special-table th {
+        background: #374151;
+        color: #fff;
+      }
+      .special-table td {
+        background: #fff;
+      }
+      .special-table tbody tr:nth-child(odd) td {
+        background: #f9fafb;
+      }
+      .special-edit-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .special-price-input {
+        width: 110px;
+      }
+      .special-save-btn {
+        border: none;
+        border-radius: 8px;
+        padding: 6px 8px;
+        background: #111827;
+        color: #fff;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .special-save-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      @media (max-width: 768px) {
+        .special-search-box {
+          max-width: 100%;
+        }
+        .special-table th,
+        .special-table td {
+          padding: 7px 8px;
+          font-size: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
+    <script src="../../scripts/header-loader.js"></script>
+
+    <main class="categorias-dinamicas">
+      <h2>Precios especiales</h2>
+      <div class="special-wrapper">
+        <p id="special-status" class="status">Cargando...</p>
+        <div id="special-search-box" class="special-search-box hidden">
+          <input
+            type="text"
+            id="special-client-search"
+            class="form-input special-search-input"
+            placeholder="Buscar cliente por nombre, apellido, correo o ID"
+            autocomplete="off"
+          />
+          <div id="special-results" class="special-results"></div>
+        </div>
+        <p id="special-selected" class="special-selected hidden"></p>
+        <div id="special-table-wrap" class="special-table-wrap hidden">
+          <table class="table-base special-table">
+            <thead>
+              <tr>
+                <th>Plataforma</th>
+                <th>Tipo</th>
+                <th>Precio Base</th>
+                <th>Precio Especial</th>
+              </tr>
+            </thead>
+            <tbody id="special-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { requireSession, attachLogoHome, attachLogout } from "../../scripts/session.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        searchSpecialPriceClients,
+        fetchSpecialPricesForClient,
+        saveSpecialPriceForClient,
+      } from "../../scripts/api.js";
+
+      requireSession();
+      attachLogoHome();
+      attachLogout(clearServerSession);
+
+      const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+
+      const statusEl = document.getElementById("special-status");
+      const searchBoxEl = document.getElementById("special-search-box");
+      const searchInputEl = document.getElementById("special-client-search");
+      const resultsEl = document.getElementById("special-results");
+      const selectedEl = document.getElementById("special-selected");
+      const tableWrapEl = document.getElementById("special-table-wrap");
+      const tableBodyEl = document.getElementById("special-table-body");
+
+      let selectedClient = null;
+      let currentRows = [];
+      let searchTimer = null;
+      let searchSeq = 0;
+
+      const setStatus = (msg = "") => {
+        if (statusEl) statusEl.textContent = msg;
+      };
+
+      const escapeHtml = (value) =>
+        String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const formatUsd = (value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return "-";
+        return `$${num.toFixed(2)}`;
+      };
+
+      const getClientLabel = (client = {}) => {
+        const fullName = [client?.nombre, client?.apellido].filter(Boolean).join(" ").trim();
+        const name = fullName || client?.correo || `Usuario #${client?.id_usuario || "-"}`;
+        const emailTxt = client?.correo ? ` · ${client.correo}` : "";
+        return `${name} (#${client?.id_usuario || "-"}${emailTxt})`;
+      };
+
+      const renderResults = (clients = []) => {
+        resultsEl.innerHTML = "";
+        if (!Array.isArray(clients) || !clients.length) {
+          resultsEl.innerHTML = '<p class="status">Sin resultados.</p>';
+          return;
+        }
+        const frag = document.createDocumentFragment();
+        clients.forEach((client) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "special-result-btn";
+          btn.textContent = getClientLabel(client);
+          btn.addEventListener("click", () => selectClient(client));
+          frag.appendChild(btn);
+        });
+        resultsEl.appendChild(frag);
+      };
+
+      const renderTable = () => {
+        tableBodyEl.innerHTML = "";
+        if (!selectedClient || !Array.isArray(currentRows) || !currentRows.length) {
+          tableWrapEl.classList.add("hidden");
+          return;
+        }
+        const rowsHtml = currentRows
+          .map((row, idx) => {
+            const idPrecio = Number(row?.id_precio) || 0;
+            const specialValue =
+              row?.precio_especial === null || row?.precio_especial === undefined
+                ? ""
+                : Number(row.precio_especial).toFixed(2);
+            return `
+              <tr data-row-index="${idx}" data-id-precio="${idPrecio}">
+                <td>${escapeHtml(row?.plataforma || "-")}</td>
+                <td>${escapeHtml(row?.tipo || "-")}</td>
+                <td>${escapeHtml(formatUsd(row?.precio_base))}</td>
+                <td>
+                  <div class="special-edit-wrap">
+                    <input
+                      type="number"
+                      class="form-input special-price-input"
+                      data-role="special-price-input"
+                      inputmode="decimal"
+                      min="0"
+                      step="0.01"
+                      value="${escapeHtml(specialValue)}"
+                      placeholder="Base"
+                    />
+                    <button type="button" class="special-save-btn" data-role="special-price-save" aria-label="Guardar precio especial">✎</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+        tableBodyEl.innerHTML = rowsHtml;
+        tableWrapEl.classList.remove("hidden");
+      };
+
+      const loadClientPrices = async (idUsuario) => {
+        setStatus("Cargando precios del cliente...");
+        const response = await fetchSpecialPricesForClient(idUsuario);
+        if (response?.error) {
+          setStatus(response.error);
+          tableWrapEl.classList.add("hidden");
+          return;
+        }
+        currentRows = Array.isArray(response?.items) ? response.items : [];
+        const cliente = response?.cliente || selectedClient || {};
+        selectedClient = {
+          id_usuario: cliente?.id_usuario,
+          nombre: cliente?.nombre,
+          apellido: cliente?.apellido,
+          correo: cliente?.correo,
+          acceso_cliente: cliente?.acceso_cliente,
+        };
+        selectedEl.textContent = `Cliente seleccionado: ${getClientLabel(selectedClient)}`;
+        selectedEl.classList.remove("hidden");
+        renderTable();
+        setStatus("Ajusta y guarda los precios especiales por fila.");
+      };
+
+      const selectClient = async (client) => {
+        if (!client?.id_usuario) return;
+        selectedClient = client;
+        await loadClientPrices(client.id_usuario);
+      };
+
+      const runSearch = async () => {
+        const term = String(searchInputEl?.value || "").trim();
+        const requestId = ++searchSeq;
+        setStatus("Buscando clientes...");
+        const response = await searchSpecialPriceClients(term, 30);
+        if (requestId !== searchSeq) return;
+        if (response?.error) {
+          setStatus(response.error);
+          resultsEl.innerHTML = "";
+          return;
+        }
+        renderResults(response?.items || []);
+        setStatus("Selecciona un cliente para editar sus precios.");
+      };
+
+      const handleSearchInput = () => {
+        if (searchTimer) window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(runSearch, 220);
+      };
+
+      tableBodyEl?.addEventListener("click", async (event) => {
+        const saveBtn = event.target.closest('[data-role="special-price-save"]');
+        if (!saveBtn) return;
+        const rowEl = saveBtn.closest("tr[data-id-precio]");
+        if (!rowEl || !selectedClient?.id_usuario) return;
+        const idPrecio = Number(rowEl.dataset.idPrecio);
+        const rowIndex = Number(rowEl.dataset.rowIndex);
+        const inputEl = rowEl.querySelector('[data-role="special-price-input"]');
+        if (!Number.isFinite(idPrecio) || idPrecio <= 0 || !inputEl) return;
+
+        const raw = String(inputEl.value || "").trim().replace(",", ".");
+        const amount = raw === "" ? null : Number(raw);
+        if (raw !== "" && (!Number.isFinite(amount) || amount < 0)) {
+          setStatus("Monto inválido. Ingresa un valor mayor o igual a 0.");
+          return;
+        }
+
+        saveBtn.disabled = true;
+        setStatus("Guardando precio especial...");
+        const response = await saveSpecialPriceForClient({
+          id_usuario: selectedClient.id_usuario,
+          id_precio: idPrecio,
+          monto: amount,
+        });
+        saveBtn.disabled = false;
+
+        if (response?.error) {
+          setStatus(response.error);
+          return;
+        }
+
+        if (Number.isFinite(rowIndex) && rowIndex >= 0 && rowIndex < currentRows.length) {
+          currentRows[rowIndex] = {
+            ...currentRows[rowIndex],
+            id_precio_especial: response?.item?.id || null,
+            precio_especial: amount,
+          };
+        }
+        setStatus("Precio especial guardado.");
+        renderTable();
+      });
+
+      searchInputEl?.addEventListener("input", handleSearchInput);
+      searchInputEl?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (searchTimer) window.clearTimeout(searchTimer);
+          runSearch();
+        }
+      });
+
+      const init = async () => {
+        setStatus("Validando permisos...");
+        const user = await loadCurrentUser();
+        if (!isTrue(user?.permiso_superadmin)) {
+          setStatus("Solo superadmin puede acceder a esta página.");
+          searchBoxEl.classList.add("hidden");
+          selectedEl.classList.add("hidden");
+          tableWrapEl.classList.add("hidden");
+          return;
+        }
+        searchBoxEl.classList.remove("hidden");
+        setStatus("Busca un cliente para configurar precios especiales.");
+        await runSearch();
+      };
+
+      init();
+    </script>
+  </body>
+</html>

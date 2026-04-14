@@ -635,7 +635,13 @@ const getPriceMaps = () => {
 };
 
 const calcItemTotals = (item, price, platform) => {
-  const unit = Number(price?.precio_usd_detal) || 0;
+  const specialUnitRaw = item?.precio_especial_monto;
+  const specialUnit = Number(specialUnitRaw);
+  const hasSpecialUnit =
+    specialUnitRaw !== null && specialUnitRaw !== undefined && Number.isFinite(specialUnit);
+  const unit = hasSpecialUnit
+    ? specialUnit
+    : Number(price?.precio_usd_detal) || 0;
   const qtyVal = Math.max(1, Number(item?.cantidad) || Number(price?.cantidad) || 1);
   const qtyDescuento = Math.max(1, Number(item?.qty_descuento) || qtyVal);
   const isGiftCard = isTrue(platform?.tarjeta_de_regalo);
@@ -1409,6 +1415,7 @@ const syncCartValuesBeforeCheckout = async () => {
     await sendCartDelta(dbItem.id_precio, delta, uiMeses, {
       id_item: dbItem.id_item,
       renovacion: dbItem.renovacion === true,
+      id_precio_especial: dbItem.id_precio_especial ?? null,
       id_venta: dbItem.id_venta ?? null,
       id_cuenta: dbItem.id_cuenta ?? null,
       id_perfil: dbItem.id_perfil ?? null,
@@ -1422,6 +1429,7 @@ const syncCartValuesBeforeCheckout = async () => {
     await sendCartDelta(dbItem.id_precio, -qty, dbItem.meses || 1, {
       id_item: dbItem.id_item,
       renovacion: dbItem.renovacion === true,
+      id_precio_especial: dbItem.id_precio_especial ?? null,
       id_venta: dbItem.id_venta ?? null,
       id_cuenta: dbItem.id_cuenta ?? null,
       id_perfil: dbItem.id_perfil ?? null,

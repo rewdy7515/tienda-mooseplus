@@ -202,6 +202,23 @@
       .cuenta-platform-title.is-clickable {
         cursor: pointer;
       }
+      .cuenta-platform-name-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .cuenta-platform-id {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #e5e7eb;
+        color: #374151;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1;
+      }
       .platform-link-icon {
         display: inline-block;
         margin-left: 6px;
@@ -4414,18 +4431,25 @@
         const plataformaTitleClass = plataformaLink
           ? "cuenta-platform-title is-clickable"
           : "cuenta-platform-title";
+        const cuentaIdLabel =
+          info.id_cuenta !== null && info.id_cuenta !== undefined
+            ? String(info.id_cuenta)
+            : "-";
 
         detalleEl.innerHTML = `
           <div class="cuenta-platform-header">
-            <div class="${plataformaTitleClass}" ${
-              plataformaLinkAttr
-                ? `data-link="${plataformaLinkAttr}" title="Abrir página de la plataforma"`
-                : ""
-            }>${info.plataformaNombre || "-"}${
-              plataformaLinkAttr
-                ? '<span class="platform-link-icon" aria-hidden="true">↗</span>'
-                : ""
-            }</div>
+            <div class="cuenta-platform-name-wrap">
+              <div class="${plataformaTitleClass}" ${
+                plataformaLinkAttr
+                  ? `data-link="${plataformaLinkAttr}" title="Abrir página de la plataforma"`
+                  : ""
+              }>${info.plataformaNombre || "-"}${
+                plataformaLinkAttr
+                  ? '<span class="platform-link-icon" aria-hidden="true">↗</span>'
+                  : ""
+              }</div>
+              <span class="cuenta-platform-id">ID Cuenta: ${cuentaIdLabel}</span>
+            </div>
             <button type="button" class="btn-outline btn-marcar-tarea" data-cuenta="${info.id_cuenta || ""}">Marcar tarea</button>
           </div>
           <div class="cuenta-platform-cred">

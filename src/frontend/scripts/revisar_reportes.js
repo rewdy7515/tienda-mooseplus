@@ -1848,8 +1848,7 @@ async function reemplazarServicio(options = {}) {
         return (
           !!perfilId &&
           !!cuentaId &&
-          !reemplazosBloqueados.perfiles.has(perfilId) &&
-          !reemplazosBloqueados.cuentas.has(cuentaId)
+          !reemplazosBloqueados.perfiles.has(perfilId)
         );
       });
       return { data: libre || null };
@@ -1882,8 +1881,7 @@ async function reemplazarServicio(options = {}) {
         return (
           !!perfilId &&
           !!cuentaId &&
-          !reemplazosBloqueados.perfiles.has(perfilId) &&
-          !reemplazosBloqueados.cuentas.has(cuentaId)
+          !reemplazosBloqueados.perfiles.has(perfilId)
         );
       });
       return { data: libre || null };

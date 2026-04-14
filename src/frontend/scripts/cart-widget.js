@@ -166,7 +166,11 @@ if (!window.__cartWidgetInit) {
         const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
         const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
         const mesesTxt = `${meses} mes${meses === 1 ? "" : "es"}`;
-        const unit = Number(price.precio_usd_detal) || 0;
+        const specialUnitRaw = item?.precio_especial_monto;
+        const specialUnit = Number(specialUnitRaw);
+        const hasSpecialUnit =
+          specialUnitRaw !== null && specialUnitRaw !== undefined && Number.isFinite(specialUnit);
+        const unit = hasSpecialUnit ? specialUnit : Number(price.precio_usd_detal) || 0;
         const isCliente = true;
         const baseSubtotal = round2(unit * qty * (flags.tarjeta_de_regalo ? 1 : meses));
         const monthEnabled =
@@ -208,13 +212,15 @@ if (!window.__cartWidgetInit) {
         return {
           id_item: item.id_item,
           id_precio: item.id_precio,
+          id_precio_especial: item.id_precio_especial ?? null,
+          precio_especial_monto: hasSpecialUnit ? specialUnit : null,
           id_plataforma: price.id_plataforma,
           id_cuenta: item.id_cuenta || null,
           id_perfil: item.id_perfil || null,
           nombre: platform.nombre || `Precio ${item.id_precio}`,
           imagen: platform.imagen,
           plan: price.plan,
-          precio: price.precio_usd_detal,
+          precio: unit,
           cantidad: qty,
           meses,
           detalle,
