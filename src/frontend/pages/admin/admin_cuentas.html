@@ -7432,7 +7432,45 @@
             }
           }
 
+          if (!assigned && perfilAnteriorId && isTrue(ventaInfo?.reportado)) {
+            const { data: perfilDirecto, error: perfilDirectErr } =
+              await findPerfilLibreSinBloqueos(
+                plataformaId,
+                perfilHogar,
+                cuentaOrigenId,
+              );
+            if (perfilDirectErr) throw perfilDirectErr;
+            if (perfilDirecto) {
+              nuevoPerfil = perfilDirecto.id_perfil;
+              nuevoCuenta = perfilDirecto.id_cuenta;
+              dataDestino = {
+                correo: perfilDirecto.cuentas?.correo,
+                clave: perfilDirecto.cuentas?.clave,
+                pin: perfilDirecto.pin,
+                n_perfil: perfilDirecto.n_perfil,
+              };
+              assigned = true;
+              console.warn("[reemplazo] usando fallback sin bloqueos de historial", {
+                id_venta: ventaId,
+                cuenta_origen: cuentaOrigenId,
+                perfil_origen: perfilAnteriorId,
+                cuenta_destino: nuevoCuenta,
+                perfil_destino: nuevoPerfil,
+              });
+            }
+          }
+
           if (!assigned) {
+            console.warn("[reemplazo] sin stock", {
+              id_venta: ventaId,
+              plataformaId,
+              cuentaOrigenId,
+              perfilAnteriorId,
+              perfilHogar,
+              ventaPerfil,
+              ventaMiembro,
+              allowBlockedFallback,
+            });
             alert("Sin stock");
             return;
           }
@@ -9004,6 +9042,43 @@
           }
           return { data: fallback };
         }
+        return { data: libre || null };
+      };
+
+      const findPerfilLibreSinBloqueos = async (
+        plataformaId,
+        perfilHogar,
+        excludeCuenta,
+      ) => {
+        const excludeCuentaId = toPositiveId(excludeCuenta);
+        let query = supabase
+          .from("perfiles")
+          .select(
+            "id_perfil, perfil_hogar, id_cuenta, pin, n_perfil, ocupado, cuentas!perfiles_id_cuenta_fkey!inner(id_plataforma, inactiva, correo, clave)",
+          )
+          .eq("cuentas.id_plataforma", plataformaId)
+          .not("ocupado", "is", true)
+          .order("id_perfil", { ascending: true });
+        if (perfilHogar === true) {
+          query = query.eq("perfil_hogar", true);
+        } else {
+          query = query.or("perfil_hogar.is.null,perfil_hogar.eq.false");
+        }
+        query = query.or("inactiva.is.null,inactiva.eq.false", {
+          foreignTable: "cuentas",
+        });
+        if (excludeCuentaId) query = query.neq("id_cuenta", excludeCuentaId);
+        const { data, error } = await query;
+        if (error) return { error };
+        const libre = (data || []).find((perfil) => {
+          const perfilId = toPositiveId(perfil?.id_perfil);
+          const cuentaId = toPositiveId(perfil?.id_cuenta);
+          return (
+            !!perfilId &&
+            !!cuentaId &&
+            (!excludeCuentaId || cuentaId !== excludeCuentaId)
+          );
+        });
         return { data: libre || null };
       };
 
