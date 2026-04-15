@@ -1365,7 +1365,8 @@
               (data || []).forEach((row) => {
                 const cuentaId = toPositiveId(row?.id_cuenta);
                 const perfilId = toPositiveId(row?.id_perfil);
-                if (cuentaId) cuentas.add(cuentaId);
+                // Solo bloquea la cuenta completa cuando el reemplazo no estuvo ligado a un perfil.
+                if (cuentaId && !perfilId) cuentas.add(cuentaId);
                 if (perfilId) perfiles.add(perfilId);
               });
               reemplazosCache = { cuentas, perfiles };
@@ -1386,7 +1387,7 @@
         if (!reemplazosCache) return;
         const cuentaId = toPositiveId(idCuenta);
         const perfilId = toPositiveId(idPerfil);
-        if (cuentaId) reemplazosCache.cuentas.add(cuentaId);
+        if (cuentaId && !perfilId) reemplazosCache.cuentas.add(cuentaId);
         if (perfilId) reemplazosCache.perfiles.add(perfilId);
       };
       const normalizeText = (val) =>
@@ -8994,7 +8995,7 @@
           .eq("id_plataforma", plataformaId)
           .eq("venta_perfil", false)
           .eq("venta_miembro", true)
-          .eq("ocupado", false)
+          .or("ocupado.is.null,ocupado.eq.false")
           .order("id_cuenta", { ascending: true });
         if (onlyActiveFalse) {
           query = query.eq("inactiva", false);
@@ -9078,7 +9079,7 @@
           )
           .eq("cuentas.id_plataforma", plataformaId)
           .eq("cuentas.cuenta_madre", true)
-          .eq("ocupado", false)
+          .not("ocupado", "is", true)
           .order("id_perfil", { ascending: true });
         query = query.or("inactiva.is.null,inactiva.eq.false", {
           foreignTable: "cuentas",

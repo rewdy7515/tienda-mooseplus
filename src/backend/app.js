@@ -298,6 +298,12 @@ const AUTO_GIFTCARD_PENDING_DELIVERY_BATCH = Math.max(
   1,
   Math.min(500, Number(process.env.AUTO_GIFTCARD_PENDING_DELIVERY_BATCH) || 120),
 );
+const AUTO_PENDING_STOCK_DELIVERY_ENABLED =
+  process.env.AUTO_PENDING_STOCK_DELIVERY !== "false" && process.env.VERCEL !== "1";
+const AUTO_PENDING_STOCK_DELIVERY_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.AUTO_PENDING_STOCK_DELIVERY_INTERVAL_MS) || 15000,
+);
 const WHATSAPP_REPORTES_WATCHER_ENABLED =
   process.env.WHATSAPP_REPORTES_WATCHER !== "false" && process.env.VERCEL !== "1";
 const WHATSAPP_REPORTES_WATCHER_INTERVAL_MS = Math.max(
@@ -387,6 +393,7 @@ let webPushQueueLastError = null;
 let autoGiftCardPendingDeliveryInProgress = false;
 let autoGiftCardPendingDeliveryInitialized = false;
 let autoGiftCardPendingDeliveryCursor = 0;
+let autoPendingStockDeliveryInProgress = false;
 let monthlyMetricsClosureInProgress = false;
 let monthlyMetricsClosureSchedulerStarted = false;
 let monthlyMetricsClosureIntervalId = null;
@@ -5845,6 +5852,19 @@ if (AUTO_GIFTCARD_PENDING_DELIVERY_ENABLED) {
   });
 }
 
+if (AUTO_PENDING_STOCK_DELIVERY_ENABLED) {
+  console.log(
+    `[Ventas] Auto-entrega por stock disponible activa (cada ${Math.round(
+      AUTO_PENDING_STOCK_DELIVERY_INTERVAL_MS / 1000,
+    )}s).`,
+  );
+  setInterval(() => {
+    processAutoPendingStockDeliveries().catch((err) => {
+      console.error("[ventas:auto-pending-stock] worker error", err);
+    });
+  }, AUTO_PENDING_STOCK_DELIVERY_INTERVAL_MS);
+}
+
 const normalizeMontoBs = (value) => {
   if (value === null || value === undefined || value === "") return null;
   const raw = String(value).trim();
@@ -8827,7 +8847,10 @@ const orderSpotifyProfilesByPriority = (profiles = [], preferredMotherId = null)
   return ordered;
 };
 
-const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
+const autoAssignReportedPendingVentas = async ({
+  plataformaIds = [],
+  includeUnreported = false,
+} = {}) => {
   const summary = { scanned: 0, resolved: 0, skipped: 0, errors: 0 };
   const platformFilter = uniqPositiveIds(plataformaIds);
 
@@ -8837,7 +8860,7 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
   if (reemplazosErr) throw reemplazosErr;
   const reemplazosBloqueados = buildReemplazosBlocklist(reemplazosRows);
 
-  const { data: ventasRows, error: ventasErr } = await supabaseAdmin
+  let ventasQuery = supabaseAdmin
     .from("ventas")
     .select(
       `
@@ -8870,9 +8893,13 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         perfiles:perfiles(id_perfil, n_perfil, perfil_hogar)
       `
     )
-    .eq("reportado", true)
+    .eq("pendiente", true)
     .order("id_venta", { ascending: true })
-    .limit(250);
+    .limit(400);
+  if (!includeUnreported) {
+    ventasQuery = ventasQuery.eq("reportado", true);
+  }
+  const { data: ventasRows, error: ventasErr } = await ventasQuery;
   if (ventasErr) throw ventasErr;
 
   const ventas = (ventasRows || []).filter((venta) => {
@@ -8885,6 +8912,27 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
     if (platformFilter.length && !platformFilter.includes(platId)) return false;
     return true;
   });
+  const plataformaIdsEnVentas = uniqPositiveIds(
+    ventas.map((venta) =>
+      toPositiveInt(
+        venta?.precios?.id_plataforma ||
+          venta?.cuenta_base?.id_plataforma ||
+          venta?.cuenta_miembro?.id_plataforma
+      )
+    )
+  );
+  const { data: plataformaRows, error: plataformaErr } = plataformaIdsEnVentas.length
+    ? await supabaseAdmin
+        .from("plataformas")
+        .select("id_plataforma, entrega_inmediata, por_pantalla, por_acceso, cuenta_madre")
+        .in("id_plataforma", plataformaIdsEnVentas)
+    : { data: [], error: null };
+  if (plataformaErr) throw plataformaErr;
+  const plataformaById = (plataformaRows || []).reduce((acc, row) => {
+    const platId = toPositiveInt(row?.id_plataforma);
+    if (platId) acc[platId] = row;
+    return acc;
+  }, {});
 
   const findCuentaCompletaLibre = async (plataformaId, excludeCuentaIds = []) => {
     const excludeIds = new Set(uniqPositiveIds(excludeCuentaIds));
@@ -9018,39 +9066,82 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
   };
 
   for (const venta of ventas) {
-    summary.scanned += 1;
-    try {
-      const ventaId = toPositiveInt(venta?.id_venta);
-      const plataformaId = toPositiveInt(
-        venta?.precios?.id_plataforma ||
+      summary.scanned += 1;
+      try {
+        const ventaId = toPositiveInt(venta?.id_venta);
+        const plataformaId = toPositiveInt(
+          venta?.precios?.id_plataforma ||
         venta?.cuenta_base?.id_plataforma ||
         venta?.cuenta_miembro?.id_plataforma
       );
-      if (!ventaId || !plataformaId) {
-        summary.skipped += 1;
-        continue;
-      }
+        if (!ventaId || !plataformaId) {
+          summary.skipped += 1;
+          continue;
+        }
+        const plataforma = plataformaById[plataformaId] || null;
+        const esReportada = isTrue(venta?.reportado);
 
-      const oldCuentaId = toPositiveInt(venta?.id_cuenta);
-      const oldPerfilId = toPositiveInt(venta?.id_perfil);
-      const oldCuentaMiembroId = toPositiveInt(venta?.id_cuenta_miembro);
-      const currentCuenta = venta?.cuenta_base || venta?.cuenta_miembro || null;
-      const perfilHogar = venta?.perfiles?.perfil_hogar === true;
-      const onlyCuentaMadre =
-        Number(plataformaId) === 9 &&
-        (isTrue(currentCuenta?.cuenta_madre) || !!oldPerfilId);
-      const ventaMiembro =
-        isTrue(currentCuenta?.venta_miembro) || (!!oldCuentaMiembroId && !oldPerfilId);
-      const ventaPerfil =
-        !!oldPerfilId || isTrue(currentCuenta?.venta_perfil) || onlyCuentaMadre;
-      const ventaCompleta =
-        !ventaPerfil &&
-        !ventaMiembro &&
-        (isTrue(venta?.precios?.completa) ||
-          (!isTrue(currentCuenta?.venta_perfil) && !isTrue(currentCuenta?.venta_miembro)));
+        const oldCuentaId = toPositiveInt(venta?.id_cuenta);
+        const oldPerfilId = toPositiveInt(venta?.id_perfil);
+        const oldCuentaMiembroId = toPositiveInt(venta?.id_cuenta_miembro);
+        const currentCuenta = venta?.cuenta_base || venta?.cuenta_miembro || null;
+        const tieneRecursoAsignado = !!oldCuentaId || !!oldCuentaMiembroId || !!oldPerfilId;
 
-      let nuevoCuentaId = null;
-      let nuevoPerfilId = null;
+        if (!esReportada) {
+          const entregaInmediata = isTrue(plataforma?.entrega_inmediata);
+          if (!entregaInmediata || tieneRecursoAsignado) {
+            summary.skipped += 1;
+            continue;
+          }
+        }
+
+        let perfilHogar = venta?.perfiles?.perfil_hogar === true;
+        let onlyCuentaMadre =
+          Number(plataformaId) === 9 &&
+          (isTrue(currentCuenta?.cuenta_madre) || !!oldPerfilId);
+        let ventaMiembro =
+          isTrue(currentCuenta?.venta_miembro) || (!!oldCuentaMiembroId && !oldPerfilId);
+        let ventaPerfil =
+          !!oldPerfilId || isTrue(currentCuenta?.venta_perfil) || onlyCuentaMadre;
+        let ventaCompleta =
+          !ventaPerfil &&
+          !ventaMiembro &&
+          (isTrue(venta?.precios?.completa) ||
+            (!isTrue(currentCuenta?.venta_perfil) && !isTrue(currentCuenta?.venta_miembro)));
+
+        if (!esReportada && !tieneRecursoAsignado) {
+          const platCuentaMadre = isTrue(plataforma?.cuenta_madre) || Number(plataformaId) === 9;
+          const platPorAcceso = isTrue(plataforma?.por_acceso);
+          const precioCompleta = isTrue(venta?.precios?.completa);
+          if (precioCompleta) {
+            ventaCompleta = true;
+            ventaMiembro = false;
+            ventaPerfil = false;
+            onlyCuentaMadre = false;
+            perfilHogar = false;
+          } else if (platCuentaMadre) {
+            ventaCompleta = false;
+            ventaMiembro = false;
+            ventaPerfil = true;
+            onlyCuentaMadre = true;
+            perfilHogar = false;
+          } else if (platPorAcceso) {
+            ventaCompleta = false;
+            ventaMiembro = true;
+            ventaPerfil = false;
+            onlyCuentaMadre = false;
+            perfilHogar = false;
+          } else {
+            ventaCompleta = false;
+            ventaMiembro = false;
+            ventaPerfil = true;
+            onlyCuentaMadre = false;
+            perfilHogar = false;
+          }
+        }
+
+        let nuevoCuentaId = null;
+        let nuevoPerfilId = null;
       if (ventaPerfil) {
         const { data: perfilLibre, error: perfilErr } = await findPerfilLibre({
           plataformaId,
@@ -9086,9 +9177,11 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         id_cuenta: nuevoCuentaId,
         id_perfil: nuevoPerfilId || null,
         pendiente: false,
-        reportado: false,
-        aviso_admin: true,
       };
+      if (esReportada) {
+        updateVenta.reportado = false;
+        updateVenta.aviso_admin = true;
+      }
       if (oldCuentaMiembroId) {
         updateVenta.id_cuenta_miembro = null;
       }
@@ -9097,10 +9190,21 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         .update(updateVenta)
         .eq("id_venta", ventaId);
       if (updVentaErr) throw updVentaErr;
-      console.log("[autoAssignReportedPendingVentas] whatsapp servicio entregado omitido", {
-        id_venta: ventaId,
-        reason: "sale_was_reported",
-      });
+      if (esReportada) {
+        console.log("[autoAssignReportedPendingVentas] whatsapp servicio entregado omitido", {
+          id_venta: ventaId,
+          reason: "sale_was_reported",
+        });
+      } else {
+        try {
+          await notifyVentaDeliveredWhatsappBestEffort(ventaId);
+        } catch (waDeliveredErr) {
+          console.error("[autoAssignReportedPendingVentas] whatsapp entregada error", {
+            id_venta: ventaId,
+            error: waDeliveredErr?.message || waDeliveredErr,
+          });
+        }
+      }
 
       if (nuevoPerfilId) {
         const { error: occPerfilErr } = await supabaseAdmin
@@ -9128,7 +9232,7 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         }
       }
 
-      if (Number(plataformaId) !== 9 && (oldCuentaId || oldPerfilId)) {
+      if (esReportada && Number(plataformaId) !== 9 && (oldCuentaId || oldPerfilId)) {
         const { error: replErr } = await supabaseAdmin
           .from("reemplazos")
           .insert({
@@ -9140,34 +9244,36 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
         if (replErr) throw replErr;
       }
 
-      const reporteAbierto = await findOpenReporte(venta);
-      if (reporteAbierto?.id_reporte) {
-        const { error: repErr } = await supabaseAdmin
-          .from("reportes")
-          .update({
-            en_revision: false,
-            solucionado: true,
-            descripcion_solucion: "Reemplazo automatico por stock disponible",
-          })
-          .eq("id_reporte", reporteAbierto.id_reporte);
-        if (repErr) throw repErr;
-        try {
-          const reporteCtx = await fetchReporteWhatsappContextById(reporteAbierto.id_reporte);
-          if (reporteCtx?.id_reporte && reporteCtx?.solucionado === true) {
-            const waSolvedRes = await sendReporteSolvedToWhatsappOwner({
-              reporte: reporteCtx,
-              manageWhatsappLifecycle: true,
-            });
-            if (!waSolvedRes?.sent) {
-              console.warn("[autoAssignReportedPendingVentas] whatsapp solucionado skipped", {
-                id_reporte: reporteAbierto.id_reporte,
-                reason: waSolvedRes?.reason || "unknown",
-                error: waSolvedRes?.error || null,
+      if (esReportada) {
+        const reporteAbierto = await findOpenReporte(venta);
+        if (reporteAbierto?.id_reporte) {
+          const { error: repErr } = await supabaseAdmin
+            .from("reportes")
+            .update({
+              en_revision: false,
+              solucionado: true,
+              descripcion_solucion: "Reemplazo automatico por stock disponible",
+            })
+            .eq("id_reporte", reporteAbierto.id_reporte);
+          if (repErr) throw repErr;
+          try {
+            const reporteCtx = await fetchReporteWhatsappContextById(reporteAbierto.id_reporte);
+            if (reporteCtx?.id_reporte && reporteCtx?.solucionado === true) {
+              const waSolvedRes = await sendReporteSolvedToWhatsappOwner({
+                reporte: reporteCtx,
+                manageWhatsappLifecycle: true,
               });
+              if (!waSolvedRes?.sent) {
+                console.warn("[autoAssignReportedPendingVentas] whatsapp solucionado skipped", {
+                  id_reporte: reporteAbierto.id_reporte,
+                  reason: waSolvedRes?.reason || "unknown",
+                  error: waSolvedRes?.error || null,
+                });
+              }
             }
+          } catch (waSolvedErr) {
+            console.error("[autoAssignReportedPendingVentas] whatsapp solucionado error", waSolvedErr);
           }
-        } catch (waSolvedErr) {
-          console.error("[autoAssignReportedPendingVentas] whatsapp solucionado error", waSolvedErr);
         }
       }
 
@@ -9179,6 +9285,27 @@ const autoAssignReportedPendingVentas = async ({ plataformaIds = [] } = {}) => {
   }
 
   return summary;
+};
+
+const processAutoPendingStockDeliveries = async () => {
+  if (!AUTO_PENDING_STOCK_DELIVERY_ENABLED) {
+    return { skipped: true, reason: "disabled" };
+  }
+  if (autoPendingStockDeliveryInProgress) {
+    return { skipped: true, reason: "in_progress" };
+  }
+  autoPendingStockDeliveryInProgress = true;
+  try {
+    const summary = await autoAssignReportedPendingVentas({
+      includeUnreported: true,
+    });
+    if (summary?.resolved > 0 || summary?.errors > 0) {
+      console.log("[ventas:auto-pending-stock] ciclo", summary);
+    }
+    return summary;
+  } finally {
+    autoPendingStockDeliveryInProgress = false;
+  }
 };
 
 const normalizeFilesArray = (value) => {
