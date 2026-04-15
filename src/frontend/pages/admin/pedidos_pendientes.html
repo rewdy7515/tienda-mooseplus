@@ -1271,6 +1271,7 @@
         const cuentaMadreFlag =
           btn?.dataset?.cuentaMadre === "true" && !isCompleta && !forceCuentaCompleta;
         const requireMadreActiva = idPlataformaNum === 9;
+        const directProfileDelivery = !forceCuentaCompleta && !porAcceso && !cuentaMadreFlag;
         if (!idVenta) return;
         if (isGiftCard) {
           const resp = await entregarGiftCardPendiente(idVenta);
@@ -1306,6 +1307,7 @@
         let nuevaCuentaId = null;
         let cuentaEntregaCorreo = correoCuentaNorm;
         let cuentaEntregaClave = claveCuentaNorm;
+        let perfilDirectoId = null;
         const findCuentaByCorreo = async (correoValue) => {
           const exactCorreo = String(correoValue || "").trim();
           if (!exactCorreo) return null;
@@ -1413,37 +1415,88 @@
           cuentaEntregaClave = claveCuentaNorm || normalizeCredentialValue(cuentaExist?.clave || "");
         } else {
           if (!correoCuentaNorm) {
-            throw new Error("Faltan datos de la cuenta y no hay stock disponible para entregar.");
+            if (directProfileDelivery && hasIdPlataforma) {
+              const { data: perfilesDisponibles, error: perfilesDisponiblesErr } = await supabase
+                .from("perfiles")
+                .select(
+                  "id_perfil, id_cuenta, n_perfil, cuentas:cuentas!perfiles_id_cuenta_fkey(id_cuenta, correo, clave, inactiva, venta_perfil, cuenta_madre)",
+                )
+                .eq("cuentas.id_plataforma", idPlataformaNum)
+                .eq("cuentas.venta_perfil", true)
+                .eq("ocupado", false)
+                .or("perfil_hogar.is.null,perfil_hogar.eq.false")
+                .or("inactiva.is.null,inactiva.eq.false", { foreignTable: "cuentas" })
+                .or("cuenta_madre.is.null,cuenta_madre.eq.false", { foreignTable: "cuentas" })
+                .order("id_perfil", { ascending: true })
+                .limit(400);
+              if (perfilesDisponiblesErr) throw perfilesDisponiblesErr;
+              const perfilDirecto = (perfilesDisponibles || []).find((row) => {
+                const perfilId = toPositiveId(row?.id_perfil);
+                const cuentaId = toPositiveId(row?.id_cuenta);
+                return (
+                  !!perfilId &&
+                  !!cuentaId &&
+                  !reemplazosBloqueados.perfiles.has(perfilId) &&
+                  !reemplazosBloqueados.cuentas.has(cuentaId)
+                );
+              }) || null;
+              if (perfilDirecto?.id_perfil && perfilDirecto?.id_cuenta) {
+                perfilDirectoId = toPositiveId(perfilDirecto.id_perfil);
+                nuevaCuentaId = toPositiveId(perfilDirecto.id_cuenta);
+                cuentaEntregaCorreo = normalizeCredentialValue(perfilDirecto?.cuentas?.correo || "")
+                  .trim()
+                  .toLowerCase();
+                cuentaEntregaClave = normalizeCredentialValue(perfilDirecto?.cuentas?.clave || "");
+                const { error: occPerfilErr } = await supabase
+                  .from("perfiles")
+                  .update({ ocupado: true })
+                  .eq("id_perfil", perfilDirectoId);
+                if (occPerfilErr) throw occPerfilErr;
+                const { error: occCuentaErr } = await supabase
+                  .from("cuentas")
+                  .update({ ocupado: true })
+                  .eq("id_cuenta", nuevaCuentaId);
+                if (occCuentaErr) throw occCuentaErr;
+              }
+            }
+            if (!nuevaCuentaId) {
+              throw new Error("Faltan datos de la cuenta y no hay stock disponible para entregar.");
+            }
           }
-          const insertCuenta = {
-            correo: correoCuentaNorm,
-            clave: claveCuentaNorm || null,
-            inactiva: false,
-            ocupado: false,
-            venta_dominio: true,
-            dominio_de: idUsuario ? Number(idUsuario) : null,
-            id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
-            id_proveedor: Number.isFinite(proveedorId) && proveedorId > 0 ? proveedorId : null,
-          };
-          if (forceCuentaCompleta) {
-            insertCuenta.id_cuenta_madre = null;
-            insertCuenta.venta_perfil = false;
-            insertCuenta.venta_miembro = false;
+          if (!nuevaCuentaId) {
+            const insertCuenta = {
+              correo: correoCuentaNorm,
+              clave: claveCuentaNorm || null,
+              inactiva: false,
+              ocupado: false,
+              venta_dominio: true,
+              dominio_de: idUsuario ? Number(idUsuario) : null,
+              id_plataforma: hasIdPlataforma ? idPlataformaNum : null,
+              id_proveedor: Number.isFinite(proveedorId) && proveedorId > 0 ? proveedorId : null,
+            };
+            if (forceCuentaCompleta) {
+              insertCuenta.id_cuenta_madre = null;
+              insertCuenta.venta_perfil = false;
+              insertCuenta.venta_miembro = false;
+            }
+            const { data: cuentaNueva, error: cuentaErr } = await supabase
+              .from("cuentas")
+              .insert(insertCuenta)
+              .select("id_cuenta")
+              .single();
+            if (cuentaErr) throw cuentaErr;
+            nuevaCuentaId = cuentaNueva?.id_cuenta || null;
+            cuentaEntregaCorreo = correoCuentaNorm;
+            cuentaEntregaClave = claveCuentaNorm;
           }
-          const { data: cuentaNueva, error: cuentaErr } = await supabase
-            .from("cuentas")
-            .insert(insertCuenta)
-            .select("id_cuenta")
-            .single();
-          if (cuentaErr) throw cuentaErr;
-          nuevaCuentaId = cuentaNueva?.id_cuenta || null;
-          cuentaEntregaCorreo = correoCuentaNorm;
-          cuentaEntregaClave = claveCuentaNorm;
         }
         if (!nuevaCuentaId) throw new Error("No se pudo crear la cuenta.");
 
         let cuentaMadreId = null;
         let perfilId = null;
+        if (directProfileDelivery && perfilDirectoId) {
+          perfilId = perfilDirectoId;
+        }
         if (cuentaMadreFlag && hasIdPlataforma) {
           if (existingMadreId && existingPerfilId) {
             let canUseExistingMadre = true;
@@ -1530,11 +1583,12 @@
         const base = getVenezuelaToday();
         const next = addMonthsKeepDay(base, Number.isFinite(mesesContratados) ? mesesContratados : 1);
         const nextIso = toYMD(next);
+        const isDirectProfileDelivered = directProfileDelivery && !!perfilId;
         const updateVenta = {
           pendiente: false,
           cuenta_pagada_admin: true,
-          id_cuenta: forceCuentaCompleta ? nuevaCuentaId : cuentaMadreId || null,
-          id_cuenta_miembro: forceCuentaCompleta ? null : nuevaCuentaId,
+          id_cuenta: forceCuentaCompleta ? nuevaCuentaId : isDirectProfileDelivered ? nuevaCuentaId : cuentaMadreId || null,
+          id_cuenta_miembro: forceCuentaCompleta || isDirectProfileDelivered ? null : nuevaCuentaId,
           id_perfil: forceCuentaCompleta ? null : perfilId || null,
           cuenta_nueva: false,
         };

@@ -79,6 +79,11 @@ const escapeHtml = (value) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+const formatDateDDMMYYYY = (value) => {
+  const normalized = String(value || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!normalized) return value || "-";
+  return `${normalized[3]}/${normalized[2]}/${normalized[1]}`;
+};
 
 const REEMPLAZO_NOTA_PREFIX = "Reemplazo automático por cuenta inactiva:";
 
@@ -208,7 +213,7 @@ function renderReportes(items = []) {
           const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
           const correoRaw = String(r.cuentas?.correo || "").trim();
           const correo = correoRaw || "-";
-          const fecha = r.fecha_creacion || "-";
+          const fecha = formatDateDDMMYYYY(r.fecha_creacion);
           const hasDatosIncorrectos = isTrue(r.datos_incorrectos);
           const estado = hasDatosIncorrectos
             ? "Datos incorrectos"
@@ -475,7 +480,7 @@ function renderSolucionadosList() {
       const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
       const plataforma = r.plataformas?.nombre || `Plataforma ${r.id_plataforma || "-"}`;
       const correo = r.cuentas?.correo || "-";
-      const fecha = r.fecha_creacion || "-";
+      const fecha = formatDateDDMMYYYY(r.fecha_creacion);
       return `
         <tr>
           <td>${escapeHtml(idReporte)}</td>
