@@ -4787,8 +4787,10 @@
             .maybeSingle();
           if (error) throw error;
           if (!cuenta) {
+            currentCuentaDetalle = null;
+            currentCuentaId = null;
             detalleEl.innerHTML = '<p class="status">Cuenta no encontrada.</p>';
-            return;
+            return false;
           }
 
           const platId = cuenta.id_plataforma;
@@ -5244,11 +5246,15 @@
               foot.textContent = `Ultimos correos registrados: ${currentCuentaDetalle.ultimosCorreosPlat1.join(", ")}`;
             }
           }
+          return true;
         } catch (err) {
           console.error("detalle cuenta error", err);
+          currentCuentaDetalle = null;
+          currentCuentaId = null;
           if (detalleEl)
             detalleEl.innerHTML =
               '<p class="status">No se pudo cargar el detalle.</p>';
+          return false;
         }
       };
 
@@ -7233,14 +7239,17 @@
             (!currentCuentaDetalle ||
               String(currentCuentaDetalle.id_cuenta) !== String(cuentaIdFromBtn))
           ) {
-            await loadCuentaDetalle(cuentaIdFromBtn);
+            const loaded = await loadCuentaDetalle(cuentaIdFromBtn);
+            if (!loaded) {
+              alert("No se pudo cargar la cuenta de la venta.");
+              return;
+            }
           }
           if (!currentCuentaDetalle) {
             alert("No se pudo obtener la cuenta actual.");
             return;
           }
-          const plataformaId = currentCuentaDetalle.plataformaId;
-          const cuentaId = cuentaIdFromBtn || currentCuentaDetalle.id_cuenta;
+          const cuentaId = cuentaIdFromBtn || currentCuentaDetalle?.id_cuenta;
           const ventaIdFromBtn = toPositiveId(
             btnRepl.dataset.idventa || btnRepl.dataset.idVenta,
           );
@@ -7294,9 +7303,26 @@
             }
           }
           const cuentaOrigenId =
-            toPositiveId(cuentaId) || toPositiveId(ventaInfo?.id_cuenta);
+            toPositiveId(ventaInfo?.id_cuenta) || toPositiveId(cuentaId);
           if (!cuentaOrigenId) {
             alert("No se pudo identificar la cuenta origen.");
+            return;
+          }
+          let plataformaId = toPositiveId(currentCuentaDetalle?.plataformaId);
+          if (
+            !plataformaId ||
+            toPositiveId(currentCuentaDetalle?.id_cuenta) !== cuentaOrigenId
+          ) {
+            const { data: cuentaOrigenData, error: cuentaOrigenErr } = await supabase
+              .from("cuentas")
+              .select("id_plataforma")
+              .eq("id_cuenta", cuentaOrigenId)
+              .maybeSingle();
+            if (cuentaOrigenErr) throw cuentaOrigenErr;
+            plataformaId = toPositiveId(cuentaOrigenData?.id_plataforma) || plataformaId;
+          }
+          if (!plataformaId) {
+            alert("No se pudo identificar la plataforma de la venta.");
             return;
           }
 
