@@ -406,6 +406,25 @@
         });
       };
 
+      const buildSignupInviteMessage = (linkValue, { includeDisclaimer = true } = {}) => {
+        const link = String(linkValue || "").trim();
+        const lines = [
+          "*Regístrate en nuestra Pagina Web* 👨🏻‍💻",
+          link,
+          "",
+          "*Al registrarte podrás:*",
+          "* Hacer compras las *24h del día* con entregas inmediatas ⚡",
+          "* Reportar y recibir *soluciones automaticas* en ciertos reportes 🚨",
+        ];
+        if (includeDisclaimer) {
+          lines.push(
+            "",
+            "> Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartirlo.",
+          );
+        }
+        return lines.join("\n");
+      };
+
       const handleCopyGenericSignupLink = async (accesoCliente, btnEl) => {
         if (!btnEl) return;
         const originalText = btnEl.textContent;
@@ -422,8 +441,9 @@
             if (!url) throw new Error("No se pudo generar el link.");
             cachePublicSignupLink(accesoCliente === true, url);
           }
-          const copied = await copyTextToClipboard(url).catch(() => false);
-          if (!copied) throw new Error("No se pudo copiar el link.");
+          const message = buildSignupInviteMessage(url, { includeDisclaimer: false });
+          const copied = await copyTextToClipboard(message).catch(() => false);
+          if (!copied) throw new Error("No se pudo copiar el mensaje.");
           btnEl.textContent = "Copiado";
           setStatus("");
           setTimeout(() => {
@@ -818,8 +838,9 @@
             if (payload?.error) throw new Error(String(payload.error));
             const url = String(payload?.url || "").trim();
             if (!url) throw new Error("No se pudo generar el link.");
-            const copied = await copyTextToClipboard(url).catch(() => false);
-            if (!copied) throw new Error("No se pudo copiar el link.");
+            const message = buildSignupInviteMessage(url, { includeDisclaimer: true });
+            const copied = await copyTextToClipboard(message).catch(() => false);
+            if (!copied) throw new Error("No se pudo copiar el mensaje.");
             registroBtn.textContent = "Copiado";
             setStatus("");
             setTimeout(() => {
@@ -828,7 +849,7 @@
           } catch (err) {
             console.error("generar link registro usuario error", err);
             registroBtn.textContent = "Error";
-            setStatus(err?.message || "No se pudo generar/copiar el link.");
+            setStatus(err?.message || "No se pudo generar/copiar el mensaje.");
             setTimeout(() => {
               if (registroBtn.isConnected) registroBtn.textContent = originalText || "Link registro";
             }, 1400);
