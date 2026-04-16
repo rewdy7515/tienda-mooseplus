@@ -76,6 +76,12 @@
         align-items: center;
         gap: 8px;
       }
+      .btn-link-registro {
+        padding: 4px 8px;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+      }
       .saldo-wrap {
         display: inline-flex;
         align-items: center;
@@ -214,6 +220,7 @@
       } from "../../scripts/session.js";
       import {
         clearServerSession,
+        createUsuarioSignupLink,
         createPublicSignupLink,
         ensureServerSession,
         fetchAuthVerifiedUsersStats,
@@ -250,6 +257,8 @@
       const saldoModalCloseBtn = document.querySelector("#saldo-modal-close");
       const PAGE_SIZE = 10;
       let saldoTargetUserId = null;
+      let signupPublicLinkCliente = "";
+      let signupPublicLinkVendedor = "";
       let usuariosRows = [];
       let usuariosFilteredRows = [];
       let currentPage = 1;
@@ -362,20 +371,57 @@
         }
       };
 
+      const cachePublicSignupLink = (accesoCliente, url) => {
+        const normalized = String(url || "").trim();
+        if (!normalized) return;
+        if (accesoCliente === true) {
+          signupPublicLinkCliente = normalized;
+        } else {
+          signupPublicLinkVendedor = normalized;
+        }
+      };
+
+      const getCachedPublicSignupLink = (accesoCliente) =>
+        accesoCliente === true ? signupPublicLinkCliente : signupPublicLinkVendedor;
+
+      const preloadPublicSignupLinks = async () => {
+        console.log("[usuarios][registro] precargando links públicos...");
+        const [clienteResp, vendedorResp] = await Promise.all([
+          createPublicSignupLink(true),
+          createPublicSignupLink(false),
+        ]);
+        if (!clienteResp?.error) {
+          cachePublicSignupLink(true, clienteResp?.url);
+        } else {
+          console.warn("[usuarios][registro] no se pudo precargar link cliente", clienteResp);
+        }
+        if (!vendedorResp?.error) {
+          cachePublicSignupLink(false, vendedorResp?.url);
+        } else {
+          console.warn("[usuarios][registro] no se pudo precargar link vendedor", vendedorResp);
+        }
+        console.log("[usuarios][registro] precarga links completa", {
+          hasCliente: !!signupPublicLinkCliente,
+          hasVendedor: !!signupPublicLinkVendedor,
+        });
+      };
+
       const handleCopyGenericSignupLink = async (accesoCliente, btnEl) => {
         if (!btnEl) return;
         const originalText = btnEl.textContent;
         btnEl.disabled = true;
         btnEl.textContent = "Generando...";
         try {
-          console.log("[usuarios][registro] solicitando link público", {
-            accesoCliente: accesoCliente === true,
-          });
-          const payload = await createPublicSignupLink(accesoCliente === true);
-          console.log("[usuarios][registro] respuesta link público", payload);
-          if (payload?.error) throw new Error(String(payload.error));
-          const url = String(payload?.url || "").trim();
-          if (!url) throw new Error("No se pudo generar el link.");
+          let url = String(getCachedPublicSignupLink(accesoCliente === true) || "").trim();
+          if (!url) {
+            console.warn("[usuarios][registro] link no estaba en caché, intentando recargar...");
+            const payload = await createPublicSignupLink(accesoCliente === true);
+            console.log("[usuarios][registro] respuesta link público (recarga)", payload);
+            if (payload?.error) throw new Error(String(payload.error));
+            url = String(payload?.url || "").trim();
+            if (!url) throw new Error("No se pudo generar el link.");
+            cachePublicSignupLink(accesoCliente === true, url);
+          }
           const copied = await copyTextToClipboard(url).catch(() => false);
           if (!copied) throw new Error("No se pudo copiar el link.");
           btnEl.textContent = "Copiado";
@@ -478,6 +524,14 @@
         const correoQuickEdit = email ? "0" : "1";
         const accesoCliente = isTrue(u?.acceso_cliente);
         const registrado = u.fecha_registro ? "Sí" : "No";
+        const registroBtnHtml =
+          registrado === "No"
+            ? `<button
+                type="button"
+                class="btn-outline btn-link-registro"
+                data-id="${u.id_usuario}"
+              >Link registro</button>`
+            : "";
         return `
           <tr>
             <td>${u.id_usuario ?? "-"}</td>
@@ -520,6 +574,7 @@
             <td class="${registrado === "Sí" ? "registro-si" : "registro-no"}">
               <span class="registro-cell-content">
                 <span>${registrado}</span>
+                ${registroBtnHtml}
               </span>
             </td>
           </tr>
@@ -631,6 +686,7 @@
             phoneStatEl.textContent = `Usuarios sin teléfono válido: ${invalidPhones.length} de ${usuariosRows.length} (${pct}%)`;
           }
           applySearchFilter({ resetPage: true });
+          await preloadPublicSignupLinks();
         } catch (err) {
           console.error("usuarios error", err);
           setStatus("No se pudieron cargar los usuarios.");
@@ -750,6 +806,41 @@
       };
 
       document.addEventListener("click", async (e) => {
+        const registroBtn = e.target.closest(".btn-link-registro");
+        if (registroBtn) {
+          const idTarget = Number(registroBtn.dataset.id);
+          if (!Number.isFinite(idTarget) || idTarget <= 0) return;
+          const originalText = registroBtn.textContent;
+          registroBtn.disabled = true;
+          registroBtn.textContent = "Generando...";
+          try {
+            const payload = await createUsuarioSignupLink(idTarget);
+            if (payload?.error) throw new Error(String(payload.error));
+            const url = String(payload?.url || "").trim();
+            if (!url) throw new Error("No se pudo generar el link.");
+            const copied = await copyTextToClipboard(url).catch(() => false);
+            if (!copied) throw new Error("No se pudo copiar el link.");
+            registroBtn.textContent = "Copiado";
+            setStatus("");
+            setTimeout(() => {
+              if (registroBtn.isConnected) registroBtn.textContent = originalText || "Link registro";
+            }, 1200);
+          } catch (err) {
+            console.error("generar link registro usuario error", err);
+            registroBtn.textContent = "Error";
+            setStatus(err?.message || "No se pudo generar/copiar el link.");
+            setTimeout(() => {
+              if (registroBtn.isConnected) registroBtn.textContent = originalText || "Link registro";
+            }, 1400);
+          } finally {
+            registroBtn.disabled = false;
+            if (registroBtn.textContent === "Generando...") {
+              registroBtn.textContent = originalText || "Link registro";
+            }
+          }
+          return;
+        }
+
         const addSaldoBtn = e.target.closest(".btn-add-saldo");
         if (addSaldoBtn) {
           openSaldoModal(addSaldoBtn.dataset.id);
