@@ -8474,6 +8474,10 @@ const SIGNUP_TOKEN_TTL_SEC = Math.max(
   300,
   Number(process.env.SIGNUP_TOKEN_TTL_SEC) || 24 * 60 * 60,
 );
+const SIGNUP_ACCESS_TOKEN_TTL_SEC = Math.max(
+  300,
+  Number(process.env.SIGNUP_ACCESS_TOKEN_TTL_SEC) || 30 * 24 * 60 * 60,
+);
 const RENEWAL_CART_TOKEN_TTL_SEC = Math.max(
   14 * 24 * 60 * 60,
   Number(process.env.RENEWAL_CART_TOKEN_TTL_SEC) || 30 * 24 * 60 * 60,
@@ -8671,6 +8675,51 @@ const buildSignupShortUrl = (idUsuario) => {
   const token = buildSignupRegistrationToken(idUsuario);
   const shortUrl = new URL(`/s/${encodeURIComponent(token)}`, PUBLIC_SITE_URL);
   return shortUrl.toString();
+};
+
+const buildSignupAccessToken = ({ accesoCliente = true } = {}) => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = nowSec + SIGNUP_ACCESS_TOKEN_TTL_SEC;
+  const accessPart = accesoCliente === false ? "0" : "1";
+  const expPart = exp.toString(36);
+  const payloadPart = `${accessPart}.${expPart}`;
+  const signaturePart = signSignupTokenCompact(payloadPart);
+  return `${payloadPart}.${signaturePart}`;
+};
+
+const verifySignupAccessToken = (tokenValue, options = {}) => {
+  const token = String(tokenValue || "").trim();
+  if (!token) throw tokenError("TOKEN_REQUIRED", "Token requerido.");
+  const parts = token.split(".");
+  if (parts.length !== 3) throw tokenError("TOKEN_INVALID", "Token inválido.");
+  const [accessPart, expPart, signaturePart] = parts;
+  if (!accessPart || !expPart || !signaturePart) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  if (accessPart !== "0" && accessPart !== "1") {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  const base36Regex = /^[0-9a-z]+$/i;
+  if (!base36Regex.test(expPart)) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  const payloadPart = `${accessPart}.${expPart}`;
+  if (!isValidSignupCompactSignature(payloadPart, signaturePart)) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  const exp = Number.parseInt(expPart, 36);
+  if (!Number.isFinite(exp) || exp <= 0) {
+    throw tokenError("TOKEN_INVALID", "Token inválido.");
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
+  const allowExpired = options?.allowExpired === true;
+  if (!allowExpired && exp <= nowSec) {
+    throw tokenError("TOKEN_EXPIRED", "El link de registro ya venció.");
+  }
+  return {
+    accesoCliente: accessPart === "1",
+    exp,
+  };
 };
 
 const buildRenewalCartToken = ({ idUsuario, ventaIds = [] } = {}) => {
@@ -11943,6 +11992,15 @@ const resolveUsuarioFromAuthToken = async (token) => {
     return digits;
   };
   const normalizeEmail = (value) => normalizeText(value).toLowerCase();
+  const parseMetaBoolean = (value) => {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    const raw = normalizeText(value).toLowerCase();
+    if (!raw) return null;
+    if (raw === "true" || raw === "1" || raw === "t" || raw === "si" || raw === "sí") return true;
+    if (raw === "false" || raw === "0" || raw === "f" || raw === "no") return false;
+    return null;
+  };
   const mapUniqueUsuariosError = (dbErr) => {
     if (String(dbErr?.code || "") !== "23505") return "";
     const detail = `${dbErr?.message || ""} ${dbErr?.details || ""} ${dbErr?.hint || ""}`.toLowerCase();
@@ -11979,6 +12037,29 @@ const resolveUsuarioFromAuthToken = async (token) => {
   const signupRegistrationToken = normalizeText(
     rawMeta.signup_registration_token || rawMeta.registro_token || rawMeta.registration_token,
   );
+  const signupAccessToken = normalizeText(
+    rawMeta.signup_access_token || rawMeta.signup_access_mode_token || rawMeta.sat,
+  );
+  const metaAccesoCliente = parseMetaBoolean(
+    rawMeta.signup_access_cliente ??
+      rawMeta.acceso_cliente ??
+      rawMeta.registro_acceso_cliente ??
+      rawMeta.signup_acceso_cliente,
+  );
+  let metaAccesoClienteResolved = metaAccesoCliente;
+  if (signupAccessToken) {
+    try {
+      const accessPayload = verifySignupAccessToken(signupAccessToken);
+      metaAccesoClienteResolved = accessPayload?.accesoCliente === true;
+      console.log("[auth/new-signup] signup access token resolved", {
+        acceso_cliente: metaAccesoClienteResolved,
+        exp: accessPayload?.exp || null,
+      });
+    } catch (_err) {
+      // Si el token de acceso no es válido, no bloquea el signup; se usa fallback.
+      console.warn("[auth/new-signup] invalid signup access token; fallback metadata/default");
+    }
+  }
 
   const buildUsuarioPatch = (currentRow, options = {}) => {
     const forceProfile = options?.forceProfile === true;
@@ -12136,7 +12217,7 @@ const resolveUsuarioFromAuthToken = async (token) => {
     correo: authEmail,
     id_auth: authUserId,
     fecha_registro: todayInVenezuela(),
-    acceso_cliente: true,
+    acceso_cliente: metaAccesoClienteResolved === false ? false : true,
   };
 
   const notifyNewAuthSignup = async (idUsuarioNuevo) => {
@@ -15271,6 +15352,47 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
       return res
         .status(500)
         .json({ error: "Token de registro no configurado en el backend." });
+    }
+    return res.status(500).json({ error: err?.message || "No se pudo generar el link de registro." });
+  }
+});
+
+// Genera link de registro para usuarios nuevos con acceso_cliente tokenizado (solo admin/superadmin)
+app.post("/api/signup-link/public", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const accesoCliente = isTrue(req.body?.acceso_cliente);
+    console.log("[signup-link/public] request", {
+      acceso_cliente: accesoCliente,
+      has_cookie: !!String(req.headers?.cookie || "").trim(),
+    });
+    const token = buildSignupAccessToken({ accesoCliente });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expiresAtIso = new Date((nowSec + SIGNUP_ACCESS_TOKEN_TTL_SEC) * 1000).toISOString();
+    const signupUrl = new URL("/signup.html", PUBLIC_SITE_URL);
+    signupUrl.searchParams.set("sat", token);
+    console.log("[signup-link/public] generated", {
+      acceso_cliente: accesoCliente,
+      expires_at: expiresAtIso,
+      url_preview: `${signupUrl.origin}${signupUrl.pathname}?sat=...`,
+    });
+    return res.json({
+      ok: true,
+      url: signupUrl.toString(),
+      expires_at: expiresAtIso,
+      expires_in_sec: SIGNUP_ACCESS_TOKEN_TTL_SEC,
+      acceso_cliente: accesoCliente,
+    });
+  } catch (err) {
+    console.error("[signup-link/public] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === "ADMIN_REQUIRED") {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    if (err?.code === "SIGNUP_TOKEN_SECRET_MISSING") {
+      return res.status(500).json({ error: "Token de registro no configurado en el backend." });
     }
     return res.status(500).json({ error: err?.message || "No se pudo generar el link de registro." });
   }

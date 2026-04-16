@@ -1210,6 +1210,39 @@ export async function createUsuarioSignupLink(idUsuarioTarget) {
   }
 }
 
+export async function createPublicSignupLink(accesoCliente = true) {
+  await ensureServerSession();
+  try {
+    console.log("[api][signup-link/public] request", {
+      acceso_cliente: accesoCliente === true,
+      api_base: API_BASE,
+    });
+    const res = await fetch(`${API_BASE}/api/signup-link/public`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ acceso_cliente: accesoCliente === true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn("[api][signup-link/public] response not ok", {
+        status: res.status,
+        error: data?.error || "",
+      });
+      return { error: data?.error || "No se pudo generar el link de registro." };
+    }
+    console.log("[api][signup-link/public] response ok", {
+      hasUrl: !!String(data?.url || "").trim(),
+      expires_at: data?.expires_at || null,
+      acceso_cliente: data?.acceso_cliente,
+    });
+    return data;
+  } catch (err) {
+    console.error("createPublicSignupLink error", err);
+    return { error: err.message };
+  }
+}
+
 export async function updateUsuarioCorreoWithAuth(idUsuarioTarget, correo) {
   await ensureServerSession();
   try {

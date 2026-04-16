@@ -48,6 +48,19 @@ let resendTargetEmail = "";
 const signupPageParams = new URLSearchParams(window.location.search || "");
 const signupToken = signupPageParams.get("t") || signupPageParams.get("registro_token") || "";
 const renewalReminderToken = String(signupPageParams.get("rr") || "").trim();
+const signupAccessToken = String(signupPageParams.get("sat") || "").trim();
+const parseAccesoClienteParam = (value) => {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+  if (raw === "true" || raw === "1" || raw === "t" || raw === "si" || raw === "sí") return true;
+  if (raw === "false" || raw === "0" || raw === "f" || raw === "no") return false;
+  return null;
+};
+const signupAccessClienteFromLink = parseAccesoClienteParam(
+  signupPageParams.get("acceso_cliente"),
+);
 const signupSuccessPreviewMode = signupPageParams.get("preview_success") === "1";
 const normalizeSignupNextTarget = (rawValue = "") => {
   const value = String(rawValue || "").trim();
@@ -455,6 +468,12 @@ async function handleSubmit(e) {
         telefono: phoneDigits,
         phone: phoneDigits,
         signup_registration_token: tokenFlow ? signupToken : undefined,
+        signup_access_token: signupAccessToken || undefined,
+        sat: signupAccessToken || undefined,
+        acceso_cliente:
+          signupAccessClienteFromLink === null ? undefined : signupAccessClienteFromLink,
+        signup_access_cliente:
+          signupAccessClienteFromLink === null ? undefined : signupAccessClienteFromLink,
       },
     };
     if (captchaToken) {
