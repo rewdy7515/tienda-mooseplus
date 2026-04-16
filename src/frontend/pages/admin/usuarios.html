@@ -18,6 +18,22 @@
         gap: 10px;
         flex-wrap: wrap;
       }
+      .registro-mode-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .btn-registro-mode.is-active {
+        background: #111;
+        border-color: #111;
+        color: #fff;
+      }
+      .registro-mode-hint {
+        margin: 0;
+        font-size: 12px;
+        color: #475569;
+      }
       .usuarios-search {
         width: min(100%, 420px);
       }
@@ -146,6 +162,17 @@
         <p id="usuarios-vendedores-stat" class="status"></p>
         <p id="usuarios-auth-verified-stat" class="status"></p>
         <p id="usuarios-phone-stat" class="status"></p>
+        <div class="registro-mode-tools">
+          <button type="button" class="btn-outline btn-registro-mode is-active" id="btn-registro-cliente">
+            Registro Cliente
+          </button>
+          <button type="button" class="btn-outline btn-registro-mode" id="btn-registro-vendedor">
+            Registro Vendedor
+          </button>
+          <p class="registro-mode-hint" id="registro-mode-hint">
+            Modo actual: Registro Cliente
+          </p>
+        </div>
         <div class="usuarios-tools">
           <input
             type="text"
@@ -239,6 +266,9 @@
       const pagePrevBtn = document.querySelector("#usuarios-page-prev");
       const pageNextBtn = document.querySelector("#usuarios-page-next");
       const pageLabelEl = document.querySelector("#usuarios-page-label");
+      const registroClienteBtn = document.querySelector("#btn-registro-cliente");
+      const registroVendedorBtn = document.querySelector("#btn-registro-vendedor");
+      const registroModeHintEl = document.querySelector("#registro-mode-hint");
       const saldoModal = document.querySelector("#saldo-modal");
       const saldoInput = document.querySelector("#saldo-input");
       const saldoCancelBtn = document.querySelector("#saldo-cancel-btn");
@@ -247,6 +277,7 @@
       const PAGE_SIZE = 10;
       let saldoTargetUserId = null;
       const registroPendingMessages = new Map();
+      let registroModeAccesoCliente = true;
       let usuariosRows = [];
       let usuariosFilteredRows = [];
       let currentPage = 1;
@@ -370,6 +401,23 @@
         return lines.join("\n");
       };
 
+      const getRegistroPendingKey = (idUsuario, accesoCliente) => {
+        const id = Number(idUsuario) || 0;
+        const mode = accesoCliente === true ? "cliente" : "vendedor";
+        return `${id}:${mode}`;
+      };
+
+      const setRegistroMode = (nextAccesoCliente) => {
+        registroModeAccesoCliente = nextAccesoCliente === true;
+        registroClienteBtn?.classList.toggle("is-active", registroModeAccesoCliente === true);
+        registroVendedorBtn?.classList.toggle("is-active", registroModeAccesoCliente === false);
+        if (registroModeHintEl) {
+          registroModeHintEl.textContent = `Modo actual: ${
+            registroModeAccesoCliente ? "Registro Cliente" : "Registro Vendedor"
+          }`;
+        }
+      };
+
       const agregarSaldo = async () => {
         if (!saldoTargetUserId) return;
         const raw = String(saldoInput?.value || "").trim().replace(",", ".");
@@ -452,20 +500,11 @@
         const registrado = u.fecha_registro ? "Sí" : "No";
         const registroBtnHtml =
           registrado === "No"
-            ? `<span class="registro-actions">
-                <button
-                  type="button"
-                  class="btn-outline btn-link-registro"
-                  data-id="${u.id_usuario}"
-                  data-acceso="true"
-                >Registro Cliente</button>
-                <button
-                  type="button"
-                  class="btn-outline btn-link-registro"
-                  data-id="${u.id_usuario}"
-                  data-acceso="false"
-                >Registro Vendedor</button>
-              </span>`
+            ? `<button
+                type="button"
+                class="btn-outline btn-link-registro"
+                data-id="${u.id_usuario}"
+              >Link registro</button>`
             : "";
         return `
           <tr>
@@ -744,7 +783,8 @@
         if (registroBtn) {
           const idTarget = Number(registroBtn.dataset.id);
           if (!Number.isFinite(idTarget) || idTarget <= 0) return;
-          const nextAccesoCliente = String(registroBtn.dataset.acceso || "true") === "true";
+          const nextAccesoCliente = registroModeAccesoCliente === true;
+          const pendingKey = getRegistroPendingKey(idTarget, nextAccesoCliente);
           const originalText = registroBtn.textContent;
           registroBtn.disabled = true;
           registroBtn.textContent = "Generando...";
@@ -762,7 +802,7 @@
               accessSelect.value = String(nextAccesoCliente);
             }
 
-            const pendingMessage = String(registroPendingMessages.get(idTarget) || "").trim();
+            const pendingMessage = String(registroPendingMessages.get(pendingKey) || "").trim();
             let message = pendingMessage;
             if (!message) {
               const result = await createUsuarioSignupLink(idTarget);
@@ -773,7 +813,7 @@
             }
             const copied = await copyTextToClipboard(message).catch(() => false);
             if (copied) {
-              registroPendingMessages.delete(idTarget);
+              registroPendingMessages.delete(pendingKey);
               registroBtn.textContent = "Copiado";
               setTimeout(() => {
                 if (registroBtn.isConnected) {
@@ -781,12 +821,12 @@
                 }
               }, 1200);
             } else {
-              registroPendingMessages.set(idTarget, message);
+              registroPendingMessages.set(pendingKey, message);
               registroBtn.textContent = "Copiar ahora";
             }
           } catch (err) {
             console.error("generar link registro error", err);
-            registroPendingMessages.delete(idTarget);
+            registroPendingMessages.delete(pendingKey);
             registroBtn.textContent = "Error";
             setTimeout(() => {
               if (registroBtn.isConnected) {
@@ -831,6 +871,14 @@
         if ((clickedText || clickedCell) && quickEdit) {
           startEdit(wrap);
         }
+      });
+
+      registroClienteBtn?.addEventListener("click", () => {
+        setRegistroMode(true);
+      });
+
+      registroVendedorBtn?.addEventListener("click", () => {
+        setRegistroMode(false);
       });
 
       document.addEventListener("change", async (e) => {
