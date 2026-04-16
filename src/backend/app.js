@@ -2068,6 +2068,23 @@ const buildWhatsappOrderDetailUrl = (idOrden = null) => {
   }
 };
 
+const buildWhatsappServiceDeliveryUrl = ({ idVenta = null, idOrden = null } = {}) => {
+  const ventaId = toPositiveInt(idVenta);
+  const ordenId = toPositiveInt(idOrden);
+  try {
+    const url = new URL("/entregar_servicios.html", buildPublicSiteUrl());
+    if (ventaId) url.searchParams.set("id_venta", String(ventaId));
+    if (ordenId) url.searchParams.set("id_orden", String(ordenId));
+    return url.toString();
+  } catch (_err) {
+    const params = new URLSearchParams();
+    if (ventaId) params.set("id_venta", String(ventaId));
+    if (ordenId) params.set("id_orden", String(ordenId));
+    const qs = params.toString();
+    return `${buildPublicSiteUrl()}/entregar_servicios.html${qs ? `?${qs}` : ""}`;
+  }
+};
+
 const buildWhatsappOrdenEntregadaMessage = ({ idOrden = null, detalleOrdenUrl = "" } = {}) => {
   const ordenId = toPositiveInt(idOrden) || idOrden || "-";
   const detalleUrl = String(detalleOrdenUrl || "").trim() || buildPublicSiteUrl();
@@ -2253,21 +2270,21 @@ const sendSpotifyRenewalsToProviderWhatsapp = async ({
 const buildWhatsappVentaEntregadaMessage = ({
   idVenta = null,
   idOrden = null,
-  detalleOrdenUrl = "",
+  detalleEntregaUrl = "",
   clienteRegistrado = true,
   signupRegistroUrl = "",
 } = {}) => {
   const ventaId = toPositiveInt(idVenta) || idVenta || "-";
   const ordenId = toPositiveInt(idOrden);
   const detalleUrl =
-    String(detalleOrdenUrl || "").trim() ||
-    (ordenId ? buildWhatsappOrderDetailUrl(ordenId) : buildPublicSiteUrl());
+    String(detalleEntregaUrl || "").trim() ||
+    buildWhatsappServiceDeliveryUrl({ idVenta: ventaId, idOrden: ordenId });
   const isRegisteredClient = clienteRegistrado !== false;
   const signupUrl = String(signupRegistroUrl || "").trim();
   const targetUrl = isRegisteredClient ? detalleUrl : signupUrl || detalleUrl;
   const actionText = isRegisteredClient
-    ? "Puedes verificar la orden por:"
-    : "Registrate verifica detalles de la orden por:";
+    ? "Puedes revisar este servicio por:"
+    : "Registrate y revisa este servicio por:";
   return `\`Venta #${ventaId}\`
 *estado:* servicio entregado ✅
 
@@ -2397,6 +2414,13 @@ const getVentaClaveCuentaPrincipalForWhatsapp = (venta = null) => {
   return "";
 };
 
+const isWhatsappNoLidForUserError = (err) => {
+  const text = String(err?.message || err || "")
+    .trim()
+    .toLowerCase();
+  return text.includes("no lid for user");
+};
+
 const sendReporteCreatedToWhatsappGroup = async ({
   reporte = null,
   manageWhatsappLifecycle = true,
@@ -2505,6 +2529,17 @@ const sendReporteCreatedToWhatsappGroup = async ({
   }
 
   if (sendErr) {
+    if (isWhatsappNoLidForUserError(sendErr)) {
+      return {
+        sent: false,
+        skipped: true,
+        reason: "target_user_chat_not_found",
+        error: sendErr?.message || String(sendErr),
+        id_reporte: reportId,
+        id_usuario_destino: targetUserId,
+        phone: targetPhone,
+      };
+    }
     return {
       sent: false,
       skipped: false,
@@ -2623,6 +2658,17 @@ const sendReporteSolvedToWhatsappOwner = async ({
   }
 
   if (sendErr) {
+    if (isWhatsappNoLidForUserError(sendErr)) {
+      return {
+        sent: false,
+        skipped: true,
+        reason: "target_user_chat_not_found",
+        error: sendErr?.message || String(sendErr),
+        id_reporte: reportId,
+        id_usuario_destino: targetUserId,
+        phone: targetPhone,
+      };
+    }
     return {
       sent: false,
       skipped: false,
@@ -2922,41 +2968,26 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   }
 
   let metodoVerificacionAutomatica = null;
-  let metodoPagoNombre = "";
   const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
   if (metodoPagoId) {
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
-      .select("verificacion_automatica, nombre")
+      .select("verificacion_automatica")
       .eq("id_metodo_de_pago", metodoPagoId)
       .maybeSingle();
     if (metodoPagoErr) throw metodoPagoErr;
     metodoVerificacionAutomatica = metodoPagoRow?.verificacion_automatica;
-    metodoPagoNombre = String(metodoPagoRow?.nombre || "").trim();
   }
 
   const manualVerifiedByAdmin = verifiedByAdmin === true;
-  const autoVerifiedBeforeWindow =
-    !manualVerifiedByAdmin &&
-    metodoVerificacionAutomatica === true &&
-    verificationWindowElapsed === false;
-  if (autoVerifiedBeforeWindow) {
-    return {
-      sent: false,
-      skipped: true,
-      reason: "auto_verified_before_window",
-      id_venta: ventaId,
-      id_orden: ordenId,
-      id_usuario_destino: targetUserId,
-    };
-  }
-  if (!manualVerifiedByAdmin && verificationWindowElapsed !== true) {
+  const isMetodoAutoVerification = metodoVerificacionAutomatica === true;
+  if (!manualVerifiedByAdmin && isMetodoAutoVerification && verificationWindowElapsed !== true) {
     return {
       sent: false,
       skipped: true,
       reason:
         verificationWindowElapsed === false
-          ? "order_verification_window_not_elapsed"
+          ? "auto_verified_before_window"
           : "order_verification_window_unknown",
       id_venta: ventaId,
       id_orden: ordenId,
@@ -2976,16 +3007,10 @@ const sendVentaEntregadaToWhatsappOwner = async ({
     };
   }
 
-  const message =
-    verifiedByAdmin === true
-      ? buildWhatsappPagoVerificadoManualMessage({
-          metodoPagoNombre,
-          referencia: String(ordenRow?.referencia || "").trim(),
-        })
-      : buildWhatsappOrdenEntregadaMessage({
-          idOrden: ordenId,
-          detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
-        });
+  const message = buildWhatsappOrdenEntregadaMessage({
+    idOrden: ordenId,
+    detalleOrdenUrl: buildWhatsappOrderDetailUrl(ordenId),
+  });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
   if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
@@ -3119,13 +3144,16 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     };
   }
 
-  const detalleOrdenUrl = buildWhatsappOrderDetailUrl(ordenId);
+  const detalleEntregaUrl = buildWhatsappServiceDeliveryUrl({
+    idVenta: ventaId,
+    idOrden: ordenId,
+  });
   const clienteRegistrado = Boolean(targetUserRow?.fecha_registro);
   let signupRegistroUrl = "";
   if (!clienteRegistrado) {
     try {
       signupRegistroUrl = buildSignupRegistrationUrl(targetUserId, {
-        redirectUrl: detalleOrdenUrl,
+        redirectUrl: detalleEntregaUrl,
       });
     } catch (signupErr) {
       console.error("[ventas:whatsapp] signup url build error", {
@@ -3140,7 +3168,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
   const message = buildWhatsappVentaEntregadaMessage({
     idVenta: ventaId,
     idOrden: ordenId,
-    detalleOrdenUrl,
+    detalleEntregaUrl,
     clienteRegistrado,
     signupRegistroUrl,
   });
@@ -3187,6 +3215,24 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
       skipped: false,
       reason: "whatsapp_send_error",
       error: sendErr?.message || String(sendErr),
+      id_venta: ventaId,
+      id_orden: ordenId,
+      id_usuario_destino: targetUserId,
+      phone: targetPhone,
+      cliente_registrado: clienteRegistrado,
+    };
+  }
+
+  const { error: markAvisoErr } = await supabaseAdmin
+    .from("ventas")
+    .update({ entrega_aviso: true })
+    .eq("id_venta", ventaId);
+  if (markAvisoErr) {
+    return {
+      sent: false,
+      skipped: false,
+      reason: "sale_delivery_notice_mark_error",
+      error: markAvisoErr?.message || String(markAvisoErr),
       id_venta: ventaId,
       id_orden: ordenId,
       id_usuario_destino: targetUserId,
@@ -8429,8 +8475,8 @@ const SIGNUP_TOKEN_TTL_SEC = Math.max(
   Number(process.env.SIGNUP_TOKEN_TTL_SEC) || 24 * 60 * 60,
 );
 const RENEWAL_CART_TOKEN_TTL_SEC = Math.max(
-  300,
-  Number(process.env.RENEWAL_CART_TOKEN_TTL_SEC) || 7 * 24 * 60 * 60,
+  14 * 24 * 60 * 60,
+  Number(process.env.RENEWAL_CART_TOKEN_TTL_SEC) || 30 * 24 * 60 * 60,
 );
 const SIGNUP_TOKEN_SECRET = String(
   process.env.SIGNUP_TOKEN_SECRET ||
@@ -9177,6 +9223,7 @@ const autoAssignReportedPendingVentas = async ({
         id_cuenta: nuevoCuentaId,
         id_perfil: nuevoPerfilId || null,
         pendiente: false,
+        entrega_aviso: false,
       };
       if (esReportada) {
         updateVenta.reportado = false;
@@ -11389,6 +11436,7 @@ const processOrderFromItems = async ({
       id_orden: ordenId,
       monto: montoLinea,
       pendiente: !!a.pendiente,
+      entrega_aviso: !isTrue(a?.pendiente),
       meses_contratados: mesesVal,
       fecha_corte: fechaCorte,
       fecha_pago: isoHoy,

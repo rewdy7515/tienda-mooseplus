@@ -727,6 +727,13 @@
           .update({ reportado: false, aviso_admin: true })
           .eq("id_venta", ventaId);
         if (ventaErr) throw ventaErr;
+        const { error: ventaAvisoErr } = await supabase
+          .from("ventas")
+          .update({ entrega_aviso: false })
+          .eq("id_venta", ventaId)
+          .eq("pendiente", true)
+          .eq("reportado", false);
+        if (ventaAvisoErr) throw ventaAvisoErr;
         return ids;
       };
 
@@ -1586,6 +1593,7 @@
         const isDirectProfileDelivered = directProfileDelivery && !!perfilId;
         const updateVenta = {
           pendiente: false,
+          entrega_aviso: false,
           cuenta_pagada_admin: true,
           id_cuenta: forceCuentaCompleta ? nuevaCuentaId : isDirectProfileDelivered ? nuevaCuentaId : cuentaMadreId || null,
           id_cuenta_miembro: forceCuentaCompleta || isDirectProfileDelivered ? null : nuevaCuentaId,
@@ -1641,12 +1649,12 @@
           });
           if (histErr) throw histErr;
         }
-        if (!wasReportado && wasPendiente) {
+        if (wasPendiente) {
           await notifyVentaDeliveredWhatsappBestEffort(idVenta);
         } else {
           console.log("[pedidos_pendientes] whatsapp servicio entregado omitido por cierre de reporte", {
             id_venta: idVenta,
-            reason: wasReportado ? "sale_was_reported" : "sale_not_pending_before_update",
+            reason: "sale_not_pending_before_update",
           });
         }
 

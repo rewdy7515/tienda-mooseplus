@@ -533,6 +533,13 @@ async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
       .update({ reportado: false, aviso_admin: true })
       .in("id_venta", ids);
     if (error) throw error;
+    const { error: avisoErr } = await supabase
+      .from("ventas")
+      .update({ entrega_aviso: false })
+      .in("id_venta", ids)
+      .eq("pendiente", true)
+      .eq("reportado", false);
+    if (avisoErr) throw avisoErr;
     return ventaInfo || { id_venta: ids[0] };
   }
 
@@ -557,6 +564,13 @@ async function clearVentaReportadoFlag(row, ventaInfoFromFlow = null) {
 
   const { error: fallbackErr } = await fallbackQuery;
   if (fallbackErr) throw fallbackErr;
+  const { error: fallbackAvisoErr } = await supabase
+    .from("ventas")
+    .update({ entrega_aviso: false })
+    .eq("reportado", false)
+    .eq("pendiente", true)
+    .or(`id_cuenta.eq.${cuentaId},id_cuenta_miembro.eq.${cuentaId}`);
+  if (fallbackAvisoErr) throw fallbackAvisoErr;
   return ventaInfo;
 }
 
@@ -577,7 +591,7 @@ async function reactivarVentaPendienteFromReporte(row) {
 
   const { error } = await supabase
     .from("ventas")
-    .update({ pendiente: true, aviso_admin: false })
+    .update({ pendiente: true, aviso_admin: false, entrega_aviso: false })
     .eq("id_venta", ventaId);
   if (error) throw error;
   row.id_venta = ventaId;

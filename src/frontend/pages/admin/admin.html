@@ -830,14 +830,12 @@
       async function loadNetflixProximas() {
         if (!netflixTable || !netflixStatus) return;
         try {
-          const today = getTodayLocal();
           const { data, error } = await supabase
             .from("cuentas")
             .select("correo, clave, fecha_corte")
             .eq("id_plataforma", 1)
             .eq("inactiva", false)
             .not("fecha_corte", "is", null)
-            .gte("fecha_corte", today)
             .order("fecha_corte", { ascending: true });
           if (error) throw error;
           netflixTable.innerHTML = "";

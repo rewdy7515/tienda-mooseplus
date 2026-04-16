@@ -76,6 +76,12 @@
         line-height: 1;
         white-space: nowrap;
       }
+      .registro-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
       .saldo-wrap {
         display: inline-flex;
         align-items: center;
@@ -345,20 +351,23 @@
         }
       };
 
-      const buildSignupInviteMessage = (linkValue) => {
+      const buildSignupInviteMessage = (linkValue, { includeDisclaimer = true } = {}) => {
         const link = String(linkValue || "").trim();
-        return [
-          "*Regístrate en nuestra Pagina Web*",
+        const lines = [
+          "*Regístrate en nuestra Pagina Web* 👨🏻‍💻",
           link,
           "",
           "*Al registrarte podrás:*",
-          "",
-          "   📦 Ver todos tus servicios activos.",
-          "   🛍️ Comprar y renovar a *cualquier hora* con *verificación de pagos automatizado*.",
-          "   🚨 *Reportar* y recibir *soluciones inmediatas* de ciertos reportes.",
-          "",
-          "_Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartirlo._",
-        ].join("\n");
+          "* Hacer compras las *24h del día* con entregas inmediatas ⚡",
+          "* Reportar y recibir *soluciones automaticas* en ciertos reportes 🚨",
+        ];
+        if (includeDisclaimer) {
+          lines.push(
+            "",
+            "> Este enlace está vinculado directamente a tus datos y servicios actuales. Recomendamos no compartirlo.",
+          );
+        }
+        return lines.join("\n");
       };
 
       const agregarSaldo = async () => {
@@ -443,11 +452,20 @@
         const registrado = u.fecha_registro ? "Sí" : "No";
         const registroBtnHtml =
           registrado === "No"
-            ? `<button
-                type="button"
-                class="btn-outline btn-link-registro"
-                data-id="${u.id_usuario}"
-              >Link registro</button>`
+            ? `<span class="registro-actions">
+                <button
+                  type="button"
+                  class="btn-outline btn-link-registro"
+                  data-id="${u.id_usuario}"
+                  data-acceso="true"
+                >Registro Cliente</button>
+                <button
+                  type="button"
+                  class="btn-outline btn-link-registro"
+                  data-id="${u.id_usuario}"
+                  data-acceso="false"
+                >Registro Vendedor</button>
+              </span>`
             : "";
         return `
           <tr>
@@ -726,10 +744,24 @@
         if (registroBtn) {
           const idTarget = Number(registroBtn.dataset.id);
           if (!Number.isFinite(idTarget) || idTarget <= 0) return;
+          const nextAccesoCliente = String(registroBtn.dataset.acceso || "true") === "true";
           const originalText = registroBtn.textContent;
           registroBtn.disabled = true;
           registroBtn.textContent = "Generando...";
           try {
+            const { error: accesoErr } = await supabase
+              .from("usuarios")
+              .update({ acceso_cliente: nextAccesoCliente })
+              .eq("id_usuario", idTarget);
+            if (accesoErr) throw accesoErr;
+            updateUsuarioFieldInRows(idTarget, "acceso_cliente", nextAccesoCliente);
+            const accessSelect = document.querySelector(
+              `[data-access-select="1"][data-id="${String(idTarget)}"]`,
+            );
+            if (accessSelect) {
+              accessSelect.value = String(nextAccesoCliente);
+            }
+
             const pendingMessage = String(registroPendingMessages.get(idTarget) || "").trim();
             let message = pendingMessage;
             if (!message) {
@@ -737,7 +769,7 @@
               if (result?.error) throw new Error(result.error);
               const url = String(result?.url || "").trim();
               if (!url) throw new Error("No se pudo generar el link.");
-              message = buildSignupInviteMessage(url);
+              message = buildSignupInviteMessage(url, { includeDisclaimer: false });
             }
             const copied = await copyTextToClipboard(message).catch(() => false);
             if (copied) {

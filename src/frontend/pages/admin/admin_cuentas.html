@@ -3537,7 +3537,7 @@
           try {
             const { error } = await supabase
               .from("ventas")
-              .update({ pendiente: true, aviso_admin: false })
+              .update({ pendiente: true, aviso_admin: false, entrega_aviso: false })
               .eq("id_venta", ventaId);
             if (error) throw error;
             reactBtn.disabled = true;
@@ -5776,7 +5776,7 @@
           try {
             const { error } = await supabase
               .from("ventas")
-              .update({ pendiente: true, aviso_admin: false })
+              .update({ pendiente: true, aviso_admin: false, entrega_aviso: false })
               .eq("id_venta", ventaId);
             if (error) throw error;
             if (currentCuentaId) {
@@ -7342,6 +7342,7 @@
           let nuevoCuenta = null;
           let nuevoPerfil = null;
           let dataDestino = {};
+          const stockDebug = [];
           const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
           const shouldForceCuentaMiembro = forceMemberExtra === true && perfilHogar;
 
@@ -7363,8 +7364,10 @@
               console.error("[reemplazo] findPerfilLibre error", perfilErr);
               throw perfilErr;
             }
-            console.log("[reemplazo] perfilDestino", perfilDestino);
-            if (!perfilDestino) return false;
+            if (!perfilDestino) {
+              stockDebug.push(`sin perfil libre (hogar=${isHogar ? "si" : "no"})`);
+              return false;
+            }
             nuevoPerfil = perfilDestino.id_perfil;
             nuevoCuenta = perfilDestino.id_cuenta;
             dataDestino = {
@@ -7389,7 +7392,10 @@
               );
               throw cuentaErr;
             }
-            if (!cuentaDestino) return false;
+            if (!cuentaDestino) {
+              stockDebug.push("sin cuenta miembro libre");
+              return false;
+            }
             nuevoPerfil = null;
             nuevoCuenta = cuentaDestino.id_cuenta;
             dataDestino = {
@@ -7420,17 +7426,19 @@
               await findCuentaCompleta(plataformaId, cuentaOrigenId, {
                 allowBlockedFallback,
               });
-            if (cuentaDestinoErr) throw cuentaDestinoErr;
-            if (cuentaDestino) {
-              nuevoCuenta = cuentaDestino.id_cuenta;
-              nuevoPerfil = null;
-              dataDestino = {
-                correo: cuentaDestino.correo,
-                clave: cuentaDestino.clave,
-              };
-              assigned = true;
+              if (cuentaDestinoErr) throw cuentaDestinoErr;
+              if (cuentaDestino) {
+                nuevoCuenta = cuentaDestino.id_cuenta;
+                nuevoPerfil = null;
+                dataDestino = {
+                  correo: cuentaDestino.correo,
+                  clave: cuentaDestino.clave,
+                };
+                assigned = true;
+              } else {
+                stockDebug.push("sin cuenta completa libre");
+              }
             }
-          }
 
           if (!assigned && perfilAnteriorId && isTrue(ventaInfo?.reportado)) {
             const { data: perfilDirecto, error: perfilDirectErr } =
@@ -7450,7 +7458,7 @@
                 n_perfil: perfilDirecto.n_perfil,
               };
               assigned = true;
-              console.warn("[reemplazo] usando fallback sin bloqueos de historial", {
+              console.error("[reemplazo] usando fallback sin bloqueos de historial", {
                 id_venta: ventaId,
                 cuenta_origen: cuentaOrigenId,
                 perfil_origen: perfilAnteriorId,
@@ -7461,7 +7469,10 @@
           }
 
           if (!assigned) {
-            console.warn("[reemplazo] sin stock", {
+            const motivoStock = stockDebug.length
+              ? stockDebug.join(" | ")
+              : "no hubo candidatos disponibles";
+            console.error("[reemplazo] sin stock", {
               id_venta: ventaId,
               plataformaId,
               cuentaOrigenId,
@@ -7470,8 +7481,9 @@
               ventaPerfil,
               ventaMiembro,
               allowBlockedFallback,
+              motivoStock,
             });
-            alert("Sin stock");
+            alert(`Sin stock (${motivoStock})`);
             return;
           }
 
