@@ -6230,7 +6230,7 @@
                 if (perfilId && memberCuentaId) {
                   const { error: perfErr } = await supabase
                     .from("perfiles")
-                  .update({ ocupado: true, id_cuenta_miembro: memberCuentaId })
+                    .update({ ocupado: true })
                     .eq("id_perfil", perfilId);
                   if (perfErr) throw perfErr;
                 }

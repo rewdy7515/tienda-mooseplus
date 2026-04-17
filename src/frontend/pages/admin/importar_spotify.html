@@ -291,7 +291,7 @@
             if (ventaErr) throw ventaErr;
             const { error: perfilErr } = await supabase
               .from("perfiles")
-              .update({ ocupado: true, id_cuenta_miembro: idCuentaMiembro })
+              .update({ ocupado: true })
               .eq("id_perfil", idPerfil);
             if (perfilErr) throw perfilErr;
             inserted += 1;

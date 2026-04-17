@@ -1573,7 +1573,7 @@
             } else {
               const { error: occErr } = await supabase
                 .from("perfiles")
-                .update({ ocupado: true, id_cuenta_miembro: nuevaCuentaId })
+                .update({ ocupado: true })
                 .eq("id_perfil", perfilId);
               if (occErr) throw occErr;
             }
@@ -2236,14 +2236,14 @@
         if (currentPerfilId) {
           const { error: oldPerfErr } = await supabase
             .from("perfiles")
-            .update({ ocupado: false, id_cuenta_miembro: null })
+            .update({ ocupado: false })
             .eq("id_perfil", currentPerfilId);
           if (oldPerfErr) throw oldPerfErr;
         }
         const cuentaMiembroIdNum = toPositiveId(cuentaMiembroId);
         const { error: newPerfErr } = await supabase
           .from("perfiles")
-          .update({ ocupado: true, id_cuenta_miembro: cuentaMiembroIdNum })
+          .update({ ocupado: true })
           .eq("id_perfil", nextPerfilId);
         if (newPerfErr) throw newPerfErr;
 

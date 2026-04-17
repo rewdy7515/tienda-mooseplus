@@ -88,6 +88,12 @@ const sanitizePersonName = (value = "") =>
     .replace(/^\s+/, "");
 
 const isValidPersonName = (value = "") => NAME_VALIDATION_REGEX.test(String(value || "").trim());
+const isAlreadyRegisteredSignupLinkError = (value = "") => {
+  const msg = String(value || "")
+    .trim()
+    .toLowerCase();
+  return msg.includes("ya está registrado") || msg.includes("ya esta registrado");
+};
 
 function getLoginPageUrl() {
   const params = new URLSearchParams();
@@ -271,8 +277,16 @@ const preloadSignupTokenContext = async () => {
   if (!signupToken) return null;
   const result = await validateSignupRegistrationToken(signupToken);
   if (result?.error) {
+    const errorText = String(result.error || "").trim();
     setFormDisabled(true);
-    setStatus("Este link de registro es inválido o venció. Solicita uno nuevo.", true);
+    if (isAlreadyRegisteredSignupLinkError(errorText)) {
+      setStatus("Esta cuenta ya está registrada. Te llevaremos a iniciar sesión...", false);
+      window.setTimeout(() => {
+        window.location.href = getLoginPageUrl();
+      }, 900);
+      return null;
+    }
+    setStatus(errorText || "Este link de registro es inválido o venció. Solicita uno nuevo.", true);
     return null;
   }
 
@@ -452,7 +466,12 @@ async function handleSubmit(e) {
     if (tokenFlow) {
       const valid = await validateSignupRegistrationToken(signupToken);
       if (valid?.error) {
-        throw new Error(valid.error || "El link de registro no es válido.");
+        const tokenErrText = String(valid.error || "").trim();
+        if (isAlreadyRegisteredSignupLinkError(tokenErrText)) {
+          window.location.href = getLoginPageUrl();
+          return;
+        }
+        throw new Error(tokenErrText || "El link de registro no es válido.");
       }
       signupTokenContext = valid;
     }

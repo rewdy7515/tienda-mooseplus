@@ -782,7 +782,7 @@
             const { data: ventas, error: ventErr } = await supabase
               .from("ventas")
               .select(
-                "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, suspendido, id_precio",
+                "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, suspendido, id_precio, correo_miembro",
               )
               .in("id_usuario", ids)
               .limit(50);
@@ -800,6 +800,7 @@
             );
             let cuentaMapa = {};
             let plataformaMapa = {};
+            let precioMapa = {};
             const perfilIds = [...new Set((ventas || []).map((v) => v.id_perfil).filter(Boolean))];
             if (cuentasIds.length) {
               const { data: cuentas, error: ctaErr } = await supabase
@@ -819,7 +820,9 @@
                 if (platIds.length) {
                   const { data: plats, error: platErr } = await supabase
                     .from("plataformas")
-                    .select("id_plataforma, nombre, color_1, por_pantalla, por_acceso, entrega_inmediata")
+                    .select(
+                      "id_plataforma, nombre, color_1, por_pantalla, por_acceso, entrega_inmediata, correo_cliente",
+                    )
                     .in("id_plataforma", platIds);
                   if (platErr) {
                     console.error("buscar plataformas error", platErr);
@@ -832,12 +835,27 @@
                 }
               }
             }
+            const precioIds = Array.from(new Set((ventas || []).map((v) => v.id_precio).filter(Boolean)));
+            if (precioIds.length) {
+              const { data: precios, error: precErr } = await supabase
+                .from("precios")
+                .select("id_precio, id_plataforma")
+                .in("id_precio", precioIds);
+              if (precErr) {
+                console.error("buscar precios error", precErr);
+              } else {
+                precioMapa = (precios || []).reduce((acc, p) => {
+                  acc[p.id_precio] = p;
+                  return acc;
+                }, {});
+              }
+            }
             let perfilMapa = {};
           if (perfilIds.length) {
             const { data: perfiles, error: perfErr } = await supabase
               .from("perfiles")
-              .select("id_perfil, n_perfil, perfil_hogar, pin, id_cuenta_miembro")
-              .in("id_perfil", perfilIds);
+                .select("id_perfil, n_perfil, perfil_hogar, pin")
+                .in("id_perfil", perfilIds);
             if (perfErr) {
               console.error("buscar perfiles error", perfErr);
             } else {
@@ -850,13 +868,7 @@
 
             const memberCuentaIds = Array.from(
               new Set(
-                (ventas || [])
-                  .map((v) => v.id_cuenta_miembro)
-                  .concat(
-                    (Object.values(perfilMapa) || [])
-                  .map((p) => p.id_cuenta_miembro)
-                  )
-                  .filter(Boolean),
+                (ventas || []).map((v) => v.id_cuenta_miembro).filter(Boolean),
               ),
             );
             let memberCuentaMap = {};
@@ -874,6 +886,32 @@
                 }, {});
               }
             }
+            const extraPlatIds = Array.from(
+              new Set(
+                [
+                  ...Object.values(cuentaMapa).map((c) => c?.id_plataforma),
+                  ...Object.values(memberCuentaMap).map((c) => c?.id_plataforma),
+                  ...Object.values(precioMapa).map((p) => p?.id_plataforma),
+                ]
+                  .filter(Boolean)
+                  .filter((id) => !plataformaMapa[id]),
+              ),
+            );
+            if (extraPlatIds.length) {
+              const { data: extraPlats, error: extraPlatErr } = await supabase
+                .from("plataformas")
+                .select(
+                  "id_plataforma, nombre, color_1, por_pantalla, por_acceso, entrega_inmediata, correo_cliente",
+                )
+                .in("id_plataforma", extraPlatIds);
+              if (extraPlatErr) {
+                console.error("buscar plataformas (extra) error", extraPlatErr);
+              } else {
+                (extraPlats || []).forEach((p) => {
+                  plataformaMapa[p.id_plataforma] = p;
+                });
+              }
+            }
 
             const rows = (ventas || []).map((v) => {
               const user = parsed.find((u) => u.id_usuario === v.id_usuario) || {};
@@ -881,13 +919,17 @@
               const cuentaBaseId = v.id_cuenta || directMemberId || null;
               const cuentaInfo = cuentaMapa[cuentaBaseId] || {};
               const perfInfo = v.id_perfil ? perfilMapa[v.id_perfil] : null;
-              const memberId = perfInfo?.id_cuenta_miembro || directMemberId;
+              const memberId = directMemberId;
               const memberCuenta = memberId
                 ? memberCuentaMap[memberId] || cuentaMapa[memberId] || null
                 : null;
               const cuentaRef = memberCuenta || cuentaInfo;
-              const platId = cuentaRef?.id_plataforma || null;
+              const precioInfo = v.id_precio ? precioMapa[v.id_precio] : null;
+              const platId = cuentaRef?.id_plataforma || precioInfo?.id_plataforma || null;
               const platInfo = platId ? plataformaMapa[platId] : null;
+              const useCorreoCliente = isTrue(platInfo?.correo_cliente) || Number(platId) === 12;
+              const correoVenta = String(v?.correo_miembro || "").trim();
+              const correoCuenta = memberCuenta?.correo || cuentaInfo?.correo || user.correo || "";
               const pinServicio = resolveServicioPin({
                 cuentaBase: cuentaInfo,
                 cuentaMiembro: memberCuenta,
@@ -910,7 +952,7 @@
                 id_plataforma: platId,
                 id_cuenta: memberId || cuentaBaseId || null,
                 id_usuario_cliente: v.id_usuario || null,
-                correo: memberCuenta?.correo || cuentaInfo?.correo || user.correo,
+                correo: useCorreoCliente ? correoVenta || correoCuenta : correoCuenta || correoVenta,
                 clave: memberCuenta?.clave || cuentaInfo?.clave || "",
                 pin: pinServicio,
                 nombreCompleto: user.nombreCompleto,
@@ -986,7 +1028,7 @@
               supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio",
+                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro",
                 )
                 .in("id_cuenta", cuentaIds)
             );
@@ -998,7 +1040,7 @@
               supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio",
+                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro",
                 )
                 .in("id_cuenta_miembro", cuentaIds)
             );
@@ -1010,7 +1052,7 @@
               supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio",
+                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro",
                 )
                 .in("id_perfil", dominioPerfilIds)
             );
@@ -1047,7 +1089,7 @@
           const { data: perfiles, error: pErr } = perfIds.length
             ? await supabase
                 .from("perfiles")
-                .select("id_perfil, n_perfil, perfil_hogar, pin, id_cuenta_miembro")
+                .select("id_perfil, n_perfil, perfil_hogar, pin")
                 .in("id_perfil", perfIds)
             : { data: [], error: null };
           if (pErr) throw pErr;
@@ -1055,13 +1097,19 @@
             acc[p.id_perfil] = p;
             return acc;
           }, {});
+          const priceIds = Array.from(new Set((ventas || []).map((v) => v.id_precio).filter(Boolean)));
+          const { data: prices, error: priceErr } = priceIds.length
+            ? await supabase.from("precios").select("id_precio, id_plataforma").in("id_precio", priceIds)
+            : { data: [], error: null };
+          if (priceErr) throw priceErr;
+          const priceMap = (prices || []).reduce((acc, p) => {
+            acc[p.id_precio] = p;
+            return acc;
+          }, {});
 
           const memberCuentaIds = Array.from(
             new Set(
-              (ventas || [])
-                .map((v) => v.id_cuenta_miembro)
-                .concat((perfiles || []).map((p) => p.id_cuenta_miembro))
-                .filter(Boolean),
+              (ventas || []).map((v) => v.id_cuenta_miembro).filter(Boolean),
             ),
           );
           let memberCuentaMap = {};
@@ -1103,12 +1151,20 @@
           }
 
           const platIds = Array.from(
-            new Set(Object.values(cuentaMap).map((c) => c.id_plataforma).filter(Boolean)),
+            new Set(
+              [
+                ...Object.values(cuentaMap).map((c) => c?.id_plataforma),
+                ...Object.values(memberCuentaMap).map((c) => c?.id_plataforma),
+                ...Object.values(priceMap).map((p) => p?.id_plataforma),
+              ].filter(Boolean),
+            ),
           );
           const { data: plats, error: platErr } = platIds.length
             ? await supabase
                 .from("plataformas")
-              .select("id_plataforma, nombre, color_1, por_pantalla, por_acceso, entrega_inmediata")
+                .select(
+                  "id_plataforma, nombre, color_1, por_pantalla, por_acceso, entrega_inmediata, correo_cliente",
+                )
                 .in("id_plataforma", platIds)
             : { data: [], error: null };
           if (platErr) throw platErr;
@@ -1122,12 +1178,17 @@
             const cuentaBaseId = v.id_cuenta || directMemberId || null;
             const cuenta = cuentaMap[cuentaBaseId] || {};
             const perf = v.id_perfil ? perfMap[v.id_perfil] : null;
-            const memberId = perf?.id_cuenta_miembro || directMemberId;
+            const memberId = directMemberId;
             const memberCuenta = memberId
               ? memberCuentaMap[memberId] || cuentaMap[memberId] || null
               : null;
             const cuentaRef = memberCuenta || cuenta;
-            const plat = platMap[cuentaRef?.id_plataforma] || {};
+            const price = v.id_precio ? priceMap[v.id_precio] : null;
+            const platId = cuentaRef?.id_plataforma || price?.id_plataforma || null;
+            const plat = platMap[platId] || {};
+            const useCorreoCliente = isTrue(plat?.correo_cliente) || Number(platId) === 12;
+            const correoVenta = String(v?.correo_miembro || "").trim();
+            const correoCuenta = memberCuenta?.correo || cuenta?.correo || "";
             const pinServicio = resolveServicioPin({
               cuentaBase: cuenta,
               cuentaMiembro: memberCuenta,
@@ -1147,10 +1208,10 @@
                 color_1: plat?.color_1 || "",
                 id_venta: v.id_venta,
                 id_precio: v.id_precio || null,
-                id_plataforma: cuentaRef?.id_plataforma || plat?.id_plataforma || null,
+                id_plataforma: platId || plat?.id_plataforma || null,
               id_cuenta: memberId || cuentaBaseId || null,
               id_usuario_cliente: v.id_usuario || null,
-              correo: memberCuenta?.correo || cuenta?.correo || "",
+              correo: useCorreoCliente ? correoVenta || correoCuenta : correoCuenta || correoVenta,
               clave: memberCuenta?.clave || cuenta?.clave || "",
               id_perfil: v.id_perfil || null,
               n_perfil: perf?.n_perfil || null,

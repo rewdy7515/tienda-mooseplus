@@ -1678,6 +1678,12 @@
           clientes_auth_confirmados_mes_anterior: 0,
           vendedores_auth_confirmados: 0,
           vendedores_auth_confirmados_mes_anterior: 0,
+          clientes_activos_base: 0,
+          clientes_activos_registrados_web: 0,
+          clientes_activos_no_registrados_web: 0,
+          clientes_activos_pct_registrados_web: 0,
+          clientes_activos_pct_no_registrados_web: 0,
+          clientes_activos_rango: null,
           registros_por_mes: [],
           mes_actual: "",
           registros_por_dia_mes_actual: [],
@@ -2429,12 +2435,25 @@
           ${xLabels}
         `;
       };
-      const renderAuthActivePieChart = (activeClientsCount, authClientsCount) => {
+      const renderAuthActivePieChart = (activeClientsCount, authClientsCount, authData = null) => {
         if (!authWebActivosPieChart || !authWebActivosPieLegend || !authWebActivosPieNote) return;
-        const active = Math.max(0, Number(activeClientsCount) || 0);
-        const authRaw = Math.max(0, Number(authClientsCount) || 0);
-        const registrados = Math.min(active, authRaw);
-        const noRegistrados = Math.max(0, active - registrados);
+        const activeFromAuth = Number(authData?.clientes_activos_base);
+        const registradosFromAuth = Number(authData?.clientes_activos_registrados_web);
+        const noRegistradosFromAuth = Number(authData?.clientes_activos_no_registrados_web);
+        const hasAuthCoverage =
+          Number.isFinite(activeFromAuth) &&
+          Number.isFinite(registradosFromAuth) &&
+          Number.isFinite(noRegistradosFromAuth);
+        const active = hasAuthCoverage
+          ? Math.max(0, Math.trunc(activeFromAuth))
+          : Math.max(0, Number(activeClientsCount) || 0);
+        const authRaw = hasAuthCoverage
+          ? Math.max(0, Math.trunc(registradosFromAuth))
+          : Math.max(0, Number(authClientsCount) || 0);
+        const registrados = hasAuthCoverage ? authRaw : Math.min(active, authRaw);
+        const noRegistrados = hasAuthCoverage
+          ? Math.max(0, Math.trunc(noRegistradosFromAuth))
+          : Math.max(0, active - registrados);
         const pctRegistrados = active > 0 ? (registrados / active) * 100 : 0;
         const pctNoRegistrados = active > 0 ? (noRegistrados / active) * 100 : 0;
 
@@ -2486,9 +2505,14 @@
           </div>
         `;
 
+        const coverageRange = authData?.clientes_activos_rango || null;
+        const coverageRangeTxt =
+          coverageRange?.start && coverageRange?.end
+            ? `${formatDDMMYYYY(coverageRange.start)} a ${formatDDMMYYYY(coverageRange.end)}`
+            : "mes seleccionado";
         authWebActivosPieNote.textContent =
           active > 0
-            ? `Base de cálculo: ${intFmt.format(active)} clientes activos del mes seleccionado.`
+            ? `Base de cálculo: ${intFmt.format(active)} clientes activos (${coverageRangeTxt}).`
             : "Sin clientes activos para calcular la cobertura de registro web.";
       };
       const renderTrafficDailyMonthLineChart = (trafico = {}) => {
@@ -2760,6 +2784,7 @@
         renderAuthActivePieChart(
           activeClientsCount,
           Number(analiticaWeb?.auth?.clientes_auth_confirmados) || 0,
+          analiticaWeb?.auth || null,
         );
         if (authWebNoteEl) {
           const totalUsuarios = Number(analiticaWeb?.auth?.usuarios_auth_confirmados) || 0;

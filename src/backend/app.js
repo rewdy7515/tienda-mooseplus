@@ -3128,7 +3128,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
 
   const { data: targetUserRow, error: targetUserErr } = await supabaseAdmin
     .from("usuarios")
-    .select("id_usuario, telefono, fecha_registro")
+    .select("id_usuario, telefono, fecha_registro, id_auth")
     .eq("id_usuario", targetUserId)
     .maybeSingle();
   if (targetUserErr) throw targetUserErr;
@@ -3149,7 +3149,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     idVenta: ventaId,
     idOrden: ordenId,
   });
-  const clienteRegistrado = Boolean(targetUserRow?.fecha_registro);
+  const clienteRegistrado = isUsuarioWebRegistrado(targetUserRow);
   let signupRegistroUrl = "";
   if (!clienteRegistrado) {
     try {
@@ -4678,7 +4678,7 @@ const loadWhatsappRecordatorioUsers = async ({ targetUserIds = null } = {}) => {
     (from, to) => {
       let query = supabaseAdmin
         .from("usuarios")
-        .select("id_usuario, nombre, apellido, telefono, fecha_registro, recordatorio_dias_antes")
+        .select("id_usuario, nombre, apellido, telefono, fecha_registro, id_auth, recordatorio_dias_antes")
         .order("id_usuario", { ascending: true })
         .range(from, to);
       if (userIdsFilter.length) {
@@ -4867,7 +4867,7 @@ const buildWhatsappRecordatorioItems = async ({
   const mapUser = usersList.reduce((acc, user) => {
     const userId = Number(user.id_usuario);
     if (!Number.isFinite(userId) || userId <= 0) return acc;
-    const isRegistered = Boolean(user?.fecha_registro);
+    const isRegistered = isUsuarioWebRegistrado(user);
     let signupUrl = "";
     if (!isRegistered) {
       try {
@@ -8617,6 +8617,8 @@ const SIGNUP_TOKEN_SECRET = String(
 const SIGNUP_RESEND_COOLDOWN_MS = 60 * 1000;
 const signupResendCooldownMap = new Map();
 const NEW_AUTH_SIGNUP_NOTIFY_USER_ID = 23;
+const isUsuarioWebRegistrado = (row = null) =>
+  Boolean(row?.fecha_registro) || Boolean(String(row?.id_auth || "").trim());
 
 const todayInVenezuela = () => {
   // Retorna fecha actual en huso horario de Venezuela (America/Caracas) en formato YYYY-MM-DD
@@ -15714,14 +15716,14 @@ app.post("/api/usuarios/:id_usuario/signup-link", async (req, res) => {
 
     const { data: targetRow, error: targetErr } = await supabaseAdmin
       .from("usuarios")
-      .select("id_usuario, fecha_registro")
+      .select("id_usuario, fecha_registro, id_auth")
       .eq("id_usuario", idUsuarioTarget)
       .maybeSingle();
     if (targetErr) throw targetErr;
     if (!targetRow) {
       return res.status(404).json({ error: "Usuario no encontrado." });
     }
-    if (targetRow?.fecha_registro) {
+    if (isUsuarioWebRegistrado(targetRow)) {
       return res.status(409).json({ error: "El usuario ya está registrado." });
     }
 
@@ -15902,14 +15904,14 @@ app.get("/api/signup-link/validate", async (req, res) => {
     const payload = verifySignupRegistrationToken(token);
     const { data: targetRow, error: targetErr } = await supabaseAdmin
       .from("usuarios")
-      .select("id_usuario, nombre, apellido, correo, fecha_registro")
+      .select("id_usuario, nombre, apellido, correo, fecha_registro, id_auth")
       .eq("id_usuario", payload.uid)
       .maybeSingle();
     if (targetErr) throw targetErr;
     if (!targetRow) {
       return res.status(404).json({ error: "Usuario del link no encontrado." });
     }
-    if (targetRow?.fecha_registro) {
+    if (isUsuarioWebRegistrado(targetRow)) {
       return res.status(409).json({ error: "El usuario del link ya está registrado." });
     }
 
@@ -15970,14 +15972,14 @@ app.post("/api/signup-link/complete", async (req, res) => {
 
     const { data: targetRow, error: targetErr } = await supabaseAdmin
       .from("usuarios")
-      .select("id_usuario, fecha_registro")
+      .select("id_usuario, fecha_registro, id_auth")
       .eq("id_usuario", payload.uid)
       .maybeSingle();
     if (targetErr) throw targetErr;
     if (!targetRow) {
       return res.status(404).json({ error: "Usuario del link no encontrado." });
     }
-    if (targetRow?.fecha_registro) {
+    if (isUsuarioWebRegistrado(targetRow)) {
       return res.status(409).json({ error: "El usuario del link ya está registrado." });
     }
 
@@ -16424,11 +16426,27 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       if (!start || !end || !nextStart) return null;
       return { start, end, nextStart, days: safeDays };
     };
+    const buildMonthRangeUntilDay = (value = "", dayLimit = null) => {
+      const base = buildMonthRange(value);
+      if (!base) return null;
+      const parsedDay = Math.trunc(Number(dayLimit));
+      if (!Number.isInteger(parsedDay) || parsedDay < 1) return base;
+      const endDay = Math.min(parsedDay, Number(String(base.end).slice(-2)) || parsedDay);
+      const end = `${String(base.start).slice(0, 8)}${String(endDay).padStart(2, "0")}`;
+      return {
+        ...base,
+        end,
+        nextStart: addDaysToDateKey(end, 1),
+      };
+    };
     const previousMonthVal = indexToMonthKey((monthToIndex(monthVal) || 0) - 1);
     const range = buildMonthRange(monthVal);
     const prevRange = buildMonthRange(previousMonthVal);
     const currentMonthRange = buildMonthRange(currentMonthVal);
     const todayCaracas = todayInVenezuela();
+    const todayCaracasDay = Number(String(todayCaracas || "").slice(-2)) || 1;
+    const authCoverageRange =
+      monthVal === currentMonthVal ? buildMonthRangeUntilDay(monthVal, todayCaracasDay) : range;
     const trafficMonthCurrentVal = currentMonthVal;
     const trafficMonthPreviousVal = indexToMonthKey((monthToIndex(currentMonthVal) || 0) - 1);
     const trafficMonthCurrentRange = buildMonthRange(trafficMonthCurrentVal);
@@ -16442,7 +16460,8 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       !trafficRangeCurrent ||
       !trafficRangePrev ||
       !trafficMonthCurrentRange ||
-      !trafficMonthPreviousRange
+      !trafficMonthPreviousRange ||
+      !authCoverageRange
     ) {
       return res.status(500).json({ error: "No se pudo calcular el rango de tráfico." });
     }
@@ -16547,6 +16566,7 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       traficoMesAnteriorResp,
       traficoMesActualDailyResp,
       traficoMesAnteriorDailyResp,
+      historialClientesActivosResp,
     ] = await Promise.all([
       supabaseAdmin
         .from("usuarios")
@@ -16602,6 +16622,12 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         .select("fecha, id_usuario")
         .gte("fecha", trafficMonthPreviousRange.start)
         .lt("fecha", trafficMonthPreviousRange.nextStart),
+      supabaseAdmin
+        .from("historial_ventas")
+        .select("id_usuario_cliente, fecha_pago")
+        .not("id_usuario_cliente", "is", null)
+        .gte("fecha_pago", authCoverageRange.start)
+        .lt("fecha_pago", authCoverageRange.nextStart),
     ]);
 
     if (usuariosResp.error) throw usuariosResp.error;
@@ -16616,6 +16642,7 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     let traficoMesAnteriorRows = traficoMesAnteriorResp.data || [];
     let traficoMesActualDailyRows = traficoMesActualDailyResp.data || [];
     let traficoMesAnteriorDailyRows = traficoMesAnteriorDailyResp.data || [];
+    let historialClientesActivosRows = historialClientesActivosResp.data || [];
     if (traficoActualResp.error) {
       if (!isMissingTableError(traficoActualResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
         throw traficoActualResp.error;
@@ -16675,6 +16702,9 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         throw traficoMesAnteriorDailyResp.error;
       }
       traficoMesAnteriorDailyRows = [];
+    }
+    if (historialClientesActivosResp.error) {
+      throw historialClientesActivosResp.error;
     }
 
     const countedTrafficEventTypes = new Set(["vista_pagina", "inicio_sesion_web"]);
@@ -16886,6 +16916,33 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     };
     const isClienteAuthRow = (row) => resolveAuthAccesoCliente(row) === true;
     const isVendedorAuthRow = (row) => resolveAuthAccesoCliente(row) !== true;
+    const clientesActivosPeriodoIds = uniqPositiveIds(
+      (historialClientesActivosRows || []).map((row) => row?.id_usuario_cliente),
+    );
+    const clientesAuthConfirmadosLinkedHastaPeriodo = new Set(
+      authConfirmedRows
+        .filter((row) => {
+          if (!isClienteAuthRow(row)) return false;
+          const usuarioId = toPositiveInt(row?.usuario?.id_usuario);
+          if (!usuarioId) return false;
+          return String(row?.fecha_confirmacion || "").trim() <= String(authCoverageRange.end || "");
+        })
+        .map((row) => toPositiveInt(row?.usuario?.id_usuario))
+        .filter(Boolean),
+    );
+    const clientesActivosRegistradosWeb = clientesActivosPeriodoIds.reduce(
+      (acc, idUsuario) => acc + (clientesAuthConfirmadosLinkedHastaPeriodo.has(idUsuario) ? 1 : 0),
+      0,
+    );
+    const clientesActivosBase = clientesActivosPeriodoIds.length;
+    const clientesActivosNoRegistradosWeb = Math.max(
+      0,
+      clientesActivosBase - clientesActivosRegistradosWeb,
+    );
+    const porcentajeRegistradosWeb =
+      clientesActivosBase > 0 ? (clientesActivosRegistradosWeb / clientesActivosBase) * 100 : 0;
+    const porcentajeNoRegistradosWeb =
+      clientesActivosBase > 0 ? (clientesActivosNoRegistradosWeb / clientesActivosBase) * 100 : 0;
 
     const usuariosAuthConfirmados = countConfirmedUntil(authConfirmedRows, range.end);
     const usuariosAuthConfirmadosPrev = countConfirmedUntil(authConfirmedRows, prevRange.end);
@@ -16927,6 +16984,12 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         clientes_auth_confirmados_mes_anterior: clientesAuthConfirmadosPrev,
         vendedores_auth_confirmados: vendedoresAuthConfirmados,
         vendedores_auth_confirmados_mes_anterior: vendedoresAuthConfirmadosPrev,
+        clientes_activos_base: clientesActivosBase,
+        clientes_activos_registrados_web: clientesActivosRegistradosWeb,
+        clientes_activos_no_registrados_web: clientesActivosNoRegistradosWeb,
+        clientes_activos_pct_registrados_web: roundTrafficAverage(porcentajeRegistradosWeb),
+        clientes_activos_pct_no_registrados_web: roundTrafficAverage(porcentajeNoRegistradosWeb),
+        clientes_activos_rango: authCoverageRange,
         registros_por_mes: registrosPorMes,
         mes_actual: currentMonthVal,
         registros_por_dia_mes_actual: registrosPorDiaMesActual,
@@ -17040,7 +17103,6 @@ app.get("/api/inventario", async (req, res) => {
           id_perfil,
           n_perfil,
           pin,
-          id_cuenta_miembro,
           perfil_hogar
         ),
         tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(
@@ -17083,7 +17145,6 @@ app.get("/api/inventario", async (req, res) => {
       new Set(
         (data || []).flatMap((row) => [
           row?.id_cuenta_miembro,
-          row?.perfiles?.id_cuenta_miembro,
           row?.cuentas_miembro?.id_cuenta,
         ]),
       ),
@@ -17120,7 +17181,6 @@ app.get("/api/inventario", async (req, res) => {
       const sub_cuenta = row.precios?.sub_cuenta ?? null;
       const memberId =
         row.id_cuenta_miembro ||
-        row.perfiles?.id_cuenta_miembro ||
         row.cuentas_miembro?.id_cuenta ||
         null;
       const memberCuenta = memberId ? memberCuentaMap[memberId] || row.cuentas_miembro : null;
@@ -17367,12 +17427,12 @@ app.get("/api/ventas/orden", async (req, res) => {
     if (usuarioIdOrden) {
       const { data: usuarioOrdenRow, error: usuarioOrdenErr } = await supabaseAdmin
         .from("usuarios")
-        .select("id_usuario, fecha_registro")
+        .select("id_usuario, fecha_registro, id_auth")
         .eq("id_usuario", usuarioIdOrden)
         .maybeSingle();
       if (usuarioOrdenErr) throw usuarioOrdenErr;
       if (usuarioOrdenRow) {
-        usuarioRegistrado = !!usuarioOrdenRow?.fecha_registro;
+        usuarioRegistrado = isUsuarioWebRegistrado(usuarioOrdenRow);
         if (!usuarioRegistrado) {
           try {
             signupRegistroUrlCorto = buildSignupShortUrl(usuarioIdOrden);

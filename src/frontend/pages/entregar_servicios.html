@@ -1454,7 +1454,7 @@
           if (assignPerfil && clientCuentaId) {
             const { error: occErr } = await supabase
               .from("perfiles")
-              .update({ ocupado: true, id_cuenta_miembro: clientCuentaId })
+              .update({ ocupado: true })
               .eq("id_perfil", assignPerfil);
             if (occErr) throw occErr;
           }
