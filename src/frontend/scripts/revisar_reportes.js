@@ -360,6 +360,8 @@ const pickReportePlataformaNombre = (row) => {
 const pickReporteCorreo = (row) => {
   const correoMiembro = String(row?.correo_miembro || "").trim();
   if (correoMiembro) return correoMiembro;
+  const correoMiembroVenta = String(row?.venta_correo_miembro || "").trim();
+  if (correoMiembroVenta) return correoMiembroVenta;
   const correoCuenta = String(row?.cuentas?.correo || "").trim();
   if (correoCuenta) return correoCuenta;
   const correoMadre = String(row?.cuenta_madre_correo || "").trim();
@@ -803,7 +805,7 @@ const renderReportesList = (plataformas = []) => {
               const cliente =
                 [r.usuarios?.nombre, r.usuarios?.apellido].filter(Boolean).join(" ").trim() || "-";
               const platformId = getReportePlatformId(r);
-              const correo = r.cuentas?.correo || "-";
+              const correo = pickReporteCorreo(r) || "-";
               const correoText = escapeHtml(correo);
               const correoCopyAttr = escapeHtml(correo);
               const datosCorregidos = isTrue(r?.datos_corregidos);
@@ -1039,24 +1041,31 @@ async function loadReportes() {
   const ventaIds = Array.from(
     new Set(rows.map((row) => toPositiveId(row?.id_venta)).filter((value) => !!value)),
   );
-  const ventaCompletaById = new Map();
+  const ventaMetaById = new Map();
   if (ventaIds.length) {
     const { data: ventasData, error: ventasErr } = await supabase
       .from("ventas")
-      .select("id_venta, completa")
+      .select("id_venta, completa, correo_miembro")
       .in("id_venta", ventaIds);
     if (ventasErr) {
       console.error("load reportes ventas completa error", ventasErr);
     } else {
       (ventasData || []).forEach((venta) => {
-        ventaCompletaById.set(toPositiveId(venta?.id_venta), isTrue(venta?.completa));
+        const ventaId = toPositiveId(venta?.id_venta);
+        if (!ventaId) return;
+        ventaMetaById.set(ventaId, {
+          completa: isTrue(venta?.completa),
+          correo_miembro: String(venta?.correo_miembro || "").trim(),
+        });
       });
     }
   }
 
   rows.forEach((row) => {
     const ventaId = toPositiveId(row?.id_venta);
-    row.venta_completa = ventaId ? ventaCompletaById.get(ventaId) === true : false;
+    const ventaMeta = ventaId ? ventaMetaById.get(ventaId) : null;
+    row.venta_completa = ventaMeta?.completa === true;
+    row.venta_correo_miembro = String(ventaMeta?.correo_miembro || "").trim();
   });
 
   const cuentaIds = new Set();
@@ -1221,7 +1230,7 @@ async function openModal(row) {
     modalPlatTitle.removeAttribute("role");
     modalPlatTitle.removeAttribute("tabindex");
   }
-  if (modalCorreo) modalCorreo.value = row.cuentas?.correo || "-";
+  if (modalCorreo) modalCorreo.value = pickReporteCorreo(row) || "-";
   if (modalFechaCorte) modalFechaCorte.value = formatDate(row.cuentas?.fecha_corte || null);
   oldClave = row.cuentas?.clave || "";
   const rawPin = row.perfiles?.pin ?? row.pin ?? "";

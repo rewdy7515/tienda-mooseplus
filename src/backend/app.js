@@ -9169,6 +9169,8 @@ const autoAssignReportedPendingVentas = async ({
         venta?.cuenta_base?.id_plataforma ||
         venta?.cuenta_miembro?.id_plataforma
       );
+        const priceId = toPositiveInt(venta?.id_precio);
+        const isNetflixPlan2 = Number(plataformaId) === 1 && (priceId === 4 || priceId === 5);
         if (!ventaId || !plataformaId) {
           summary.skipped += 1;
           continue;
@@ -9203,12 +9205,22 @@ const autoAssignReportedPendingVentas = async ({
           !ventaMiembro &&
           (isTrue(venta?.precios?.completa) ||
             (!isTrue(currentCuenta?.venta_perfil) && !isTrue(currentCuenta?.venta_miembro)));
+        let useNetflixPlan2Flow = isNetflixPlan2 && !ventaCompleta;
 
         if (!esReportada && !tieneRecursoAsignado) {
           const platCuentaMadre = isTrue(plataforma?.cuenta_madre) || Number(plataformaId) === 9;
           const platPorAcceso = isTrue(plataforma?.por_acceso);
           const precioCompleta = isTrue(venta?.precios?.completa);
-          if (precioCompleta) {
+          if (isNetflixPlan2) {
+            // Igual que checkout principal para Netflix Plan 2:
+            // intentar perfil hogar y, si no hay, cuenta miembro.
+            ventaCompleta = false;
+            ventaMiembro = false;
+            ventaPerfil = true;
+            onlyCuentaMadre = false;
+            perfilHogar = true;
+            useNetflixPlan2Flow = true;
+          } else if (precioCompleta) {
             ventaCompleta = true;
             ventaMiembro = false;
             ventaPerfil = false;
@@ -9237,7 +9249,34 @@ const autoAssignReportedPendingVentas = async ({
 
         let nuevoCuentaId = null;
         let nuevoPerfilId = null;
-      if (ventaPerfil) {
+      if (useNetflixPlan2Flow) {
+        const { data: perfilHogarLibre, error: perfilHogarErr } = await findPerfilLibre({
+          plataformaId,
+          perfilHogar: true,
+          onlyCuentaMadre: false,
+          excludeCuentaIds: [oldCuentaId, oldCuentaMiembroId],
+        });
+        if (perfilHogarErr) throw perfilHogarErr;
+        nuevoCuentaId = toPositiveInt(perfilHogarLibre?.id_cuenta);
+        nuevoPerfilId = toPositiveInt(perfilHogarLibre?.id_perfil);
+
+        if (!nuevoCuentaId) {
+          const { data: cuentaMiembroLibre, error: cuentaMiembroErr } = await findCuentaMiembroLibre(
+            plataformaId,
+            [oldCuentaId, oldCuentaMiembroId]
+          );
+          if (cuentaMiembroErr) throw cuentaMiembroErr;
+          nuevoCuentaId = toPositiveInt(cuentaMiembroLibre?.id_cuenta);
+          nuevoPerfilId = null;
+        }
+        console.log("[autoAssignPending][netflix-plan2] resolved", {
+          id_venta: ventaId,
+          id_precio: priceId,
+          assigned_cuenta: nuevoCuentaId || null,
+          assigned_perfil: nuevoPerfilId || null,
+          route: nuevoPerfilId ? "perfil_hogar" : nuevoCuentaId ? "cuenta_miembro" : "sin_stock",
+        });
+      } else if (ventaPerfil) {
         const { data: perfilLibre, error: perfilErr } = await findPerfilLibre({
           plataformaId,
           perfilHogar,
