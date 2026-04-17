@@ -1394,11 +1394,11 @@ async function handleSubmit(e) {
       return;
     }
     const id_cuenta = selectedCuentaId ? Number(selectedCuentaId) : null;
-    const id_perfil = selectedPerfilId ? Number(selectedPerfilId) : null;
+    const idPerfilSeleccionado = toPositiveId(selectedPerfilId);
     const ventaAsociada = await findVentaAsociadaParaReporte({
       idUsuario: reportUserId,
       idCuenta: id_cuenta,
-      idPerfil: id_perfil,
+      idPerfil: idPerfilSeleccionado,
     });
     const ventaYaReportada =
       (forcedVentaContext?.id_venta && isTrue(forcedVentaContext?.reportado)) ||
@@ -1410,6 +1410,9 @@ async function handleSubmit(e) {
     }
     const ventaAsociadaId =
       toPositiveId(forcedVentaContext?.id_venta) || toPositiveId(ventaAsociada?.id_venta) || null;
+    const idPerfilVenta =
+      toPositiveId(forcedVentaContext?.id_perfil) || toPositiveId(ventaAsociada?.id_perfil) || null;
+    const idPerfilReporte = idPerfilSeleccionado || idPerfilVenta || null;
     const motivoOption = selectMotivo?.selectedOptions?.[0] || null;
     const motivoTipoRaw = String(motivoOption?.value || "").trim();
     const motivoLabel = (motivoOption?.dataset?.titulo || motivoOption?.textContent || "").trim();
@@ -1467,7 +1470,7 @@ async function handleSubmit(e) {
       ? await intentarReemplazoAutomaticoCuentaInactiva({
           idUsuario: reportUserId,
           idCuenta: id_cuenta,
-          idPerfil: id_perfil,
+          idPerfil: idPerfilReporte,
           idPlataforma: id_plataforma,
           forceNetflixPlan1Hogar: forzarAutoNetflixPlan1Hogar,
         })
@@ -1487,7 +1490,7 @@ async function handleSubmit(e) {
         id_usuario: reportUserId,
         id_plataforma,
         id_cuenta,
-        id_perfil,
+        id_perfil: idPerfilReporte,
         id_venta: ventaAsociadaId,
         id_tipo_reporte: motivoTipoId,
         descripcion,
@@ -1519,7 +1522,7 @@ async function handleSubmit(e) {
           ventaId: ventaAsociadaId,
           idUsuario: reportUserId,
           idCuenta: id_cuenta,
-          idPerfil: id_perfil,
+          idPerfil: idPerfilReporte,
           idPlataforma: id_plataforma,
           motivoTipoId: motivoTipoId,
         });
@@ -1538,7 +1541,7 @@ async function handleSubmit(e) {
       id_usuario: reportUserId,
       id_plataforma,
       id_cuenta,
-      id_perfil,
+      id_perfil: idPerfilReporte,
       id_venta: ventaAsociadaId,
       id_tipo_reporte: motivoTipoId,
       descripcion,
@@ -1565,7 +1568,7 @@ async function handleSubmit(e) {
         ventaId: ventaAsociadaId,
         idUsuario: reportUserId,
         idCuenta: id_cuenta,
-        idPerfil: id_perfil,
+        idPerfil: idPerfilReporte,
         idPlataforma: id_plataforma,
         motivoTipoId: motivoTipoId,
       });

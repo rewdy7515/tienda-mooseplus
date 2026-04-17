@@ -248,6 +248,22 @@
           return;
         }
         setStatus("");
+        const toSortDateMs = (value) => {
+          const raw = String(value || "").trim();
+          if (!raw) return 0;
+          const base = raw.slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(base)) {
+            const [y, m, d] = base.split("-").map((n) => Number(n));
+            return Date.UTC(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+          }
+          const parsed = new Date(raw).getTime();
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const sortedItems = [...items].sort((a, b) => {
+          const dateDiff = toSortDateMs(b?.fecha) - toSortDateMs(a?.fecha);
+          if (dateDiff !== 0) return dateDiff;
+          return Number(b?.id_notificacion || 0) - Number(a?.id_notificacion || 0);
+        });
         const linkifyEmails = (html = "") => {
           const wrap = document.createElement("div");
           wrap.innerHTML = html;
@@ -371,7 +387,7 @@
           });
           return wrap.innerHTML;
         };
-        tbody.innerHTML = items
+        tbody.innerHTML = sortedItems
           .map((n) => {
             const title = n.titulo || "-";
             const isReporteNotif =

@@ -288,6 +288,9 @@
       .dashboard-platform-span-2 {
         grid-column: span 2;
       }
+      .dashboard-web-span-2 {
+        grid-column: span 2;
+      }
       .dashboard-web-grid,
       .dashboard-auth-grid {
         display: grid;
@@ -589,6 +592,7 @@
           grid-template-columns: 1fr;
         }
         .dashboard-platform-span-2,
+        .dashboard-web-span-2,
         .dashboard-auth-grid .dashboard-block:first-child {
           grid-column: span 1;
         }
@@ -908,9 +912,23 @@
       <section class="dashboard-section dashboard-card-shell">
         <div class="dashboard-section-head">
           <h3>Analítica de tráfico web</h3>
-          <p class="dashboard-section-note">Vista conjunta del comportamiento de visitas por día de semana y hora del día.</p>
+          <p class="dashboard-section-note">Vista conjunta del comportamiento de visitas por día, día de la semana y hora del día.</p>
         </div>
         <div class="dashboard-web-grid">
+          <article class="dashboard-block dashboard-web-span-2">
+            <h3>Ingresos diarios de clientes web</h3>
+            <p class="dashboard-mini-note" id="trafico-diario-note">-</p>
+            <svg
+              id="chart-trafico-diario"
+              class="dashboard-line-chart hidden"
+              viewBox="0 0 1000 240"
+              preserveAspectRatio="none"
+            ></svg>
+            <p class="dashboard-line-chart-empty hidden" id="empty-chart-trafico-diario">
+              Sin tráfico diario suficiente para comparar mes actual y mes anterior.
+            </p>
+            <div id="chart-trafico-diario-legend" class="dashboard-line-legend hidden"></div>
+          </article>
           <article class="dashboard-block">
             <h3>Tráfico web por día de la semana</h3>
             <p class="dashboard-mini-note" id="trafico-semana-note">-</p>
@@ -1066,6 +1084,10 @@
       const authWebDailyNoteEl = document.querySelector("#auth-web-daily-note");
       const authWebDailyChart = document.querySelector("#chart-auth-web-diario");
       const emptyAuthWebDailyChart = document.querySelector("#empty-chart-auth-web-diario");
+      const traficoDiarioNoteEl = document.querySelector("#trafico-diario-note");
+      const traficoDiarioChart = document.querySelector("#chart-trafico-diario");
+      const emptyTraficoDiarioChart = document.querySelector("#empty-chart-trafico-diario");
+      const traficoDiarioLegend = document.querySelector("#chart-trafico-diario-legend");
       const traficoSemanaNoteEl = document.querySelector("#trafico-semana-note");
       const traficoSemanaChart = document.querySelector("#chart-trafico-semana");
       const emptyTraficoSemanaChart = document.querySelector("#empty-chart-trafico-semana");
@@ -1088,6 +1110,8 @@
       let platformSalesDailyRows = [];
       let selectedPlatformDailyKeys = [];
       let platformDailyLastRange = null;
+      let traficoDiarioSelectedPoint = null;
+      let traficoDiarioHoverPoint = null;
       const PLATFORM_DAILY_LINE_COLORS = [
         "#0f766e",
         "#2563eb",
@@ -1186,6 +1210,11 @@
         return `${monthName} ${m[1]}`;
       };
       const formatAverageValue = (value) => avgFmt.format(Number(value) || 0);
+      const formatIsoDateLabel = (dateVal) => {
+        const m = normalizeIsoDate(dateVal).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return String(dateVal || "").trim();
+        return `${m[3]}/${m[2]}/${m[1]}`;
+      };
       const getPointRxScale = (svgEl, viewBoxW, viewBoxH) => {
         const vw = Number(svgEl?.clientWidth) || 0;
         const vh = Number(svgEl?.clientHeight) || 0;
@@ -1668,6 +1697,16 @@
             por_dia_semana: [],
             por_hora: [],
           },
+          rango_actual: null,
+          rango_anterior: null,
+          diario_mes: {
+            mes_actual: "",
+            mes_anterior: "",
+            rango_actual: null,
+            rango_anterior: null,
+            actual: [],
+            anterior: [],
+          },
         },
       });
 
@@ -1687,7 +1726,12 @@
         }
       };
 
-      const fillKpis = (stats, prevStats, compareSuffix = "vs mes anterior") => {
+      const fillKpis = (
+        stats,
+        prevStats,
+        compareSuffix = "vs mes anterior",
+        activeCompareSuffix = compareSuffix,
+      ) => {
         if (kpiIngresos) kpiIngresos.textContent = formatMoney(stats.ingresosTotal);
         if (kpiGastos) kpiGastos.textContent = formatMoney(stats.gastosTotal);
         if (kpiNeto) {
@@ -1726,14 +1770,14 @@
           "int",
           stats.clientesActivosCount,
           prevStats.clientesActivosCount,
-          compareSuffix,
+          activeCompareSuffix,
         );
         setCompare(
           cmpVentasActivas,
           "int",
           stats.ventasActivasCount,
           prevStats.ventasActivasCount,
-          compareSuffix,
+          activeCompareSuffix,
         );
         setCompare(
           cmpRenovCount,
@@ -2447,6 +2491,250 @@
             ? `Base de cálculo: ${intFmt.format(active)} clientes activos del mes seleccionado.`
             : "Sin clientes activos para calcular la cobertura de registro web.";
       };
+      const renderTrafficDailyMonthLineChart = (trafico = {}) => {
+        if (!traficoDiarioChart) return;
+        traficoDiarioChart.innerHTML = "";
+        const diarioMes = trafico?.diario_mes || {};
+        const monthCurrentKey = String(diarioMes?.mes_actual || "").trim();
+        const monthPrevKey = String(diarioMes?.mes_anterior || "").trim();
+        const currentRows = Array.isArray(diarioMes?.actual)
+          ? diarioMes.actual
+              .map((row) => ({
+                dia: Number(row?.dia) || 0,
+                cantidad: Number(row?.cantidad) || 0,
+              }))
+              .filter((row) => Number.isInteger(row.dia) && row.dia > 0)
+              .sort((a, b) => a.dia - b.dia)
+          : [];
+        const prevRows = Array.isArray(diarioMes?.anterior)
+          ? diarioMes.anterior
+              .map((row) => ({
+                dia: Number(row?.dia) || 0,
+                cantidad: Number(row?.cantidad) || 0,
+              }))
+              .filter((row) => Number.isInteger(row.dia) && row.dia > 0)
+              .sort((a, b) => a.dia - b.dia)
+          : [];
+        const maxDay = Math.max(
+          1,
+          ...currentRows.map((row) => row.dia),
+          ...prevRows.map((row) => row.dia),
+        );
+        const dayList = Array.from({ length: maxDay }, (_, idx) => idx + 1);
+        const currentMap = new Map(currentRows.map((row) => [row.dia, row.cantidad]));
+        const prevMap = new Map(prevRows.map((row) => [row.dia, row.cantidad]));
+        const currentVals = dayList.map((day) => (currentMap.has(day) ? Number(currentMap.get(day)) || 0 : null));
+        const prevVals = dayList.map((day) => (prevMap.has(day) ? Number(prevMap.get(day)) || 0 : null));
+        const numericVals = [...currentVals, ...prevVals].filter((value) => Number.isFinite(value));
+        const hasPositive = numericVals.some((value) => Number(value) > 0);
+        if (!hasPositive) {
+          traficoDiarioSelectedPoint = null;
+          traficoDiarioHoverPoint = null;
+          traficoDiarioChart.classList.add("hidden");
+          emptyTraficoDiarioChart?.classList.remove("hidden");
+          if (traficoDiarioLegend) {
+            traficoDiarioLegend.innerHTML = "";
+            traficoDiarioLegend.classList.add("hidden");
+          }
+          if (traficoDiarioNoteEl) {
+            traficoDiarioNoteEl.textContent =
+              "Sin tráfico diario suficiente para comparar mes actual y mes anterior.";
+          }
+          return;
+        }
+        const maxY = Math.max(1, ...numericVals.map((value) => Number(value) || 0));
+        const w = 1000;
+        const h = 240;
+        const px = 44;
+        const pyTop = 16;
+        const pyBottom = 34;
+        const innerW = w - px * 2;
+        const innerH = h - pyTop - pyBottom;
+        const toX = (idx) =>
+          px + (dayList.length <= 1 ? innerW / 2 : (idx / (dayList.length - 1)) * innerW);
+        const toY = (value) => pyTop + innerH - (Math.max(0, Number(value) || 0) / maxY) * innerH;
+        const pointRxScale = getPointRxScale(traficoDiarioChart, w, h);
+        const normalizePoint = (point = null) => {
+          if (!point || typeof point !== "object") return null;
+          const series = String(point?.series || "").trim().toLowerCase();
+          if (series !== "current" && series !== "previous") return null;
+          const day = Number(point?.day);
+          if (!Number.isInteger(day) || day < 1 || day > dayList.length) return null;
+          const idx = day - 1;
+          const value = Number(series === "current" ? currentVals[idx] : prevVals[idx]);
+          if (!Number.isFinite(value)) return null;
+          return { series, day, idx, value };
+        };
+        const selectedPoint = normalizePoint(traficoDiarioSelectedPoint);
+        if (!selectedPoint) {
+          traficoDiarioSelectedPoint = null;
+        }
+        const hoverPoint = normalizePoint(traficoDiarioHoverPoint);
+        if (!hoverPoint) {
+          traficoDiarioHoverPoint = null;
+        }
+        const activePoint = hoverPoint || selectedPoint;
+        const buildSeriesPath = (values = []) => {
+          let path = "";
+          values.forEach((value, idx) => {
+            if (value === null || value === undefined || !Number.isFinite(Number(value))) return;
+            const x = toX(idx).toFixed(2);
+            const y = toY(value).toFixed(2);
+            if (!path || values[idx - 1] === null || values[idx - 1] === undefined) {
+              path += `${path ? " " : ""}M${x},${y}`;
+            } else {
+              path += ` L${x},${y}`;
+            }
+          });
+          return path;
+        };
+        const buildSeriesPoints = (values = [], color = "#111827", radius = 2.8) =>
+          values
+            .map((value, idx) => {
+              if (value === null || value === undefined || !Number.isFinite(Number(value))) return "";
+              return buildEllipsePoint(toX(idx), toY(value), radius, color, pointRxScale);
+            })
+            .join("");
+        const buildHitTargets = (values = [], series = "current") =>
+          values
+            .map((value, idx) => {
+              if (value === null || value === undefined || !Number.isFinite(Number(value))) return "";
+              return buildEllipsePoint(
+                toX(idx),
+                toY(value),
+                12,
+                "rgba(0, 0, 0, 0.001)",
+                pointRxScale,
+                `data-traffic-series="${series}" data-traffic-day="${dayList[idx]}" style="cursor:pointer;"`,
+              );
+            })
+            .join("");
+        const currentPath = buildSeriesPath(currentVals);
+        const prevPath = buildSeriesPath(prevVals);
+        const currentPoints = buildSeriesPoints(currentVals, "#111827", 2.9);
+        const prevPoints = buildSeriesPoints(prevVals, "#cbd5e1", 2.5);
+        const hitTargets = `${buildHitTargets(prevVals, "previous")}${buildHitTargets(currentVals, "current")}`;
+        const activePointLabel = activePoint
+          ? (() => {
+              const x = toX(activePoint.idx);
+              const y = toY(activePoint.value);
+              const fill = activePoint.series === "current" ? "#111827" : "#64748b";
+              const stroke = activePoint.series === "current" ? "#111827" : "#94a3b8";
+              return `
+                ${buildEllipsePoint(x, y, 5.3, stroke, pointRxScale, 'stroke="#ffffff" stroke-width="1.5"')}
+                <text x="${x.toFixed(2)}" y="${Math.max(14, y - 10).toFixed(2)}" text-anchor="middle" fill="${fill}" font-size="11" font-weight="700">${intFmt.format(activePoint.value)}</text>
+              `;
+            })()
+          : "";
+        const gridLines = [0, 0.25, 0.5, 0.75, 1]
+          .map((ratio) => {
+            const y = pyTop + innerH - innerH * ratio;
+            return `<line x1="${px}" y1="${y}" x2="${w - px}" y2="${y}" stroke="#e2e8f0" stroke-width="1" />`;
+          })
+          .join("");
+        const yTicks = [0, 0.25, 0.5, 0.75, 1]
+          .map((ratio) => {
+            const y = pyTop + innerH - innerH * ratio;
+            const value = Math.round(maxY * ratio);
+            return `<text x="${(px - 8).toFixed(2)}" y="${(y + 3).toFixed(2)}" text-anchor="end" fill="#64748b" font-size="10">${value}</text>`;
+          })
+          .join("");
+        const axisY = pyTop + innerH;
+        const xLabelStep = dayList.length > 22 ? 3 : dayList.length > 14 ? 2 : 1;
+        const xLabels = dayList
+          .map((day, idx) => {
+            const x = toX(idx);
+            const showLabel =
+              idx === 0 ||
+              idx === dayList.length - 1 ||
+              day % xLabelStep === 0;
+            return showLabel
+              ? `<text x="${x.toFixed(2)}" y="${(axisY + 16).toFixed(2)}" text-anchor="middle" fill="#6b7280" font-size="9">${day}</text>`
+              : "";
+          })
+          .join("");
+        traficoDiarioChart.innerHTML = `
+          ${gridLines}
+          ${yTicks}
+          <line x1="${px}" y1="${axisY}" x2="${w - px}" y2="${axisY}" stroke="#cbd5e1" stroke-width="1.2" />
+          <path d="${prevPath}" fill="none" stroke="#cbd5e1" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="${currentPath}" fill="none" stroke="#111827" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          ${prevPoints}
+          ${currentPoints}
+          ${activePointLabel}
+          ${xLabels}
+          ${hitTargets}
+        `;
+        traficoDiarioChart.onpointerleave = () => {
+          if (!traficoDiarioHoverPoint) return;
+          traficoDiarioHoverPoint = null;
+          renderTrafficDailyMonthLineChart(trafico);
+        };
+        const pointNodes = traficoDiarioChart.querySelectorAll("[data-traffic-series][data-traffic-day]");
+        pointNodes.forEach((node) => {
+          const series = String(node.getAttribute("data-traffic-series") || "").trim().toLowerCase();
+          const day = Number(node.getAttribute("data-traffic-day"));
+          if ((series !== "current" && series !== "previous") || !Number.isInteger(day)) return;
+          node.addEventListener("pointerenter", () => {
+            if (
+              traficoDiarioHoverPoint?.series === series &&
+              Number(traficoDiarioHoverPoint?.day) === day
+            ) {
+              return;
+            }
+            traficoDiarioHoverPoint = { series, day };
+            renderTrafficDailyMonthLineChart(trafico);
+          });
+          const selectPoint = (event) => {
+            event.preventDefault();
+            if (
+              traficoDiarioSelectedPoint?.series === series &&
+              Number(traficoDiarioSelectedPoint?.day) === day
+            ) {
+              return;
+            }
+            traficoDiarioSelectedPoint = { series, day };
+            renderTrafficDailyMonthLineChart(trafico);
+          };
+          node.addEventListener("click", selectPoint);
+          node.addEventListener("pointerdown", selectPoint);
+        });
+        traficoDiarioChart.classList.remove("hidden");
+        emptyTraficoDiarioChart?.classList.add("hidden");
+        if (traficoDiarioLegend) {
+          const currentLabel = formatMonthLabel(monthCurrentKey || "") || "Mes actual";
+          const prevLabel = formatMonthLabel(monthPrevKey || "") || "Mes anterior";
+          traficoDiarioLegend.innerHTML = `
+            <span class="dashboard-line-legend-item">
+              <span class="dashboard-line-legend-dot" style="background:#111827;"></span>
+              ${escapeHtml(currentLabel)}
+            </span>
+            <span class="dashboard-line-legend-item">
+              <span class="dashboard-line-legend-dot" style="background:#cbd5e1;"></span>
+              ${escapeHtml(prevLabel)}
+            </span>
+          `;
+          traficoDiarioLegend.classList.remove("hidden");
+        }
+        if (traficoDiarioNoteEl) {
+          const totalCurrent = currentRows.reduce((acc, row) => acc + (Number(row?.cantidad) || 0), 0);
+          const totalPrev = prevRows.reduce((acc, row) => acc + (Number(row?.cantidad) || 0), 0);
+          const currentLabel = formatMonthLabel(monthCurrentKey || "") || "Mes actual";
+          const prevLabel = formatMonthLabel(monthPrevKey || "") || "Mes anterior";
+          const currentRange = diarioMes?.rango_actual || null;
+          const prevRange = diarioMes?.rango_anterior || null;
+          const currentRangeText =
+            currentRange?.start && currentRange?.end
+              ? `${formatDDMMYYYY(currentRange.start)} a ${formatDDMMYYYY(currentRange.end)}`
+              : "mes actual";
+          const prevRangeText =
+            prevRange?.start && prevRange?.end
+              ? `${formatDDMMYYYY(prevRange.start)} a ${formatDDMMYYYY(prevRange.end)}`
+              : "mes anterior";
+          traficoDiarioNoteEl.textContent =
+            `${currentLabel}: ${intFmt.format(totalCurrent)} ingresos únicos (${currentRangeText}). ${prevLabel}: ${intFmt.format(totalPrev)} ingresos únicos (${prevRangeText}).`;
+        }
+      };
       const renderAnaliticaWeb = (analiticaWeb, monthVal, activeClientsCount = 0) => {
         const authRows = Array.isArray(analiticaWeb?.auth?.registros_por_mes)
           ? analiticaWeb.auth.registros_por_mes.map((row) => ({
@@ -2494,45 +2782,25 @@
 
         const traficoActual = analiticaWeb?.trafico?.actual || {};
         const traficoPrev = analiticaWeb?.trafico?.anterior || {};
+        const traficoRangoActual = analiticaWeb?.trafico?.rango_actual || {};
+        const traficoRangoAnterior = analiticaWeb?.trafico?.rango_anterior || {};
+        renderTrafficDailyMonthLineChart(analiticaWeb?.trafico || {});
         const semanaRows = Array.isArray(traficoActual?.por_dia_semana)
           ? traficoActual.por_dia_semana.map((row) => ({
               label: String(row?.label || "").trim() || "-",
               cantidad: Number(row?.cantidad) || 0,
             }))
           : [];
-        const horaRowsMap = new Map(
-          Array.from({ length: 24 }, (_, hour) => [
-            hour,
-            {
-              hora: hour,
-              weightedTotal: 0,
-              dias: 0,
-            },
-          ]),
-        );
-        const accumulateHoraRows = (rows = []) => {
-          (Array.isArray(rows) ? rows : []).forEach((row) => {
-            const hora = Number(row?.hora);
-            if (!Number.isInteger(hora) || hora < 0 || hora > 23) return;
-            const dias = Math.max(0, Number(row?.dias) || 0);
-            if (!dias) return;
-            const cantidad = Number(row?.cantidad) || 0;
-            const entry = horaRowsMap.get(hora);
-            if (!entry) return;
-            entry.weightedTotal += cantidad * dias;
-            entry.dias += dias;
-          });
-        };
-        accumulateHoraRows(traficoActual?.por_hora || []);
-        accumulateHoraRows(traficoPrev?.por_hora || []);
-        const horaRows = Array.from(horaRowsMap.values())
-          .sort((a, b) => a.hora - b.hora)
-          .map((row) => ({
-            label: formatHourLabel12(row?.hora),
-            cantidad: row.dias > 0 ? row.weightedTotal / row.dias : 0,
-            hora: Number(row?.hora),
-            dias: row.dias,
-          }));
+        const horaRows = Array.isArray(traficoActual?.por_hora)
+          ? traficoActual.por_hora
+              .map((row) => ({
+                label: formatHourLabel12(row?.hora),
+                cantidad: Number(row?.cantidad) || 0,
+                hora: Number(row?.hora),
+                dias: Number(row?.dias) || 0,
+              }))
+              .sort((a, b) => (Number(a?.hora) || 0) - (Number(b?.hora) || 0))
+          : [];
         renderSimpleHorizontalChart(traficoSemanaChart, emptyTraficoSemanaChart, semanaRows, {
           color: "#2563eb",
           valueFormatter: formatAverageValue,
@@ -2550,13 +2818,24 @@
             Number(traficoActual?.promedio_diario_clientes_unicos) || 0;
           const promedioDiarioPrev =
             Number(traficoPrev?.promedio_diario_clientes_unicos) || 0;
+          const rangoActualTxt =
+            traficoRangoActual?.start && traficoRangoActual?.end
+              ? `${formatIsoDateLabel(traficoRangoActual.start)} al ${formatIsoDateLabel(traficoRangoActual.end)}`
+              : "últimos 30 días";
+          const rangoAnteriorTxt =
+            traficoRangoAnterior?.start && traficoRangoAnterior?.end
+              ? `${formatIsoDateLabel(traficoRangoAnterior.start)} al ${formatIsoDateLabel(traficoRangoAnterior.end)}`
+              : "30 días previos";
           traficoSemanaNoteEl.textContent =
-            `Promedio diario de clientes únicos en ${formatMonthLabel(monthVal)}: ${formatAverageValue(promedioDiarioActual)} (mes anterior: ${formatAverageValue(promedioDiarioPrev)}). Cada barra promedia todas las ocurrencias de ese día dentro del mes.`;
+            `Promedio diario de clientes únicos (últimos 30 días: ${rangoActualTxt}): ${formatAverageValue(promedioDiarioActual)}. Periodo anterior (${rangoAnteriorTxt}): ${formatAverageValue(promedioDiarioPrev)}.`;
         }
         if (traficoHoraNoteEl) {
-          const monthPrev = previousMonthKey(monthVal) || "";
+          const rangoActualTxt =
+            traficoRangoActual?.start && traficoRangoActual?.end
+              ? `${formatIsoDateLabel(traficoRangoActual.start)} al ${formatIsoDateLabel(traficoRangoActual.end)}`
+              : "últimos 30 días";
           traficoHoraNoteEl.textContent =
-            `Cada barra muestra el promedio de clientes únicos por hora usando los últimos 2 meses (${formatMonthLabel(monthPrev)} y ${formatMonthLabel(monthVal)}), ponderado por la cantidad de días de cada mes, en formato 12h.`;
+            `Cada barra muestra el promedio de clientes únicos por hora en los últimos 30 días (${rangoActualTxt}), en formato 12h.`;
         }
       };
       const renderVentasTrendChart = (stats, prevStats, range) => {
@@ -3012,7 +3291,7 @@
             supabase
               .from("historial_ventas")
               .select(
-                "id_historial_ventas, monto, fecha_pago, venta_cliente, renovacion, id_plataforma, id_proveedor, id_tarjeta_de_regalo, plataformas(nombre, tarjeta_de_regalo), proveedores(nombre)",
+                "id_historial_ventas, id_usuario_cliente, monto, fecha_pago, venta_cliente, renovacion, id_plataforma, id_proveedor, id_tarjeta_de_regalo, plataformas(nombre, tarjeta_de_regalo), proveedores(nombre)",
               )
               .gte("fecha_pago", range.start)
               .lt("fecha_pago", endExclusive)
@@ -3036,6 +3315,16 @@
           historial: historialData || [],
           gifts: giftData || [],
         };
+      };
+      const countUniqueClientesFromHistorial = (historialRows = []) => {
+        const uniqueIds = new Set();
+        (historialRows || []).forEach((row) => {
+          const idUsuario = Number(row?.id_usuario_cliente);
+          if (Number.isFinite(idUsuario) && idUsuario > 0) {
+            uniqueIds.add(Math.trunc(idUsuario));
+          }
+        });
+        return uniqueIds.size;
       };
       const fetchActiveCounts = async (endDate) => {
         if (!endDate) {
@@ -3169,13 +3458,14 @@
         range,
         prevRange,
         compareSuffix,
+        activeCompareSuffix,
         isProgressCut,
         adjustments = {},
       ) => {
         trendLastStats = trendStats || null;
         trendLastPrevStats = prevTrendStats || null;
         trendLastRange = range || null;
-        fillKpis(stats, prevStats, compareSuffix);
+        fillKpis(stats, prevStats, compareSuffix, activeCompareSuffix);
         fillWebKpis(analiticaWeb);
         renderPlatforms(stats.platformRows);
         renderProviders(stats.providerRows);
@@ -3265,6 +3555,13 @@
           const previousNominaAdjustment = getNominaQuincenalAdjustment(prevRange);
           const prevMonthFullRange = monthRange(previousMonthKey(monthVal));
           const shouldLoadPrevTrendFull = compareCtx.isProgressCut && !!prevMonthFullRange;
+          const previousActiveEndDate =
+            (compareCtx.isProgressCut ? prevMonthFullRange?.end : prevRange?.end) ||
+            prevRange?.end ||
+            range.end;
+          const activeCompareSuffix = compareCtx.isProgressCut
+            ? "vs cierre mes anterior"
+            : compareCtx.compareSuffix;
           const [
             { historial, gifts },
             prevData,
@@ -3280,7 +3577,7 @@
               ? fetchMonthData(prevMonthFullRange)
               : Promise.resolve(null),
             fetchActiveCounts(range.end),
-            fetchActiveCounts(prevRange?.end || range.end),
+            fetchActiveCounts(previousActiveEndDate),
             fetchPlatformSalesMonthly(),
             fetchAnaliticaWeb(monthVal),
           ]);
@@ -3297,9 +3594,14 @@
             shouldLoadPrevTrendFull && prevTrendData
               ? buildVentasTrendStats(prevTrendData.historial || [])
               : basePrevTrendStats;
-          stats.clientesActivosCount = currentActive?.clientesActivosCount || 0;
+          const prevHistorialForClientesActivos =
+            shouldLoadPrevTrendFull && prevTrendData
+              ? prevTrendData.historial || []
+              : prevData.historial || [];
+          stats.clientesActivosCount = countUniqueClientesFromHistorial(historial);
           stats.ventasActivasCount = currentActive?.ventasActivasCount || 0;
-          prevStats.clientesActivosCount = previousActive?.clientesActivosCount || 0;
+          prevStats.clientesActivosCount =
+            countUniqueClientesFromHistorial(prevHistorialForClientesActivos);
           prevStats.ventasActivasCount = previousActive?.ventasActivasCount || 0;
           applyIncomeAdjustment(stats, currentAdjustment);
           applyIncomeAdjustment(prevStats, previousAdjustment);
@@ -3317,6 +3619,7 @@
             range,
             prevRange || range,
             compareCtx.compareSuffix,
+            activeCompareSuffix,
             compareCtx.isProgressCut,
             {
               current: currentAdjustment,

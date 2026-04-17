@@ -211,6 +211,21 @@ CREATE TABLE public.metricas_clientes_activos_mes (
   CONSTRAINT metricas_clientes_activos_mes_pkey PRIMARY KEY (periodo_mes, id_usuario),
   CONSTRAINT metricas_clientes_activos_mes_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
 );
+CREATE TABLE public.metricas_trafico_web_diario (
+  fecha date NOT NULL,
+  id_usuario bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT metricas_trafico_web_diario_pkey PRIMARY KEY (fecha, id_usuario),
+  CONSTRAINT metricas_trafico_web_diario_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
+);
+CREATE TABLE public.metricas_trafico_web_horario (
+  fecha date NOT NULL,
+  hora smallint NOT NULL CHECK (hora >= 0 AND hora <= 23),
+  id_usuario bigint NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT metricas_trafico_web_horario_pkey PRIMARY KEY (fecha, hora, id_usuario),
+  CONSTRAINT metricas_trafico_web_horario_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.usuarios(id_usuario)
+);
 CREATE TABLE public.metricas_mensuales (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   clientes_activos smallint NOT NULL,

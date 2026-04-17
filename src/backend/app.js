@@ -316,10 +316,11 @@ const WHATSAPP_REPORTES_WATCHER_BATCH = Math.max(
 );
 const HOME_BANNERS_TABLE = "banners";
 const WEB_TRAFFIC_EVENTS_TABLE = "eventos_trafico_web";
+const WEB_TRAFFIC_DAILY_TABLE = "metricas_trafico_web_diario";
+const WEB_TRAFFIC_HOURLY_TABLE = "metricas_trafico_web_horario";
 const MONTHLY_METRICS_TABLE = "metricas_mensuales";
 const MONTHLY_ACTIVE_CLIENTS_TABLE = "metricas_clientes_activos_mes";
-const MONTHLY_METRICS_CLOSURE_ENABLED =
-  process.env.MONTHLY_METRICS_CLOSURE !== "false" && process.env.VERCEL !== "1";
+const MONTHLY_METRICS_CLOSURE_ENABLED = process.env.MONTHLY_METRICS_CLOSURE !== "false";
 const MONTHLY_METRICS_CLOSURE_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
   Number(process.env.MONTHLY_METRICS_CLOSURE_INTERVAL_MS) || 60 * 60 * 1000,
@@ -3629,13 +3630,19 @@ const buildManualVerificationAdminNotificationMessage = ({
   metodoPagoNombre = "",
   referencia = "",
   source = "",
+  triggerReason = "",
 } = {}) => {
   const ordenId = toPositiveInt(idOrden);
   const metodo = String(metodoPagoNombre || "").trim() || "No especificado";
   const ref = String(referencia || "").trim() || "-";
   const origen = String(source || "").trim() || "manual";
+  const reason = String(triggerReason || "").trim();
+  const resumenMotivo =
+    reason === "automatic_payment_not_confirmed_after_window"
+      ? "Pago no confirmado automáticamente en la ventana."
+      : "Pago enviado sin verificación automática.";
   return [
-    "Pago enviado sin verificación automática.",
+    resumenMotivo,
     `ID Orden: #${ordenId || "-"}`,
     `Método: ${metodo}`,
     `Referencia: ${ref}`,
@@ -3648,6 +3655,7 @@ const ensureManualVerificationAdminInboxNotification = async ({
   metodoPagoNombre = "",
   referencia = "",
   source = "",
+  triggerReason = "",
 } = {}) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) {
@@ -3680,6 +3688,7 @@ const ensureManualVerificationAdminInboxNotification = async ({
       metodoPagoNombre,
       referencia,
       source,
+      triggerReason,
     }),
     fecha: getCaracasDateStr(0),
     leido: false,
@@ -3705,6 +3714,7 @@ const notifyManualVerificationToWhatsappAdmin = async ({
   idOrden = null,
   source = "manual_verification",
   manageWhatsappLifecycle = true,
+  allowAutomaticAfterWindow = true,
 } = {}) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) {
@@ -3713,7 +3723,9 @@ const notifyManualVerificationToWhatsappAdmin = async ({
 
   const { data: ordenRow, error: ordenErr } = await supabaseAdmin
     .from("ordenes")
-    .select("id_orden, referencia, pago_verificado, orden_cancelada, id_metodo_de_pago, aviso_verificacion_manual")
+    .select(
+      "id_orden, fecha, hora_orden, referencia, pago_verificado, orden_cancelada, id_metodo_de_pago, aviso_verificacion_manual",
+    )
     .eq("id_orden", ordenId)
     .maybeSingle();
   if (ordenErr) throw ordenErr;
@@ -3733,6 +3745,7 @@ const notifyManualVerificationToWhatsappAdmin = async ({
   const metodoPagoId = toPositiveInt(ordenRow?.id_metodo_de_pago);
   let metodoPagoNombre = "";
   let metodoPagoVerificacionAutomatica = null;
+  let manualVerificationTriggerReason = "manual_payment_method";
   if (metodoPagoId) {
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
@@ -3744,12 +3757,39 @@ const notifyManualVerificationToWhatsappAdmin = async ({
     metodoPagoVerificacionAutomatica = metodoPagoRow?.verificacion_automatica;
   }
 
-  // La alerta de verificación manual aplica únicamente a métodos no automáticos.
-  if (metodoPagoVerificacionAutomatica !== false) {
+  if (metodoPagoVerificacionAutomatica === false) {
+    manualVerificationTriggerReason = "manual_payment_method";
+  } else if (metodoPagoVerificacionAutomatica === true) {
+    if (allowAutomaticAfterWindow !== true) {
+      return {
+        sent: false,
+        skipped: true,
+        reason: "payment_method_verification_is_automatic",
+        id_orden: ordenId,
+        id_metodo_de_pago: metodoPagoId || null,
+        id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+      };
+    }
+    const verificationWindowElapsed = hasManualVerificationWindowElapsed(ordenRow);
+    if (verificationWindowElapsed !== true) {
+      return {
+        sent: false,
+        skipped: true,
+        reason:
+          verificationWindowElapsed === false
+            ? "payment_method_verification_window_not_elapsed"
+            : "order_verification_window_unknown",
+        id_orden: ordenId,
+        id_metodo_de_pago: metodoPagoId || null,
+        id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
+      };
+    }
+    manualVerificationTriggerReason = "automatic_payment_not_confirmed_after_window";
+  } else {
     return {
       sent: false,
       skipped: true,
-      reason: "payment_method_verification_is_automatic",
+      reason: "payment_method_verification_mode_unknown",
       id_orden: ordenId,
       id_metodo_de_pago: metodoPagoId || null,
       id_usuario_destino: WHATSAPP_MANUAL_VERIFICATION_NOTIFY_USER_ID,
@@ -3769,6 +3809,7 @@ const notifyManualVerificationToWhatsappAdmin = async ({
       metodoPagoNombre: metodoPagoNombre || `ID ${metodoPagoId || "-"}`,
       referencia: referenciaText || "-",
       source,
+      triggerReason: manualVerificationTriggerReason,
     });
   } catch (notifErr) {
     console.error("[manual_verification] notificacion interna error", {
@@ -4397,95 +4438,180 @@ const processPendingManualVerificationAlerts = async () => {
       }
     }
 
-    if (shouldStartWhatsapp) {
-      const { data: autoMetodoRows, error: autoMetodoErr } = await supabaseAdmin
-        .from("metodos_de_pago")
-        .select("id_metodo_de_pago")
-        .eq("verificacion_automatica", true);
-      if (autoMetodoErr) throw autoMetodoErr;
+    const { data: autoMetodoRows, error: autoMetodoErr } = await supabaseAdmin
+      .from("metodos_de_pago")
+      .select("id_metodo_de_pago")
+      .eq("verificacion_automatica", true);
+    if (autoMetodoErr) throw autoMetodoErr;
 
-      const autoMetodoIds = (autoMetodoRows || [])
-        .map((row) => toPositiveInt(row?.id_metodo_de_pago))
-        .filter((id) => !!id);
-      if (autoMetodoIds.length) {
-        const { data: autoPendingOrders, error: autoPendingErr } = await supabaseAdmin
-          .from("ordenes")
-          .select(
-            "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada, aviso_verificacion_pago",
-          )
-          .eq("marcado_pago", true)
-          .eq("checkout_finalizado", true)
-          .eq("pago_verificado", true)
-          .in("id_metodo_de_pago", autoMetodoIds)
-          .or("orden_cancelada.eq.false,orden_cancelada.is.null")
-          .order("id_orden", { ascending: false })
-          .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
-        if (autoPendingErr) throw autoPendingErr;
+    const autoMetodoIds = (autoMetodoRows || [])
+      .map((row) => toPositiveInt(row?.id_metodo_de_pago))
+      .filter((id) => !!id);
+    if (autoMetodoIds.length) {
+      const { data: autoPendingOrders, error: autoPendingErr } = await supabaseAdmin
+        .from("ordenes")
+        .select(
+          "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada, aviso_verificacion_manual",
+        )
+        .eq("marcado_pago", true)
+        .eq("checkout_finalizado", true)
+        .eq("pago_verificado", false)
+        .in("id_metodo_de_pago", autoMetodoIds)
+        .or("orden_cancelada.eq.false,orden_cancelada.is.null")
+        .order("id_orden", { ascending: false })
+        .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
+      if (autoPendingErr) throw autoPendingErr;
 
-        const autoOrders = Array.isArray(autoPendingOrders) ? autoPendingOrders : [];
-        result.autoFetched = autoOrders.length;
+      const autoOrders = Array.isArray(autoPendingOrders) ? autoPendingOrders : [];
+      result.autoFetched = autoOrders.length;
 
-        for (const ordenRow of autoOrders) {
-          const ordenId = toPositiveInt(ordenRow?.id_orden);
-          if (!ordenId) {
-            result.autoFailed += 1;
+      for (const ordenRow of autoOrders) {
+        const ordenId = toPositiveInt(ordenRow?.id_orden);
+        if (!ordenId) {
+          result.autoFailed += 1;
+          continue;
+        }
+        if (isTrue(ordenRow?.aviso_verificacion_manual)) {
+          result.autoAlreadyNotified += 1;
+          continue;
+        }
+
+        const isExpired = hasManualVerificationWindowElapsed(ordenRow);
+        if (isExpired === null) {
+          result.autoSkippedNoDate += 1;
+          continue;
+        }
+        if (isExpired !== true) {
+          result.autoSkippedRecent += 1;
+          continue;
+        }
+
+        try {
+          const notifyRes = await notifyManualVerificationToWhatsappAdmin({
+            idOrden: ordenId,
+            source: "auto_verification_timeout_watcher",
+            manageWhatsappLifecycle: false,
+            allowAutomaticAfterWindow: true,
+          });
+          if (!managedWhatsappForRun && isWhatsappClientActive()) {
+            managedWhatsappForRun = true;
+          }
+          const notifCreated = notifyRes?.inbox_notification?.created === true;
+          if (notifCreated) result.notifCreated += 1;
+          if (notifyRes?.sent) {
+            result.autoSentWhatsapp += 1;
             continue;
           }
-          if (isTrue(ordenRow?.aviso_verificacion_pago)) {
+          if (
+            notifyRes?.reason === "already_flagged_manual_verification" ||
+            notifyRes?.reason === "payment_method_verification_window_not_elapsed"
+          ) {
             result.autoAlreadyNotified += 1;
             continue;
           }
-
-          const isExpired = hasManualVerificationWindowElapsed(ordenRow);
-          if (isExpired === null) {
-            result.autoSkippedNoDate += 1;
+          console.warn("[auto_verification_timeout_watcher] not sent", {
+            id_orden: ordenId,
+            reason: notifyRes?.reason || "unknown",
+            skipped: !!notifyRes?.skipped,
+            notif_created: notifCreated,
+            target_user: notifyRes?.id_usuario_destino || null,
+            phone: notifyRes?.phone || null,
+            error: notifyRes?.error || null,
+          });
+          if (notifyRes?.skipped || notifCreated) {
+            result.autoSkippedNoSale += 1;
             continue;
           }
-          if (isExpired !== true) {
-            result.autoSkippedRecent += 1;
+          result.autoFailed += 1;
+        } catch (notifyErr) {
+          result.autoFailed += 1;
+          console.error("[auto_verification_timeout_watcher] notify error", {
+            id_orden: ordenId,
+            error: notifyErr?.message || notifyErr,
+          });
+        }
+      }
+    }
+
+    // Reintenta avisos al cliente para órdenes automáticas ya verificadas que quedaron sin notificar.
+    if (shouldStartWhatsapp && autoMetodoIds.length) {
+      const { data: autoVerifiedOrders, error: autoVerifiedErr } = await supabaseAdmin
+        .from("ordenes")
+        .select(
+          "id_orden, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada, aviso_verificacion_pago",
+        )
+        .eq("marcado_pago", true)
+        .eq("checkout_finalizado", true)
+        .eq("pago_verificado", true)
+        .in("id_metodo_de_pago", autoMetodoIds)
+        .or("orden_cancelada.eq.false,orden_cancelada.is.null")
+        .order("id_orden", { ascending: false })
+        .limit(WHATSAPP_MANUAL_VERIFICATION_WATCHER_BATCH);
+      if (autoVerifiedErr) throw autoVerifiedErr;
+
+      const autoOrdersVerified = Array.isArray(autoVerifiedOrders) ? autoVerifiedOrders : [];
+      result.autoFetched += autoOrdersVerified.length;
+
+      for (const ordenRow of autoOrdersVerified) {
+        const ordenId = toPositiveInt(ordenRow?.id_orden);
+        if (!ordenId) {
+          result.autoFailed += 1;
+          continue;
+        }
+        if (isTrue(ordenRow?.aviso_verificacion_pago)) {
+          result.autoAlreadyNotified += 1;
+          continue;
+        }
+
+        const isExpired = hasManualVerificationWindowElapsed(ordenRow);
+        if (isExpired === null) {
+          result.autoSkippedNoDate += 1;
+          continue;
+        }
+        if (isExpired !== true) {
+          result.autoSkippedRecent += 1;
+          continue;
+        }
+
+        try {
+          const notifyRes = await notifyVentaEntregadaAfterOrderVerified({
+            idOrden: ordenId,
+            manageWhatsappLifecycle: false,
+          });
+          if (!managedWhatsappForRun && isWhatsappClientActive()) {
+            managedWhatsappForRun = true;
+          }
+          if (notifyRes?.sent) {
+            result.autoSentWhatsapp += 1;
             continue;
           }
-
-          try {
-            const notifyRes = await notifyVentaEntregadaAfterOrderVerified({
-              idOrden: ordenId,
-              manageWhatsappLifecycle: false,
-            });
-            if (!managedWhatsappForRun && isWhatsappClientActive()) {
-              managedWhatsappForRun = true;
-            }
-            if (notifyRes?.sent) {
-              result.autoSentWhatsapp += 1;
-              continue;
-            }
-            if (notifyRes?.reason === "order_payment_already_notified") {
-              result.autoAlreadyNotified += 1;
-              continue;
-            }
-            if (notifyRes?.reason === "no_delivered_non_reported_sale") {
-              result.autoSkippedNoSale += 1;
-              continue;
-            }
-            console.warn("[auto_verified_payment_watcher] not sent", {
-              id_orden: ordenId,
-              reason: notifyRes?.reason || "unknown",
-              skipped: !!notifyRes?.skipped,
-              target_user: notifyRes?.id_usuario_destino || null,
-              phone: notifyRes?.phone || null,
-              error: notifyRes?.error || null,
-            });
-            if (notifyRes?.skipped) {
-              result.autoSkippedNoSale += 1;
-              continue;
-            }
-            result.autoFailed += 1;
-          } catch (notifyErr) {
-            result.autoFailed += 1;
-            console.error("[auto_verified_payment_watcher] notify error", {
-              id_orden: ordenId,
-              error: notifyErr?.message || notifyErr,
-            });
+          if (notifyRes?.reason === "order_payment_already_notified") {
+            result.autoAlreadyNotified += 1;
+            continue;
           }
+          if (notifyRes?.reason === "no_delivered_non_reported_sale") {
+            result.autoSkippedNoSale += 1;
+            continue;
+          }
+          console.warn("[auto_verified_payment_watcher] not sent", {
+            id_orden: ordenId,
+            reason: notifyRes?.reason || "unknown",
+            skipped: !!notifyRes?.skipped,
+            target_user: notifyRes?.id_usuario_destino || null,
+            phone: notifyRes?.phone || null,
+            error: notifyRes?.error || null,
+          });
+          if (notifyRes?.skipped) {
+            result.autoSkippedNoSale += 1;
+            continue;
+          }
+          result.autoFailed += 1;
+        } catch (notifyErr) {
+          result.autoFailed += 1;
+          console.error("[auto_verified_payment_watcher] notify error", {
+            id_orden: ordenId,
+            error: notifyErr?.message || notifyErr,
+          });
         }
       }
     }
@@ -13295,23 +13421,108 @@ const getMonthKeyFromDate = (dateStr = "") => {
   return value.slice(0, 7);
 };
 
-const isMonthlyMetricsMonthClosed = async ({ periodEnd }) => {
+const monthKeyToIndex = (value = "") => {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+  return year * 12 + (month - 1);
+};
+
+const indexToMonthKey = (idx) => {
+  if (!Number.isInteger(idx)) return "";
+  const year = Math.floor(idx / 12);
+  const month = (idx % 12) + 1;
+  return `${year}-${pad2(month)}`;
+};
+
+const getMonthEndDateFromMonthKey = (monthKey = "") => {
+  const idx = monthKeyToIndex(monthKey);
+  if (idx === null) return "";
+  const normalized = indexToMonthKey(idx);
+  const match = normalized.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${match[1]}-${match[2]}-${pad2(lastDay)}`;
+};
+
+const buildMonthKeyRange = (startMonthKey = "", endMonthKey = "") => {
+  const startIdx = monthKeyToIndex(startMonthKey);
+  const endIdx = monthKeyToIndex(endMonthKey);
+  if (startIdx === null || endIdx === null || startIdx > endIdx) return [];
+  const rows = [];
+  for (let idx = startIdx; idx <= endIdx; idx += 1) {
+    rows.push(indexToMonthKey(idx));
+  }
+  return rows.filter(Boolean);
+};
+
+const listClosedMonthlyMetricMonthKeys = async ({ periodEnd = "" } = {}) => {
+  const periodEndVal = String(periodEnd || "").trim();
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () => {
+      let query = supabaseAdmin
+        .from(MONTHLY_METRICS_TABLE)
+        .select("periodo_mes")
+        .not("periodo_mes", "is", null)
+        .order("periodo_mes", { ascending: true });
+      if (periodEndVal) {
+        query = query.lte("periodo_mes", periodEndVal);
+      }
+      return query;
+    },
+    `monthly_metrics:closed_months:list:${periodEndVal || "all"}`,
+  );
+  if (error) throw error;
+  return [...new Set((data || []).map((row) => getMonthKeyFromDate(row?.periodo_mes)).filter(Boolean))];
+};
+
+const getFirstVentasMonthKeyUntil = async ({ periodEnd = "" } = {}) => {
+  const periodEndVal = String(periodEnd || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEndVal)) return "";
   const { data, error } = await runSupabaseQueryWithRetry(
     () =>
       supabaseAdmin
-        .from(MONTHLY_METRICS_TABLE)
-        .select("id")
-        .eq("periodo_mes", periodEnd)
-        .order("id", { ascending: true })
+        .from("ventas")
+        .select("fecha_pago")
+        .not("fecha_pago", "is", null)
+        .lte("fecha_pago", periodEndVal)
+        .order("fecha_pago", { ascending: true })
         .limit(1),
-    `monthly_metrics:closed_check:${periodEnd}`,
+    `monthly_metrics:first_sale_month:${periodEndVal}`,
   );
   if (error) throw error;
-  return Array.isArray(data) && data.length > 0;
+  const firstDate = String(data?.[0]?.fecha_pago || "").trim();
+  return getMonthKeyFromDate(firstDate);
 };
 
-const computeMonthlyActiveMetricsSnapshot = async (periodEnd) => {
-  const ventasRows = await fetchAllSupabaseRows(
+const getFirstHistorialMonthKeyUntil = async ({ periodEnd = "" } = {}) => {
+  const periodEndVal = String(periodEnd || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEndVal)) return "";
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from("historial_ventas")
+        .select("fecha_pago")
+        .not("fecha_pago", "is", null)
+        .not("id_usuario_cliente", "is", null)
+        .lte("fecha_pago", periodEndVal)
+        .order("fecha_pago", { ascending: true })
+        .limit(1),
+    `monthly_metrics:first_historial_month:${periodEndVal}`,
+  );
+  if (error) throw error;
+  const firstDate = String(data?.[0]?.fecha_pago || "").trim();
+  return getMonthKeyFromDate(firstDate);
+};
+
+const fetchVentasRowsUntil = async (periodEnd = "") => {
+  const periodEndVal = String(periodEnd || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEndVal)) return [];
+  return fetchAllSupabaseRows(
     (from, to) =>
       supabaseAdmin
         .from("ventas")
@@ -13320,29 +13531,78 @@ const computeMonthlyActiveMetricsSnapshot = async (periodEnd) => {
         )
         .not("id_usuario", "is", null)
         .not("fecha_pago", "is", null)
-        .lte("fecha_pago", periodEnd)
+        .lte("fecha_pago", periodEndVal)
         .range(from, to),
-    { label: `monthly_metrics:ventas:${periodEnd}` },
+    { label: `monthly_metrics:ventas:${periodEndVal}` },
   );
+};
 
+const fetchHistorialClienteRowsUntil = async (periodEnd = "") => {
+  const periodEndVal = String(periodEnd || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEndVal)) return [];
+  return fetchAllSupabaseRows(
+    (from, to) =>
+      supabaseAdmin
+        .from("historial_ventas")
+        .select("fecha_pago, id_usuario_cliente")
+        .not("fecha_pago", "is", null)
+        .not("id_usuario_cliente", "is", null)
+        .lte("fecha_pago", periodEndVal)
+        .range(from, to),
+    { label: `monthly_metrics:historial_clientes:${periodEndVal}` },
+  );
+};
+
+const buildMonthlyBuyerUserIdsFromHistorialRows = (historialRows = [], monthKey = "") => {
+  const monthKeyVal = String(monthKey || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(monthKeyVal)) return [];
+  return uniqPositiveIds(
+    (historialRows || [])
+      .filter((row) => getMonthKeyFromDate(row?.fecha_pago) === monthKeyVal)
+      .map((row) => row?.id_usuario_cliente),
+  );
+};
+
+const buildMonthlyActiveMetricsSnapshotFromVentasRows = (
+  ventasRows = [],
+  periodEnd = "",
+  monthlyBuyerUserIds = [],
+) => {
+  const periodEndVal = String(periodEnd || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEndVal)) {
+    throw new Error("periodo_mes inválido para calcular snapshot mensual.");
+  }
+  const monthKey = getMonthKeyFromDate(periodEndVal);
+  const buyerUserIds = uniqPositiveIds(monthlyBuyerUserIds);
   const activeRows = (ventasRows || []).filter((row) => {
     const notSuspended = !isTrue(row?.suspendido);
     const notPending = !isTrue(row?.pendiente);
     const notRejected = !isTrue(row?.pago_rechazado);
+    const paidBeforeOrOnPeriod = String(row?.fecha_pago || "").trim() <= periodEndVal;
     const activeByDate =
-      isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= periodEnd);
-    return notSuspended && notPending && notRejected && activeByDate;
+      isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= periodEndVal);
+    return paidBeforeOrOnPeriod && notSuspended && notPending && notRejected && activeByDate;
   });
 
-  const activeUserIds = uniqPositiveIds((activeRows || []).map((row) => row?.id_usuario));
-
   return {
-    periodo_mes: periodEnd,
-    monthKey: getMonthKeyFromDate(periodEnd),
-    clientes_activos: activeUserIds.length,
+    periodo_mes: periodEndVal,
+    monthKey,
+    clientes_activos: buyerUserIds.length,
     ventas_activas: activeRows.length,
-    activeUserIds,
+    activeUserIds: buyerUserIds,
   };
+};
+
+const computeMonthlyActiveMetricsSnapshot = async (periodEnd) => {
+  const ventasRows = await fetchVentasRowsUntil(periodEnd);
+  const historialRows = await fetchHistorialClienteRowsUntil(periodEnd);
+  const monthKey = getMonthKeyFromDate(periodEnd);
+  const monthlyBuyerUserIds = buildMonthlyBuyerUserIdsFromHistorialRows(historialRows, monthKey);
+  return buildMonthlyActiveMetricsSnapshotFromVentasRows(
+    ventasRows,
+    periodEnd,
+    monthlyBuyerUserIds,
+  );
 };
 
 const persistMonthlyActiveClientsSnapshot = async (snapshot = {}) => {
@@ -13393,8 +13653,17 @@ const persistMonthlyMetricsSummary = async (snapshot = {}) => {
   const existingIds = uniqPositiveIds((existingRows || []).map((row) => row?.id));
 
   if (existingIds.length) {
+    if (existingIds.length > 1) {
+      const duplicateIds = existingIds.slice(1);
+      const { error: duplicateDeleteErr } = await runSupabaseQueryWithRetry(
+        () => supabaseAdmin.from(MONTHLY_METRICS_TABLE).delete().in("id", duplicateIds),
+        `monthly_metrics:summary:dedupe_delete:${periodEnd}`,
+      );
+      if (duplicateDeleteErr) throw duplicateDeleteErr;
+    }
+    const targetId = existingIds[0];
     const { error: updateErr } = await runSupabaseQueryWithRetry(
-      () => supabaseAdmin.from(MONTHLY_METRICS_TABLE).update(payload).in("id", existingIds),
+      () => supabaseAdmin.from(MONTHLY_METRICS_TABLE).update(payload).eq("id", targetId),
       `monthly_metrics:summary:update:${periodEnd}`,
     );
     if (updateErr) throw updateErr;
@@ -13429,35 +13698,97 @@ const runMonthlyMetricsClosureIfNeeded = async ({ reason = "scheduler", force = 
     if (!periodEnd) {
       return { ok: false, skipped: true, reason: "invalid_date" };
     }
-    const monthKey = getMonthKeyFromDate(periodEnd);
+    const targetMonthKey = getMonthKeyFromDate(periodEnd);
 
-    if (!force && monthKey && monthKey === monthlyMetricsClosureLastMonthKey) {
-      return { ok: true, skipped: true, reason: "already_processed_runtime", periodEnd, monthKey };
+    if (!force && targetMonthKey && targetMonthKey === monthlyMetricsClosureLastMonthKey) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "already_processed_runtime",
+        periodEnd,
+        monthKey: targetMonthKey,
+      };
     }
 
-    const alreadyClosed = await isMonthlyMetricsMonthClosed({ periodEnd });
-    if (alreadyClosed && !force) {
-      monthlyMetricsClosureLastMonthKey = monthKey;
-      return { ok: true, skipped: true, reason: "already_closed", periodEnd, monthKey };
+    const closedMonthKeys = await listClosedMonthlyMetricMonthKeys({ periodEnd });
+    const closedMonthSet = new Set(closedMonthKeys);
+    let targetMonthKeys = [];
+
+    if (force) {
+      targetMonthKeys = targetMonthKey ? [targetMonthKey] : [];
+    } else {
+      const firstHistorialMonthKey = await getFirstHistorialMonthKeyUntil({ periodEnd });
+      const firstVentasMonthKey = await getFirstVentasMonthKeyUntil({ periodEnd });
+      const firstClosedMonthKey = closedMonthKeys[0] || "";
+      const startMonthKey =
+        firstHistorialMonthKey ||
+        firstVentasMonthKey ||
+        firstClosedMonthKey ||
+        targetMonthKey;
+      const fullRange = buildMonthKeyRange(startMonthKey, targetMonthKey);
+      targetMonthKeys = fullRange.filter((monthKey) => !closedMonthSet.has(monthKey));
     }
 
-    const snapshot = await computeMonthlyActiveMetricsSnapshot(periodEnd);
-    await persistMonthlyActiveClientsSnapshot(snapshot);
-    await persistMonthlyMetricsSummary(snapshot);
+    if (!targetMonthKeys.length) {
+      monthlyMetricsClosureLastMonthKey = targetMonthKey || monthlyMetricsClosureLastMonthKey;
+      return {
+        ok: true,
+        skipped: true,
+        reason: "already_closed",
+        periodEnd,
+        monthKey: targetMonthKey,
+      };
+    }
 
-    monthlyMetricsClosureLastMonthKey = snapshot.monthKey || monthKey;
-    console.log(
-      `[Metricas] Cierre mensual ${snapshot.monthKey || monthKey} guardado (${reason}): clientes_activos=${snapshot.clientes_activos}, ventas_activas=${snapshot.ventas_activas}`,
-    );
+    const ventasRows = await fetchVentasRowsUntil(periodEnd);
+    const historialRows = await fetchHistorialClienteRowsUntil(periodEnd);
+    const processedMonths = [];
+    for (const monthKey of targetMonthKeys) {
+      const monthPeriodEnd = getMonthEndDateFromMonthKey(monthKey);
+      if (!monthPeriodEnd) continue;
+      const monthlyBuyerUserIds = buildMonthlyBuyerUserIdsFromHistorialRows(
+        historialRows,
+        monthKey,
+      );
+      const snapshot = buildMonthlyActiveMetricsSnapshotFromVentasRows(
+        ventasRows,
+        monthPeriodEnd,
+        monthlyBuyerUserIds,
+      );
+      await persistMonthlyActiveClientsSnapshot(snapshot);
+      await persistMonthlyMetricsSummary(snapshot);
+      processedMonths.push({
+        monthKey,
+        periodEnd: monthPeriodEnd,
+        clientesActivos: snapshot.clientes_activos,
+        ventasActivas: snapshot.ventas_activas,
+      });
+    }
+
+    const lastProcessed = processedMonths[processedMonths.length - 1] || null;
+    monthlyMetricsClosureLastMonthKey =
+      lastProcessed?.monthKey || targetMonthKey || monthlyMetricsClosureLastMonthKey;
+    if (processedMonths.length === 1) {
+      const row = processedMonths[0];
+      console.log(
+        `[Metricas] Cierre mensual ${row.monthKey} guardado (${reason}): clientes_activos=${row.clientesActivos}, ventas_activas=${row.ventasActivas}`,
+      );
+    } else {
+      console.log(
+        `[Metricas] Cierre mensual backfill guardado (${reason}): meses=${processedMonths.length}, desde=${processedMonths[0]?.monthKey || "-"}, hasta=${lastProcessed?.monthKey || "-"}`,
+      );
+    }
 
     return {
       ok: true,
       skipped: false,
       reason,
-      periodEnd: snapshot.periodo_mes,
-      monthKey: snapshot.monthKey || monthKey,
-      clientesActivos: snapshot.clientes_activos,
-      ventasActivas: snapshot.ventas_activas,
+      periodEnd: lastProcessed?.periodEnd || periodEnd,
+      monthKey: lastProcessed?.monthKey || targetMonthKey,
+      clientesActivos: lastProcessed?.clientesActivos || 0,
+      ventasActivas: lastProcessed?.ventasActivas || 0,
+      monthsProcessed: processedMonths.length,
+      processedMonths,
     };
   } catch (err) {
     monthlyMetricsClosureLastError = err?.message || String(err);
@@ -15814,6 +16145,77 @@ const isAllowedTrafficUrl = (value = "") => {
   }
 };
 
+const toCaracasDateKey = (value) => {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Caracas",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(value));
+  } catch (_err) {
+    return "";
+  }
+};
+
+const toCaracasHourNumber = (value) => {
+  if (!value) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Caracas",
+      hour: "2-digit",
+      hour12: false,
+      hourCycle: "h23",
+    }).formatToParts(new Date(value));
+    const hourTxt = parts.find((part) => part.type === "hour")?.value || "";
+    const hour = Number(hourTxt);
+    return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
+  } catch (_err) {
+    return null;
+  }
+};
+
+const rememberTrafficDailyUniqueUser = async ({ idUsuario = null, fechaHora = null } = {}) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return { ok: false, skipped: true, reason: "invalid_user" };
+  const fecha = toCaracasDateKey(fechaHora) || todayInVenezuela();
+  if (!fecha) return { ok: false, skipped: true, reason: "invalid_date" };
+  const payload = { fecha, id_usuario: userId };
+  const { error } = await supabaseAdmin
+    .from(WEB_TRAFFIC_DAILY_TABLE)
+    .upsert(payload, { onConflict: "fecha,id_usuario", ignoreDuplicates: true });
+  if (error) {
+    if (isMissingTableError(error, WEB_TRAFFIC_DAILY_TABLE)) {
+      return { ok: false, skipped: true, tableMissing: true };
+    }
+    throw error;
+  }
+  return { ok: true };
+};
+
+const rememberTrafficHourlyUniqueUser = async ({ idUsuario = null, fechaHora = null } = {}) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return { ok: false, skipped: true, reason: "invalid_user" };
+  const fecha = toCaracasDateKey(fechaHora) || todayInVenezuela();
+  const hora = toCaracasHourNumber(fechaHora);
+  if (!fecha) return { ok: false, skipped: true, reason: "invalid_date" };
+  if (!Number.isInteger(hora) || hora < 0 || hora > 23) {
+    return { ok: false, skipped: true, reason: "invalid_hour" };
+  }
+  const payload = { fecha, hora, id_usuario: userId };
+  const { error } = await supabaseAdmin
+    .from(WEB_TRAFFIC_HOURLY_TABLE)
+    .upsert(payload, { onConflict: "fecha,hora,id_usuario", ignoreDuplicates: true });
+  if (error) {
+    if (isMissingTableError(error, WEB_TRAFFIC_HOURLY_TABLE)) {
+      return { ok: false, skipped: true, tableMissing: true };
+    }
+    throw error;
+  }
+  return { ok: true };
+};
+
 app.post("/api/client-errors", jsonParser, async (req, res) => {
   try {
     const sessionUserId = toPositiveInt(parseSessionUserId(req));
@@ -15913,6 +16315,23 @@ app.post("/api/eventos-trafico-web", jsonParser, async (req, res) => {
       throw error;
     }
 
+    try {
+      await rememberTrafficDailyUniqueUser({
+        idUsuario: payload.id_usuario,
+        fechaHora: payload.fecha_hora,
+      });
+    } catch (dailyErr) {
+      console.error("[eventos-trafico-web] upsert diario unico error", dailyErr);
+    }
+    try {
+      await rememberTrafficHourlyUniqueUser({
+        idUsuario: payload.id_usuario,
+        fechaHora: payload.fecha_hora,
+      });
+    } catch (hourlyErr) {
+      console.error("[eventos-trafico-web] upsert horario unico error", hourlyErr);
+    }
+
     if (payload.id_usuario) {
       const fechaConexion = todayInVenezuela();
       const { error: userErr } = await supabaseAdmin
@@ -15983,12 +16402,49 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
             : `${year}-${String(month + 1).padStart(2, "0")}-01`,
       };
     };
+    const addDaysToDateKey = (dateKey = "", delta = 0) => {
+      const match = String(dateKey || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return "";
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return "";
+      const dt = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+      dt.setUTCDate(dt.getUTCDate() + Math.trunc(Number(delta) || 0));
+      const yyyy = dt.getUTCFullYear();
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(dt.getUTCDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    };
+    const buildRollingRangeFromEnd = (endDateKey, days = 30) => {
+      const safeDays = Math.max(1, Math.trunc(Number(days) || 30));
+      const end = String(endDateKey || "").trim();
+      const start = addDaysToDateKey(end, -(safeDays - 1));
+      const nextStart = addDaysToDateKey(end, 1);
+      if (!start || !end || !nextStart) return null;
+      return { start, end, nextStart, days: safeDays };
+    };
     const previousMonthVal = indexToMonthKey((monthToIndex(monthVal) || 0) - 1);
     const range = buildMonthRange(monthVal);
     const prevRange = buildMonthRange(previousMonthVal);
     const currentMonthRange = buildMonthRange(currentMonthVal);
+    const todayCaracas = todayInVenezuela();
+    const trafficMonthCurrentVal = currentMonthVal;
+    const trafficMonthPreviousVal = indexToMonthKey((monthToIndex(currentMonthVal) || 0) - 1);
+    const trafficMonthCurrentRange = buildMonthRange(trafficMonthCurrentVal);
+    const trafficMonthPreviousRange = buildMonthRange(trafficMonthPreviousVal);
+    const trafficRangeCurrent = buildRollingRangeFromEnd(todayCaracas, 30);
+    const trafficRangePrev = buildRollingRangeFromEnd(addDaysToDateKey(todayCaracas, -30), 30);
     if (!range || !prevRange || !currentMonthRange) {
       return res.status(400).json({ error: "Mes inválido." });
+    }
+    if (
+      !trafficRangeCurrent ||
+      !trafficRangePrev ||
+      !trafficMonthCurrentRange ||
+      !trafficMonthPreviousRange
+    ) {
+      return res.status(500).json({ error: "No se pudo calcular el rango de tráfico." });
     }
 
     const toCaracasDate = (value) => {
@@ -16039,33 +16495,59 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       }
     };
     const toCaracasHour = (value) => {
-      if (!value) return null;
-      try {
-        const hourTxt = new Intl.DateTimeFormat("en-US", {
-          timeZone: "America/Caracas",
-          hour: "2-digit",
-          hour12: false,
-        }).format(new Date(value));
-        const hour = Number(hourTxt);
-        return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
-      } catch (_err) {
-        return null;
-      }
+      return toCaracasHourNumber(value);
     };
     const roundTrafficAverage = (value) =>
       Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
-    const buildMonthDateKeys = (monthRange) => {
-      const match = String(monthRange?.start || "").match(/^(\d{4})-(\d{2})-01$/);
-      if (!match) return [];
-      const year = match[1];
-      const monthTxt = match[2];
-      const daysInMonth = Number(String(monthRange?.end || "").slice(-2)) || 0;
-      return Array.from({ length: Math.max(0, daysInMonth) }, (_, idx) => {
-        const day = String(idx + 1).padStart(2, "0");
-        return `${year}-${monthTxt}-${day}`;
-      });
+    const buildDateKeysFromRange = (dateRange = null) => {
+      const startRaw = String(dateRange?.start || "").trim();
+      const endRaw = String(dateRange?.end || "").trim();
+      const startMatch = startRaw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const endMatch = endRaw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!startMatch || !endMatch) return [];
+      const startUtc = Date.UTC(
+        Number(startMatch[1]),
+        Number(startMatch[2]) - 1,
+        Number(startMatch[3]),
+        0,
+        0,
+        0,
+        0,
+      );
+      const endUtc = Date.UTC(
+        Number(endMatch[1]),
+        Number(endMatch[2]) - 1,
+        Number(endMatch[3]),
+        0,
+        0,
+        0,
+        0,
+      );
+      if (!Number.isFinite(startUtc) || !Number.isFinite(endUtc) || endUtc < startUtc) return [];
+      const result = [];
+      for (let cursor = startUtc; cursor <= endUtc; cursor += 86400000) {
+        const dt = new Date(cursor);
+        const yyyy = dt.getUTCFullYear();
+        const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+        const dd = String(dt.getUTCDate()).padStart(2, "0");
+        result.push(`${yyyy}-${mm}-${dd}`);
+      }
+      return result;
     };
-    const [usuariosResp, authUsers, traficoActualResp, traficoPrevResp] = await Promise.all([
+    const [
+      usuariosResp,
+      authUsers,
+      traficoActualResp,
+      traficoPrevResp,
+      traficoActualDailyResp,
+      traficoPrevDailyResp,
+      traficoActualHourlyResp,
+      traficoPrevHourlyResp,
+      traficoMesActualResp,
+      traficoMesAnteriorResp,
+      traficoMesActualDailyResp,
+      traficoMesAnteriorDailyResp,
+    ] = await Promise.all([
       supabaseAdmin
         .from("usuarios")
         .select("id_usuario, id_auth, acceso_cliente"),
@@ -16073,19 +16555,67 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       supabaseAdmin
         .from(WEB_TRAFFIC_EVENTS_TABLE)
         .select("fecha_hora, id_usuario, id_sesion, url_completa, tipo_evento")
-        .gte("fecha_hora", `${range.start}T00:00:00-04:00`)
-        .lt("fecha_hora", `${range.nextStart}T00:00:00-04:00`),
+        .gte("fecha_hora", `${trafficRangeCurrent.start}T00:00:00-04:00`)
+        .lt("fecha_hora", `${trafficRangeCurrent.nextStart}T00:00:00-04:00`),
       supabaseAdmin
         .from(WEB_TRAFFIC_EVENTS_TABLE)
         .select("fecha_hora, id_usuario, id_sesion, url_completa, tipo_evento")
-        .gte("fecha_hora", `${prevRange.start}T00:00:00-04:00`)
-        .lt("fecha_hora", `${prevRange.nextStart}T00:00:00-04:00`),
+        .gte("fecha_hora", `${trafficRangePrev.start}T00:00:00-04:00`)
+        .lt("fecha_hora", `${trafficRangePrev.nextStart}T00:00:00-04:00`),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_DAILY_TABLE)
+        .select("fecha, id_usuario")
+        .gte("fecha", trafficRangeCurrent.start)
+        .lt("fecha", trafficRangeCurrent.nextStart),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_DAILY_TABLE)
+        .select("fecha, id_usuario")
+        .gte("fecha", trafficRangePrev.start)
+        .lt("fecha", trafficRangePrev.nextStart),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_HOURLY_TABLE)
+        .select("fecha, hora, id_usuario")
+        .gte("fecha", trafficRangeCurrent.start)
+        .lt("fecha", trafficRangeCurrent.nextStart),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_HOURLY_TABLE)
+        .select("fecha, hora, id_usuario")
+        .gte("fecha", trafficRangePrev.start)
+        .lt("fecha", trafficRangePrev.nextStart),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_EVENTS_TABLE)
+        .select("fecha_hora, id_usuario, id_sesion, url_completa, tipo_evento")
+        .gte("fecha_hora", `${trafficMonthCurrentRange.start}T00:00:00-04:00`)
+        .lt("fecha_hora", `${trafficMonthCurrentRange.nextStart}T00:00:00-04:00`),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_EVENTS_TABLE)
+        .select("fecha_hora, id_usuario, id_sesion, url_completa, tipo_evento")
+        .gte("fecha_hora", `${trafficMonthPreviousRange.start}T00:00:00-04:00`)
+        .lt("fecha_hora", `${trafficMonthPreviousRange.nextStart}T00:00:00-04:00`),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_DAILY_TABLE)
+        .select("fecha, id_usuario")
+        .gte("fecha", trafficMonthCurrentRange.start)
+        .lt("fecha", trafficMonthCurrentRange.nextStart),
+      supabaseAdmin
+        .from(WEB_TRAFFIC_DAILY_TABLE)
+        .select("fecha, id_usuario")
+        .gte("fecha", trafficMonthPreviousRange.start)
+        .lt("fecha", trafficMonthPreviousRange.nextStart),
     ]);
 
     if (usuariosResp.error) throw usuariosResp.error;
 
     let traficoActualRows = traficoActualResp.data || [];
     let traficoPrevRows = traficoPrevResp.data || [];
+    let traficoActualDailyRows = traficoActualDailyResp.data || [];
+    let traficoPrevDailyRows = traficoPrevDailyResp.data || [];
+    let traficoActualHourlyRows = traficoActualHourlyResp.data || [];
+    let traficoPrevHourlyRows = traficoPrevHourlyResp.data || [];
+    let traficoMesActualRows = traficoMesActualResp.data || [];
+    let traficoMesAnteriorRows = traficoMesAnteriorResp.data || [];
+    let traficoMesActualDailyRows = traficoMesActualDailyResp.data || [];
+    let traficoMesAnteriorDailyRows = traficoMesAnteriorDailyResp.data || [];
     if (traficoActualResp.error) {
       if (!isMissingTableError(traficoActualResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
         throw traficoActualResp.error;
@@ -16098,14 +16628,67 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       }
       traficoPrevRows = [];
     }
+    if (traficoActualDailyResp.error) {
+      if (!isMissingTableError(traficoActualDailyResp.error, WEB_TRAFFIC_DAILY_TABLE)) {
+        throw traficoActualDailyResp.error;
+      }
+      traficoActualDailyRows = [];
+    }
+    if (traficoPrevDailyResp.error) {
+      if (!isMissingTableError(traficoPrevDailyResp.error, WEB_TRAFFIC_DAILY_TABLE)) {
+        throw traficoPrevDailyResp.error;
+      }
+      traficoPrevDailyRows = [];
+    }
+    if (traficoActualHourlyResp.error) {
+      if (!isMissingTableError(traficoActualHourlyResp.error, WEB_TRAFFIC_HOURLY_TABLE)) {
+        throw traficoActualHourlyResp.error;
+      }
+      traficoActualHourlyRows = [];
+    }
+    if (traficoPrevHourlyResp.error) {
+      if (!isMissingTableError(traficoPrevHourlyResp.error, WEB_TRAFFIC_HOURLY_TABLE)) {
+        throw traficoPrevHourlyResp.error;
+      }
+      traficoPrevHourlyRows = [];
+    }
+    if (traficoMesActualResp.error) {
+      if (!isMissingTableError(traficoMesActualResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
+        throw traficoMesActualResp.error;
+      }
+      traficoMesActualRows = [];
+    }
+    if (traficoMesAnteriorResp.error) {
+      if (!isMissingTableError(traficoMesAnteriorResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
+        throw traficoMesAnteriorResp.error;
+      }
+      traficoMesAnteriorRows = [];
+    }
+    if (traficoMesActualDailyResp.error) {
+      if (!isMissingTableError(traficoMesActualDailyResp.error, WEB_TRAFFIC_DAILY_TABLE)) {
+        throw traficoMesActualDailyResp.error;
+      }
+      traficoMesActualDailyRows = [];
+    }
+    if (traficoMesAnteriorDailyResp.error) {
+      if (!isMissingTableError(traficoMesAnteriorDailyResp.error, WEB_TRAFFIC_DAILY_TABLE)) {
+        throw traficoMesAnteriorDailyResp.error;
+      }
+      traficoMesAnteriorDailyRows = [];
+    }
 
     const countedTrafficEventTypes = new Set(["vista_pagina", "inicio_sesion_web"]);
     const hasValidTrafficUser = (row = {}) => {
       const idUsuario = Number(row?.id_usuario);
       return Number.isFinite(idUsuario) && idUsuario > 0;
     };
-    const aggregateTrafficRows = (rows = [], monthRange = null) => {
-      const monthDateKeys = buildMonthDateKeys(monthRange);
+    const aggregateTrafficRows = (
+      rows = [],
+      dateRange = null,
+      dailyRows = [],
+      hourlyRows = [],
+    ) => {
+      const monthDateKeys = buildDateKeysFromRange(dateRange);
       const monthDateKeySet = new Set(monthDateKeys);
       const daysInMonth = monthDateKeys.length;
       const uniqueUsers = new Set();
@@ -16123,20 +16706,45 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         }
       });
 
+      const addUserToDay = (dateKeyRaw, userIdRaw) => {
+        const dateKey = String(dateKeyRaw || "").trim();
+        if (!dateKey || !monthDateKeySet.has(dateKey)) return;
+        const userId = String(Math.trunc(Number(userIdRaw)));
+        if (!userId) return;
+        uniqueUsers.add(userId);
+        dailyUsersByDate.get(dateKey)?.add(userId);
+      };
+
+      (dailyRows || []).forEach((row) => {
+        const dateKey = String(row?.fecha || "").trim();
+        addUserToDay(dateKey, row?.id_usuario);
+      });
       (rows || []).forEach((row) => {
         if (!hasValidTrafficUser(row) || !isAllowedTrafficUrl(row?.url_completa)) return;
         const tipoEvento = String(row?.tipo_evento || "").trim().toLowerCase();
         if (tipoEvento && !countedTrafficEventTypes.has(tipoEvento)) return;
-        const userId = String(Math.trunc(Number(row?.id_usuario)));
-        if (!userId) return;
         const dateKey = toCaracasDate(row?.fecha_hora);
+        addUserToDay(dateKey, row?.id_usuario);
+      });
+
+      const addUserToHour = (dateKeyRaw, hourRaw, userIdRaw) => {
+        const dateKey = String(dateKeyRaw || "").trim();
         if (!dateKey || !monthDateKeySet.has(dateKey)) return;
-        uniqueUsers.add(userId);
-        dailyUsersByDate.get(dateKey)?.add(userId);
-        const hour = toCaracasHour(row?.fecha_hora);
-        if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
-          hourlyUsersByDate[hour]?.get(dateKey)?.add(userId);
-        }
+        const hour = Number(hourRaw);
+        if (!Number.isInteger(hour) || hour < 0 || hour > 23) return;
+        const userId = String(Math.trunc(Number(userIdRaw)));
+        if (!userId) return;
+        hourlyUsersByDate[hour]?.get(dateKey)?.add(userId);
+      };
+
+      (hourlyRows || []).forEach((row) => {
+        addUserToHour(row?.fecha, row?.hora, row?.id_usuario);
+      });
+      (rows || []).forEach((row) => {
+        if (!hasValidTrafficUser(row) || !isAllowedTrafficUrl(row?.url_completa)) return;
+        const tipoEvento = String(row?.tipo_evento || "").trim().toLowerCase();
+        if (tipoEvento && !countedTrafficEventTypes.has(tipoEvento)) return;
+        addUserToHour(toCaracasDate(row?.fecha_hora), toCaracasHour(row?.fecha_hora), row?.id_usuario);
       });
 
       const totalDailyUniqueUsers = monthDateKeys.reduce(
@@ -16179,6 +16787,32 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         })),
       };
     };
+    const aggregateTrafficDailySeries = (rows = [], dailyRows = [], dateRange = null) => {
+      const dateKeys = buildDateKeysFromRange(dateRange);
+      const dateKeySet = new Set(dateKeys);
+      const dailyUsersByDate = new Map(dateKeys.map((dateKey) => [dateKey, new Set()]));
+      const addUserToDay = (dateKeyRaw, userIdRaw) => {
+        const dateKey = String(dateKeyRaw || "").trim();
+        if (!dateKey || !dateKeySet.has(dateKey)) return;
+        const userId = String(Math.trunc(Number(userIdRaw)));
+        if (!userId) return;
+        dailyUsersByDate.get(dateKey)?.add(userId);
+      };
+      (dailyRows || []).forEach((row) => {
+        addUserToDay(row?.fecha, row?.id_usuario);
+      });
+      (rows || []).forEach((row) => {
+        if (!hasValidTrafficUser(row) || !isAllowedTrafficUrl(row?.url_completa)) return;
+        const tipoEvento = String(row?.tipo_evento || "").trim().toLowerCase();
+        if (tipoEvento && !countedTrafficEventTypes.has(tipoEvento)) return;
+        addUserToDay(toCaracasDate(row?.fecha_hora), row?.id_usuario);
+      });
+      return dateKeys.map((dateKey) => ({
+        fecha: dateKey,
+        dia: Number(String(dateKey).slice(-2)) || 0,
+        cantidad: dailyUsersByDate.get(dateKey)?.size || 0,
+      }));
+    };
 
     const usuarioByAuthId = new Map(
       (usuariosResp.data || [])
@@ -16217,7 +16851,7 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       .map(([monthKey, cantidad]) => ({ monthKey, cantidad }))
       .sort((a, b) => String(a.monthKey).localeCompare(String(b.monthKey)));
     const registrosPorDiaMesActualMap = new Map(
-      buildMonthDateKeys(currentMonthRange).map((dateKey) => [dateKey, 0]),
+      buildDateKeysFromRange(currentMonthRange).map((dateKey) => [dateKey, 0]),
     );
     authConfirmedRows.forEach((row) => {
       const dateKey = String(row?.fecha_confirmacion || "").trim();
@@ -16298,8 +16932,36 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         registros_por_dia_mes_actual: registrosPorDiaMesActual,
       },
       trafico: {
-        actual: aggregateTrafficRows(traficoActualRows, range),
-        anterior: aggregateTrafficRows(traficoPrevRows, prevRange),
+        actual: aggregateTrafficRows(
+          traficoActualRows,
+          trafficRangeCurrent,
+          traficoActualDailyRows,
+          traficoActualHourlyRows,
+        ),
+        anterior: aggregateTrafficRows(
+          traficoPrevRows,
+          trafficRangePrev,
+          traficoPrevDailyRows,
+          traficoPrevHourlyRows,
+        ),
+        rango_actual: trafficRangeCurrent,
+        rango_anterior: trafficRangePrev,
+        diario_mes: {
+          mes_actual: trafficMonthCurrentVal,
+          mes_anterior: trafficMonthPreviousVal,
+          rango_actual: trafficMonthCurrentRange,
+          rango_anterior: trafficMonthPreviousRange,
+          actual: aggregateTrafficDailySeries(
+            traficoMesActualRows,
+            traficoMesActualDailyRows,
+            trafficMonthCurrentRange,
+          ),
+          anterior: aggregateTrafficDailySeries(
+            traficoMesAnteriorRows,
+            traficoMesAnteriorDailyRows,
+            trafficMonthPreviousRange,
+          ),
+        },
       },
     });
   } catch (err) {

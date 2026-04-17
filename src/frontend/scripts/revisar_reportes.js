@@ -1770,7 +1770,7 @@ async function reemplazarServicio(options = {}) {
       selectedRow.cuentas?.id_plataforma ??
       selectedRow.plataformas?.id_plataforma;
     const cuentaId = selectedRow.id_cuenta;
-    const rowPerfil = selectedRow.id_perfil
+    let rowPerfil = selectedRow.id_perfil
       ? {
           id_perfil: selectedRow.id_perfil,
           n_raw: selectedRow.perfiles?.n_perfil ?? null,
@@ -1805,9 +1805,38 @@ async function reemplazarServicio(options = {}) {
     }
 
     const ventaId = ventaInfo.id_venta;
+    const ventaPerfilId = toPositiveId(ventaInfo?.id_perfil);
+    if (!rowPerfil && ventaPerfilId) {
+      let perfilMeta = null;
+      try {
+        const { data: perfilRow, error: perfilErr } = await supabase
+          .from("perfiles")
+          .select("id_perfil, n_perfil, perfil_hogar")
+          .eq("id_perfil", ventaPerfilId)
+          .maybeSingle();
+        if (perfilErr) throw perfilErr;
+        perfilMeta = perfilRow || null;
+      } catch (perfilLookupErr) {
+        console.warn("reemplazo lookup perfil de venta error", perfilLookupErr);
+      }
+      rowPerfil = {
+        id_perfil: ventaPerfilId,
+        n_raw: perfilMeta?.n_perfil ?? selectedRow.perfiles?.n_perfil ?? null,
+        perfil: (perfilMeta?.n_perfil ?? selectedRow.perfiles?.n_perfil)
+          ? `M${perfilMeta?.n_perfil ?? selectedRow.perfiles?.n_perfil}`
+          : "",
+        hogar:
+          perfilMeta?.perfil_hogar === true ||
+          selectedRow.perfiles?.perfil_hogar === true,
+        fecha_corte: null,
+      };
+    }
 
-    const ventaPerfil = isTrue(selectedRow.cuentas?.venta_perfil);
-    const ventaMiembro = isTrue(selectedRow.cuentas?.venta_miembro);
+    const ventaPerfil =
+      isTrue(selectedRow.cuentas?.venta_perfil) || !!ventaPerfilId;
+    const ventaMiembro =
+      isTrue(selectedRow.cuentas?.venta_miembro) ||
+      (!ventaPerfil && !!toPositiveId(ventaInfo?.id_cuenta_miembro));
     const perfilHogar = rowPerfil?.hogar === true;
     const cuentaMadreActualId =
       toPositiveId(ventaInfo?.id_cuenta) ||
@@ -1828,6 +1857,26 @@ async function reemplazarServicio(options = {}) {
     }
     const forceCambiarCuentaMadre =
       plataformaUsaCuentaMadre && !!cuentaMiembroVentaId && cuentaMadreActualInactiva;
+    const stockDebugTag = "[reemplazo][stock-debug]";
+    const stockDebugBase = {
+      id_reporte: toPositiveId(selectedRow?.id_reporte) || null,
+      id_venta: toPositiveId(ventaInfo?.id_venta) || null,
+      id_precio: toPositiveId(ventaInfo?.id_precio) || null,
+      id_plataforma: toPositiveId(plataformaId) || null,
+      id_cuenta_actual: toPositiveId(cuentaId) || null,
+      id_perfil_actual: toPositiveId(rowPerfil?.id_perfil) || null,
+      venta_perfil: ventaPerfil,
+      venta_miembro: ventaMiembro,
+      perfil_hogar: perfilHogar,
+      force_cambiar_cuenta_madre: forceCambiarCuentaMadre,
+      id_cuenta_madre_actual: cuentaMadreActualId,
+      id_cuenta_miembro_venta: cuentaMiembroVentaId,
+    };
+    const logStockDebug = (event, payload = {}) => {
+      console.log(stockDebugTag, event, { ...stockDebugBase, ...payload });
+    };
+    const assignmentTrace = [];
+    logStockDebug("inicio_reemplazo");
 
     const loadReemplazosBloqueados = async () => {
       const { data, error } = await supabase.from("reemplazos").select("id_cuenta, id_perfil");
@@ -1844,6 +1893,10 @@ async function reemplazarServicio(options = {}) {
     };
 
     const reemplazosBloqueados = await loadReemplazosBloqueados();
+    logStockDebug("reemplazos_bloqueados", {
+      cuentas_bloqueadas: reemplazosBloqueados.cuentas.size,
+      perfiles_bloqueados: reemplazosBloqueados.perfiles.size,
+    });
 
     const findPerfilLibre = async (platId, isHogar, excludeCuenta) => {
       let query = supabase
@@ -1865,7 +1918,12 @@ async function reemplazarServicio(options = {}) {
       if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
       const { data, error } = await query;
       if (error) return { error };
-      const libre = (data || []).find((perfil) => {
+      const rows = data || [];
+      const bloqueados = rows.filter((perfil) => {
+        const perfilId = toPositiveId(perfil?.id_perfil);
+        return !!perfilId && reemplazosBloqueados.perfiles.has(perfilId);
+      });
+      const libres = rows.filter((perfil) => {
         const perfilId = toPositiveId(perfil?.id_perfil);
         const cuentaId = toPositiveId(perfil?.id_cuenta);
         return (
@@ -1873,6 +1931,20 @@ async function reemplazarServicio(options = {}) {
           !!cuentaId &&
           !reemplazosBloqueados.perfiles.has(perfilId)
         );
+      });
+      const libre = libres[0] || null;
+      logStockDebug("find_perfil_libre", {
+        is_hogar: isHogar === true,
+        exclude_cuenta: toPositiveId(excludeCuenta) || null,
+        total_rows: rows.length,
+        bloqueados_reemplazo: bloqueados.length,
+        candidatos_utiles: libres.length,
+        candidato_elegido: toPositiveId(libre?.id_perfil) || null,
+        muestra_perfiles: rows.slice(0, 8).map((perfil) => ({
+          id_perfil: toPositiveId(perfil?.id_perfil) || null,
+          id_cuenta: toPositiveId(perfil?.id_cuenta) || null,
+          bloqueado: reemplazosBloqueados.perfiles.has(toPositiveId(perfil?.id_perfil)),
+        })),
       });
       return { data: libre || null };
     };
@@ -1898,7 +1970,12 @@ async function reemplazarServicio(options = {}) {
       if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
       const { data, error } = await query;
       if (error) return { error };
-      const libre = (data || []).find((perfil) => {
+      const rows = data || [];
+      const bloqueados = rows.filter((perfil) => {
+        const perfilId = toPositiveId(perfil?.id_perfil);
+        return !!perfilId && reemplazosBloqueados.perfiles.has(perfilId);
+      });
+      const libres = rows.filter((perfil) => {
         const perfilId = toPositiveId(perfil?.id_perfil);
         const cuentaId = toPositiveId(perfil?.id_cuenta);
         return (
@@ -1906,6 +1983,20 @@ async function reemplazarServicio(options = {}) {
           !!cuentaId &&
           !reemplazosBloqueados.perfiles.has(perfilId)
         );
+      });
+      const libre = libres[0] || null;
+      logStockDebug("find_perfil_libre_cuenta_madre", {
+        is_hogar: isHogar === true,
+        exclude_cuenta: toPositiveId(excludeCuenta) || null,
+        total_rows: rows.length,
+        bloqueados_reemplazo: bloqueados.length,
+        candidatos_utiles: libres.length,
+        candidato_elegido: toPositiveId(libre?.id_perfil) || null,
+        muestra_perfiles: rows.slice(0, 8).map((perfil) => ({
+          id_perfil: toPositiveId(perfil?.id_perfil) || null,
+          id_cuenta: toPositiveId(perfil?.id_cuenta) || null,
+          bloqueado: reemplazosBloqueados.perfiles.has(toPositiveId(perfil?.id_perfil)),
+        })),
       });
       return { data: libre || null };
     };
@@ -1923,9 +2014,26 @@ async function reemplazarServicio(options = {}) {
       if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
       const { data, error } = await query;
       if (error) return { error };
-      const libre = (data || []).find((cuenta) => {
+      const rows = data || [];
+      const bloqueadas = rows.filter((cuenta) => {
+        const id = toPositiveId(cuenta?.id_cuenta);
+        return !!id && reemplazosBloqueados.cuentas.has(id);
+      });
+      const libres = rows.filter((cuenta) => {
         const cuentaId = toPositiveId(cuenta?.id_cuenta);
         return !!cuentaId && !reemplazosBloqueados.cuentas.has(cuentaId);
+      });
+      const libre = libres[0] || null;
+      logStockDebug("find_cuenta_miembro_libre", {
+        exclude_cuenta: toPositiveId(excludeCuenta) || null,
+        total_rows: rows.length,
+        bloqueadas_reemplazo: bloqueadas.length,
+        candidatos_utiles: libres.length,
+        candidato_elegido: toPositiveId(libre?.id_cuenta) || null,
+        muestra_cuentas: rows.slice(0, 8).map((cuenta) => ({
+          id_cuenta: toPositiveId(cuenta?.id_cuenta) || null,
+          bloqueada: reemplazosBloqueados.cuentas.has(toPositiveId(cuenta?.id_cuenta)),
+        })),
       });
       return { data: libre || null };
     };
@@ -1943,9 +2051,26 @@ async function reemplazarServicio(options = {}) {
       if (excludeCuenta) query = query.neq("id_cuenta", excludeCuenta);
       const { data, error } = await query;
       if (error) return { error };
-      const libre = (data || []).find((cuenta) => {
+      const rows = data || [];
+      const bloqueadas = rows.filter((cuenta) => {
+        const id = toPositiveId(cuenta?.id_cuenta);
+        return !!id && reemplazosBloqueados.cuentas.has(id);
+      });
+      const libres = rows.filter((cuenta) => {
         const cuentaId = toPositiveId(cuenta?.id_cuenta);
         return !!cuentaId && !reemplazosBloqueados.cuentas.has(cuentaId);
+      });
+      const libre = libres[0] || null;
+      logStockDebug("find_cuenta_completa_libre", {
+        exclude_cuenta: toPositiveId(excludeCuenta) || null,
+        total_rows: rows.length,
+        bloqueadas_reemplazo: bloqueadas.length,
+        candidatos_utiles: libres.length,
+        candidato_elegido: toPositiveId(libre?.id_cuenta) || null,
+        muestra_cuentas: rows.slice(0, 8).map((cuenta) => ({
+          id_cuenta: toPositiveId(cuenta?.id_cuenta) || null,
+          bloqueada: reemplazosBloqueados.cuentas.has(toPositiveId(cuenta?.id_cuenta)),
+        })),
       });
       return { data: libre || null };
     };
@@ -1964,6 +2089,11 @@ async function reemplazarServicio(options = {}) {
         cuentaMadreActualId || cuentaId,
       );
       if (perfilErr) throw perfilErr;
+      assignmentTrace.push({
+        intento: "perfil_cuenta_madre",
+        is_hogar: isHogar === true,
+        candidato_id_perfil: toPositiveId(perfilDestino?.id_perfil) || null,
+      });
       if (!perfilDestino) return false;
       nuevoPerfil = perfilDestino.id_perfil;
       nuevoCuenta = perfilDestino.id_cuenta;
@@ -1985,6 +2115,11 @@ async function reemplazarServicio(options = {}) {
         cuentaId,
       );
       if (perfilErr) throw perfilErr;
+      assignmentTrace.push({
+        intento: "perfil",
+        is_hogar: isHogar === true,
+        candidato_id_perfil: toPositiveId(perfilDestino?.id_perfil) || null,
+      });
       if (!perfilDestino) return false;
       nuevoPerfil = perfilDestino.id_perfil;
       nuevoCuenta = perfilDestino.id_cuenta;
@@ -2004,6 +2139,10 @@ async function reemplazarServicio(options = {}) {
         cuentaId,
       );
       if (cuentaErr) throw cuentaErr;
+      assignmentTrace.push({
+        intento: "cuenta_miembro",
+        candidato_id_cuenta: toPositiveId(cuentaDestino?.id_cuenta) || null,
+      });
       if (!cuentaDestino) return false;
       nuevoPerfil = null;
       nuevoCuenta = cuentaDestino.id_cuenta;
@@ -2022,6 +2161,7 @@ async function reemplazarServicio(options = {}) {
         assigned = await tryAsignarPerfilCuentaMadre(true);
       }
       if (!assigned) {
+        logStockDebug("sin_stock_cuenta_madre", { assignment_trace: assignmentTrace });
         notify("Sin stock de cuentas madre activas.");
         return { ok: false, reason: "sin_stock_cuenta_madre" };
       }
@@ -2054,13 +2194,30 @@ async function reemplazarServicio(options = {}) {
         };
         destinoEsCuentaMiembro = false;
         assigned = true;
+        assignmentTrace.push({
+          intento: "cuenta_completa",
+          candidato_id_cuenta: toPositiveId(cuentaCompletaDestino?.id_cuenta) || null,
+        });
+      } else {
+        assignmentTrace.push({
+          intento: "cuenta_completa",
+          candidato_id_cuenta: null,
+        });
       }
     }
 
     if (!assigned) {
+      logStockDebug("sin_stock", { assignment_trace: assignmentTrace });
       notify("Sin stock");
       return { ok: false, reason: "sin_stock" };
     }
+    logStockDebug("asignacion_exitosa", {
+      assignment_trace: assignmentTrace,
+      nuevo_id_cuenta: toPositiveId(nuevoCuenta) || null,
+      nuevo_id_perfil: toPositiveId(nuevoPerfil) || null,
+      destino_cuenta_miembro: destinoEsCuentaMiembro,
+      asignado_desde_cuenta_madre: asignadoDesdeCuentaMadre,
+    });
 
     const { error: updVentaErr } = await supabase
       .from("ventas")
@@ -2284,11 +2441,21 @@ async function reemplazarServicio(options = {}) {
 async function autoReplaceInactiveReportes(reportes = []) {
   if (!autoReemplazoCuentaInactivaEnabled) return false;
   const targets = (reportes || []).filter((r) => isTrue(r?.cuenta_inactiva_resuelta));
+  console.log("[reemplazo][auto]", "scan_reportes", {
+    total_reportes: (reportes || []).length,
+    total_targets: targets.length,
+  });
   if (!targets.length) return false;
 
   for (const row of targets) {
     try {
-      await reemplazarServicio({ row, silent: true, closeModal: false });
+      const result = await reemplazarServicio({ row, silent: true, closeModal: false });
+      console.log("[reemplazo][auto]", "resultado", {
+        id_reporte: toPositiveId(row?.id_reporte) || null,
+        id_venta: toPositiveId(row?.id_venta) || null,
+        ok: result?.ok === true,
+        reason: result?.reason || null,
+      });
     } catch (err) {
       console.error("auto reemplazo por cuenta inactiva error", err);
     }
