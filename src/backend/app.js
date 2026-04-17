@@ -9186,7 +9186,9 @@ const autoAssignReportedPendingVentas = async ({
 
         if (!esReportada) {
           const entregaInmediata = isTrue(plataforma?.entrega_inmediata);
-          if (!entregaInmediata || tieneRecursoAsignado) {
+          const autoAssignBloqueado =
+            Number(plataformaId) === 9 || isTrue(plataforma?.cuenta_madre);
+          if (!entregaInmediata || autoAssignBloqueado || tieneRecursoAsignado) {
             summary.skipped += 1;
             continue;
           }
@@ -11010,6 +11012,29 @@ const processOrderFromItems = async ({
       isNetflixPlan2,
       cantidad,
     });
+
+    // Si la plataforma no es de entrega inmediata, la venta debe permanecer pendiente
+    // y la asignación/entrega se realiza manualmente desde pedidos pendientes.
+    if (!entregaInmediata && !isGiftCardSale) {
+      for (let i = 0; i < cantidad; i += 1) {
+        pendientes.push({
+          id_item_carrito: toPositiveInt(it?.id_item) || null,
+          id_precio: price.id_precio,
+          monto: pickPrecio(price, it),
+          id_cuenta: null,
+          id_perfil: null,
+          id_sub_cuenta: null,
+          meses: mesesItem,
+          pendiente: true,
+        });
+      }
+      console.log("[checkout] item marcado manual (sin auto-asignacion)", {
+        id_precio: price?.id_precio,
+        id_plataforma: platId,
+        cantidad,
+      });
+      continue;
+    }
 
     if (isGiftCardSale) {
       const giftCardsStock = await fetchAvailableGiftCardStock({

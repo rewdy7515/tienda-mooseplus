@@ -1669,8 +1669,20 @@
           </tr>
         `;
       };
-      const renderCuentaCorreoEditControls = (cuentaId, correo) => {
-        if (!isSuperadmin) return "";
+      const canEditCuentaCorreo = ({ cuentaId = null, idPlataforma = null } = {}) => {
+        if (isSuperadmin) return true;
+        if (!isAdminUser) return false;
+        const platNum = Number(idPlataforma || 0);
+        if (platNum === 9) return true;
+        const targetCuentaId = toPositiveId(cuentaId);
+        const currentCuentaId = toPositiveId(currentCuentaDetalle?.id_cuenta);
+        const currentPlatId = Number(
+          currentCuentaDetalle?.id_plataforma || currentCuentaDetalle?.plataformaId || 0,
+        );
+        return !!targetCuentaId && !!currentCuentaId && targetCuentaId === currentCuentaId && currentPlatId === 9;
+      };
+      const renderCuentaCorreoEditControls = (cuentaId, correo, idPlataforma = null) => {
+        if (!canEditCuentaCorreo({ cuentaId, idPlataforma })) return "";
         return `
           <button type="button" class="btn-edit-fecha-cuenta btn-edit-correo-cuenta" data-cuenta="${cuentaId}">✏️</button>
           <input type="text" class="fecha-input-cuenta correo-input-cuenta hidden" data-cuenta="${cuentaId}" value="${correo || ""}" />
@@ -4457,11 +4469,16 @@
             <span class="cuenta-platform-label">Correo:</span>
             <span class="fecha-wrap cuenta-correo-wrap">
               <span class="cred-copy correo-cuenta-text" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
-              ${renderCuentaCorreoEditControls(info.id_cuenta, info.correo)}
+              ${renderCuentaCorreoEditControls(info.id_cuenta, info.correo, info.id_plataforma)}
             </span>
             <span class="cuenta-platform-sep">•</span>
             <span class="cuenta-platform-label">Clave:</span>
             <span class="cred-copy" data-clipboard="${info.clave || ""}">${info.clave || "-"}</span>
+            ${
+              Number(info.id_plataforma || 0) === 9 || isSuperadmin
+                ? `<button type="button" class="btn-pin btn-clave" data-cuenta="${info.id_cuenta}" data-clave="${info.clave || ""}" data-correo="${info.correo || ""}">✏️</button>`
+                : ""
+            }
           </div>
           ${
             (() => {
@@ -4532,7 +4549,7 @@
                 <strong>Correo:</strong>
                 <span class="fecha-wrap cuenta-correo-wrap">
                   <span class="cred-copy correo-cuenta-text" data-clipboard="${info.correo || ""}">${info.correo || "-"}</span>
-                  ${renderCuentaCorreoEditControls(info.id_cuenta, info.correo)}
+                  ${renderCuentaCorreoEditControls(info.id_cuenta, info.correo, info.id_plataforma)}
                 </span>
               </p>
               <p>
@@ -5581,8 +5598,9 @@
       detalleEl?.addEventListener("click", async (e) => {
         const editCorreoCuentaBtn = e.target.closest(".btn-edit-correo-cuenta");
         if (editCorreoCuentaBtn) {
-          if (!isSuperadmin) {
-            alert("Solo superadmin puede cambiar el correo de la cuenta.");
+          const cuentaId = editCorreoCuentaBtn.dataset.cuenta || currentCuentaDetalle?.id_cuenta;
+          if (!canEditCuentaCorreo({ cuentaId })) {
+            alert("No tienes permisos para cambiar el correo de esta cuenta.");
             return;
           }
           const wrap = editCorreoCuentaBtn.closest(".cuenta-correo-wrap");
@@ -5624,16 +5642,16 @@
 
         const saveCorreoCuentaBtn = e.target.closest(".btn-save-correo-cuenta");
         if (saveCorreoCuentaBtn) {
-          if (!isSuperadmin) {
-            alert("Solo superadmin puede cambiar el correo de la cuenta.");
-            return;
-          }
           const wrap = saveCorreoCuentaBtn.closest(".cuenta-correo-wrap");
           const input = wrap?.querySelector(".correo-input-cuenta");
           const span = wrap?.querySelector(".correo-cuenta-text");
           const editBtn = wrap?.querySelector(".btn-edit-correo-cuenta");
           const cancelBtn = wrap?.querySelector(".btn-cancel-correo-cuenta");
           const cuentaId = saveCorreoCuentaBtn.dataset.cuenta || currentCuentaDetalle?.id_cuenta;
+          if (!canEditCuentaCorreo({ cuentaId })) {
+            alert("No tienes permisos para cambiar el correo de esta cuenta.");
+            return;
+          }
           const newCorreo = String(input?.value || "").trim();
           if (!cuentaId || !newCorreo) {
             alert("Ingresa un correo.");
@@ -5642,11 +5660,31 @@
           const confirmado = await confirmarCambioCorreo(newCorreo);
           if (!confirmado) return;
           try {
+            const cuentaIdNum = toPositiveId(cuentaId);
+            const currentPlatId = Number(
+              currentCuentaDetalle?.id_plataforma || currentCuentaDetalle?.plataformaId || 0,
+            );
             const { error } = await supabase
               .from("cuentas")
               .update({ correo: newCorreo })
               .eq("id_cuenta", cuentaId);
             if (error) throw error;
+
+            if (currentPlatId === 9 && cuentaIdNum) {
+              const syncResults = await Promise.all([
+                supabase
+                  .from("ventas")
+                  .update({ correo_miembro: newCorreo })
+                  .eq("id_cuenta_miembro", cuentaIdNum),
+                supabase
+                  .from("ventas")
+                  .update({ correo_miembro: newCorreo })
+                  .eq("id_cuenta", cuentaIdNum)
+                  .is("id_cuenta_miembro", null),
+              ]);
+              const syncErr = syncResults.find((r) => r?.error)?.error;
+              if (syncErr) throw syncErr;
+            }
 
             if (currentCuentaDetalle && String(currentCuentaDetalle.id_cuenta || "") === String(cuentaId)) {
               currentCuentaDetalle.correo = newCorreo;
