@@ -267,6 +267,8 @@
       let saldoTargetUserId = null;
       let signupPublicLinkCliente = "";
       let signupPublicLinkVendedor = "";
+      const signupUsuarioLinkCache = new Map();
+      const signupUsuarioLinkInFlight = new Set();
       let usuariosRows = [];
       let usuariosFilteredRows = [];
       let currentPage = 1;
@@ -379,6 +381,18 @@
         }
       };
 
+      const openManualCopyPrompt = (value, label = "Copia este mensaje manualmente:") => {
+        const text = String(value || "").trim();
+        if (!text) return false;
+        try {
+          window.prompt(label, text);
+          return true;
+        } catch (err) {
+          console.warn("[usuarios][copy] prompt manual falló", err);
+          return false;
+        }
+      };
+
       const cachePublicSignupLink = (accesoCliente, url) => {
         const normalized = String(url || "").trim();
         if (!normalized) return;
@@ -391,6 +405,57 @@
 
       const getCachedPublicSignupLink = (accesoCliente) =>
         accesoCliente === true ? signupPublicLinkCliente : signupPublicLinkVendedor;
+
+      const cacheUsuarioSignupLink = (idUsuario, url) => {
+        const uid = Number(idUsuario);
+        const normalized = String(url || "").trim();
+        if (!Number.isFinite(uid) || uid <= 0 || !normalized) return;
+        signupUsuarioLinkCache.set(uid, normalized);
+      };
+
+      const getCachedUsuarioSignupLink = (idUsuario) => {
+        const uid = Number(idUsuario);
+        if (!Number.isFinite(uid) || uid <= 0) return "";
+        return String(signupUsuarioLinkCache.get(uid) || "").trim();
+      };
+
+      const preloadUsuarioSignupLink = async (idUsuario) => {
+        const uid = Number(idUsuario);
+        if (!Number.isFinite(uid) || uid <= 0) return "";
+        const cached = getCachedUsuarioSignupLink(uid);
+        if (cached) return cached;
+        if (signupUsuarioLinkInFlight.has(uid)) return "";
+        signupUsuarioLinkInFlight.add(uid);
+        try {
+          const payload = await createUsuarioSignupLink(uid);
+          if (payload?.error) {
+            const errText = String(payload.error || "").trim();
+            if (isAlreadyRegisteredErrorMessage(errText)) {
+              updateUsuarioFieldInRows(uid, "id_auth", "__registered__");
+              return "";
+            }
+            return "";
+          }
+          const url = String(payload?.url || "").trim();
+          if (!url) return "";
+          cacheUsuarioSignupLink(uid, url);
+          return url;
+        } catch (_err) {
+          return "";
+        } finally {
+          signupUsuarioLinkInFlight.delete(uid);
+        }
+      };
+
+      const preloadPageSignupLinks = async (rows = []) => {
+        const pageRows = Array.isArray(rows) ? rows : [];
+        const targetIds = pageRows
+          .filter((row) => !isUsuarioRegistradoWeb(row))
+          .map((row) => Number(row?.id_usuario))
+          .filter((id) => Number.isFinite(id) && id > 0 && !getCachedUsuarioSignupLink(id));
+        if (!targetIds.length) return;
+        await Promise.all(targetIds.map((id) => preloadUsuarioSignupLink(id)));
+      };
 
       const preloadPublicSignupLinks = async () => {
         console.log("[usuarios][registro] precargando links públicos...");
@@ -451,9 +516,15 @@
           }
           const message = buildSignupInviteMessage(url, { includeDisclaimer: false });
           const copied = await copyTextToClipboard(message).catch(() => false);
-          if (!copied) throw new Error("No se pudo copiar el mensaje.");
-          btnEl.textContent = "Copiado";
-          setStatus("");
+          if (!copied) {
+            const opened = openManualCopyPrompt(message);
+            if (!opened) throw new Error("No se pudo copiar el mensaje.");
+            btnEl.textContent = "Manual";
+            setStatus("Copia manual abierta. Pega el texto y envíalo al cliente.");
+          } else {
+            btnEl.textContent = "Copiado";
+            setStatus("");
+          }
           setTimeout(() => {
             if (btnEl.isConnected) btnEl.textContent = originalText || "Registro";
           }, 1200);
@@ -633,6 +704,9 @@
         const end = start + PAGE_SIZE;
         const pageRows = usuariosFilteredRows.slice(start, end);
         tbodyEl.innerHTML = pageRows.map((u) => buildUsuarioRowHtml(u)).join("");
+        preloadPageSignupLinks(pageRows).catch((err) => {
+          console.warn("[usuarios][registro] preload por fila falló", err);
+        });
         renderPagination();
       };
 
@@ -842,22 +916,38 @@
           registroBtn.disabled = true;
           registroBtn.textContent = "Generando...";
           try {
-            const payload = await createUsuarioSignupLink(idTarget);
-            if (payload?.error) {
-              const errText = String(payload.error || "").trim();
-              if (isAlreadyRegisteredErrorMessage(errText)) {
-                updateUsuarioFieldInRows(idTarget, "id_auth", "__registered__");
-                renderCurrentPage();
-                setStatus("Este usuario ya está registrado. No necesita link de registro.");
-                return;
+            let url = getCachedUsuarioSignupLink(idTarget);
+            let generatedOnDemand = false;
+            if (!url) {
+              const payload = await createUsuarioSignupLink(idTarget);
+              if (payload?.error) {
+                const errText = String(payload.error || "").trim();
+                if (isAlreadyRegisteredErrorMessage(errText)) {
+                  updateUsuarioFieldInRows(idTarget, "id_auth", "__registered__");
+                  renderCurrentPage();
+                  setStatus("Este usuario ya está registrado. No necesita link de registro.");
+                  return;
+                }
+                throw new Error(errText);
               }
-              throw new Error(errText);
+              url = String(payload?.url || "").trim();
+              if (!url) throw new Error("No se pudo generar el link.");
+              cacheUsuarioSignupLink(idTarget, url);
+              generatedOnDemand = true;
             }
-            const url = String(payload?.url || "").trim();
-            if (!url) throw new Error("No se pudo generar el link.");
             const message = buildSignupInviteMessage(url, { includeDisclaimer: true });
             const copied = await copyTextToClipboard(message).catch(() => false);
-            if (!copied) throw new Error("No se pudo copiar el mensaje.");
+            if (!copied) {
+              if (generatedOnDemand) {
+                registroBtn.textContent = "Listo";
+                setStatus("Link generado. Presiona de nuevo para copiar al portapapeles.");
+                setTimeout(() => {
+                  if (registroBtn.isConnected) registroBtn.textContent = originalText || "Link registro";
+                }, 1400);
+                return;
+              }
+              throw new Error("No se pudo copiar el mensaje.");
+            }
             registroBtn.textContent = "Copiado";
             setStatus("");
             setTimeout(() => {

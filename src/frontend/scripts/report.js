@@ -86,6 +86,7 @@ const formatDateDDMMYYYY = (value) => {
 };
 
 const REEMPLAZO_NOTA_PREFIX = "Reemplazo automático por cuenta inactiva:";
+const MEMBER_CREDENTIAL_PLATFORM_IDS = new Set([9, 12]);
 
 const linkifyText = (value = "") => {
   const source = String(value || "");
@@ -133,6 +134,68 @@ const toPositiveId = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.trunc(parsed);
+};
+
+const getReportCredentials = (row = {}) => {
+  const platId = toPositiveId(row?.id_plataforma);
+  const requiresMemberCredentials = MEMBER_CREDENTIAL_PLATFORM_IDS.has(platId || 0);
+  const venta = row?.ventas || null;
+  const memberCorreo = String(
+    venta?.cuenta_miembro?.correo || venta?.correo_miembro || "",
+  ).trim();
+  const memberClave = String(
+    venta?.cuenta_miembro?.clave || venta?.clave_miembro || "",
+  ).trim();
+  const motherCorreo = String(row?.cuentas?.correo || "").trim();
+  const motherClave = String(row?.cuentas?.clave || "").trim();
+  if (requiresMemberCredentials) {
+    return {
+      correo: memberCorreo || "-",
+      clave: memberClave || "-",
+    };
+  }
+  return {
+    correo: motherCorreo || memberCorreo || "-",
+    clave: motherClave || memberClave || "-",
+  };
+};
+
+const attachVentasToReportes = async (reportesRows = []) => {
+  const rows = Array.isArray(reportesRows) ? reportesRows : [];
+  if (!rows.length) return [];
+  const ventaIds = Array.from(
+    new Set(
+      rows
+        .map((row) => toPositiveId(row?.id_venta))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  );
+  if (!ventaIds.length) {
+    return rows.map((row) => ({ ...row, ventas: null }));
+  }
+  const ventasMap = new Map();
+  const batchSize = 200;
+  for (let i = 0; i < ventaIds.length; i += batchSize) {
+    const idsBatch = ventaIds.slice(i, i + batchSize);
+    const { data: ventasBatch, error: ventasErr } = await supabase
+      .from("ventas")
+      .select(
+        "id_venta, id_cuenta_miembro, correo_miembro, clave_miembro, cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave)",
+      )
+      .in("id_venta", idsBatch);
+    if (ventasErr) throw ventasErr;
+    (ventasBatch || []).forEach((venta) => {
+      const ventaId = toPositiveId(venta?.id_venta);
+      if (ventaId) ventasMap.set(ventaId, venta);
+    });
+  }
+  return rows.map((row) => {
+    const ventaId = toPositiveId(row?.id_venta);
+    return {
+      ...row,
+      ventas: ventaId ? ventasMap.get(ventaId) || null : null,
+    };
+  });
 };
 
 const buildInventarioVentaUrl = (idVenta) => {
@@ -211,8 +274,8 @@ function renderReportes(items = []) {
       const rows = (p.items || [])
         .map((r) => {
           const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
-          const correoRaw = String(r.cuentas?.correo || "").trim();
-          const correo = correoRaw || "-";
+          const creds = getReportCredentials(r);
+          const correo = creds.correo || "-";
           const fecha = formatDateDDMMYYYY(r.fecha_creacion);
           const hasDatosIncorrectos = isTrue(r.datos_incorrectos);
           const estado = hasDatosIncorrectos
@@ -285,7 +348,8 @@ async function loadReportes() {
       .eq("en_revision", true)
       .order("id_reporte", { ascending: false });
     if (error) throw error;
-    renderReportes(data || []);
+    const hydratedRows = await attachVentasToReportes(data || []);
+    renderReportes(hydratedRows);
     if (statusEl) statusEl.textContent = "";
   } catch (err) {
     console.error("load reportes error", err);
@@ -345,7 +409,7 @@ async function loadReportesSolucionados() {
       .eq("solucionado", true)
       .order("id_reporte", { ascending: false });
     if (error) throw error;
-    reportesSolRows = data || [];
+    reportesSolRows = await attachVentasToReportes(data || []);
     if (solFilterSelect) {
       const selectedPrev = String(solFilterSelect.value || "");
       const plataformasMap = new Map();
@@ -479,7 +543,8 @@ function renderSolucionadosList() {
       if (r?.id_reporte) reportesSolById.set(String(r.id_reporte), r);
       const idReporte = r.id_reporte ? `#${String(r.id_reporte).padStart(4, "0")}` : "-";
       const plataforma = r.plataformas?.nombre || `Plataforma ${r.id_plataforma || "-"}`;
-      const correo = r.cuentas?.correo || "-";
+      const creds = getReportCredentials(r);
+      const correo = creds.correo || "-";
       const fecha = formatDateDDMMYYYY(r.fecha_creacion);
       return `
         <tr>
@@ -528,9 +593,10 @@ function openModalSol(row) {
   if (!modalSol) return;
   modalSolTitle.textContent = row.plataformas?.nombre || "Detalle de reporte";
   const ventaId = toPositiveId(row?.id_venta);
+  const creds = getReportCredentials(row);
   if (modalSolVenta) modalSolVenta.textContent = ventaId ? String(ventaId) : "-";
-  modalSolCorreo.textContent = row.cuentas?.correo || "-";
-  modalSolClave.textContent = row.cuentas?.clave || "-";
+  modalSolCorreo.textContent = creds.correo || "-";
+  modalSolClave.textContent = creds.clave || "-";
   modalSolPerfil.textContent =
     row.perfiles?.n_perfil !== undefined && row.perfiles?.n_perfil !== null
       ? row.perfiles.n_perfil

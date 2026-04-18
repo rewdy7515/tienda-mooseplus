@@ -358,14 +358,32 @@ const pickReportePlataformaNombre = (row) => {
 };
 
 const pickReporteCorreo = (row) => {
+  const platformId = getReportePlatformId(row);
   const correoMiembro = String(row?.correo_miembro || "").trim();
   if (correoMiembro) return correoMiembro;
   const correoMiembroVenta = String(row?.venta_correo_miembro || "").trim();
   if (correoMiembroVenta) return correoMiembroVenta;
+  const correoCuentaMiembroVenta = String(row?.venta_cuenta_miembro_correo || "").trim();
+  if (correoCuentaMiembroVenta) return correoCuentaMiembroVenta;
+  if (platformId === 9) return "";
   const correoCuenta = String(row?.cuentas?.correo || "").trim();
   if (correoCuenta) return correoCuenta;
   const correoMadre = String(row?.cuenta_madre_correo || "").trim();
   if (correoMadre) return correoMadre;
+  return "";
+};
+
+const pickReporteClave = (row) => {
+  const platformId = getReportePlatformId(row);
+  const claveMiembro = String(row?.clave_miembro || "").trim();
+  if (claveMiembro) return claveMiembro;
+  const claveMiembroVenta = String(row?.venta_clave_miembro || "").trim();
+  if (claveMiembroVenta) return claveMiembroVenta;
+  const claveCuentaMiembroVenta = String(row?.venta_cuenta_miembro_clave || "").trim();
+  if (claveCuentaMiembroVenta) return claveCuentaMiembroVenta;
+  if (platformId === 9) return "";
+  const claveCuenta = String(row?.cuentas?.clave || "").trim();
+  if (claveCuenta) return claveCuenta;
   return "";
 };
 
@@ -1045,7 +1063,9 @@ async function loadReportes() {
   if (ventaIds.length) {
     const { data: ventasData, error: ventasErr } = await supabase
       .from("ventas")
-      .select("id_venta, completa, correo_miembro")
+      .select(
+        "id_venta, completa, id_cuenta_miembro, correo_miembro, clave_miembro, cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(correo, clave)",
+      )
       .in("id_venta", ventaIds);
     if (ventasErr) {
       console.error("load reportes ventas completa error", ventasErr);
@@ -1053,9 +1073,16 @@ async function loadReportes() {
       (ventasData || []).forEach((venta) => {
         const ventaId = toPositiveId(venta?.id_venta);
         if (!ventaId) return;
+        const cuentaMiembro = Array.isArray(venta?.cuentas_miembro)
+          ? venta.cuentas_miembro[0] || null
+          : venta?.cuentas_miembro || null;
         ventaMetaById.set(ventaId, {
           completa: isTrue(venta?.completa),
+          id_cuenta_miembro: toPositiveId(venta?.id_cuenta_miembro),
           correo_miembro: String(venta?.correo_miembro || "").trim(),
+          clave_miembro: String(venta?.clave_miembro || "").trim(),
+          cuenta_miembro_correo: String(cuentaMiembro?.correo || "").trim(),
+          cuenta_miembro_clave: String(cuentaMiembro?.clave || "").trim(),
         });
       });
     }
@@ -1065,7 +1092,11 @@ async function loadReportes() {
     const ventaId = toPositiveId(row?.id_venta);
     const ventaMeta = ventaId ? ventaMetaById.get(ventaId) : null;
     row.venta_completa = ventaMeta?.completa === true;
+    row.venta_id_cuenta_miembro = toPositiveId(ventaMeta?.id_cuenta_miembro);
     row.venta_correo_miembro = String(ventaMeta?.correo_miembro || "").trim();
+    row.venta_clave_miembro = String(ventaMeta?.clave_miembro || "").trim();
+    row.venta_cuenta_miembro_correo = String(ventaMeta?.cuenta_miembro_correo || "").trim();
+    row.venta_cuenta_miembro_clave = String(ventaMeta?.cuenta_miembro_clave || "").trim();
   });
 
   const cuentaIds = new Set();
@@ -1232,7 +1263,7 @@ async function openModal(row) {
   }
   if (modalCorreo) modalCorreo.value = pickReporteCorreo(row) || "-";
   if (modalFechaCorte) modalFechaCorte.value = formatDate(row.cuentas?.fecha_corte || null);
-  oldClave = row.cuentas?.clave || "";
+  oldClave = pickReporteClave(row) || "";
   const rawPin = row.perfiles?.pin ?? row.pin ?? "";
   oldPin = rawPin === null || rawPin === undefined ? "" : String(rawPin);
   if (modalClave) modalClave.value = oldClave;
@@ -1628,12 +1659,25 @@ async function guardarCambios() {
     const nuevaClave = modalClave?.value || "";
     const nuevoPin = (modalPin?.value || "").trim();
     const updates = [];
+    const platformId = getReportePlatformId(currentRow);
+    const isPlatform9 = platformId === 9;
+    const claveTargetCuentaId = isPlatform9
+      ? toPositiveId(currentRow?.venta_id_cuenta_miembro)
+      : toPositiveId(currentRow?.id_cuenta);
 
     // Actualiza clave de cuenta si cambió
     if (nuevaClave !== oldClave) {
+      if (!claveTargetCuentaId) {
+        throw new Error("No se encontró la cuenta miembro para actualizar la clave.");
+      }
       updates.push(
-        supabase.from("cuentas").update({ clave: nuevaClave }).eq("id_cuenta", currentRow.id_cuenta)
+        supabase.from("cuentas").update({ clave: nuevaClave }).eq("id_cuenta", claveTargetCuentaId),
       );
+      if (isPlatform9 && toPositiveId(currentRow?.id_venta)) {
+        updates.push(
+          supabase.from("ventas").update({ clave_miembro: nuevaClave }).eq("id_venta", currentRow.id_venta),
+        );
+      }
     }
 
     // Actualiza pin si aplica y cambió
@@ -1648,6 +1692,15 @@ async function guardarCambios() {
       const results = await Promise.all(updates);
       const err = results.find((r) => r.error);
       if (err?.error) throw err.error;
+      if (nuevaClave !== oldClave) {
+        currentRow.venta_clave_miembro = nuevaClave;
+        currentRow.venta_cuenta_miembro_clave = nuevaClave;
+        if (isPlatform9) {
+          currentRow.clave_miembro = nuevaClave;
+        } else if (currentRow?.cuentas && typeof currentRow.cuentas === "object") {
+          currentRow.cuentas.clave = nuevaClave;
+        }
+      }
     }
 
     // Construir descripcion/descripción_solucion con cambios primero
@@ -1665,7 +1718,7 @@ async function guardarCambios() {
     }
     if (checkIngreso?.checked) {
       const inventarioLink = buildInventarioLinkByCorreo(
-        currentRow?.cuentas?.correo || modalCorreo?.value || "",
+        pickReporteCorreo(currentRow) || modalCorreo?.value || "",
       );
       textos.push(
         `Se pudo ingresar sin problemas con los datos actuales de la cuenta. Verifíquelos en ${inventarioLink}.`,
@@ -2327,7 +2380,8 @@ async function reemplazarServicio(options = {}) {
         const oldMemberCorreo = String(
           ventaInfo?.correo_miembro ||
             ventaInfo?.cuentas_miembro?.correo ||
-            selectedRow?.cuentas?.correo ||
+            selectedRow?.venta_correo_miembro ||
+            selectedRow?.venta_cuenta_miembro_correo ||
             "",
         ).trim();
         const newMemberCorreo = destinoEsCuentaMiembro ? String(dataDestino?.correo || "").trim() : "";
@@ -2388,7 +2442,17 @@ async function reemplazarServicio(options = {}) {
       return { ok: true, kept_open: true };
     }
 
-    const correoNuevoReemplazo = String(dataDestino?.correo || "").trim();
+    const correoNuevoReemplazo = Number(plataformaId) === 9
+      ? String(
+          destinoEsCuentaMiembro
+            ? dataDestino?.correo || ""
+            : ventaInfo?.correo_miembro ||
+                ventaInfo?.cuentas_miembro?.correo ||
+                selectedRow?.venta_correo_miembro ||
+                selectedRow?.venta_cuenta_miembro_correo ||
+                "",
+        ).trim()
+      : String(dataDestino?.correo || "").trim();
     const inventarioLinkReemplazo = buildInventarioLinkByCorreo(correoNuevoReemplazo);
     const descripcionSolucion = correoNuevoReemplazo
       ? `Su servicio fue reemplazado a una cuenta funcional. Verifique sus nuevos datos en: ${inventarioLinkReemplazo}`

@@ -515,6 +515,10 @@
         background: #dbeafe;
         color: #1e40af;
       }
+      .estado-cell.reportado {
+        background: #fee2e2;
+        color: #991b1b;
+      }
       .cuenta-estado-pill {
         display: inline-flex;
         align-items: center;
@@ -549,6 +553,35 @@
       .copyable-text.inactiva {
         color: #dc2626;
         font-weight: 700;
+      }
+      .correo-cell-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+      }
+      .correo-cell-main {
+        min-width: 0;
+        flex: 1;
+      }
+      .correo-cell-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .correo-estado-dot {
+        margin-left: 0;
+      }
+      .correo-estado-dot.dot-red {
+        background: #ef4444;
+      }
+      .correo-estado-dot.dot-orange {
+        background: #f59e0b;
+      }
+      .correo-estado-dot.dot-green {
+        background: #22c55e;
       }
       .btn-delete-venta {
         padding: 6px 10px;
@@ -1064,7 +1097,10 @@
         const cmp = new Date(d.getFullYear(), d.getMonth(), d.getDate());
         return cmp <= today;
       };
-      const getEstadoVenta = ({ pendiente, suspendido, fecha_corte } = {}) => {
+      const getEstadoVenta = ({ reportado, pendiente, suspendido, fecha_corte } = {}) => {
+        if (isTrue(reportado)) {
+          return { label: "Reportado", className: "reportado" };
+        }
         if (isTrue(pendiente)) {
           return { label: "Pendiente", className: "pendiente" };
         }
@@ -1129,6 +1165,16 @@
           return { label: "Vencido", className: "vencido" };
         }
         return { label: "Activo", className: "activo" };
+      };
+      const getCuentaEstadoDotClass = ({ inactiva, fecha_corte } = {}) => {
+        if (isTrue(inactiva)) return "dot-red";
+        if (isOnOrBeforeToday(fecha_corte)) return "dot-orange";
+        return "dot-green";
+      };
+      const getCuentaEstadoDotTitle = ({ inactiva, fecha_corte } = {}) => {
+        if (isTrue(inactiva)) return "Cuenta inactiva";
+        if (isOnOrBeforeToday(fecha_corte)) return "Cuenta vencida (hoy o anterior)";
+        return "Cuenta activa";
       };
       const isEligibleForCredChangeNotification = (venta = {}) => {
         if (!venta || venta.suspendido === true) return false;
@@ -3032,6 +3078,15 @@
           const rows = Array.isArray(groupVal)
             ? groupVal
             : groupVal?.rows || [];
+          const platformLinkRaw = Array.isArray(groupVal)
+            ? ""
+            : String(groupVal?.link_pagina || "").trim();
+          const platformLinkHref = normalizeExternalLink(platformLinkRaw);
+          const platformTitle = platformLinkHref
+            ? `<a href="${escapeHtml(platformLinkHref)}" target="_blank" rel="noopener noreferrer" title="Abrir página de la plataforma">${escapeHtml(
+                platName || "Plataforma",
+              )} <span aria-hidden="true">↗</span></a>`
+            : escapeHtml(platName || "Plataforma");
           const flags = Array.isArray(groupVal)
             ? getPlatFlags(rows[0]?.platFlags || {}, { fallbackAll: true })
             : groupVal?.flags || getPlatFlags({}, { fallbackAll: true });
@@ -3047,12 +3102,24 @@
               const correo = r.correo || "";
               const correoSafe = correo.replace(/"/g, "&quot;");
               const correoClass = r.cuenta_inactiva === true ? "copyable-text inactiva" : "copyable-text";
-              const correoCell = correo
+              const correoText = correo
                 ? `<span class="${correoClass}" data-clipboard="${correoSafe}">${correo}</span>`
-                : "-";
+                : `<span class="${correoClass}">-</span>`;
               const alertBtn = correo
                 ? `<button type="button" class="cliente-alert" data-correo="${correoSafe}" title="Ver cuenta">!</button>`
                 : "";
+              const dotClass = String(r.cuenta_estado_dot_class || "").trim();
+              const dotTitle = escapeHtml(String(r.cuenta_estado_dot_title || "Estado de cuenta").trim());
+              const estadoDot = dotClass
+                ? `<span class="perfil-dot correo-estado-dot ${dotClass}" title="${dotTitle}" aria-label="${dotTitle}"></span>`
+                : "";
+              const rightChunk = [alertBtn, estadoDot].filter(Boolean).join("");
+              const correoCell = `
+                <div class="correo-cell-inner">
+                  <span class="correo-cell-main">${correoText}</span>
+                  <span class="correo-cell-right">${rightChunk}</span>
+                </div>
+              `;
               const perfilLabel = showPerfil
                 ? getPerfilCellLabel(flags, r.n_perfil, r.perfil_hogar)
                 : "";
@@ -3060,6 +3127,7 @@
               const pinCell = showPin ? `<td>${r.pin || ""}</td>` : "";
               const claveCell = showClave ? `<td>${r.clave || ""}</td>` : "";
               const estadoInfo = getEstadoVenta({
+                reportado: r.reportado === true,
                 fecha_corte: r.fecha_corte,
                 suspendido: r.suspendido === true,
                 pendiente: r.pendiente === true,
@@ -3069,7 +3137,6 @@
                 <td>${r.id_venta ?? ""}</td>
                 <td>
                   ${correoCell}
-                  ${alertBtn}
                 </td>
                 ${claveCell}
                 ${perfilCell}
@@ -3126,7 +3193,7 @@
             .join("");
           return `
             <div class="ventas-bloque">
-              <h3>${platName}</h3>
+              <h3>${platformTitle}</h3>
               <div class="ventas-table-wrap">
                 <table class="table-base">
                   <thead>
@@ -3160,7 +3227,7 @@
           const { data: ventas, error } = await supabase
             .from("ventas")
             .select(
-              "id_venta, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido, pendiente",
+              "id_venta, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, id_usuario, id_precio, correo_miembro, clave_miembro, suspendido, pendiente, reportado",
             )
             .eq("id_usuario", idUsuario);
           if (error) throw error;
@@ -3179,7 +3246,7 @@
             const { data: cuentas } = await supabase
               .from("cuentas")
               .select(
-                "id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro, cuenta_madre",
+                "id_cuenta, correo, clave, id_plataforma, venta_perfil, venta_miembro, cuenta_madre, inactiva, fecha_corte",
               )
               .in("id_cuenta", cuentasIds);
             cuentaMap =
@@ -3236,7 +3303,7 @@
             const { data: plats } = await supabase
               .from("plataformas")
               .select(
-                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, correo_cliente, clave_cliente",
+                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, correo_cliente, clave_cliente, link_pagina",
               )
               .in("id_plataforma", platIds);
             plataformaMap =
@@ -3248,6 +3315,7 @@
                   por_pantalla: p.por_pantalla,
                   correo_cliente: p.correo_cliente,
                   clave_cliente: p.clave_cliente,
+                  link_pagina: p.link_pagina || "",
                 };
                 return acc;
               }, {}) || {};
@@ -3267,10 +3335,15 @@
               grouped[platName] = {
                 rows: [],
                 flags: getPlatFlags(platInfo || {}, { fallbackAll: true }),
+                link_pagina: String(platInfo?.link_pagina || "").trim(),
               };
+            } else if (!grouped[platName]?.link_pagina && String(platInfo?.link_pagina || "").trim()) {
+              grouped[platName].link_pagina = String(platInfo.link_pagina || "").trim();
             }
             const perfilInfo = perfilMap[v.id_perfil] || {};
             const isCuentaMadre = cuenta.cuenta_madre === true;
+            const cuentaEstadoRef = isCuentaMadre ? cuentaMiembro || cuenta : cuenta;
+            const cuentaEstadoFecha = cuentaEstadoRef?.fecha_corte || v.fecha_corte || "";
             const correoVenta = isCuentaMadre
               ? v.correo_miembro || ""
               : cuenta.correo || "";
@@ -3283,13 +3356,22 @@
               id_cuenta: v.id_cuenta,
               id_perfil: v.id_perfil,
               correo: correoVenta,
-              cuenta_inactiva: cuenta.inactiva === true,
+              cuenta_inactiva: cuentaEstadoRef?.inactiva === true,
+              cuenta_estado_dot_class: getCuentaEstadoDotClass({
+                inactiva: cuentaEstadoRef?.inactiva === true,
+                fecha_corte: cuentaEstadoFecha,
+              }),
+              cuenta_estado_dot_title: getCuentaEstadoDotTitle({
+                inactiva: cuentaEstadoRef?.inactiva === true,
+                fecha_corte: cuentaEstadoFecha,
+              }),
               clave: claveVenta,
               n_perfil: perfilInfo.n_perfil ?? "",
               pin: perfilInfo.pin ?? "",
               fecha_corte: v.fecha_corte || "",
               suspendido: v.suspendido === true,
               pendiente: v.pendiente === true,
+              reportado: v.reportado === true,
               id_precio: v.id_precio ?? null,
               id_plataforma: platId,
               perfil_hogar: perfilInfo.perfil_hogar,
@@ -8673,6 +8755,7 @@
 
         const plataformaId = toPositiveId(cuentaActual.id_plataforma);
         if (!plataformaId) return summary;
+        const isPlatform9 = Number(plataformaId) === 9;
 
         const { data: plataformaInfo } = await supabase
           .from("plataformas")
@@ -8894,6 +8977,14 @@
                 id_perfil: nuevoPerfil,
                 id_sub_cuenta: null,
                 id_precio: ventaInfo?.id_precio ?? null,
+                ...(isPlatform9
+                  ? {
+                      pendiente: true,
+                      reportado: true,
+                      aviso_admin: false,
+                      entrega_aviso: false,
+                    }
+                  : {}),
               })
               .eq("id_venta", ventaInfo.id_venta);
             if (updVentaErr) throw updVentaErr;
@@ -8953,48 +9044,50 @@
               addToReemplazosCache({ idCuenta: cuentaId, idPerfil: perfilIdVenta || null });
             }
 
-	            if (reporteId) {
-	              const { error: updReporteErr } = await supabase
-	                .from("reportes")
-	                .update({
-	                  en_revision: false,
-	                  solucionado: true,
-	                  solucionado_por: actorUserId || null,
-	                  descripcion_solucion: "Reemplazo automático por cuenta inactiva",
-	                })
-	                .eq("id_reporte", reporteId);
-	              if (updReporteErr) throw updReporteErr;
-	            }
-	            const { error: updVentaReportadoErr } = await supabase
-	              .from("ventas")
-	              .update({ reportado: false, aviso_admin: true })
-	              .eq("id_venta", ventaInfo.id_venta);
-	            if (updVentaReportadoErr) throw updVentaReportadoErr;
-	            if (reporteId) {
-	              try {
-	                const { data: ventaEstadoRow, error: ventaEstadoErr } = await supabase
-	                  .from("ventas")
-	                  .select("pendiente")
-	                  .eq("id_venta", ventaInfo.id_venta)
-	                  .maybeSingle();
-	                if (ventaEstadoErr) throw ventaEstadoErr;
-	                const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort({
-	                  idReporte: reporteId,
-	                  idVenta: ventaInfo.id_venta,
-	                  pendingState: ventaEstadoRow?.pendiente,
-	                });
-	                if (!waSolvedRes?.ok) {
-	                  console.warn("[admin_cuentas] reporte cerrado sin WhatsApp de solucion", {
-	                    id_reporte: reporteId,
-	                    id_venta: ventaInfo.id_venta,
-	                    reason: waSolvedRes?.reason || null,
-	                    error: waSolvedRes?.error || null,
-	                  });
-	                }
-	              } catch (waSolvedErr) {
-	                console.error("[admin_cuentas] whatsapp reporte solucionado auto reemplazo error", waSolvedErr);
-	              }
-	            }
+            if (!isPlatform9) {
+              if (reporteId) {
+                const { error: updReporteErr } = await supabase
+                  .from("reportes")
+                  .update({
+                    en_revision: false,
+                    solucionado: true,
+                    solucionado_por: actorUserId || null,
+                    descripcion_solucion: "Reemplazo automático por cuenta inactiva",
+                  })
+                  .eq("id_reporte", reporteId);
+                if (updReporteErr) throw updReporteErr;
+              }
+              const { error: updVentaReportadoErr } = await supabase
+                .from("ventas")
+                .update({ reportado: false, aviso_admin: true })
+                .eq("id_venta", ventaInfo.id_venta);
+              if (updVentaReportadoErr) throw updVentaReportadoErr;
+              if (reporteId) {
+                try {
+                  const { data: ventaEstadoRow, error: ventaEstadoErr } = await supabase
+                    .from("ventas")
+                    .select("pendiente")
+                    .eq("id_venta", ventaInfo.id_venta)
+                    .maybeSingle();
+                  if (ventaEstadoErr) throw ventaEstadoErr;
+                  const waSolvedRes = await notifyReporteSolvedWhatsappBestEffort({
+                    idReporte: reporteId,
+                    idVenta: ventaInfo.id_venta,
+                    pendingState: ventaEstadoRow?.pendiente,
+                  });
+                  if (!waSolvedRes?.ok) {
+                    console.warn("[admin_cuentas] reporte cerrado sin WhatsApp de solucion", {
+                      id_reporte: reporteId,
+                      id_venta: ventaInfo.id_venta,
+                      reason: waSolvedRes?.reason || null,
+                      error: waSolvedRes?.error || null,
+                    });
+                  }
+                } catch (waSolvedErr) {
+                  console.error("[admin_cuentas] whatsapp reporte solucionado auto reemplazo error", waSolvedErr);
+                }
+              }
+            }
 
 	            try {
 	              const userIds = pickNotificationUserIds("servicio_reemplazado", {

@@ -304,6 +304,16 @@ const AUTO_PENDING_STOCK_DELIVERY_INTERVAL_MS = Math.max(
   5000,
   Number(process.env.AUTO_PENDING_STOCK_DELIVERY_INTERVAL_MS) || 15000,
 );
+const AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_ENABLED =
+  process.env.AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS !== "false" && process.env.VERCEL !== "1";
+const AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_INTERVAL_MS = Math.max(
+  5000,
+  Number(process.env.AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_INTERVAL_MS) || 5000,
+);
+const AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_BATCH = Math.max(
+  1,
+  Math.min(300, Number(process.env.AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_BATCH) || 120),
+);
 const WHATSAPP_REPORTES_WATCHER_ENABLED =
   process.env.WHATSAPP_REPORTES_WATCHER !== "false" && process.env.VERCEL !== "1";
 const WHATSAPP_REPORTES_WATCHER_INTERVAL_MS = Math.max(
@@ -395,6 +405,7 @@ let autoGiftCardPendingDeliveryInProgress = false;
 let autoGiftCardPendingDeliveryInitialized = false;
 let autoGiftCardPendingDeliveryCursor = 0;
 let autoPendingStockDeliveryInProgress = false;
+let autoCreditedPagoMovilOrderProcessInProgress = false;
 let monthlyMetricsClosureInProgress = false;
 let monthlyMetricsClosureSchedulerStarted = false;
 let monthlyMetricsClosureIntervalId = null;
@@ -6226,7 +6237,10 @@ const computeOrderMontoBs = async (orden = {}) => {
   return Math.round(total * tasa * 100) / 100;
 };
 
-const matchPagoMovilToOrder = async (orden = {}) => {
+const matchPagoMovilToOrder = async (
+  orden = {},
+  { includeCreditedForUserId = null, requireCredited = false } = {},
+) => {
   const metodoId = Number(orden?.id_metodo_de_pago || 0);
   if (metodoId !== 1) {
     return { matched: false, reason: "metodo_no_pagomovil" };
@@ -6241,12 +6255,26 @@ const matchPagoMovilToOrder = async (orden = {}) => {
     return { matched: false, reason: "monto_orden_invalido" };
   }
 
-  const { data: pagosRows, error: pagosErr } = await supabaseAdmin
+  const creditedUserId = toPositiveInt(includeCreditedForUserId);
+  let pagosQuery = supabaseAdmin
     .from("pagomoviles")
     .select("id, referencia, texto, monto_bs, saldo_acreditado, saldo_acreditado_a")
-    .or("saldo_acreditado.is.null,saldo_acreditado.eq.false")
     .order("id", { ascending: false })
     .limit(400);
+  if (requireCredited === true) {
+    pagosQuery = pagosQuery.eq("saldo_acreditado", true);
+    if (creditedUserId) {
+      pagosQuery = pagosQuery.eq("saldo_acreditado_a", creditedUserId);
+    }
+  } else if (creditedUserId) {
+    pagosQuery = pagosQuery.or(
+      `saldo_acreditado.is.null,saldo_acreditado.eq.false,and(saldo_acreditado.eq.true,saldo_acreditado_a.eq.${creditedUserId})`,
+    );
+  } else {
+    pagosQuery = pagosQuery.or("saldo_acreditado.is.null,saldo_acreditado.eq.false");
+  }
+
+  const { data: pagosRows, error: pagosErr } = await pagosQuery;
   if (pagosErr) throw pagosErr;
 
   const pagos = Array.isArray(pagosRows) ? pagosRows : [];
@@ -6261,6 +6289,12 @@ const matchPagoMovilToOrder = async (orden = {}) => {
       const pagoMonto = normalizeMontoBs(pago?.monto_bs);
       if (!Number.isFinite(pagoMonto)) return null;
       if (Math.abs(pagoMonto - montoOrdenBs) > 0.01) return null;
+      const pagoAcreditado = isTrue(pago?.saldo_acreditado);
+      const pagoAcreditadoA = toPositiveInt(pago?.saldo_acreditado_a);
+      if (requireCredited === true && !pagoAcreditado) return null;
+      if (requireCredited === true && creditedUserId && pagoAcreditadoA !== creditedUserId) {
+        return null;
+      }
       return {
         pago,
         refResolution,
@@ -6308,7 +6342,9 @@ const markPagoMovilCreditedForOrder = async ({ orden = {}, idUsuario = null } = 
     return { matched: false, reason: "id_usuario_invalido" };
   }
 
-  const match = await matchPagoMovilToOrder(orden);
+  const match = await matchPagoMovilToOrder(orden, {
+    includeCreditedForUserId: targetUserId,
+  });
   if (!match?.matched) return match;
 
   const updates = {
@@ -6641,7 +6677,10 @@ const autoProcessMatchedOrder = async (match = {}) => {
   };
 };
 
-const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
+const autoMatchPagoMovilAgainstOrders = async (
+  pagoMovilRow = {},
+  { targetUserId = null } = {},
+) => {
   const pagoId = Number(pagoMovilRow?.id || 0);
   if (!pagoId) return { matched: false, reason: "invalid_pago_id" };
 
@@ -6660,7 +6699,8 @@ const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
     return { matched: false, reason: "missing_ref_or_amount" };
   }
 
-  const { data: pendingOrders, error: ordErr } = await supabaseAdmin
+  const userFilterId = toPositiveInt(targetUserId);
+  let pendingOrdersQuery = supabaseAdmin
     .from("ordenes")
     .select(
       "id_orden, id_usuario, referencia, monto_bs, total, tasa_bs, id_metodo_de_pago, marcado_pago, pago_verificado, en_espera, orden_cancelada, fecha, hora_orden",
@@ -6671,6 +6711,10 @@ const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
     .eq("orden_cancelada", false)
     .order("id_orden", { ascending: false })
     .limit(400);
+  if (userFilterId) {
+    pendingOrdersQuery = pendingOrdersQuery.eq("id_usuario", userFilterId);
+  }
+  const { data: pendingOrders, error: ordErr } = await pendingOrdersQuery;
   if (ordErr) throw ordErr;
 
   const matchedOrders = [];
@@ -6711,6 +6755,98 @@ const autoMatchPagoMovilAgainstOrders = async (pagoMovilRow = {}) => {
     monto_bs_pago: pagoMonto,
   };
 };
+
+const processCreditedPagoMovilOrders = async () => {
+  if (!AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_ENABLED) {
+    return { skipped: true, reason: "disabled" };
+  }
+  if (autoCreditedPagoMovilOrderProcessInProgress) {
+    return { skipped: true, reason: "in_progress" };
+  }
+  autoCreditedPagoMovilOrderProcessInProgress = true;
+  const summary = {
+    fetched: 0,
+    matched: 0,
+    processed: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  try {
+    const { data: pendingOrders, error: pendingErr } = await supabaseAdmin
+      .from("ordenes")
+      .select(
+        "id_orden, id_usuario, referencia, monto_bs, total, tasa_bs, id_metodo_de_pago, marcado_pago, pago_verificado, en_espera, orden_cancelada, fecha, hora_orden, checkout_finalizado",
+      )
+      .eq("id_metodo_de_pago", 1)
+      .eq("marcado_pago", true)
+      .eq("checkout_finalizado", true)
+      .eq("pago_verificado", false)
+      .eq("orden_cancelada", false)
+      .order("id_orden", { ascending: false })
+      .limit(AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_BATCH);
+    if (pendingErr) throw pendingErr;
+
+    const orders = Array.isArray(pendingOrders) ? pendingOrders : [];
+    summary.fetched = orders.length;
+
+    for (const orden of orders) {
+      const orderId = toPositiveInt(orden?.id_orden);
+      const orderUserId = toPositiveInt(orden?.id_usuario);
+      if (!orderId || !orderUserId) {
+        summary.skipped += 1;
+        continue;
+      }
+      try {
+        const match = await matchPagoMovilToOrder(orden, {
+          includeCreditedForUserId: orderUserId,
+          requireCredited: true,
+        });
+        if (!match?.matched || !toPositiveInt(match?.pago_id)) {
+          summary.skipped += 1;
+          continue;
+        }
+        summary.matched += 1;
+        const processResult = await autoProcessMatchedOrder({
+          id_orden: orderId,
+          id_usuario: orderUserId,
+          pago_id: match.pago_id,
+          referencia_match: match.referencia_match || null,
+          monto_bs_pago: match.monto_bs_pago ?? null,
+        });
+        if (processResult?.processed === true) {
+          summary.processed += 1;
+        } else {
+          summary.skipped += 1;
+        }
+      } catch (itemErr) {
+        summary.failed += 1;
+        console.error("[autoCreditedPagoMovilOrders] order error", {
+          id_orden: orderId,
+          error: itemErr?.message || itemErr,
+        });
+      }
+    }
+    return summary;
+  } finally {
+    autoCreditedPagoMovilOrderProcessInProgress = false;
+  }
+};
+
+if (AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_ENABLED) {
+  console.log(
+    `[ordenes:auto-credit-sync] conciliación por pagos acreditados activa (cada ${Math.round(
+      AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_INTERVAL_MS / 1000,
+    )}s).`,
+  );
+  setInterval(() => {
+    processCreditedPagoMovilOrders().catch((err) => {
+      console.error("[ordenes:auto-credit-sync] worker error", err);
+    });
+  }, AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_INTERVAL_MS);
+  processCreditedPagoMovilOrders().catch((err) => {
+    console.error("[ordenes:auto-credit-sync] worker init error", err);
+  });
+}
 
 app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async (req, res) => {
   clearCorsHeaders(res);
@@ -9305,6 +9441,11 @@ const autoAssignReportedPendingVentas = async ({
         }
         const plataforma = plataformaById[plataformaId] || null;
         const esReportada = isTrue(venta?.reportado);
+        const isPlatform9 = Number(plataformaId) === 9;
+        if (esReportada && isPlatform9) {
+          summary.skipped += 1;
+          continue;
+        }
 
         const oldCuentaId = toPositiveInt(venta?.id_cuenta);
         const oldPerfilId = toPositiveInt(venta?.id_perfil);
@@ -9497,7 +9638,7 @@ const autoAssignReportedPendingVentas = async ({
         }
       }
 
-      if (esReportada && Number(plataformaId) !== 9 && (oldCuentaId || oldPerfilId)) {
+      if (esReportada && !isPlatform9 && (oldCuentaId || oldPerfilId)) {
         const { error: replErr } = await supabaseAdmin
           .from("reemplazos")
           .insert({
@@ -9509,7 +9650,7 @@ const autoAssignReportedPendingVentas = async ({
         if (replErr) throw replErr;
       }
 
-      if (esReportada) {
+      if (esReportada && !isPlatform9) {
         const reporteAbierto = await findOpenReporte(venta);
         if (reporteAbierto?.id_reporte) {
           const { error: repErr } = await supabaseAdmin

@@ -1542,43 +1542,8 @@
         return candidatos[0] || preciosPlat[0] || null;
       };
 
-      const isCuentaCompletaFromCuenta = (cuenta) => {
-        if (!cuenta || cuenta.completa == null) return null;
-        return isTrue(cuenta.completa);
-      };
-
-      const isCuentaCompletaByContext = async (ctx) => {
-        if (!ctx) return false;
-        const idCuenta = ctx.id_cuenta ? Number(ctx.id_cuenta) : null;
-        if (idCuenta) {
-          const { data: cuentaRow, error: cuentaErr } = await supabase
-            .from("cuentas")
-            .select("completa, venta_perfil, venta_miembro")
-            .eq("id_cuenta", idCuenta)
-            .maybeSingle();
-          if (cuentaErr) throw cuentaErr;
-          const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaRow);
-          if (cuentaCompleta !== null) return cuentaCompleta;
-          const ventaPerfil = isTrue(cuentaRow?.venta_perfil);
-          const ventaMiembro = isTrue(cuentaRow?.venta_miembro);
-          return !ventaPerfil && !ventaMiembro;
-        }
-        const idPrecio = ctx.id_precio ? Number(ctx.id_precio) : null;
-        if (idPrecio) {
-          const { data: precioRow, error: precioErr } = await supabase
-            .from("precios")
-            .select("completa, sub_cuenta")
-            .eq("id_precio", idPrecio)
-            .maybeSingle();
-          if (precioErr) throw precioErr;
-          if (precioRow) {
-            const completa = isTrue(precioRow.completa);
-            const subCuenta = isTrue(precioRow.sub_cuenta);
-            return completa && !subCuenta;
-          }
-        }
-        return false;
-      };
+      const isCostoRenovacionElegible = ({ platId = null, ventaCompleta = false } = {}) =>
+        Number(platId) === 9 && isTrue(ventaCompleta);
 
       const fetchMontoBaseForRow = async (ctx) => {
         if (!ctx) return null;
@@ -1835,34 +1800,37 @@
           const registradoPor = window.__RC_USER_ID__ || null;
           const metodoId = metodo ? Number(metodo) : null;
           const refValue = ref || null;
-          const hasCuentasCompletas = seleccionActual.some((it) => {
+          const ventaIds = [
+            ...new Set(seleccionActual.map((it) => Number(it.id_venta)).filter(Boolean)),
+          ];
+          const ventaCompletaMap = {};
+          if (ventaIds.length) {
+            const { data: ventasMetaRows, error: ventasMetaErr } = await supabase
+              .from("ventas")
+              .select("id_venta, completa")
+              .in("id_venta", ventaIds);
+            if (ventasMetaErr) throw ventasMetaErr;
+            (ventasMetaRows || []).forEach((row) => {
+              ventaCompletaMap[row.id_venta] = row.completa;
+            });
+          }
+          const hasCostoRenovacionElegibles = seleccionActual.some((it) => {
             const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
-            const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
-            if (cuentaCompleta !== null) return cuentaCompleta;
             const platIdNum = it.id_plataforma ? Number(it.id_plataforma) : cuentaInfo?.id_plataforma || null;
-            const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
-            const completa = isTrue(priceRow?.completa);
-            const subCuenta = isTrue(priceRow?.sub_cuenta);
-            const cuentaCompletaFlags =
-              !!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro);
-            return (completa && !subCuenta) || cuentaCompletaFlags;
+            const ventaCompleta = isTrue(ventaCompletaMap[Number(it.id_venta)]);
+            return isCostoRenovacionElegible({ platId: platIdNum, ventaCompleta });
           });
           let costoRenovacionProveedorSel = null;
-          if (hasCuentasCompletas) {
+          if (hasCostoRenovacionElegibles) {
             const correosReferencia = seleccionActual
               .map((it) => {
                 const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
                 const platIdNum = it.id_plataforma
                   ? Number(it.id_plataforma)
                   : cuentaInfo?.id_plataforma || null;
-                const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
-                const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
-                const isCuentaCompletaItem =
-                  cuentaCompleta !== null
-                    ? cuentaCompleta
-                    : (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
-                      (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
-                return isCuentaCompletaItem ? it.correo || "" : "";
+                const ventaCompleta = isTrue(ventaCompletaMap[Number(it.id_venta)]);
+                const isElegible = isCostoRenovacionElegible({ platId: platIdNum, ventaCompleta });
+                return isElegible ? it.correo || "" : "";
               })
               .filter(Boolean);
             try {
@@ -1874,14 +1842,9 @@
                     const platIdNum = it.id_plataforma
                       ? Number(it.id_plataforma)
                       : cuentaInfo?.id_plataforma || null;
-                    const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
-                    const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
-                    const isCuentaCompletaItem =
-                      cuentaCompleta !== null
-                        ? cuentaCompleta
-                        : (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
-                          (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
-                    if (!isCuentaCompletaItem) return null;
+                    const ventaCompleta = isTrue(ventaCompletaMap[Number(it.id_venta)]);
+                    const isElegible = isCostoRenovacionElegible({ platId: platIdNum, ventaCompleta });
+                    if (!isElegible) return null;
                     return {
                       id_cuenta: it.id_cuenta || cuentaInfo?.id_cuenta || null,
                       correo: it.correo || cuentaInfo?.correo || "",
@@ -1906,22 +1869,20 @@
             const cuentaInfo = it.id_cuenta ? cuentaMap[it.id_cuenta] : null;
             const accesoCliente = it.id_usuario_cliente ? userMap[it.id_usuario_cliente]?.acceso_cliente : null;
             const platIdNum = it.id_plataforma ? Number(it.id_plataforma) : cuentaInfo?.id_plataforma || null;
+            const ventaCompletaItem = isTrue(ventaCompletaMap[Number(it.id_venta)]);
             const priceRow = resolvePrecioRow(platIdNum, cuentaInfo);
-            const cuentaCompleta = isCuentaCompletaFromCuenta(cuentaInfo);
-            const isCuentaCompletaItem =
-              cuentaCompleta !== null
-                ? cuentaCompleta
-                : (isTrue(priceRow?.completa) && !isTrue(priceRow?.sub_cuenta)) ||
-                  (!!cuentaInfo && !isTrue(cuentaInfo?.venta_perfil) && !isTrue(cuentaInfo?.venta_miembro));
+            const isCostoRenovacionElegibleItem = isCostoRenovacionElegible({
+              platId: platIdNum,
+              ventaCompleta: ventaCompletaItem,
+            });
             const updatePayload = {
               fecha_corte: nuevaCorte,
               fecha_pago: fechaPago,
               meses_contratados: it.meses || 1,
               suspendido: false,
             };
-            if (isCuentaCompletaItem || !!costoRenovacionProveedorSel) {
-              // Renovaciones hechas desde renovar_cliente no deben pasar por renovaciones_pendientes.
-              updatePayload.cuenta_pagada_admin = true;
+            if (Number.isFinite(platIdNum) && Number(platIdNum) !== 12 && ventaCompletaItem) {
+              updatePayload.cuenta_pagada_admin = false;
             }
             updatePayload.pendiente = isSuspendido && entregaInmediata;
             const { error } = await supabase
@@ -1949,7 +1910,7 @@
             });
             if (histErr) throw histErr;
 
-            if (isCuentaCompletaItem && costoRenovacionProveedorSel) {
+            if (isCostoRenovacionElegibleItem && costoRenovacionProveedorSel) {
               const { error: gastoErr } = await supabase.from("historial_ventas").insert({
                 id_usuario_cliente: it.id_usuario_cliente ? Number(it.id_usuario_cliente) : null,
                 id_proveedor: Number(costoRenovacionProveedorSel.id_proveedor) || null,
@@ -2175,11 +2136,22 @@
         const nuevaFecha = addMonths(baseForCalc, meses) || baseForCalc;
         const fechaPago = new Date().toISOString().slice(0, 10);
         const registradoPor = window.__RC_USER_ID__ || null;
-        let esCuentaCompleta = false;
+        const platIdNum = modalRowContext.id_plataforma ? Number(modalRowContext.id_plataforma) : null;
+        let ventaCompleta = false;
         let costoRenovacionProveedor = null;
         try {
-          esCuentaCompleta = await isCuentaCompletaByContext(modalRowContext);
-          if (esCuentaCompleta) {
+          const { data: ventaMeta, error: ventaMetaErr } = await supabase
+            .from("ventas")
+            .select("completa")
+            .eq("id_venta", modalRowContext.id_venta)
+            .maybeSingle();
+          if (ventaMetaErr) throw ventaMetaErr;
+          ventaCompleta = isTrue(ventaMeta?.completa);
+          const shouldOpenCostoModal = isCostoRenovacionElegible({
+            platId: platIdNum,
+            ventaCompleta,
+          });
+          if (shouldOpenCostoModal) {
             try {
               costoRenovacionProveedor = await openCostoRenovacionModal({
                 referenciaCorreo: buildCostoRenovReferencia([modalRowContext?.correo || ""]),
@@ -2201,9 +2173,8 @@
             meses_contratados: meses,
             suspendido: false,
           };
-          if (esCuentaCompleta || !!costoRenovacionProveedor) {
-            // Renovaciones hechas desde renovar_cliente no deben pasar por renovaciones_pendientes.
-            updatePayload.cuenta_pagada_admin = true;
+          if (Number.isFinite(platIdNum) && Number(platIdNum) !== 12 && ventaCompleta) {
+            updatePayload.cuenta_pagada_admin = false;
           }
           updatePayload.pendiente = isSuspendido && entregaInmediata;
           const { error: updErr } = await supabase
@@ -2226,7 +2197,10 @@
           });
           if (histErr) throw histErr;
 
-          if (esCuentaCompleta && costoRenovacionProveedor) {
+          if (
+            isCostoRenovacionElegible({ platId: platIdNum, ventaCompleta }) &&
+            costoRenovacionProveedor
+          ) {
             const { error: gastoErr } = await supabase.from("historial_ventas").insert({
               id_usuario_cliente: modalRowContext.id_usuario_cliente || null,
               id_proveedor: Number(costoRenovacionProveedor.id_proveedor) || null,
