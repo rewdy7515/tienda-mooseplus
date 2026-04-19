@@ -8446,7 +8446,7 @@
           const { data: perfilesBase, error: perfilesBaseErr } = await supabase
             .from("perfiles")
             .select(
-              "id_perfil, n_perfil, pin, perfil_hogar, id_cuenta_miembro, ocupado",
+              "id_perfil, n_perfil, pin, perfil_hogar, ocupado",
             )
             .eq("id_cuenta", cuentaId)
             .order("n_perfil", { ascending: true });
@@ -8564,7 +8564,6 @@
                 perfil_hogar:
                   Number(cuentaBase.id_plataforma) === 1 ? idx === 0 : false,
                 correo: null,
-                id_cuenta_miembro: null,
               };
             });
             const { data: perfilesNuevosRows, error: perfilesNuevosErr } = await supabase

@@ -805,7 +805,7 @@
             if (cuentasIds.length) {
               const { data: cuentas, error: ctaErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa")
+                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa, cuenta_madre")
                 .in("id_cuenta", cuentasIds);
               if (ctaErr) {
                 console.error("buscar cuentas error", ctaErr);
@@ -875,7 +875,7 @@
             if (memberCuentaIds.length) {
               const { data: cuentasMiembro, error: cmErr } = await supabase
                 .from("cuentas")
-                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa")
+                .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa, cuenta_madre")
                 .in("id_cuenta", memberCuentaIds);
               if (cmErr) {
                 console.error("buscar cuentas miembro error", cmErr);
@@ -923,13 +923,23 @@
               const memberCuenta = memberId
                 ? memberCuentaMap[memberId] || cuentaMapa[memberId] || null
                 : null;
-              const cuentaRef = memberCuenta || cuentaInfo;
+              const isCuentaMadre = cuentaInfo?.cuenta_madre === true;
+              const cuentaRef = isCuentaMadre ? cuentaInfo : memberCuenta || cuentaInfo;
               const precioInfo = v.id_precio ? precioMapa[v.id_precio] : null;
-              const platId = cuentaRef?.id_plataforma || precioInfo?.id_plataforma || null;
+              const platId =
+                cuentaInfo?.id_plataforma || memberCuenta?.id_plataforma || precioInfo?.id_plataforma || null;
               const platInfo = platId ? plataformaMapa[platId] : null;
               const useCorreoCliente = isTrue(platInfo?.correo_cliente) || Number(platId) === 12;
               const correoVenta = String(v?.correo_miembro || "").trim();
-              const correoCuenta = memberCuenta?.correo || cuentaInfo?.correo || user.correo || "";
+              const correoCuenta = isCuentaMadre
+                ? correoVenta || memberCuenta?.correo || cuentaInfo?.correo || user.correo || ""
+                : memberCuenta?.correo || cuentaInfo?.correo || user.correo || "";
+              const claveCuenta = isCuentaMadre
+                ? cuentaInfo?.clave || memberCuenta?.clave || ""
+                : memberCuenta?.clave || cuentaInfo?.clave || "";
+              const cuentaIdRow = isCuentaMadre
+                ? v.id_cuenta || cuentaBaseId || memberId || null
+                : memberId || cuentaBaseId || null;
               const pinServicio = resolveServicioPin({
                 cuentaBase: cuentaInfo,
                 cuentaMiembro: memberCuenta,
@@ -950,10 +960,10 @@
                 plataforma_nombre: platInfo?.nombre || "",
                 color_1: platInfo?.color_1 || "",
                 id_plataforma: platId,
-                id_cuenta: memberId || cuentaBaseId || null,
+                id_cuenta: cuentaIdRow,
                 id_usuario_cliente: v.id_usuario || null,
                 correo: useCorreoCliente ? correoVenta || correoCuenta : correoCuenta || correoVenta,
-                clave: memberCuenta?.clave || cuentaInfo?.clave || "",
+                clave: claveCuenta,
                 pin: pinServicio,
                 nombreCompleto: user.nombreCompleto,
                 id_perfil: v.id_perfil,
@@ -993,7 +1003,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, correo, id_plataforma, clave, pin, venta_dominio, id_cuenta_madre, venta_miembro, completa")
+            .select("id_cuenta, correo, id_plataforma, clave, pin, venta_dominio, id_cuenta_madre, venta_miembro, completa, cuenta_madre")
             .ilike("correo", `%${term}%`)
             .limit(10);
           if (cErr) throw cErr;
@@ -1017,7 +1027,7 @@
             const { data: perfilesDom, error: perfDomErr } = await supabase
               .from("perfiles")
               .select("id_perfil")
-              .in("id_cuenta_miembro", childIds);
+              .in("id_cuenta", childIds);
             if (perfDomErr) throw perfDomErr;
             dominioPerfilIds = (perfilesDom || []).map((p) => p.id_perfil).filter(Boolean);
           }
@@ -1116,7 +1126,7 @@
           if (memberCuentaIds.length) {
             const { data: cuentasMiembro, error: cmErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa")
+              .select("id_cuenta, id_plataforma, correo, clave, pin, venta_miembro, completa, cuenta_madre")
               .in("id_cuenta", memberCuentaIds);
             if (cmErr) throw cmErr;
             memberCuentaMap = (cuentasMiembro || []).reduce((acc, c) => {
@@ -1142,7 +1152,7 @@
           if (missingIds.length) {
             const { data: extraCuentas, error: extraErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, correo, id_plataforma, clave, pin, venta_miembro, completa")
+              .select("id_cuenta, correo, id_plataforma, clave, pin, venta_miembro, completa, cuenta_madre")
               .in("id_cuenta", missingIds);
             if (extraErr) throw extraErr;
             (extraCuentas || []).forEach((c) => {
@@ -1182,13 +1192,23 @@
             const memberCuenta = memberId
               ? memberCuentaMap[memberId] || cuentaMap[memberId] || null
               : null;
-            const cuentaRef = memberCuenta || cuenta;
+            const isCuentaMadre = cuenta?.cuenta_madre === true;
+            const cuentaRef = isCuentaMadre ? cuenta : memberCuenta || cuenta;
             const price = v.id_precio ? priceMap[v.id_precio] : null;
-            const platId = cuentaRef?.id_plataforma || price?.id_plataforma || null;
+            const platId =
+              cuenta?.id_plataforma || memberCuenta?.id_plataforma || price?.id_plataforma || null;
             const plat = platMap[platId] || {};
             const useCorreoCliente = isTrue(plat?.correo_cliente) || Number(platId) === 12;
             const correoVenta = String(v?.correo_miembro || "").trim();
-            const correoCuenta = memberCuenta?.correo || cuenta?.correo || "";
+            const correoCuenta = isCuentaMadre
+              ? correoVenta || memberCuenta?.correo || cuenta?.correo || ""
+              : memberCuenta?.correo || cuenta?.correo || "";
+            const claveCuenta = isCuentaMadre
+              ? cuenta?.clave || memberCuenta?.clave || ""
+              : memberCuenta?.clave || cuenta?.clave || "";
+            const cuentaIdRow = isCuentaMadre
+              ? v.id_cuenta || cuentaBaseId || memberId || null
+              : memberId || cuentaBaseId || null;
             const pinServicio = resolveServicioPin({
               cuentaBase: cuenta,
               cuentaMiembro: memberCuenta,
@@ -1209,10 +1229,10 @@
                 id_venta: v.id_venta,
                 id_precio: v.id_precio || null,
                 id_plataforma: platId || plat?.id_plataforma || null,
-              id_cuenta: memberId || cuentaBaseId || null,
+              id_cuenta: cuentaIdRow,
               id_usuario_cliente: v.id_usuario || null,
               correo: useCorreoCliente ? correoVenta || correoCuenta : correoCuenta || correoVenta,
-              clave: memberCuenta?.clave || cuenta?.clave || "",
+              clave: claveCuenta,
               id_perfil: v.id_perfil || null,
               n_perfil: perf?.n_perfil || null,
               pin: pinServicio,

@@ -86,6 +86,7 @@ const modalResumenClose = document.querySelector(".modal-resumen-close");
 const checkOtro = document.querySelector("#check-otro");
 const resumenOtroText = document.querySelector("#resumen-otro-text");
 const checkAgregarDias = document.querySelector("#check-agregar-dias");
+const checkClaveActualizada = document.querySelector("#check-clave-actualizada");
 const checkAgregarDiasLabel = checkAgregarDias?.closest("label") || null;
 const checkSuscripcion = document.querySelector("#check-suscripcion");
 const checkPerfiles = document.querySelector("#check-perfiles");
@@ -227,6 +228,7 @@ const sanitizeFileName = (name = "") =>
 
 const resetResumenChecks = () => {
   [
+    checkClaveActualizada,
     checkSuscripcion,
     checkPerfiles,
     checkIngreso,
@@ -1705,7 +1707,11 @@ async function guardarCambios() {
 
     // Construir descripcion/descripción_solucion con cambios primero
     const textos = [];
-    if (cambioClave) textos.push("Se actualizó la contraseña");
+    const textoClaveActualizada = "Se actualizó la contraseña";
+    if (cambioClave) textos.push(textoClaveActualizada);
+    if (checkClaveActualizada?.checked && !textos.includes(textoClaveActualizada)) {
+      textos.push(textoClaveActualizada);
+    }
     if (cambioPin) textos.push("Se actualizó el pin");
     if (checkSuscripcion?.checked) {
       textos.push("La cuenta ya cuenta con suscripción activa. Cierre y vuelva a abrir la aplicación por favor.");
