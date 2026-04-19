@@ -11642,12 +11642,41 @@ const processOrderFromItems = async ({
   if (assignedPerfilIds.length) {
     const { data: perfilesAsignados, error: perfValErr } = await supabaseAdmin
       .from("perfiles")
-      .select("id_perfil, cuentas:cuentas!perfiles_id_cuenta_fkey(inactiva)")
+      .select("id_perfil, id_cuenta, cuentas:cuentas!perfiles_id_cuenta_fkey(inactiva, id_plataforma)")
       .in("id_perfil", assignedPerfilIds);
     if (perfValErr) throw perfValErr;
     const bad = (perfilesAsignados || []).find((p) => isInactive(p?.cuentas?.inactiva));
     if (bad) {
       throw new Error("Se intentó asignar una cuenta inactiva.");
+    }
+    const perfilMetaById = (perfilesAsignados || []).reduce((acc, perfilRow) => {
+      const perfilId = toPositiveInt(perfilRow?.id_perfil);
+      if (!perfilId) return acc;
+      acc[perfilId] = {
+        cuentaId: toPositiveInt(perfilRow?.id_cuenta) || null,
+        plataformaId: toPositiveInt(perfilRow?.cuentas?.id_plataforma) || null,
+      };
+      return acc;
+    }, {});
+    const badPerfilPlat = (asignaciones || []).find((a) => {
+      const perfilId = toPositiveInt(a?.id_perfil);
+      if (!perfilId) return false;
+      const platEsperada = toPositiveInt(priceMap[a.id_precio]?.id_plataforma) || null;
+      const platPerfil = toPositiveInt(perfilMetaById?.[perfilId]?.plataformaId) || null;
+      return !!platEsperada && !!platPerfil && Number(platEsperada) !== Number(platPerfil);
+    });
+    if (badPerfilPlat) {
+      throw new Error("Asignación con perfil de plataforma incorrecta.");
+    }
+    const badPerfilCuenta = (asignaciones || []).find((a) => {
+      const perfilId = toPositiveInt(a?.id_perfil);
+      const cuentaId = toPositiveInt(a?.id_cuenta);
+      if (!perfilId || !cuentaId) return false;
+      const perfilCuentaId = toPositiveInt(perfilMetaById?.[perfilId]?.cuentaId) || null;
+      return !!perfilCuentaId && Number(perfilCuentaId) !== Number(cuentaId);
+    });
+    if (badPerfilCuenta) {
+      throw new Error("Asignación con perfil/cuenta inconsistente.");
     }
   }
 
