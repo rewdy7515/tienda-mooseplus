@@ -8450,7 +8450,23 @@ app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
       imagen,
       manageWhatsappLifecycle: true,
     });
-    if (result?.sent) return res.json({ ok: true, ...result });
+    if (result?.sent) {
+      const { error: markVentaErr } = await supabaseAdmin
+        .from("ventas")
+        .update({ reporte_admin: true })
+        .eq("id_venta", ventaId);
+      if (markVentaErr) {
+        if (isMissingColumnError(markVentaErr, "reporte_admin")) {
+          return res.status(500).json({
+            error: "Falta columna ventas.reporte_admin. No se pudo marcar la venta.",
+            ...result,
+            markedSale: false,
+          });
+        }
+        throw markVentaErr;
+      }
+      return res.json({ ok: true, ...result, markedSale: true });
+    }
     if (result?.skipped) return res.status(202).json({ ok: false, ...result });
     return res.status(500).json({
       error: result?.error || "No se pudo enviar el reporte de admin por WhatsApp",

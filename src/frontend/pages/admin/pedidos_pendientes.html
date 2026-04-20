@@ -81,6 +81,10 @@
         background: #fee2e2;
         color: #991b1b;
       }
+      .tipo-reporte-admin {
+        background: #ffedd5;
+        color: #9a3412;
+      }
       .tipo-pantalla {
         background: #e0e7ff;
         color: #312e81;
@@ -1002,6 +1006,7 @@
         const entries = Object.entries(grouped);
         if (!entries.length) return "";
         const getTipoSolicitudLabel = (row) => {
+          if (isTrue(row?.reporte_admin)) return "Reporte Admin";
           if (isTrue(row?.reportado)) return "reportado";
           if (Number(row?.id_plataforma) === 9) {
             return isTrue(row?.cuenta_nueva) ? "nueva" : "existente";
@@ -1012,6 +1017,7 @@
           return "-";
         };
         const getTipoSolicitudClass = (label) => {
+          if (label === "Reporte Admin") return "tipo-reporte-admin";
           if (label === "reportado") return "tipo-reportado";
           if (label === "nueva") return "tipo-nueva";
           if (label === "existente") return "tipo-existe";
@@ -1234,7 +1240,7 @@
             const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, reporte_admin, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -1396,6 +1402,7 @@
               id_perfil: v.id_perfil || null,
               pendiente: v.pendiente === true,
               reportado: v.reportado === true,
+              reporte_admin: v.reporte_admin === true,
               asignado_a: v.asignado_a || null,
               asignado: v.asignado || null,
             });

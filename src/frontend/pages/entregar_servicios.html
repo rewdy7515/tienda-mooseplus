@@ -1123,6 +1123,7 @@
         if (!ventaIdNum) throw new Error("id_venta inválido");
         const venta = ventasById[String(ventaIdNum)] || {};
         const ventaPayload = {};
+        ventaPayload.reporte_admin = false;
         if (correoChanged) ventaPayload.correo_miembro = normalizeCorreo(correo);
         if (claveChanged) ventaPayload.clave_miembro = String(clave || "").trim();
         if (Object.keys(ventaPayload).length) {
