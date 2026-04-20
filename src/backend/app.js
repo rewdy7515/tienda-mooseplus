@@ -2047,12 +2047,15 @@ const formatWhatsappReporteSolvedNote = ({ nota = "", correo = "" } = {}) => {
 
 const buildWhatsappReporteDatosIncorrectosMessage = ({
   idReporte = null,
+  idVenta = null,
   incluirCorreo = false,
   incluirClave = false,
   imagen = "",
+  updateDataUrl = "",
 } = {}) => {
   const reportId = toPositiveInt(idReporte) || idReporte || "-";
   const imagenUrl = String(imagen || "").trim();
+  const updateUrl = String(updateDataUrl || "").trim();
   const bullets = [];
   if (incluirCorreo === true) bullets.push("* Correo");
   if (incluirClave === true) bullets.push("* Contraseña");
@@ -2062,10 +2065,44 @@ const buildWhatsappReporteDatosIncorrectosMessage = ({
       ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
       : "";
   const imageSection = imagenUrl ? `${imagenUrl}\n` : "";
-  return `${imageSection}\`Reporte #${reportId}\`
+  const ventaSuffix = toPositiveInt(idVenta) ? ` · Venta #${toPositiveInt(idVenta)}` : "";
+  const updateSection = updateUrl
+    ? `\n\nDespues de restablecer los datos actualizalos por la pagina:\n${updateUrl}`
+    : "";
+  return `${imageSection}\`Reporte #${reportId}${ventaSuffix}\`
 Respuesta:
 Datos erroneos:
-${bodyBullets}${resetClaveMsg}`;
+${bodyBullets}${resetClaveMsg}${updateSection}`;
+};
+
+const buildWhatsappVentaReporteAdminMessage = ({
+  idVenta = null,
+  incluirCorreo = false,
+  incluirClave = false,
+  imagen = "",
+  incluirResetClaveSpotify = false,
+  updateDataUrl = "",
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta) || idVenta || "-";
+  const imagenUrl = String(imagen || "").trim();
+  const updateUrl = String(updateDataUrl || "").trim();
+  const bullets = [];
+  if (incluirCorreo === true) bullets.push("* Correo");
+  if (incluirClave === true) bullets.push("* Contraseña");
+  const bodyBullets = bullets.length ? bullets.join("\n") : "* -";
+  const resetClaveMsg =
+    incluirClave === true && incluirResetClaveSpotify === true
+      ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
+      : "";
+  const imageSection = imagenUrl ? `${imagenUrl}\n` : "";
+  const updateSection = updateUrl
+    ? `\n\nDespues de restablecer los datos actualizalos por la pagina:\n${updateUrl}`
+    : "";
+  return `${imageSection}Reporte de Admin.
+\`Venta #${ventaId}\`
+Respuesta:
+Datos erroneos:
+${bodyBullets}${resetClaveMsg}${updateSection}`;
 };
 
 const buildWhatsappOrderDetailUrl = (idOrden = null) => {
@@ -2094,6 +2131,20 @@ const buildWhatsappServiceDeliveryUrl = ({ idVenta = null, idOrden = null } = {}
     if (ordenId) params.set("id_orden", String(ordenId));
     const qs = params.toString();
     return `${buildPublicSiteUrl()}/entregar_servicios.html${qs ? `?${qs}` : ""}`;
+  }
+};
+
+const buildWhatsappUpdateDataUrl = ({ idVenta = null, idOrden = null } = {}) => {
+  const baseUrl = buildWhatsappServiceDeliveryUrl({ idVenta, idOrden });
+  const trimmed = String(baseUrl || "").trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    url.searchParams.set("modificar_datos", "1");
+    return url.toString();
+  } catch (_err) {
+    const glue = trimmed.includes("?") ? "&" : "?";
+    return `${trimmed}${glue}modificar_datos=1`;
   }
 };
 
@@ -2754,11 +2805,17 @@ const sendReporteIncorrectDataToWhatsappOwner = async ({
     };
   }
 
+  const ventaAsociada = await findVentaAsociadaFromReporteForWhatsapp(reporte);
+  const ventaId = toPositiveInt(reporte?.id_venta) || toPositiveInt(ventaAsociada?.id_venta) || null;
+  const updateDataUrl = buildWhatsappUpdateDataUrl({ idVenta: ventaId });
+
   const message = buildWhatsappReporteDatosIncorrectosMessage({
     idReporte: reportId,
+    idVenta: ventaId,
     incluirCorreo,
     incluirClave,
     imagen,
+    updateDataUrl,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
@@ -2814,6 +2871,143 @@ const sendReporteIncorrectDataToWhatsappOwner = async ({
     skipped: false,
     reason: null,
     id_reporte: reportId,
+    id_usuario_destino: targetUserId,
+    phone: targetPhone,
+  };
+};
+
+const sendVentaAdminReportToWhatsappOwner = async ({
+  idVenta = null,
+  incluirCorreo = false,
+  incluirClave = false,
+  imagen = "",
+  manageWhatsappLifecycle = true,
+} = {}) => {
+  const ventaId = toPositiveInt(idVenta);
+  if (!ventaId) {
+    return { sent: false, skipped: true, reason: "invalid_sale" };
+  }
+  if (incluirCorreo !== true && incluirClave !== true) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "missing_incorrect_data_flags",
+      id_venta: ventaId,
+    };
+  }
+
+  const { data: ventaRow, error: ventaErr } = await supabaseAdmin
+    .from("ventas")
+    .select(
+      "id_venta, id_usuario, id_precio, precios:precios!ventas_id_precio_fkey(id_plataforma), cuenta:cuentas!ventas_id_cuenta_fkey(id_plataforma), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_plataforma)",
+    )
+    .eq("id_venta", ventaId)
+    .maybeSingle();
+  if (ventaErr) throw ventaErr;
+
+  if (!ventaRow?.id_venta) {
+    return { sent: false, skipped: true, reason: "sale_not_found", id_venta: ventaId };
+  }
+
+  const targetUserId = toPositiveInt(ventaRow?.id_usuario);
+  if (!targetUserId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_target_user",
+      id_venta: ventaId,
+    };
+  }
+
+  const targetPhone = await resolveWhatsappPhoneForUser(targetUserId);
+  if (!targetPhone) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "target_user_phone_missing",
+      id_venta: ventaId,
+      id_usuario_destino: targetUserId,
+    };
+  }
+
+  const platformId =
+    toPositiveInt(ventaRow?.precios?.id_plataforma) ||
+    toPositiveInt(ventaRow?.cuenta?.id_plataforma) ||
+    toPositiveInt(ventaRow?.cuenta_miembro?.id_plataforma) ||
+    null;
+  const isSpotify = platformId === 9;
+
+  const message = buildWhatsappVentaReporteAdminMessage({
+    idVenta: ventaId,
+    incluirCorreo,
+    incluirClave,
+    imagen,
+    incluirResetClaveSpotify: isSpotify,
+    updateDataUrl: buildWhatsappUpdateDataUrl({ idVenta: ventaId }),
+  });
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle ? "sale_admin_report_user_alert" : "sale_admin_report_user_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  let sendErr = null;
+  try {
+    const client = getWhatsappClient();
+    await withTimeout(
+      client.sendMessage(`${targetPhone}@c.us`, message, {
+        linkPreview: false,
+        waitUntilMsgSent: true,
+      }),
+      WHATSAPP_SEND_TIMEOUT_MS,
+      "Timeout enviando reporte de admin",
+    );
+  } catch (err) {
+    sendErr = err;
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "sale_admin_report_user_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[ventas:whatsapp] reporte admin shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  if (sendErr) {
+    if (isWhatsappNoLidForUserError(sendErr)) {
+      return {
+        sent: false,
+        skipped: true,
+        reason: "target_user_chat_not_found",
+        error: sendErr?.message || String(sendErr),
+        id_venta: ventaId,
+        id_usuario_destino: targetUserId,
+        phone: targetPhone,
+      };
+    }
+    return {
+      sent: false,
+      skipped: false,
+      reason: "whatsapp_send_error",
+      error: sendErr?.message || String(sendErr),
+      id_venta: ventaId,
+      id_usuario_destino: targetUserId,
+      phone: targetPhone,
+    };
+  }
+
+  return {
+    sent: true,
+    skipped: false,
+    reason: null,
+    id_venta: ventaId,
     id_usuario_destino: targetUserId,
     phone: targetPhone,
   };
@@ -8235,6 +8429,47 @@ app.post("/api/whatsapp/reportes/notificar-datos-incorrectos", async (req, res) 
   }
 });
 
+app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const ventaId = toPositiveInt(req.body?.id_venta ?? req.body?.idVenta);
+    if (!ventaId) {
+      return res.status(400).json({ error: "id_venta inválido" });
+    }
+    const incluirCorreo = isTrue(req.body?.correo ?? req.body?.incluirCorreo);
+    const incluirClave = isTrue(req.body?.clave ?? req.body?.incluirClave);
+    if (!incluirCorreo && !incluirClave) {
+      return res.status(400).json({ error: "Debe seleccionar Correo o Contraseña." });
+    }
+    const imagen = String(req.body?.imagen || "").trim();
+
+    const result = await sendVentaAdminReportToWhatsappOwner({
+      idVenta: ventaId,
+      incluirCorreo,
+      incluirClave,
+      imagen,
+      manageWhatsappLifecycle: true,
+    });
+    if (result?.sent) return res.json({ ok: true, ...result });
+    if (result?.skipped) return res.status(202).json({ ok: false, ...result });
+    return res.status(500).json({
+      error: result?.error || "No se pudo enviar el reporte de admin por WhatsApp",
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[whatsapp/ventas/notificar-reporte-admin] error", err);
+    return res.status(500).json({
+      error: err?.message || "No se pudo notificar el reporte de admin por WhatsApp",
+    });
+  }
+});
+
 app.post("/api/whatsapp/ventas/notificar-entregada", async (req, res) => {
   try {
     await requireAdminSession(req);
@@ -11131,6 +11366,8 @@ const processOrderFromItems = async ({
       ventaAnt?.cuenta_miembro?.id_cuenta ? ventaAnt.cuenta_miembro : ventaAnt?.cuenta_principal || null;
     const correoRenovacion = String(sourceAccountRenov?.correo || "").trim();
     const claveRenovacion = String(sourceAccountRenov?.clave || "").trim();
+    const isCuentaMiembroRenov =
+      !!toPositiveInt(ventaAnt?.id_cuenta_miembro) || isTrue(ventaAnt?.cuenta_miembro?.venta_miembro);
     const isCuentaCompletaRenov =
       isCuentaCompletaByFlags(cuentaVenta) ||
       (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
@@ -11156,11 +11393,15 @@ const processOrderFromItems = async ({
     if (isCuentaCompletaRenov || isVentaCompletaRenov) {
       if (platId === 9) {
         updatePayload.cuenta_pagada_admin = true;
-        spotifyRenovacionesParaProveedor.push({
-          id_venta: toPositiveInt(it?.id_venta) || null,
-          correo: correoRenovacion || "-",
-          clave: claveRenovacion || "-",
-        });
+        // Proveedor Spotify: solo notificar renovaciones de ventas completas
+        // y excluir renovaciones de cuentas miembro.
+        if (isVentaCompletaRenov && !isCuentaMiembroRenov) {
+          spotifyRenovacionesParaProveedor.push({
+            id_venta: toPositiveInt(it?.id_venta) || null,
+            correo: correoRenovacion || "-",
+            clave: claveRenovacion || "-",
+          });
+        }
       } else {
         updatePayload.cuenta_pagada_admin = false;
       }
@@ -11886,6 +12127,8 @@ const processOrderFromItems = async ({
         ventaAnt?.cuenta_miembro?.id_cuenta ? ventaAnt.cuenta_miembro : ventaAnt?.cuenta_principal || null;
       const correoRenovacion = String(sourceAccountRenov?.correo || "").trim();
       const claveRenovacion = String(sourceAccountRenov?.clave || "").trim();
+      const isCuentaMiembroRenov =
+        !!toPositiveInt(ventaAnt?.id_cuenta_miembro) || isTrue(ventaAnt?.cuenta_miembro?.venta_miembro);
       const isCuentaCompletaRenov =
         isCuentaCompletaByFlags(cuentaVenta) ||
         (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
@@ -11911,11 +12154,15 @@ const processOrderFromItems = async ({
       if (isCuentaCompletaRenov || isVentaCompletaRenov) {
         if (platId === 9) {
           updatePayload.cuenta_pagada_admin = true;
-          spotifyImplicitRenovacionesParaProveedor.push({
-            id_venta: ventaId,
-            correo: correoRenovacion || "-",
-            clave: claveRenovacion || "-",
-          });
+          // Proveedor Spotify: solo notificar renovaciones de ventas completas
+          // y excluir renovaciones de cuentas miembro.
+          if (isVentaCompletaRenov && !isCuentaMiembroRenov) {
+            spotifyImplicitRenovacionesParaProveedor.push({
+              id_venta: ventaId,
+              correo: correoRenovacion || "-",
+              clave: claveRenovacion || "-",
+            });
+          }
         } else {
           updatePayload.cuenta_pagada_admin = false;
         }

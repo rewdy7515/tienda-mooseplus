@@ -212,7 +212,7 @@
         <div id="datos-confirm-lines" class="datos-confirm-lines"></div>
         <div class="cliente-modal-actions">
           <button type="button" class="btn-outline" id="datos-confirm-cancel">Cancelar</button>
-          <button type="button" class="btn-primary" id="datos-confirm-send">Enviar datos</button>
+          <button type="button" class="btn-primary" id="datos-confirm-send">Actualizar datos</button>
         </div>
       </div>
     </div>
@@ -636,7 +636,7 @@
                       <td>${buildEditableCell(claveEdit, "clave")}</td>
                       <td>
                         <div class="entrega-action-wrap">
-                          <button type="button" class="btn-outline btn-send-datos btn-send-datos-edit" data-venta="${r.id_venta}">Enviar datos</button>
+                          <button type="button" class="btn-outline btn-send-datos btn-send-datos-edit btn-actualizar-datos" data-venta="${r.id_venta}" disabled>Actualizar datos</button>
                         </div>
                       </td>
                     </tr>
@@ -1103,6 +1103,7 @@
             });
           }
           renderTablas(groupedNew, { title: "Cuentas nuevas" });
+          syncAllEditRowsUpdateButtons();
           setVerificacionNoteVisible(!String(tablasEl?.innerHTML || "").trim());
         } catch (err) {
           console.error("entregar servicios error", err);
@@ -1166,6 +1167,38 @@
         if (updReporteErr) throw updReporteErr;
       };
 
+      const getEditedRowState = (row) => {
+        const correoNuevo = normalizeCorreo(row?.querySelector(".input-correo")?.value || "");
+        const claveNueva = String(row?.querySelector(".input-clave")?.value || "").trim();
+        const correoOriginal = normalizeCorreo(row?.dataset?.originalCorreo || "");
+        const claveOriginal = String(row?.dataset?.originalClave || "").trim();
+        const correoChanged = correoNuevo !== correoOriginal;
+        const claveChanged = claveNueva !== claveOriginal;
+        const hasRequiredValues = !!correoNuevo && !!claveNueva;
+        return {
+          correoNuevo,
+          claveNueva,
+          correoChanged,
+          claveChanged,
+          hasRequiredValues,
+          hasChanges: correoChanged || claveChanged,
+        };
+      };
+
+      const syncEditRowUpdateButtonState = (row) => {
+        if (!row || row.dataset?.editRow !== "1") return;
+        const btn = row.querySelector(".btn-send-datos-edit");
+        if (!btn) return;
+        const state = getEditedRowState(row);
+        btn.disabled = !(state.hasRequiredValues && state.hasChanges);
+      };
+
+      const syncAllEditRowsUpdateButtons = () => {
+        tablasEl?.querySelectorAll('tr[data-edit-row="1"]').forEach((row) => {
+          syncEditRowUpdateButtonState(row);
+        });
+      };
+
       tablasEl?.addEventListener("click", (e) => {
         const copyEl = e.target.closest(".copyable");
         if (copyEl) {
@@ -1193,12 +1226,19 @@
           btn.textContent = "✓";
           inputEl.focus();
           inputEl.select();
+          syncEditRowUpdateButtonState(btn.closest('tr[data-edit-row="1"]'));
           return;
         }
         textEl.textContent = String(inputEl.value || "").trim() || "-";
         inputEl.classList.add("hidden");
         textEl.classList.remove("hidden");
         btn.textContent = "✎";
+        syncEditRowUpdateButtonState(btn.closest('tr[data-edit-row="1"]'));
+      });
+      tablasEl?.addEventListener("input", (e) => {
+        const input = e.target.closest(".edit-field-input");
+        if (!input) return;
+        syncEditRowUpdateButtonState(input.closest('tr[data-edit-row="1"]'));
       });
       tablasEl?.addEventListener("click", (e) => {
         const btn = e.target.closest(".btn-copy-renew");
@@ -1257,10 +1297,9 @@
         if (!ventaId) return;
         const isEditRow = row?.dataset?.editRow === "1";
         if (isEditRow) {
-          const correoNuevoRaw = row?.querySelector(".input-correo")?.value?.trim() || "";
-          const claveNuevaRaw = row?.querySelector(".input-clave")?.value?.trim() || "";
-          const correoNuevo = normalizeCorreo(correoNuevoRaw);
-          const claveNueva = String(claveNuevaRaw || "").trim();
+          const editState = getEditedRowState(row);
+          const correoNuevo = editState.correoNuevo;
+          const claveNueva = editState.claveNueva;
           if (!correoNuevo) {
             alert("Ingresa el correo.");
             return;
@@ -1269,10 +1308,8 @@
             alert("Ingresa la clave.");
             return;
           }
-          const correoOriginal = normalizeCorreo(row?.dataset?.originalCorreo || "");
-          const claveOriginal = String(row?.dataset?.originalClave || "").trim();
-          const correoChanged = correoNuevo !== correoOriginal;
-          const claveChanged = claveNueva !== claveOriginal;
+          const correoChanged = editState.correoChanged;
+          const claveChanged = editState.claveChanged;
           if (!correoChanged && !claveChanged) {
             alert("No detectamos cambios en correo ni clave.");
             return;
@@ -1523,10 +1560,10 @@
           });
           closeDatosConfirmModal();
           await loadServicios();
-          alert("Datos enviados.");
+          alert("Datos actualizados.");
         } catch (err) {
           console.error("confirmar envio datos error", err);
-          alert("No se pudieron enviar los datos.");
+          alert("No se pudieron actualizar los datos.");
         } finally {
           if (btn) btn.disabled = false;
         }

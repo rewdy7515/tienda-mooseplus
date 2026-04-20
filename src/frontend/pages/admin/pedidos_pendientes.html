@@ -261,6 +261,43 @@
         font-size: 13px;
         color: #6b7280;
       }
+      .modal-card-admin-reporte {
+        width: min(92vw, 460px);
+      }
+      .admin-reporte-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .admin-reporte-subtitle {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 800;
+        color: #111827;
+      }
+      .admin-reporte-checks {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .admin-reporte-mensaje-preview {
+        margin: 0;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #f9fafb;
+        color: #111827;
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .admin-reporte-preview {
+        min-height: 30px;
+        margin: 0;
+        font-size: 13px;
+        color: #6b7280;
+      }
     </style>
   </head>
   <body>
@@ -315,6 +352,30 @@
         </div>
       </div>
     </div>
+    <div id="modal-admin-reporte" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card modal-card-admin-reporte">
+        <button type="button" class="modal-close" id="modal-admin-reporte-close" aria-label="Cerrar">×</button>
+        <div class="modal-body admin-reporte-body">
+          <h3>Reporte de Admin.</h3>
+          <div>
+            <label for="admin-reporte-imagen"><strong>Imagen</strong></label>
+            <input type="file" id="admin-reporte-imagen" class="form-input" accept="image/*" />
+            <p id="admin-reporte-imagen-preview" class="admin-reporte-preview">Sin imagen seleccionada.</p>
+          </div>
+          <p class="admin-reporte-subtitle">Datos erroneos</p>
+          <div class="admin-reporte-checks">
+            <label><input type="checkbox" id="admin-reporte-check-correo" /> Correo</label>
+            <label><input type="checkbox" id="admin-reporte-check-clave" /> Contraseña</label>
+          </div>
+          <p class="admin-reporte-subtitle">Mensaje que recibirá el cliente</p>
+          <pre id="admin-reporte-mensaje-preview" class="admin-reporte-mensaje-preview"></pre>
+          <div class="modal-actions-column" style="margin-top:4px;">
+            <button class="btn-primary" id="btn-enviar-admin-reporte">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import {
@@ -324,6 +385,8 @@
         entregarGiftCardPendiente,
         notifyVentaDeliveredWhatsapp,
         notifyReporteSolvedWhatsapp,
+        notifyVentaAdminReportWhatsapp,
+        uploadComprobantes,
       } from "../../scripts/api.js";
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
@@ -348,6 +411,14 @@
       const modalActivarAddProveedorBtn = document.querySelector("#btn-activar-add-proveedor");
       const modalActivarStatusEl = document.querySelector("#activar-modal-status");
       const modalActivarTitleEl = document.querySelector(".modal-activar-title");
+      const modalAdminReporteEl = document.querySelector("#modal-admin-reporte");
+      const modalAdminReporteCloseBtn = document.querySelector("#modal-admin-reporte-close");
+      const adminReporteImagenInput = document.querySelector("#admin-reporte-imagen");
+      const adminReporteImagenPreview = document.querySelector("#admin-reporte-imagen-preview");
+      const adminReporteCheckCorreo = document.querySelector("#admin-reporte-check-correo");
+      const adminReporteCheckClave = document.querySelector("#admin-reporte-check-clave");
+      const adminReporteMensajePreview = document.querySelector("#admin-reporte-mensaje-preview");
+      const btnEnviarAdminReporte = document.querySelector("#btn-enviar-admin-reporte");
 
       let currentUser = null;
       let pendingEntregaBtn = null;
@@ -356,6 +427,11 @@
       let proveedorFetchCounter = 0;
       let reemplazosCache = null;
       let reemplazosCachePromise = null;
+      let adminReportVentaContext = {
+        idVenta: null,
+        idUsuario: null,
+        idPlataforma: null,
+      };
       const MADRE_DEBUG = true;
       const logMadreDebug = (...args) => {
         if (!MADRE_DEBUG) return;
@@ -395,6 +471,91 @@
         const lower = raw.toLowerCase();
         if (raw === "-" || lower === "null" || lower === "undefined") return "";
         return raw;
+      };
+      const sanitizeFileName = (name = "") =>
+        String(name || "imagen.jpg")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9._-]/g, "_");
+      const buildEntregarServiciosModificarDatosUrl = (idVenta) => {
+        const ventaId = toPositiveId(idVenta);
+        if (!ventaId) return "";
+        const targetUrl = new URL("../entregar_servicios.html", window.location.href);
+        targetUrl.searchParams.set("id_venta", String(ventaId));
+        targetUrl.searchParams.set("modificar_datos", "1");
+        return targetUrl.toString();
+      };
+      const buildAdminReportPreviewMessage = () => {
+        const ventaId = toPositiveId(adminReportVentaContext?.idVenta) || "-";
+        const correoMarcado = adminReporteCheckCorreo?.checked === true;
+        const claveMarcada = adminReporteCheckClave?.checked === true;
+        const hasImage = Boolean((adminReporteImagenInput?.files || [])[0]);
+        if (!correoMarcado && !claveMarcada) {
+          return "Selecciona Correo o Contraseña para ver el mensaje.";
+        }
+        const bullets = [];
+        if (correoMarcado) bullets.push("* Correo");
+        if (claveMarcada) bullets.push("* Contraseña");
+        const bodyBullets = bullets.length ? bullets.join("\n") : "* -";
+        const isSpotify = Number(adminReportVentaContext?.idPlataforma) === 9;
+        const resetClaveMsg =
+          claveMarcada && isSpotify
+            ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
+            : "";
+        const updateUrl = buildEntregarServiciosModificarDatosUrl(ventaId);
+        const updateSection = updateUrl
+          ? `\n\nDespues de restablecer los datos actualizalos por la pagina:\n${updateUrl}`
+          : "";
+        const imageSection = hasImage ? "[Imagen adjunta]\n" : "";
+        return `${imageSection}Reporte de Admin.\n\`Venta #${ventaId}\`\nRespuesta:\nDatos erroneos:\n${bodyBullets}${resetClaveMsg}${updateSection}`;
+      };
+      const updateAdminReportMessagePreview = () => {
+        if (!adminReporteMensajePreview) return;
+        adminReporteMensajePreview.textContent = buildAdminReportPreviewMessage();
+      };
+      const resetAdminReportModalState = () => {
+        if (adminReporteImagenInput) adminReporteImagenInput.value = "";
+        if (adminReporteImagenPreview) adminReporteImagenPreview.textContent = "Sin imagen seleccionada.";
+        if (adminReporteCheckCorreo) adminReporteCheckCorreo.checked = false;
+        if (adminReporteCheckClave) adminReporteCheckClave.checked = false;
+        updateAdminReportMessagePreview();
+      };
+      const closeAdminReportModal = () => {
+        modalAdminReporteEl?.classList.add("hidden");
+        document.body.classList.remove("modal-open");
+        adminReportVentaContext = { idVenta: null, idUsuario: null, idPlataforma: null };
+        resetAdminReportModalState();
+      };
+      const openAdminReportModal = (btn = null) => {
+        const ventaId = toPositiveId(btn?.dataset?.venta);
+        if (!ventaId) {
+          alert("No se pudo identificar la venta.");
+          return;
+        }
+        adminReportVentaContext = {
+          idVenta: ventaId,
+          idUsuario: toPositiveId(btn?.dataset?.usuario),
+          idPlataforma: toPositiveId(btn?.dataset?.idPlataforma),
+        };
+        resetAdminReportModalState();
+        modalAdminReporteEl?.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+        updateAdminReportMessagePreview();
+      };
+      const uploadAdminReportImage = async (file, userId) => {
+        if (!file) return "";
+        const safeName = sanitizeFileName(file.name || "imagen.jpg");
+        const uniqueName = `admin-reporte-${userId || "0"}-${Date.now()}-${safeName}`;
+        const payloadFile = {
+          name: uniqueName,
+          type: file.type || "image/jpeg",
+          arrayBuffer: () => file.arrayBuffer(),
+        };
+        const { urls, error } = await uploadComprobantes([payloadFile]);
+        if (error || !urls?.length) {
+          throw new Error(error || "No se pudo subir la imagen.");
+        }
+        return String(urls[0] || "").trim();
       };
       const getCaracasDateISO = () => toYMD(getVenezuelaToday());
       const normalizeForCompare = (value) => String(value || "").trim().toLowerCase();
@@ -944,7 +1105,7 @@
                           : `<button class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
                       }
                       <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-pendiente="${r.pendiente ? "true" : "false"}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
-                      <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}">!</button>
+                      <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}">!</button>
                       ${
                         r.cuenta_madre
                           ? `<span class="madre-switch-wrap" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">
@@ -2011,6 +2172,11 @@
           }
           return;
         }
+        const alertBtn = e.target.closest(".btn-alert");
+        if (alertBtn) {
+          openAdminReportModal(alertBtn);
+          return;
+        }
         const btn = e.target.closest(".btn-entregar");
         if (!btn) return;
         try {
@@ -2365,6 +2531,68 @@
         await copyTextNotify(text);
       });
 
+      modalAdminReporteCloseBtn?.addEventListener("click", () => {
+        closeAdminReportModal();
+      });
+      modalAdminReporteEl?.addEventListener("click", (e) => {
+        if (e.target.classList.contains("modal-backdrop") || e.target.classList.contains("modal-close")) {
+          closeAdminReportModal();
+        }
+      });
+      adminReporteImagenInput?.addEventListener("change", () => {
+        const file = (adminReporteImagenInput.files || [])[0] || null;
+        if (adminReporteImagenPreview) {
+          adminReporteImagenPreview.textContent = file ? file.name : "Sin imagen seleccionada.";
+        }
+        updateAdminReportMessagePreview();
+      });
+      adminReporteCheckCorreo?.addEventListener("change", updateAdminReportMessagePreview);
+      adminReporteCheckClave?.addEventListener("change", updateAdminReportMessagePreview);
+      btnEnviarAdminReporte?.addEventListener("click", async () => {
+        const ventaId = toPositiveId(adminReportVentaContext?.idVenta);
+        if (!ventaId) {
+          alert("No se pudo identificar la venta.");
+          return;
+        }
+        const incluirCorreo = adminReporteCheckCorreo?.checked === true;
+        const incluirClave = adminReporteCheckClave?.checked === true;
+        if (!incluirCorreo && !incluirClave) {
+          alert("Selecciona al menos Correo o Contraseña.");
+          return;
+        }
+        const btn = btnEnviarAdminReporte;
+        if (btn) btn.disabled = true;
+        try {
+          let imageUrl = "";
+          const imageFile = (adminReporteImagenInput?.files || [])[0] || null;
+          if (imageFile) {
+            const fallbackUserId = toPositiveId(currentUser?.id_usuario) || 0;
+            const imageOwnerId = toPositiveId(adminReportVentaContext?.idUsuario) || fallbackUserId;
+            imageUrl = await uploadAdminReportImage(imageFile, imageOwnerId);
+          }
+          const waRes = await notifyVentaAdminReportWhatsapp(ventaId, {
+            correo: incluirCorreo,
+            clave: incluirClave,
+            imagen: imageUrl,
+          });
+          if (waRes?.error) {
+            alert(waRes.error || "No se pudo enviar el mensaje.");
+            return;
+          }
+          if (waRes?.ok === false && waRes?.sent !== true) {
+            alert("No se pudo enviar el mensaje.");
+            return;
+          }
+          alert("Mensaje enviado al cliente.");
+          closeAdminReportModal();
+        } catch (err) {
+          console.error("enviar reporte admin whatsapp error", err);
+          alert("No se pudo enviar el mensaje.");
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      });
+
       modalActivarCloseBtn?.addEventListener("click", () => {
         closeModalActivacion();
       });
@@ -2449,6 +2677,10 @@
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && modalActivarEl && !modalActivarEl.classList.contains("hidden")) {
           closeModalActivacion();
+          return;
+        }
+        if (e.key === "Escape" && modalAdminReporteEl && !modalAdminReporteEl.classList.contains("hidden")) {
+          closeAdminReportModal();
         }
       });
       document.addEventListener("click", (e) => {

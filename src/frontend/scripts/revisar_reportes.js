@@ -269,8 +269,18 @@ const syncDatosIncorrectosButtonForRow = (row) => {
   if (btnDatosIncorrectos) btnDatosIncorrectos.classList.toggle("hidden", !showButton);
 };
 
+const buildEntregarServiciosModificarDatosUrl = (idVenta) => {
+  const ventaId = toPositiveId(idVenta);
+  if (!ventaId) return "";
+  const targetUrl = new URL("../entregar_servicios.html", window.location.href);
+  targetUrl.searchParams.set("id_venta", String(ventaId));
+  targetUrl.searchParams.set("modificar_datos", "1");
+  return targetUrl.toString();
+};
+
 const buildDatosIncorrectosPreviewMessage = () => {
   const reportId = toPositiveId(currentRow?.id_reporte) || "-";
+  const ventaId = toPositiveId(currentRow?.id_venta) || null;
   const correoMarcado = datosIncorrectosCheckCorreo?.checked === true;
   const claveMarcada = datosIncorrectosCheckClave?.checked === true;
   const hasImage = Boolean((datosIncorrectosImagenInput?.files || [])[0]);
@@ -285,8 +295,13 @@ const buildDatosIncorrectosPreviewMessage = () => {
     claveMarcada
       ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
       : "";
+  const updateUrl = buildEntregarServiciosModificarDatosUrl(ventaId);
+  const updateSection = updateUrl
+    ? `\n\nDespues de restablecer los datos actualizalos por la pagina:\n${updateUrl}`
+    : "";
   const imageSection = hasImage ? "[Imagen adjunta]\n" : "";
-  return `${imageSection}\`Reporte #${reportId}\`\nRespuesta:\nDatos erroneos:\n${bodyBullets}${resetClaveMsg}`;
+  const ventaSuffix = ventaId ? ` · Venta #${ventaId}` : "";
+  return `${imageSection}\`Reporte #${reportId}${ventaSuffix}\`\nRespuesta:\nDatos erroneos:\n${bodyBullets}${resetClaveMsg}${updateSection}`;
 };
 
 const updateDatosIncorrectosMessagePreview = () => {
