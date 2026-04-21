@@ -1010,6 +1010,13 @@
           normalized === "s"
         );
       };
+      const isFalse = (v) => {
+        if (v === false || v === 0) return true;
+        const normalized = String(v ?? "")
+          .trim()
+          .toLowerCase();
+        return normalized === "0" || normalized === "false" || normalized === "f" || normalized === "no" || normalized === "n";
+      };
 
       const monthFilter = document.querySelector("#month-filter");
       const btnLoad = document.querySelector("#btn-dashboard-load");
@@ -3099,6 +3106,12 @@
         const rowsRenovGasto = [];
         const ventasDiariasPorDia = {};
         const scopedGiftRows = (giftRows || []).filter((row) => hasPositiveGiftCost(row));
+        const gastoPlat1DesdeGift21 = scopedGiftRows.reduce((acc, row) => {
+          const giftPlatformId = Number(row?.id_plataforma);
+          if (giftPlatformId !== 21) return acc;
+          if (!isFalse(row?.para_venta)) return acc;
+          return acc + toNumber(row?.costo);
+        }, 0);
 
         historial.forEach((row) => {
           const isIngreso = isHistorialIngresoRow(row);
@@ -3158,11 +3171,19 @@
         });
 
         scopedGiftRows.forEach((row) => {
+          const giftPlatformId = Number(row?.id_plataforma);
+          if (giftPlatformId === 21 && !isTrue(row?.para_venta)) return;
           const giftPlatformName = toName(row?.plataformas, "Sin plataforma");
           const entry = upsertPlatform(row?.id_plataforma ?? null, giftPlatformName);
           entry.gastos += toNumber(row?.costo);
           entry.movimientos += 1;
         });
+
+        if (platformMap.has("1") || gastoPlat1DesdeGift21 > 0) {
+          const plat1CurrentName = platformMap.get("1")?.nombre || "Plat 1";
+          const plat1Entry = upsertPlatform(1, plat1CurrentName);
+          plat1Entry.gastos = gastoPlat1DesdeGift21;
+        }
 
         const platformRows = Array.from(platformMap.values())
           .map((r) => ({ ...r, neto: r.ingresos - r.gastos }))

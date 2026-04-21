@@ -679,6 +679,7 @@
           if (isTrue(cuenta?.venta_miembro)) return "Plan 2";
           return "Completa";
         }
+        if (platId === 9) return "Perfil";
         if (isTrue(platformInfo?.por_acceso)) return "Acceso";
         if (isTrue(cuenta?.venta_perfil)) return "Perfil";
         if (isTrue(cuenta?.venta_miembro)) return "Miembro";
@@ -1087,7 +1088,7 @@
             supabase
               .from("perfiles")
               .select(
-                "id_perfil, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro)",
+                "id_perfil, perfil_hogar, cuentas:cuentas!perfiles_id_cuenta_fkey!inner(id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro, cuenta_madre)",
               )
               .eq("ocupado", false)
               .not("id_cuenta", "is", null)
@@ -1149,6 +1150,7 @@
             const cuenta = perfilRow?.cuentas || {};
             const platformId = toPositiveInt(cuenta?.id_plataforma);
             if (!platformId) return;
+            if (platformId === 9 && !isTrue(cuenta?.cuenta_madre)) return;
             const platformInfo = platformById.get(platformId) || {};
             const planLabel = resolvePlanLabel({
               platformId,
@@ -1163,6 +1165,7 @@
           (cuentasLibres || []).forEach((cuentaRow) => {
             const platformId = toPositiveInt(cuentaRow?.id_plataforma);
             if (!platformId) return;
+            if (platformId === 9) return;
             const platformInfo = platformById.get(platformId) || {};
             if (isTrue(platformInfo?.tarjeta_de_regalo)) return;
             const planLabel = resolvePlanLabel({

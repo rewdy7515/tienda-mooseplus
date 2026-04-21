@@ -6877,10 +6877,13 @@ const autoProcessMatchedOrder = async (match = {}) => {
     carritoId: orden.id_carrito,
     totalCliente: orden.total,
   });
-  const montoBaseCobrado = await resolveMontoBaseCarrito({
-    carritoId: orden.id_carrito,
-    fallbackTotal: context.total,
-  });
+  const orderTotalProcesado = parseOptionalCheckoutNumber(orden?.total);
+  const montoBaseCobrado = Number.isFinite(orderTotalProcesado)
+    ? roundCheckoutMoney(orderTotalProcesado)
+    : await resolveMontoBaseCarrito({
+        carritoId: orden.id_carrito,
+        fallbackTotal: context.total,
+      });
 
   if (!context.items?.length) {
     return completeNoItemsOrder({
@@ -19826,10 +19829,10 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       carritoId: orden.id_carrito,
       fallbackTotal: context.total,
     });
-    const montoBaseCobrado =
-      processingSource === "ordenes_items" && Number.isFinite(Number(orden?.total))
-        ? roundCheckoutMoney(Number(orden.total))
-        : montoBaseCobradoFallback;
+    const orderTotalProcesado = parseOptionalCheckoutNumber(orden?.total);
+    const montoBaseCobrado = Number.isFinite(orderTotalProcesado)
+      ? roundCheckoutMoney(orderTotalProcesado)
+      : montoBaseCobradoFallback;
     if (!context.items?.length) {
       console.log("[ordenes/procesar] carrito vacío; se acredita saldo", {
         id_orden: idOrden,

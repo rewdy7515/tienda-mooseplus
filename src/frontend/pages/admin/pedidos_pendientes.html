@@ -997,6 +997,8 @@
 
       const requiereModalActivacion = (btn) => {
         if (!btn) return false;
+        const idPlataforma = Number(btn.dataset.idPlataforma || 0);
+        if (idPlataforma === 12) return false;
         const correoCliente = isTrue(btn.dataset.correoCliente);
         const ligadoPerfil = hasPerfilId(btn.dataset.idPerfil);
         return (correoCliente && !ligadoPerfil) || requiereCostoPorPrecioCompleta(btn);

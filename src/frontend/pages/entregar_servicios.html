@@ -524,7 +524,17 @@
         setStatus("");
         const sectionHtml = plataformas
           .map((platObj) => {
-            const rows = platObj.rows || [];
+            const rows = [...(platObj.rows || [])].sort((a, b) => {
+              const ventaA = toPositiveId(a?.id_venta);
+              const ventaB = toPositiveId(b?.id_venta);
+              if (ventaA && ventaB) return ventaA - ventaB;
+              if (ventaA) return -1;
+              if (ventaB) return 1;
+              return String(a?.id_venta || "").localeCompare(String(b?.id_venta || ""), undefined, {
+                numeric: true,
+                sensitivity: "base",
+              });
+            });
             const giftCardPins = getGiftCardPins(rows);
             const hasPendiente = rows.some((r) => r.pendiente);
             const platId = Number(rows?.[0]?.id_plataforma || "");
