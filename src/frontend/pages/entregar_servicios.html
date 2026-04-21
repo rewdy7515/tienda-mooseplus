@@ -1199,6 +1199,25 @@
           syncEditRowUpdateButtonState(row);
         });
       };
+      const markEditRowAsUpdated = (ventaId) => {
+        const ventaIdNum = toPositiveId(ventaId);
+        if (!ventaIdNum || !tablasEl) return;
+        const row = tablasEl.querySelector(
+          `tr[data-edit-row="1"][data-venta="${String(ventaIdNum)}"]`,
+        );
+        if (!row) return;
+        const actionWrap = row.querySelector(".entrega-action-wrap");
+        if (!actionWrap) return;
+        const btn = actionWrap.querySelector(".btn-send-datos-edit");
+        if (btn) btn.classList.add("hidden");
+        let badge = actionWrap.querySelector(".entrega-action-badge.is-delivered");
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "entrega-action-badge is-delivered";
+          actionWrap.appendChild(badge);
+        }
+        badge.textContent = "Datos actualizados";
+      };
 
       tablasEl?.addEventListener("click", (e) => {
         const copyEl = e.target.closest(".copyable");
@@ -1552,16 +1571,16 @@
         const btn = btnDatosConfirmSend;
         if (btn) btn.disabled = true;
         try {
+          const ventaIdUpdated = pendingDatosConfirm.ventaId;
           await persistEditedDatosVenta({
-            ventaId: pendingDatosConfirm.ventaId,
+            ventaId: ventaIdUpdated,
             correo: pendingDatosConfirm.correo,
             clave: pendingDatosConfirm.clave,
             correoChanged: pendingDatosConfirm.correoChanged,
             claveChanged: pendingDatosConfirm.claveChanged,
           });
           closeDatosConfirmModal();
-          await loadServicios();
-          alert("Datos actualizados.");
+          markEditRowAsUpdated(ventaIdUpdated);
         } catch (err) {
           console.error("confirmar envio datos error", err);
           alert("No se pudieron actualizar los datos.");

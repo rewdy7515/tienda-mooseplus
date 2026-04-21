@@ -407,6 +407,48 @@ let autoGiftCardPendingDeliveryCursor = 0;
 let autoPendingStockDeliveryInProgress = false;
 let autoCreditedPagoMovilOrderProcessInProgress = false;
 let monthlyMetricsClosureInProgress = false;
+const ORDER_PROCESS_LOCK_STALE_MS = Math.max(
+  2 * 60 * 1000,
+  Number(process.env.ORDER_PROCESS_LOCK_STALE_MS) || 10 * 60 * 1000,
+);
+const orderProcessLocks = new Map();
+const acquireOrderProcessLock = (idOrden, meta = {}) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) return { acquired: false, reason: "invalid_order" };
+  const now = Date.now();
+  const current = orderProcessLocks.get(orderId);
+  if (current) {
+    const ageMs = now - Number(current.startedAt || 0);
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs > ORDER_PROCESS_LOCK_STALE_MS) {
+      console.warn("[ordenes/procesar] lock stale liberado", {
+        id_orden: orderId,
+        age_ms: ageMs,
+      });
+      orderProcessLocks.delete(orderId);
+    } else {
+      return {
+        acquired: false,
+        reason: "already_processing",
+        lock: {
+          id_orden: orderId,
+          startedAt: current.startedAt || null,
+          source: current.source || null,
+        },
+      };
+    }
+  }
+  const lockInfo = {
+    startedAt: now,
+    source: String(meta?.source || "api_ordenes_procesar"),
+  };
+  orderProcessLocks.set(orderId, lockInfo);
+  return { acquired: true, id_orden: orderId, lock: lockInfo };
+};
+const releaseOrderProcessLock = (idOrden) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) return;
+  orderProcessLocks.delete(orderId);
+};
 let monthlyMetricsClosureSchedulerStarted = false;
 let monthlyMetricsClosureIntervalId = null;
 let monthlyMetricsClosureSchemaMissing = false;
@@ -3011,6 +3053,46 @@ const sendVentaAdminReportToWhatsappOwner = async ({
     id_usuario_destino: targetUserId,
     phone: targetPhone,
   };
+};
+
+const buildIncorrectDataFieldsText = ({ incluirCorreo = false, incluirClave = false } = {}) => {
+  const fields = [];
+  if (incluirCorreo === true) fields.push("Correo");
+  if (incluirClave === true) fields.push("Contraseña");
+  return fields.length ? fields.join(" y ") : "datos de acceso";
+};
+
+const createWebNotificationForIncorrectData = async ({
+  idUsuario = null,
+  idCuenta = null,
+  titulo = "Datos incorrectos",
+  incluirCorreo = false,
+  incluirClave = false,
+  idVenta = null,
+} = {}) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return { ok: false, skipped: true, reason: "invalid_target_user" };
+
+  const fieldsTxt = buildIncorrectDataFieldsText({ incluirCorreo, incluirClave });
+  const ventaId = toPositiveInt(idVenta);
+  const updateUrl = buildWhatsappUpdateDataUrl({ idVenta: ventaId });
+  const updateLine = updateUrl
+    ? `<br><a href="${updateUrl}" class="link-inline">Actualizar datos</a>`
+    : "";
+  const mensaje =
+    `Te enviamos un mensaje por WhatsApp para actualizar tus datos de acceso.<br>` +
+    `Datos reportados: ${fieldsTxt}.${updateLine}`;
+
+  const { error } = await supabaseAdmin.from("notificaciones").insert({
+    id_usuario: userId,
+    id_cuenta: toPositiveInt(idCuenta) || null,
+    titulo: String(titulo || "Datos incorrectos").trim() || "Datos incorrectos",
+    mensaje,
+    fecha: getCaracasDateStr(0),
+    leido: false,
+  });
+  if (error) throw error;
+  return { ok: true };
 };
 
 const markOrderPaymentVerificationWhatsappNotified = async (idOrden, value = true) => {
@@ -8383,6 +8465,7 @@ app.post("/api/whatsapp/reportes/notificar-datos-incorrectos", async (req, res) 
     if (result?.skipped) return res.status(202).json({ ok: false, ...result });
     if (result?.sent) {
       let datosIncorrectosActualizado = true;
+      let notificacionWebCreada = true;
       let warning = "";
       const { error: markDatosErr } = await supabaseAdmin
         .from("reportes")
@@ -8407,10 +8490,31 @@ app.post("/api/whatsapp/reportes/notificar-datos-incorrectos", async (req, res) 
         warning = "Falta columna reportes.datos_incorrectos. No se pudo marcar el estado.";
       }
 
+      try {
+        await createWebNotificationForIncorrectData({
+          idUsuario: result?.id_usuario_destino || reporte?.id_usuario,
+          idCuenta: reporte?.id_cuenta,
+          titulo: "Datos incorrectos",
+          incluirCorreo,
+          incluirClave,
+          idVenta: reporte?.id_venta,
+        });
+      } catch (notifErr) {
+        console.error("[whatsapp/reportes/notificar-datos-incorrectos] web notification error", {
+          id_reporte: reportId,
+          error: notifErr,
+        });
+        notificacionWebCreada = false;
+        warning = warning
+          ? `${warning} No se pudo crear la notificación web.`
+          : "Mensaje enviado, pero no se pudo crear la notificación web.";
+      }
+
       return res.json({
         ok: true,
         ...result,
         datos_incorrectos_actualizado: datosIncorrectosActualizado,
+        notificacion_web_creada: notificacionWebCreada,
         warning: warning || undefined,
       });
     }
@@ -8451,10 +8555,15 @@ app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
       manageWhatsappLifecycle: true,
     });
     if (result?.sent) {
-      const { error: markVentaErr } = await supabaseAdmin
+      let datosIncorrectosActualizado = true;
+      let notificacionWebCreada = true;
+      let warning = "";
+      const { data: markVentaRows, error: markVentaErr } = await supabaseAdmin
         .from("ventas")
         .update({ reporte_admin: true })
-        .eq("id_venta", ventaId);
+        .eq("id_venta", ventaId)
+        .select("id_venta, id_usuario, id_cuenta, id_cuenta_miembro")
+        .maybeSingle();
       if (markVentaErr) {
         if (isMissingColumnError(markVentaErr, "reporte_admin")) {
           return res.status(500).json({
@@ -8465,7 +8574,58 @@ app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
         }
         throw markVentaErr;
       }
-      return res.json({ ok: true, ...result, markedSale: true });
+      const { error: markDatosErr } = await supabaseAdmin
+        .from("reportes")
+        .update({ datos_incorrectos: true, datos_corregidos: false })
+        .eq("id_venta", ventaId)
+        .eq("solucionado", false);
+
+      if (markDatosErr && !isMissingColumnError(markDatosErr, "datos_incorrectos")) {
+        console.error("[whatsapp/ventas/notificar-reporte-admin] mark datos_incorrectos error", {
+          id_venta: ventaId,
+          error: markDatosErr,
+        });
+        datosIncorrectosActualizado = false;
+        warning =
+          "Mensaje enviado, pero no se pudo actualizar el estado de datos incorrectos de los reportes.";
+      }
+
+      if (markDatosErr && isMissingColumnError(markDatosErr, "datos_incorrectos")) {
+        console.warn(
+          "[whatsapp/ventas/notificar-reporte-admin] Falta columna reportes.datos_incorrectos. Continúa sin marcar estado.",
+        );
+        datosIncorrectosActualizado = false;
+        warning = "Falta columna reportes.datos_incorrectos. No se pudo marcar el estado.";
+      }
+
+      try {
+        await createWebNotificationForIncorrectData({
+          idUsuario: result?.id_usuario_destino || markVentaRows?.id_usuario,
+          idCuenta: markVentaRows?.id_cuenta_miembro || markVentaRows?.id_cuenta,
+          titulo: "Reporte de Admin.",
+          incluirCorreo,
+          incluirClave,
+          idVenta: ventaId,
+        });
+      } catch (notifErr) {
+        console.error("[whatsapp/ventas/notificar-reporte-admin] web notification error", {
+          id_venta: ventaId,
+          error: notifErr,
+        });
+        notificacionWebCreada = false;
+        warning = warning
+          ? `${warning} No se pudo crear la notificación web.`
+          : "Mensaje enviado, pero no se pudo crear la notificación web.";
+      }
+
+      return res.json({
+        ok: true,
+        ...result,
+        markedSale: true,
+        datos_incorrectos_actualizado: datosIncorrectosActualizado,
+        notificacion_web_creada: notificacionWebCreada,
+        warning: warning || undefined,
+      });
     }
     if (result?.skipped) return res.status(202).json({ ok: false, ...result });
     return res.status(500).json({
@@ -10587,20 +10747,6 @@ const parseOrdenSnapshotPrecioIdFromDetalle = (detalle = "") => {
   return toPositiveInt(match?.[1]) || null;
 };
 
-const parseOrdenSnapshotCantidadFromDetalle = (detalle = "") => {
-  const text = String(detalle || "");
-  const match = text.match(/(\d+)\s+(?:tarjeta|tarjetas|pantalla|pantallas|acceso|accesos|item|items)\b/i);
-  const qty = toPositiveInt(match?.[1]);
-  return qty || 1;
-};
-
-const parseOrdenSnapshotMesesFromDetalle = (detalle = "") => {
-  const text = String(detalle || "");
-  const match = text.match(/(\d+)\s+mes(?:es)?\b/i);
-  const meses = toPositiveInt(match?.[1]);
-  return meses || 1;
-};
-
 const resolveOrderProcessingContextFromSnapshot = async ({
   ordenId,
   totalCliente = null,
@@ -10649,14 +10795,17 @@ const resolveOrderProcessingContextFromSnapshot = async ({
 
   const parseErrors = [];
   const snapshotItemAmountMap = new Map();
+  const fallbackItems = Array.isArray(fallbackContext?.items) ? fallbackContext.items : [];
   const snapshotItems = snapshotRows.map((row, index) => {
     const itemId = toPositiveInt(row?.id_item_orden) || index + 1;
     const ventaId = toPositiveInt(row?.id_venta) || null;
     const renew = isTrue(row?.renovacion);
     const detalle = String(row?.detalle || "");
+    const fallbackItem = fallbackItems[index] || null;
+    const fallbackPriceId = toPositiveInt(fallbackItem?.id_precio) || null;
     const parsedPriceId = parseOrdenSnapshotPrecioIdFromDetalle(detalle);
     const fallbackRenewalPriceId = renew && ventaId ? toPositiveInt(renewalPriceByVenta[ventaId]) : null;
-    const priceId = parsedPriceId || fallbackRenewalPriceId || null;
+    const priceId = fallbackPriceId || parsedPriceId || fallbackRenewalPriceId || null;
     if (!priceId) {
       parseErrors.push({
         id_item_orden: itemId,
@@ -10666,8 +10815,22 @@ const resolveOrderProcessingContextFromSnapshot = async ({
       });
     }
 
-    const cantidad = parseOrdenSnapshotCantidadFromDetalle(detalle);
-    const meses = parseOrdenSnapshotMesesFromDetalle(detalle);
+    const cantidad =
+      Number.isFinite(Number(fallbackItem?.cantidad)) && Number(fallbackItem?.cantidad) > 0
+        ? Math.max(1, Math.round(Number(fallbackItem.cantidad)))
+        : null;
+    const meses =
+      Number.isFinite(Number(fallbackItem?.meses)) && Number(fallbackItem?.meses) > 0
+        ? Math.max(1, Math.round(Number(fallbackItem.meses)))
+        : null;
+    if (!cantidad || !meses) {
+      parseErrors.push({
+        id_item_orden: itemId,
+        id_venta: ventaId,
+        detalle,
+        reason: "cantidad_meses_no_disponibles_en_carrito_items",
+      });
+    }
     const montoUsd = parseOptionalCheckoutNumber(row?.monto_usd);
     if (Number.isFinite(montoUsd)) {
       snapshotItemAmountMap.set(itemId, roundCheckoutMoney(montoUsd));
@@ -10676,8 +10839,8 @@ const resolveOrderProcessingContextFromSnapshot = async ({
     return {
       id_item: itemId,
       id_precio: priceId,
-      cantidad: Math.max(1, Number(cantidad) || 1),
-      meses: Math.max(1, Number(meses) || 1),
+      cantidad: cantidad || 1,
+      meses: meses || 1,
       renovacion: renew,
       id_venta: ventaId,
       id_cuenta: null,
@@ -19394,6 +19557,17 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     return res.status(400).json({ error: "saldo_a_favor inválido. Debe ser mayor o igual a 0." });
   }
   const forceWhatsappPagoVerificado = isTrue(req.body?.force_whatsapp_pago_verificado);
+  const orderProcessLock = acquireOrderProcessLock(idOrden, {
+    source: "api_ordenes_procesar",
+  });
+  if (!orderProcessLock?.acquired) {
+    return res.status(409).json({
+      error: "La orden ya está siendo procesada. Intenta nuevamente en unos segundos.",
+      code: "ORDER_ALREADY_PROCESSING",
+      id_orden: toPositiveInt(idOrden),
+      lock: orderProcessLock?.lock || null,
+    });
+  }
 
   try {
     const idUsuarioSesion = await getOrCreateUsuario(req);
@@ -19783,6 +19957,8 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       });
     }
     res.status(500).json({ error: err.message });
+  } finally {
+    releaseOrderProcessLock(idOrden);
   }
 });
 

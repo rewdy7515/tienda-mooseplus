@@ -72,6 +72,7 @@ let cachedAuthAccessTokenStoredAt = 0;
 let authStateBridgeInit = false;
 let authSessionFailureCooldownUntil = 0;
 let authSessionFailureMessage = "";
+const orderProcessInFlightById = new Map();
 
 const trimText = (value, max = 2000) => {
   const txt = String(value ?? "");
@@ -1575,33 +1576,46 @@ export async function fetchCheckoutSummary(payload = {}) {
 }
 
 export async function procesarOrden(id_orden, options = {}) {
-  await ensureServerSession();
-  try {
-    const saldoRaw = options?.saldo_a_favor;
-    const saldoNum = Number(String(saldoRaw ?? "").replace(",", "."));
-    const payload = { id_orden };
-    if (Number.isFinite(saldoNum) && saldoNum > 0) {
-      payload.saldo_a_favor = saldoNum;
-    }
-    if (options?.force_whatsapp_pago_verificado === true) {
-      payload.force_whatsapp_pago_verificado = true;
-    }
-    const res = await fetch(`${API_BASE}/api/ordenes/procesar`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("ordenes/procesar response", res.status, text);
-      return { error: text || "No se pudo procesar la orden" };
-    }
-    return res.json();
-  } catch (err) {
-    console.error("procesarOrden error", err);
-    return { error: err.message };
+  const orderId = Number(id_orden);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    return { error: "id_orden inválido" };
   }
+  if (orderProcessInFlightById.has(orderId)) {
+    return orderProcessInFlightById.get(orderId);
+  }
+  const requestPromise = (async () => {
+    await ensureServerSession();
+    try {
+      const saldoRaw = options?.saldo_a_favor;
+      const saldoNum = Number(String(saldoRaw ?? "").replace(",", "."));
+      const payload = { id_orden: orderId };
+      if (Number.isFinite(saldoNum) && saldoNum > 0) {
+        payload.saldo_a_favor = saldoNum;
+      }
+      if (options?.force_whatsapp_pago_verificado === true) {
+        payload.force_whatsapp_pago_verificado = true;
+      }
+      const res = await fetch(`${API_BASE}/api/ordenes/procesar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("ordenes/procesar response", res.status, text);
+        return { error: text || "No se pudo procesar la orden" };
+      }
+      return res.json();
+    } catch (err) {
+      console.error("procesarOrden error", err);
+      return { error: err.message };
+    } finally {
+      orderProcessInFlightById.delete(orderId);
+    }
+  })();
+  orderProcessInFlightById.set(orderId, requestPromise);
+  return requestPromise;
 }
 
 export async function notificarVerificacionManualOrden(id_orden, options = {}) {

@@ -1067,6 +1067,7 @@
                 const body = rows
                   .map((r) => {
                     const tipoSolicitudLabel = getTipoSolicitudLabel(r);
+                    const datosIncorrectosBloqueado = isTrue(r?.reporte_admin);
                     const tipoCell = `<td class="tipo-cell ${getTipoSolicitudClass(
                       tipoSolicitudLabel,
                     )}">${tipoSolicitudLabel}</td>`;
@@ -1111,7 +1112,7 @@
                           : `<button class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
                       }
                       <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-pendiente="${r.pendiente ? "true" : "false"}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
-                      <button class="btn-outline btn-alert" title="Acción" aria-label="Acción" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}">!</button>
+                      <button class="btn-outline btn-alert" title="${datosIncorrectosBloqueado ? "Ya reportado" : "Datos incorrectos"}" aria-label="${datosIncorrectosBloqueado ? "Datos incorrectos bloqueado" : "Datos incorrectos"}" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}" ${datosIncorrectosBloqueado ? "disabled" : ""}>Datos incorrectos</button>
                       ${
                         r.cuenta_madre
                           ? `<span class="madre-switch-wrap" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">
@@ -2181,6 +2182,7 @@
         }
         const alertBtn = e.target.closest(".btn-alert");
         if (alertBtn) {
+          if (alertBtn.disabled) return;
           openAdminReportModal(alertBtn);
           return;
         }
