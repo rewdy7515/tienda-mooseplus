@@ -4,6 +4,7 @@ import {
   loadCatalog,
   submitCheckout,
   fetchCheckoutDraft,
+  fetchCheckoutSummary,
   uploadComprobantes,
   fetchP2PRate,
   loadCurrentUser,
@@ -1169,6 +1170,23 @@ async function init() {
       fixedHora = cartData?.hora ?? null;
       fixedFecha = cartData?.fecha ?? null;
 
+      const summaryResp = await fetchCheckoutSummary();
+      if (!summaryResp?.error) {
+        const summaryTotalUsd = Number(summaryResp?.total_usd);
+        const summaryMontoBs = Number(summaryResp?.monto_bs);
+        const summaryTasaBs = Number(summaryResp?.tasa_bs);
+        if (Number.isFinite(summaryTotalUsd)) {
+          totalUsd = summaryTotalUsd;
+          fixedMontoUsd = summaryTotalUsd;
+        }
+        if (Number.isFinite(summaryMontoBs)) {
+          fixedMontoBs = summaryMontoBs;
+        }
+        if (Number.isFinite(summaryTasaBs) && summaryTasaBs > 0) {
+          tasaBs = summaryTasaBs;
+        }
+      }
+
       try {
         await syncCartMontosIfNeeded(cartData, totalUsd, tasaBs);
       } catch (syncErr) {
@@ -1309,7 +1327,7 @@ btnSendPayment?.addEventListener("click", async () => {
   try {
     try {
       if (!isSaldoCheckout) {
-        const cartData = await fetchCart();
+        const [cartData, summaryResp] = await Promise.all([fetchCart(), fetchCheckoutSummary()]);
         cartItems = cartData.items || [];
         cartId = cartData.id_carrito || null;
         const cartTotals = resolveCheckoutTotalsFromCart(cartData);
@@ -1323,6 +1341,21 @@ btnSendPayment?.addEventListener("click", async () => {
         fixedMontoBs = Number.isFinite(cartTotals?.montoBs) ? Number(cartTotals.montoBs) : null;
         if (Number.isFinite(fixedMontoBs) && fixedMontoBs <= 0 && totalUsd > 0) {
           fixedMontoBs = null;
+        }
+        if (!summaryResp?.error) {
+          const summaryTotalUsd = Number(summaryResp?.total_usd);
+          const summaryMontoBs = Number(summaryResp?.monto_bs);
+          const summaryTasaBs = Number(summaryResp?.tasa_bs);
+          if (Number.isFinite(summaryTotalUsd)) {
+            totalUsd = summaryTotalUsd;
+            fixedMontoUsd = summaryTotalUsd;
+          }
+          if (Number.isFinite(summaryMontoBs)) {
+            fixedMontoBs = summaryMontoBs;
+          }
+          if (Number.isFinite(summaryTasaBs) && summaryTasaBs > 0) {
+            tasaBs = summaryTasaBs;
+          }
         }
         fixedHora = cartData?.hora ?? null;
         fixedFecha = cartData?.fecha ?? null;

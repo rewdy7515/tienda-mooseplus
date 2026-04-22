@@ -15054,6 +15054,26 @@ app.get("/api/cart", async (_req, res) => {
       "cart:get:usuarioSaldo",
     );
     if (userErr) throw userErr;
+    const montoUsdResolved = await resolveCarritoMontoUsdFromItems({
+      idUsuarioVentas: idUsuario,
+      carritoId,
+      fallbackMontoUsd: carritoInfo?.monto_usd,
+    });
+    if (!areCloseNumbers(parseOptionalCheckoutNumber(carritoInfo?.monto_usd), montoUsdResolved, 0.01)) {
+      const { error: updMontoErr } = await runSupabaseQueryWithRetry(
+        () =>
+          supabaseAdmin
+            .from("carritos")
+            .update({ monto_usd: montoUsdResolved })
+            .eq("id_carrito", carritoId),
+        "cart:get:updateMontoUsd",
+      );
+      if (updMontoErr) throw updMontoErr;
+    }
+    carritoInfo = {
+      ...(carritoInfo || {}),
+      monto_usd: montoUsdResolved,
+    };
     const montoFinalResolved = resolveMontoFinal({
       montoUsd: carritoInfo?.monto_usd,
       usaSaldo: carritoInfo?.usa_saldo,
@@ -15158,7 +15178,7 @@ app.get("/api/cart", async (_req, res) => {
     res.json({
       id_carrito: carritoId,
       items: enriched,
-      monto_usd: carritoInfo?.monto_usd ?? null,
+      monto_usd: Number.isFinite(montoUsdResolved) ? montoUsdResolved : null,
       monto_bs:
         carritoRateState?.montoBs ?? carritoInfo?.monto_bs ?? null,
       tasa_bs: carritoRateState?.tasaBs ?? null,
