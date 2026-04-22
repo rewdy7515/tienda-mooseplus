@@ -171,7 +171,12 @@
 
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
-      import { clearServerSession, loadCurrentUser, supabase } from "../../scripts/api.js";
+      import {
+        clearServerSession,
+        loadCurrentUser,
+        supabase,
+        notificarSpotifyProveedorPendientes,
+      } from "../../scripts/api.js";
       import { buildNotificationPayload, pickNotificationUserIds } from "../../scripts/notification-templates.js";
       import { formatDDMMYYYY } from "../../scripts/date-format.js";
       import { copyTextNotify } from "../../scripts/copy-toast.js";
@@ -1949,6 +1954,24 @@
           });
           const resultados = await Promise.all(updates);
           if (resultados?.length) {
+            const ventasRenovadasIds = [
+              ...new Set(resultados.map((row) => Number(row?.id_venta)).filter((id) => Number.isFinite(id) && id > 0)),
+            ];
+            if (ventasRenovadasIds.length) {
+              try {
+                const notifyProveedorRes = await notificarSpotifyProveedorPendientes({
+                  ventaIds: ventasRenovadasIds,
+                  source: "renovar_cliente:seleccion",
+                });
+                if (notifyProveedorRes?.error || notifyProveedorRes?.marked_sent === false) {
+                  console.warn("renovar seleccion notify proveedor spotify error", notifyProveedorRes);
+                }
+              } catch (notifyErr) {
+                console.error("renovar seleccion notify proveedor spotify exception", notifyErr);
+              }
+            }
+          }
+          if (resultados?.length) {
             const notifRows = [];
             resultados.forEach((res) => {
               const uids = pickNotificationUserIds("servicio_renovado", {
@@ -2234,6 +2257,18 @@
               registrado_por: null,
             });
             if (gastoErr) throw gastoErr;
+          }
+
+          try {
+            const notifyProveedorRes = await notificarSpotifyProveedorPendientes({
+              ventaIds: [modalRowContext.id_venta],
+              source: "renovar_cliente:fila",
+            });
+            if (notifyProveedorRes?.error || notifyProveedorRes?.marked_sent === false) {
+              console.warn("renovar fila notify proveedor spotify error", notifyProveedorRes);
+            }
+          } catch (notifyErr) {
+            console.error("renovar fila notify proveedor spotify exception", notifyErr);
           }
 
           // Notificación de servicio renovado para el cliente de esta venta

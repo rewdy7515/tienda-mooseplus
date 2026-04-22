@@ -2214,10 +2214,11 @@ Ref: ${refText}`;
 const buildWhatsappSpotifyRenewalsMessage = (items = []) => {
   const normalized = (Array.isArray(items) ? items : [])
     .map((item) => ({
+      id_venta: toPositiveInt(item?.id_venta) || null,
       correo: String(item?.correo || "").trim(),
       clave: String(item?.clave || "").trim(),
     }))
-    .filter((item) => item.correo || item.clave);
+    .filter((item) => item.correo && item.clave);
   if (!normalized.length) return "";
 
   const lines = ["`Renovación Spotify`"];
@@ -2239,10 +2240,11 @@ const sendSpotifyRenewalsToProviderWhatsapp = async ({
 } = {}) => {
   const items = (Array.isArray(renewals) ? renewals : [])
     .map((item) => ({
+      id_venta: toPositiveInt(item?.id_venta) || null,
       correo: String(item?.correo || "").trim(),
       clave: String(item?.clave || "").trim(),
     }))
-    .filter((item) => item.correo || item.clave);
+    .filter((item) => item.correo && item.clave);
   if (!items.length) {
     return {
       sent: false,
@@ -2369,6 +2371,132 @@ const sendSpotifyRenewalsToProviderWhatsapp = async ({
     id_orden: toPositiveInt(idOrden) || null,
     phone: targetPhone,
     total: items.length,
+  };
+};
+
+const fetchSpotifyProviderPendingSales = async ({ idOrden = null, saleIds = [] } = {}) => {
+  const resolvedOrderId = toPositiveInt(idOrden);
+  const resolvedSaleIds = uniqPositiveIds(saleIds);
+  if (!resolvedOrderId && !resolvedSaleIds.length) {
+    return { rows: [], missingMensajeProveedorColumn: false };
+  }
+
+  let query = supabaseAdmin
+    .from("ventas")
+    .select(
+      "id_venta, id_orden, completa, mensaje_proveedor, correo_miembro, clave_miembro, precios:precios!ventas_id_precio_fkey(id_plataforma)",
+    )
+    .eq("completa", true)
+    .eq("mensaje_proveedor", false);
+
+  if (resolvedOrderId) query = query.eq("id_orden", resolvedOrderId);
+  if (resolvedSaleIds.length) query = query.in("id_venta", resolvedSaleIds);
+
+  const { data, error } = await query.order("id_venta", { ascending: true });
+  if (error) {
+    if (isMissingColumnError(error, "mensaje_proveedor")) {
+      return { rows: [], missingMensajeProveedorColumn: true };
+    }
+    throw error;
+  }
+
+  const rows = (data || [])
+    .map((row) => ({
+      id_venta: toPositiveInt(row?.id_venta) || null,
+      id_orden: toPositiveInt(row?.id_orden) || null,
+      id_plataforma: toPositiveInt(row?.precios?.id_plataforma) || null,
+      mensaje_proveedor: row?.mensaje_proveedor === true,
+      correo: String(row?.correo_miembro || "").trim(),
+      clave: String(row?.clave_miembro || "").trim(),
+    }))
+    .filter(
+      (row) =>
+        row.id_venta &&
+        row.id_plataforma === 9 &&
+        row.mensaje_proveedor === false &&
+        row.correo &&
+        row.clave,
+    );
+
+  return { rows, missingMensajeProveedorColumn: false };
+};
+
+const notifySpotifyProviderPendingSales = async ({
+  idOrden = null,
+  saleIds = [],
+  providerId = 11,
+  manageWhatsappLifecycle = true,
+  source = "spotify_provider_pending_manual",
+} = {}) => {
+  const resolvedOrderId = toPositiveInt(idOrden);
+  const resolvedSaleIds = uniqPositiveIds(saleIds);
+  const { rows, missingMensajeProveedorColumn } = await fetchSpotifyProviderPendingSales({
+    idOrden: resolvedOrderId,
+    saleIds: resolvedSaleIds,
+  });
+
+  if (missingMensajeProveedorColumn) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "mensaje_proveedor_column_missing",
+      id_orden: resolvedOrderId || null,
+    };
+  }
+
+  if (!rows.length) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "no_pending_sales_with_credentials",
+      id_orden: resolvedOrderId || null,
+      venta_ids: [],
+    };
+  }
+
+  const ventaIds = uniqPositiveIds(rows.map((row) => row.id_venta));
+  const waResult = await sendSpotifyRenewalsToProviderWhatsapp({
+    renewals: rows,
+    providerId,
+    manageWhatsappLifecycle,
+    source,
+    idOrden: resolvedOrderId || toPositiveInt(rows[0]?.id_orden) || null,
+  });
+
+  if (!waResult?.sent) {
+    return {
+      ...waResult,
+      id_orden: resolvedOrderId || toPositiveInt(rows[0]?.id_orden) || null,
+      venta_ids: ventaIds,
+      total_pendientes: rows.length,
+    };
+  }
+
+  let markedCount = 0;
+  let markError = null;
+  if (ventaIds.length) {
+    let markQuery = supabaseAdmin
+      .from("ventas")
+      .update({ mensaje_proveedor: true })
+      .in("id_venta", ventaIds)
+      .eq("mensaje_proveedor", false);
+    if (resolvedOrderId) markQuery = markQuery.eq("id_orden", resolvedOrderId);
+    const { data: markedRows, error: markErr } = await markQuery.select("id_venta");
+    if (markErr) {
+      markError = markErr;
+    } else {
+      markedCount = Array.isArray(markedRows) ? markedRows.length : 0;
+    }
+  }
+
+  return {
+    ...waResult,
+    id_orden: resolvedOrderId || toPositiveInt(rows[0]?.id_orden) || null,
+    venta_ids: ventaIds,
+    total_pendientes: rows.length,
+    mensaje_proveedor_actualizadas: markedCount,
+    marked_sent: !markError,
+    mark_error: markError ? markError?.message || String(markError) : null,
   };
 };
 
@@ -11531,7 +11659,6 @@ const processOrderFromItems = async ({
   }
 
   let renovacionesPendientesCount = 0;
-  const spotifyRenovacionesParaProveedor = [];
   const renovPromises = renovaciones.map((it) => {
     const price = priceMap[it.id_precio] || {};
     const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
@@ -11545,12 +11672,6 @@ const processOrderFromItems = async ({
     const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
     if (renovarPendiente) renovacionesPendientesCount += 1;
     const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
-    const sourceAccountRenov =
-      ventaAnt?.cuenta_miembro?.id_cuenta ? ventaAnt.cuenta_miembro : ventaAnt?.cuenta_principal || null;
-    const correoRenovacion = String(sourceAccountRenov?.correo || "").trim();
-    const claveRenovacion = String(sourceAccountRenov?.clave || "").trim();
-    const isCuentaMiembroRenov =
-      !!toPositiveInt(ventaAnt?.id_cuenta_miembro) || isTrue(ventaAnt?.cuenta_miembro?.venta_miembro);
     const isCuentaCompletaRenov =
       isCuentaCompletaByFlags(cuentaVenta) ||
       (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
@@ -11576,15 +11697,6 @@ const processOrderFromItems = async ({
     if (isCuentaCompletaRenov || isVentaCompletaRenov) {
       if (platId === 9) {
         updatePayload.cuenta_pagada_admin = true;
-        // Proveedor Spotify: solo notificar renovaciones de ventas completas
-        // y excluir renovaciones de cuentas miembro.
-        if (isVentaCompletaRenov && !isCuentaMiembroRenov) {
-          spotifyRenovacionesParaProveedor.push({
-            id_venta: toPositiveInt(it?.id_venta) || null,
-            correo: correoRenovacion || "-",
-            clave: claveRenovacion || "-",
-          });
-        }
       } else {
         updatePayload.cuenta_pagada_admin = false;
       }
@@ -11599,24 +11711,6 @@ const processOrderFromItems = async ({
     const renovErr = renovRes.find((r) => r?.error);
     if (renovErr?.error) throw renovErr.error;
   }
-  if (spotifyRenovacionesParaProveedor.length) {
-    const waProveedorResult = await sendSpotifyRenewalsToProviderWhatsapp({
-      renewals: spotifyRenovacionesParaProveedor,
-      providerId: 11,
-      source: "processOrderFromItems",
-      idOrden: ordenId,
-    });
-    if (waProveedorResult?.sent) {
-      console.log("[checkout] spotify renovaciones notificadas a proveedor", {
-        id_orden: ordenId,
-        id_proveedor: waProveedorResult?.id_proveedor || 11,
-        total: waProveedorResult?.total || spotifyRenovacionesParaProveedor.length,
-      });
-    } else {
-      console.warn("[checkout] spotify renovaciones proveedor no enviadas", waProveedorResult);
-    }
-  }
-
   // Filtra items nuevos (no renovaciones) para asignación de stock
   const itemsNuevos = (items || []).filter((it) => !it.id_venta);
   if (!itemsNuevos.length) {
@@ -12110,7 +12204,6 @@ const processOrderFromItems = async ({
   }));
   const sourceRowsConvertedToRenewals = new Set();
   const sourceRowsForInsertedVentas = [];
-  const spotifyComprasCompletasParaProveedor = [];
   const spotifyImplicitRenewals = [];
   const implicitResolvedVentaByItemId = new Map();
   const implicitRenewalItemIds = new Set();
@@ -12222,16 +12315,6 @@ const processOrderFromItems = async ({
       }
     }
 
-    if (isSpotifyCompletaCompra) {
-      const correoCuenta = String(cuentaFlags?.correo || "").trim();
-      const claveCuenta = String(cuentaFlags?.clave || "").trim();
-      spotifyComprasCompletasParaProveedor.push({
-        id_cuenta: cuentaId || null,
-        correo: correoCuenta || "-",
-        clave: claveCuenta || "-",
-      });
-    }
-
     ventasToInsert.push({
       id_usuario: idUsuarioVentas,
       id_precio: a.id_precio,
@@ -12270,7 +12353,6 @@ const processOrderFromItems = async ({
   }
   let implicitRenovacionesPendientesCount = 0;
   const implicitRenewalHistRows = [];
-  const spotifyImplicitRenovacionesParaProveedor = [];
   if (spotifyImplicitRenewals.length) {
     const implicitVentaIds = uniqPositiveIds(spotifyImplicitRenewals.map((row) => row?.id_venta));
     const implicitVentaMap = {};
@@ -12306,12 +12388,6 @@ const processOrderFromItems = async ({
       const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
       if (renovarPendiente) implicitRenovacionesPendientesCount += 1;
       const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
-      const sourceAccountRenov =
-        ventaAnt?.cuenta_miembro?.id_cuenta ? ventaAnt.cuenta_miembro : ventaAnt?.cuenta_principal || null;
-      const correoRenovacion = String(sourceAccountRenov?.correo || "").trim();
-      const claveRenovacion = String(sourceAccountRenov?.clave || "").trim();
-      const isCuentaMiembroRenov =
-        !!toPositiveInt(ventaAnt?.id_cuenta_miembro) || isTrue(ventaAnt?.cuenta_miembro?.venta_miembro);
       const isCuentaCompletaRenov =
         isCuentaCompletaByFlags(cuentaVenta) ||
         (isTrue(price?.completa) && !isTrue(price?.sub_cuenta));
@@ -12337,15 +12413,6 @@ const processOrderFromItems = async ({
       if (isCuentaCompletaRenov || isVentaCompletaRenov) {
         if (platId === 9) {
           updatePayload.cuenta_pagada_admin = true;
-          // Proveedor Spotify: solo notificar renovaciones de ventas completas
-          // y excluir renovaciones de cuentas miembro.
-          if (isVentaCompletaRenov && !isCuentaMiembroRenov) {
-            spotifyImplicitRenovacionesParaProveedor.push({
-              id_venta: ventaId,
-              correo: correoRenovacion || "-",
-              clave: claveRenovacion || "-",
-            });
-          }
         } else {
           updatePayload.cuenta_pagada_admin = false;
         }
@@ -12375,44 +12442,6 @@ const processOrderFromItems = async ({
       });
     }
   }
-  if (insertedVentas.length && spotifyComprasCompletasParaProveedor.length) {
-    const waComprasSpotifyResult = await sendSpotifyRenewalsToProviderWhatsapp({
-      renewals: spotifyComprasCompletasParaProveedor,
-      providerId: 11,
-      source: "processOrderFromItems_new_sales",
-      idOrden: ordenId,
-    });
-    if (waComprasSpotifyResult?.sent) {
-      console.log("[checkout] spotify compras completas notificadas a proveedor", {
-        id_orden: ordenId,
-        id_proveedor: waComprasSpotifyResult?.id_proveedor || 11,
-        total: waComprasSpotifyResult?.total || spotifyComprasCompletasParaProveedor.length,
-      });
-    } else {
-      console.warn("[checkout] spotify compras completas proveedor no enviadas", waComprasSpotifyResult);
-    }
-  }
-  if (spotifyImplicitRenovacionesParaProveedor.length) {
-    const waSpotifyImplicitRenov = await sendSpotifyRenewalsToProviderWhatsapp({
-      renewals: spotifyImplicitRenovacionesParaProveedor,
-      providerId: 11,
-      source: "processOrderFromItems_new_sale_to_renewal",
-      idOrden: ordenId,
-    });
-    if (waSpotifyImplicitRenov?.sent) {
-      console.log("[checkout] spotify compras nuevas convertidas a renovacion notificadas a proveedor", {
-        id_orden: ordenId,
-        id_proveedor: waSpotifyImplicitRenov?.id_proveedor || 11,
-        total: waSpotifyImplicitRenov?.total || spotifyImplicitRenovacionesParaProveedor.length,
-      });
-    } else {
-      console.warn(
-        "[checkout] spotify compras nuevas convertidas a renovacion proveedor no enviadas",
-        waSpotifyImplicitRenov,
-      );
-    }
-  }
-
   const resolvedVentaByItemId = new Map();
   (items || []).forEach((item) => {
     const itemId = toPositiveInt(item?.id_item);
@@ -15034,7 +15063,7 @@ app.get("/api/cart", async (_req, res) => {
     const carritoId = await getCurrentCarrito(idUsuario);
     if (!carritoId) return res.json({ items: [] });
 
-    const { data: carritoInfo, error: carritoErr } = await runSupabaseQueryWithRetry(
+    const { data: carritoInfoData, error: carritoErr } = await runSupabaseQueryWithRetry(
       () =>
         supabaseAdmin
           .from("carritos")
@@ -15044,6 +15073,7 @@ app.get("/api/cart", async (_req, res) => {
       "cart:get:carritoInfo",
     );
     if (carritoErr) throw carritoErr;
+    let carritoInfo = carritoInfoData;
     const { data: usuarioInfo, error: userErr } = await runSupabaseQueryWithRetry(
       () =>
         supabaseAdmin
@@ -18065,6 +18095,8 @@ app.get("/api/ventas/orden", async (req, res) => {
         id_tarjeta_de_regalo,
         pendiente,
         id_orden,
+        completa,
+        mensaje_proveedor,
         correo_miembro,
         clave_miembro,
         cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, pin, id_plataforma, venta_perfil, venta_miembro),
@@ -18112,6 +18144,8 @@ app.get("/api/ventas/orden", async (req, res) => {
             id_tarjeta_de_regalo: toPositiveInt(row?.id_tarjeta_de_regalo) || null,
             pendiente: false,
             id_orden: idOrden,
+            completa: false,
+            mensaje_proveedor: true,
             correo_miembro: "",
             clave_miembro: "",
             cuentas: null,
@@ -18150,6 +18184,37 @@ app.get("/api/ventas/orden", async (req, res) => {
   } catch (err) {
     console.error("[ventas/orden] error", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ventas/proveedor/spotify/notificar-pendientes", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const idOrden = toPositiveInt(req.body?.id_orden);
+    const saleIds = uniqPositiveIds(req.body?.id_ventas || req.body?.sale_ids || []);
+    if (!idOrden && !saleIds.length) {
+      return res
+        .status(400)
+        .json({ error: "Debes enviar id_orden o id_ventas para notificar al proveedor." });
+    }
+
+    const source = String(req.body?.source || "api_spotify_provider_pending").trim() || "api_spotify_provider_pending";
+    const result = await notifySpotifyProviderPendingSales({
+      idOrden,
+      saleIds,
+      providerId: 11,
+      source,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[ventas/proveedor/spotify/notificar-pendientes] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudo notificar al proveedor." });
   }
 });
 

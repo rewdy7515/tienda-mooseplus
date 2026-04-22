@@ -1894,6 +1894,54 @@ export async function fetchOrdenByVenta(idVenta) {
   }
 }
 
+export async function notificarSpotifyProveedorPendientes({
+  idOrden = null,
+  ventaIds = [],
+  source = "",
+} = {}) {
+  await ensureServerSession();
+  try {
+    const payload = {};
+    const ordenNum = Number(idOrden);
+    if (Number.isFinite(ordenNum) && ordenNum > 0) payload.id_orden = Math.trunc(ordenNum);
+    if (Array.isArray(ventaIds) && ventaIds.length) {
+      payload.id_ventas = ventaIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .map((value) => Math.trunc(value));
+    }
+    const sourceTxt = String(source || "").trim();
+    if (sourceTxt) payload.source = sourceTxt;
+    if (!payload.id_orden && !(payload.id_ventas || []).length) {
+      return { error: "Debes enviar id_orden o id_ventas." };
+    }
+
+    const res = await fetch(`${API_BASE}/api/ventas/proveedor/spotify/notificar-pendientes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let message = "";
+      try {
+        const data = await res.json();
+        message = data?.error || "";
+      } catch (_err) {
+        message = (await res.text()) || "";
+      }
+      if (!message && res.status === 401) message = "Usuario no autenticado.";
+      if (!message && res.status === 403) message = "Solo admin/superadmin.";
+      console.error("notificarSpotifyProveedorPendientes response", res.status, message);
+      return { error: message || "No se pudo notificar al proveedor.", status: res.status };
+    }
+    return await res.json();
+  } catch (err) {
+    console.error("notificarSpotifyProveedorPendientes error", err);
+    return { error: err.message };
+  }
+}
+
 export async function entregarGiftCardPendiente(idVenta) {
   await ensureServerSession();
   try {

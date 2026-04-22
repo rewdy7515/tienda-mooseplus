@@ -225,6 +225,7 @@
         supabase,
         fetchVentasOrden,
         fetchOrdenByVenta,
+        notificarSpotifyProveedorPendientes,
       } from "../scripts/api.js";
       import { buildServiceCopyText } from "../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../scripts/date-format.js";
@@ -264,6 +265,9 @@
       let platById = {};
       let shouldUseSignupHeaderOnCopy = false;
       let signupHeaderShortUrl = "";
+      let currentOrderId = null;
+      let spotifyProveedorNotifyTimerId = null;
+      const SPOTIFY_PROVEEDOR_NOTIFY_DELAY_MS = 60 * 1000;
       console.log("entregar_servicios init", { idOrdenParam, ventaParamRaw, isModificarDatosMode });
 
       const setStatus = (msg) => {
@@ -304,6 +308,127 @@
         datosConfirmModal.classList.remove("hidden");
         datosConfirmModal.setAttribute("aria-hidden", "false");
       };
+
+      const clearSpotifyProveedorNotifyTimer = () => {
+        if (spotifyProveedorNotifyTimerId) {
+          clearTimeout(spotifyProveedorNotifyTimerId);
+          spotifyProveedorNotifyTimerId = null;
+        }
+      };
+
+      const patchVentaLocal = (ventaId, patch = {}) => {
+        const ventaIdNum = toPositiveId(ventaId);
+        if (!ventaIdNum) return null;
+        const key = String(ventaIdNum);
+        const current = ventasById[key];
+        if (!current) return null;
+        const next = { ...current, ...patch };
+        ventasById[key] = next;
+        return next;
+      };
+
+      const markVentasProveedorNotificadasLocal = (ventaIds = []) => {
+        (ventaIds || []).forEach((ventaId) => {
+          const ventaIdNum = toPositiveId(ventaId);
+          if (!ventaIdNum) return;
+          patchVentaLocal(ventaIdNum, { mensaje_proveedor: true });
+        });
+      };
+
+      const getSpotifyProviderVentasByOrder = (idOrden, { requireCreds = false } = {}) => {
+        const orderIdNum = toPositiveId(idOrden);
+        if (!orderIdNum) return [];
+        return Object.values(ventasById || {})
+          .map((venta) => {
+            const platId = toPositiveId(venta?.cuentas?.id_plataforma || venta?.precios?.id_plataforma);
+            const correo = normalizeCorreo(venta?.correo_miembro || "");
+            const clave = String(venta?.clave_miembro || "").trim();
+            return {
+              venta,
+              id_venta: toPositiveId(venta?.id_venta),
+              id_orden: toPositiveId(venta?.id_orden),
+              id_plataforma: platId,
+              completa: venta?.completa === true,
+              mensaje_proveedor: venta?.mensaje_proveedor === true,
+              correo,
+              clave,
+            };
+          })
+          .filter((row) => {
+            if (!row.id_venta || row.id_orden !== orderIdNum) return false;
+            if (row.id_plataforma !== 9) return false;
+            if (!row.completa) return false;
+            if (row.mensaje_proveedor === true) return false;
+            if (requireCreds) return !!row.correo && !!row.clave;
+            return true;
+          });
+      };
+
+      const notificarProveedorSpotifyOrdenAhora = async (reason = "manual") => {
+        const orderIdNum = toPositiveId(currentOrderId);
+        if (!orderIdNum) {
+          return { sent: false, skipped: true, reason: "missing_order_id" };
+        }
+        const result = await notificarSpotifyProveedorPendientes({
+          idOrden: orderIdNum,
+          source: `entregar_servicios:${String(reason || "manual").trim() || "manual"}`,
+        });
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+        if (result?.sent && result?.marked_sent === false) {
+          throw new Error(result?.mark_error || "El proveedor fue notificado, pero no se pudo marcar mensaje_proveedor=true.");
+        }
+        if (
+          Array.isArray(result?.venta_ids) &&
+          result.venta_ids.length &&
+          result?.sent &&
+          result?.marked_sent !== false
+        ) {
+          markVentasProveedorNotificadasLocal(result.venta_ids);
+        }
+        return result || {};
+      };
+
+      const programarNotificacionProveedorSpotify = async (triggerVentaId = null) => {
+        const orderIdNum = toPositiveId(currentOrderId);
+        if (!orderIdNum) return;
+        const pendingForOrder = getSpotifyProviderVentasByOrder(orderIdNum, {
+          requireCreds: false,
+        });
+        if (!pendingForOrder.length) return;
+
+        if (pendingForOrder.length === 1) {
+          try {
+            const result = await notificarProveedorSpotifyOrdenAhora("single_immediate");
+            if (result?.sent) {
+              setStatus("Datos enviados y proveedor notificado.");
+            }
+          } catch (notifyErr) {
+            console.error("notificar proveedor spotify inmediato error", notifyErr);
+            setStatus("Datos enviados, pero no se pudo notificar al proveedor.");
+          }
+          return;
+        }
+
+        clearSpotifyProveedorNotifyTimer();
+        spotifyProveedorNotifyTimerId = setTimeout(async () => {
+          spotifyProveedorNotifyTimerId = null;
+          try {
+            const result = await notificarProveedorSpotifyOrdenAhora("batch_timer");
+            if (result?.sent) {
+              setStatus("Proveedor notificado con los datos enviados.");
+            }
+          } catch (notifyErr) {
+            console.error("notificar proveedor spotify por temporizador error", notifyErr);
+            setStatus("Datos guardados, pero no se pudo notificar al proveedor.");
+          }
+        }, SPOTIFY_PROVEEDOR_NOTIFY_DELAY_MS);
+
+        const ventaTxt = toPositiveId(triggerVentaId) ? ` #${toPositiveId(triggerVentaId)}` : "";
+        setStatus(`Datos guardados para venta${ventaTxt}. Se notificará al proveedor en 1 minuto.`);
+      };
+
       const loadReemplazosBloqueados = async (force = false) => {
         if (force) {
           reemplazosCache = null;
@@ -805,6 +930,8 @@
 
       const loadServicios = async () => {
         try {
+          clearSpotifyProveedorNotifyTimer();
+          currentOrderId = null;
           if (ventaParamRaw && !idVentaParam) {
             setStatus("El parámetro id_venta es inválido.");
             if (tablasEl) tablasEl.innerHTML = "";
@@ -839,6 +966,7 @@
             mainEl?.classList.add("hidden");
             return;
           }
+          currentOrderId = effectiveOrderId;
           const user = await loadCurrentUser();
           currentUserId = toPositiveId(user?.id_usuario);
           canAnnotateCliente = user?.acceso_cliente === false;
@@ -1325,6 +1453,8 @@
         const row = btn.closest("tr");
         const ventaId = btn.dataset.venta;
         if (!ventaId) return;
+        const ventaIdNum = toPositiveId(ventaId);
+        if (!ventaIdNum) return;
         const isEditRow = row?.dataset?.editRow === "1";
         if (isEditRow) {
           const editState = getEditedRowState(row);
@@ -1557,9 +1687,15 @@
           const { error } = await supabase
             .from("ventas")
             .update(payload)
-            .eq("id_venta", ventaId);
+            .eq("id_venta", ventaIdNum);
           if (error) throw error;
-          await markReportesDatosCorregidosByVenta(ventaId);
+          await markReportesDatosCorregidosByVenta(ventaIdNum);
+          patchVentaLocal(ventaIdNum, {
+            correo_miembro: correoValNorm,
+            clave_miembro: claveVal || null,
+            mensaje_proveedor: false,
+          });
+          await programarNotificacionProveedorSpotify(ventaIdNum);
           btn.classList.add("hidden");
           const status = document.createElement("span");
           status.className = "entrega-action-badge is-delivered";
@@ -1589,6 +1725,18 @@
             correoChanged: pendingDatosConfirm.correoChanged,
             claveChanged: pendingDatosConfirm.claveChanged,
           });
+          const ventaIdUpdatedNum = toPositiveId(ventaIdUpdated);
+          if (ventaIdUpdatedNum) {
+            const patch = { mensaje_proveedor: false };
+            if (pendingDatosConfirm.correoChanged) {
+              patch.correo_miembro = normalizeCorreo(pendingDatosConfirm.correo);
+            }
+            if (pendingDatosConfirm.claveChanged) {
+              patch.clave_miembro = String(pendingDatosConfirm.clave || "").trim();
+            }
+            patchVentaLocal(ventaIdUpdatedNum, patch);
+            await programarNotificacionProveedorSpotify(ventaIdUpdatedNum);
+          }
           closeDatosConfirmModal();
           markEditRowAsUpdated(ventaIdUpdated);
         } catch (err) {
@@ -1597,6 +1745,10 @@
         } finally {
           if (btn) btn.disabled = false;
         }
+      });
+
+      window.addEventListener("beforeunload", () => {
+        clearSpotifyProveedorNotifyTimer();
       });
 
       loadServicios();
