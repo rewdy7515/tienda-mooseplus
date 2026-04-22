@@ -3923,6 +3923,7 @@
                     <th>Correo</th>
                     <th>Fecha de corte</th>
                     <th>Estado</th>
+                    <th>Acción</th>
                     <th>ID Precio</th>
                     <th class="action-cell">Acción</th>
                   </tr>
@@ -4475,7 +4476,7 @@
         if (info.isPlat9 && info.cuenta_madre === true) {
           const filas = info.plat9Rows || [];
           const needsPlus = filas.length < 5;
-          const plat9ColCount = 5 + (showClaveCliente ? 1 : 0);
+          const plat9ColCount = 6 + (showClaveCliente ? 1 : 0);
           const bodyRows = filas
             .map(
               (r) => `<tr>
@@ -4485,6 +4486,20 @@
               <td>${r.usuario || "-"}</td>
               <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
               <td class="estado-cell ${r.estadoClass || ""}">${r.estado || "-"}</td>
+              <td class="action-cell">
+                ${buildReportarVentaButton({
+                  idVenta: r.id_venta,
+                  idUsuario: r.id_usuario,
+                  idCuenta: info.id_cuenta || currentCuentaId,
+                  idPlataforma: 9,
+                  correo: r.correo,
+                })}
+                ${
+                  isSuperadmin && r.id_venta
+                    ? `<button type="button" class="btn-delete-venta" data-id-venta="${r.id_venta}">Eliminar</button>`
+                    : ""
+                }
+              </td>
             </tr>`,
             )
             .join("");
@@ -4503,6 +4518,7 @@
                     <th>Usuario</th>
                     <th>Fecha de corte</th>
                     <th>Estado</th>
+                    <th>Acción</th>
                   </tr>
                 </thead>
                 <tbody>${bodyRows}${plus}</tbody>
@@ -5193,6 +5209,7 @@
               });
               return {
                 id_venta: v.id_venta || null,
+                id_usuario: v.id_usuario || null,
                 cliente: userNames9[v.id_usuario] || "-",
                 correo: cuenta.correo || "-",
                 clave: cuenta.clave || "-",

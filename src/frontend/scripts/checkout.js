@@ -71,6 +71,14 @@ const METODO_RECARGO_USD_FIJO = 0.49;
 const METODO_COMISION_20_ID = 3;
 const METODO_COMISION_20_PERCENT = 0.2;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const formatBsDisplay = (amount) => {
+  const value = Number(amount);
+  if (!Number.isFinite(value)) return "-";
+  return new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
 const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 const isImageFile = (file) => {
   if (!file) return false;
@@ -828,7 +836,8 @@ const renderTotal = () => {
     }
   }
   const lineBs = isBs && Number.isFinite(montoBsView)
-    ? `<div>Bs. ${montoBsView.toFixed(2)}</div>`
+    ? `<div class="checkout-bs-line">Bs. ${formatBsDisplay(montoBsView)}</div>
+       <div class="checkout-bs-exact-note">Envíe el monto exacto para la verificación automática de pago</div>`
     : "";
   totalEl.innerHTML = `<div>${lineUsd}</div>${lineBs}${countdownLine}`;
 };

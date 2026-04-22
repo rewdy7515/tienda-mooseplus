@@ -11356,6 +11356,7 @@ const processOrderFromItems = async ({
   snapshotMontoBsTotal = null,
   snapshotTasaBs = null,
   saldoAplicadoExpectedUsd = 0,
+  montoExtraHistorialUsd = 0,
 }) => {
   console.log("[checkout] processOrderFromItems start", {
     ordenId,
@@ -12522,7 +12523,20 @@ const processOrderFromItems = async ({
   }
   if (histRows.length) {
     let historialGiftCardLinkFallback = false;
-    const targetHistTotalNum = hasCustomItemAmounts ? Number.NaN : Number(montoHistorialTotalOverride);
+    const saldoConsumidoHist = (() => {
+      const consumed = toFiniteMoney(saldoConsumption?.monto);
+      if (Number.isFinite(consumed) && consumed > 0) return consumed;
+      const expected = toFiniteMoney(saldoAplicadoExpectedUsd);
+      if (Number.isFinite(expected) && expected > 0) return expected;
+      return 0;
+    })();
+    const extraHist = (() => {
+      const extra = toFiniteMoney(montoExtraHistorialUsd);
+      return Number.isFinite(extra) && extra > 0 ? extra : 0;
+    })();
+    const targetHistTotalNum = hasCustomItemAmounts
+      ? Number.NaN
+      : Number(toFiniteMoney(montoHistorialTotalOverride) || 0) + saldoConsumidoHist + extraHist;
     if (Number.isFinite(targetHistTotalNum) && targetHistTotalNum >= 0) {
       const targetHistTotal = Math.round(targetHistTotalNum * 100) / 100;
       const baseTotal = histRows.reduce((acc, row) => acc + (Number(row?.monto) || 0), 0);
@@ -19878,6 +19892,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       snapshotMontoBsTotal: orden?.monto_bs ?? null,
       snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
       saldoAplicadoExpectedUsd: await resolveSaldoAplicadoForOrderVerification({ orden }),
+      montoExtraHistorialUsd: saldoAFavor,
     });
     console.log("[ordenes/procesar] procesado", {
       id_orden: idOrden,

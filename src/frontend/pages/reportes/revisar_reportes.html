@@ -383,6 +383,23 @@
       #modal-plat-title {
         font-weight: 800;
       }
+      .modal-plat-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .modal-venta-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #111827;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+      }
       #modal-plat-subtitle {
         margin: 4px 0 0;
         font-size: 13px;
@@ -521,7 +538,10 @@
           <button class="modal-close" aria-label="Cerrar">×</button>
           <div class="modal-body modal-body-split">
             <div class="modal-info">
-              <h3 id="modal-plat-title" class="plat-title"></h3>
+              <div class="modal-plat-header">
+                <h3 id="modal-plat-title" class="plat-title"></h3>
+                <span id="modal-venta-badge" class="modal-venta-badge hidden"></span>
+              </div>
               <p id="modal-plat-subtitle" class="hidden"></p>
               <div class="modal-info-grid">
                 <div class="label">Correo:</div>

@@ -314,10 +314,13 @@ const buildButtonLabel = (opcion, flags, _months, platform, _qty = 1) => {
       text: `${opcion.valor_tarjeta_de_regalo || ""} ${opcion.moneda || ""} $${final.toFixed(2)}`,
     };
   }
+  const isPlat9 = Number(platform?.id_plataforma) === 9;
   const baseUnit = flags.por_pantalla
     ? "pantalla"
     : flags.por_acceso
     ? "dispositivo"
+    : isPlat9
+    ? "cuenta"
     : "mes";
   const cantidad =
     baseUnit === "mes"
@@ -333,10 +336,13 @@ const buildCartDetalle = (opcion, flags, cantidad) => {
     const monto = `${opcion.valor_tarjeta_de_regalo || ""} ${opcion.moneda || ""} $${opcion.precio_usd_detal}`;
     return `Región: ${region} · Monto: ${monto}`;
   }
+  const isPlat9 = Number(opcion?.id_plataforma) === 9;
   const baseUnit = flags.por_pantalla
     ? "pantalla"
     : flags.por_acceso
     ? "dispositivo"
+    : isPlat9
+    ? "cuenta"
     : "mes";
   const qty =
     baseUnit === "mes"
@@ -1149,13 +1155,19 @@ export const initModal = (elements) => {
       }
       const qty = currentQty || 1;
       const meses = monthsToSend || 1;
+      const isPlat9 = Number(currentPlatform?.id_plataforma) === 9;
       const baseUnit = currentFlags.por_pantalla
         ? "pantalla"
         : currentFlags.por_acceso
           ? "dispositivo"
+          : isPlat9
+            ? "cuenta"
           : "mes";
       const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
-      const mesesTxt = baseUnit === "mes" ? ` · ${meses} mes${meses === 1 ? "" : "es"}` : "";
+      const mesesTxt =
+        baseUnit === "mes" || isPlat9
+          ? ` · ${meses} mes${meses === 1 ? "" : "es"}`
+          : "";
       return `${qty} ${baseUnit}${plural}${mesesTxt} $${unitPrice}`;
     })();
 

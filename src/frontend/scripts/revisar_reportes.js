@@ -58,6 +58,7 @@ const toggleAutoReemplazoWrapEl = document.querySelector("#auto-reemplazo-toggle
 const toggleAutoReemplazoEl = document.querySelector("#toggle-auto-reemplazo");
 const modal = document.querySelector("#modal-detalle");
 const modalPlatTitle = document.querySelector("#modal-plat-title");
+const modalVentaBadge = document.querySelector("#modal-venta-badge");
 const modalPlatSubtitle = document.querySelector("#modal-plat-subtitle");
 const modalCorreo = document.querySelector("#modal-correo");
 const modalFechaCorte = document.querySelector("#modal-fecha-corte");
@@ -1247,6 +1248,10 @@ function closeModal() {
     modalPlatSubtitle.textContent = "";
     modalPlatSubtitle.classList.add("hidden");
   }
+  if (modalVentaBadge) {
+    modalVentaBadge.textContent = "";
+    modalVentaBadge.classList.add("hidden");
+  }
   currentRow = null;
   cambioClave = false;
   cambioPin = false;
@@ -1258,9 +1263,14 @@ async function openModal(row) {
   const platName = row.plataformas?.nombre || "-";
   const platColor = normalizeHexColor(row.plataformas?.color_1) || "#111";
   const platLink = normalizePlatformLink(row.plataformas?.link_pagina);
+  const ventaId = toPositiveId(row?.id_venta);
   const isCuentaCompleta = isTrue(row?.ventas?.completa) || row?.venta_completa === true;
   modalPlatTitle.textContent = platName;
   modalPlatTitle.style.color = platColor;
+  if (modalVentaBadge) {
+    modalVentaBadge.textContent = ventaId ? `#${ventaId}` : "";
+    modalVentaBadge.classList.toggle("hidden", !ventaId);
+  }
   if (modalPlatSubtitle) {
     modalPlatSubtitle.textContent = isCuentaCompleta ? "Cuenta completa" : "";
     modalPlatSubtitle.classList.toggle("hidden", !isCuentaCompleta);

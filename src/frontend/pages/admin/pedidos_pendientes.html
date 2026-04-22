@@ -46,6 +46,10 @@
         font-weight: 800;
         color: #111827;
       }
+      .madre-correo-inactiva {
+        color: #b91c1c;
+        font-weight: 800;
+      }
       .correo-edit-wrap {
         display: inline-flex;
         align-items: center;
@@ -238,6 +242,13 @@
         border: 1px solid #d1d5db;
         border-radius: 8px;
         box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+      }
+      @media (max-width: 768px) {
+        .madre-options {
+          width: min(420px, calc(100vw - 16px)) !important;
+          max-width: calc(100vw - 16px) !important;
+          max-height: min(70vh, calc(100vh - 24px)) !important;
+        }
       }
       .madre-options.hidden {
         display: none;
@@ -1045,11 +1056,14 @@
                 const usesMother = payload.cuenta_madre && !!group.cuenta_info;
                 const madreLinkRaw = String(madre.link || "").trim();
                 const madreLinkHref = toExternalHref(madreLinkRaw);
+                const madreCorreoClass = isTrue(madre?.inactiva)
+                  ? "copyable madre-correo-inactiva"
+                  : "copyable";
                 const madreBlock = usesMother
                   ? `
                     <div class="madre-bar">
                       ${madre.region ? `<p class="madre-region">${madre.region}</p>` : ""}
-                      <p><strong>Cuenta madre:</strong> <span class="copyable" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
+                      <p><strong>Cuenta madre:</strong> <span class="${madreCorreoClass}" data-clipboard="${madre.correo || ""}">${madre.correo || "-"}</span></p>
                       <p><strong>Clave:</strong> <span class="copyable" data-clipboard="${madre.clave || ""}">${madre.clave || "-"}</span></p>
                       <p>
                         <strong>Link:</strong>
@@ -1243,7 +1257,7 @@
             const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, reporte_admin, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, reporte_admin, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, inactiva, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -1366,6 +1380,7 @@
                       id_cuenta: v.id_cuenta || "",
                       correo: v.cuentas?.correo || "",
                       clave: v.cuentas?.clave || "",
+                      inactiva: v.cuentas?.inactiva === true,
                       link: v.cuentas?.link_codigo || "",
                       direccion: v.cuentas?.direccion || "",
                       region: v.cuentas?.region || "",
@@ -2206,6 +2221,7 @@
           el.classList.add("hidden");
           el.style.removeProperty("top");
           el.style.removeProperty("left");
+          el.style.removeProperty("transform");
           el.style.removeProperty("width");
           el.style.removeProperty("max-height");
         });
@@ -2217,6 +2233,17 @@
         const vw = window.innerWidth || document.documentElement.clientWidth || 0;
         const vh = window.innerHeight || document.documentElement.clientHeight || 0;
         const pad = 8;
+        const isPhone = vw <= 768;
+        if (isPhone) {
+          const panelWidth = Math.max(260, Math.min(420, vw - pad * 2));
+          const maxHeight = Math.max(180, Math.min(Math.round(vh * 0.7), vh - pad * 2));
+          listEl.style.width = `${panelWidth}px`;
+          listEl.style.maxHeight = `${maxHeight}px`;
+          listEl.style.left = "50%";
+          listEl.style.top = "50%";
+          listEl.style.transform = "translate(-50%, -50%)";
+          return;
+        }
         const desiredWidth = Math.max(300, Math.min(420, Number(rect.width || 0) + 260));
         const panelWidth = Math.max(240, Math.min(desiredWidth, vw - pad * 2));
         let left = Math.round(rect.right - panelWidth);
@@ -2232,6 +2259,7 @@
         listEl.style.maxHeight = `${maxHeight}px`;
         listEl.style.left = `${left}px`;
         listEl.style.top = `${top}px`;
+        listEl.style.transform = "none";
       };
 
       const fetchMadresDisponibles = async (idPlataforma, currentMadreId = null) => {
