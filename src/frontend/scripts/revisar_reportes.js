@@ -2379,8 +2379,7 @@ async function reemplazarServicio(options = {}) {
       .eq("id_venta", ventaId)
       .maybeSingle();
     if (ventaEstadoErr) throw ventaEstadoErr;
-    const mantenerReporteAbiertoPlat9 =
-      Number(plataformaId) === 9 && ventaEstadoRow?.pendiente !== false;
+    const mantenerReporteAbiertoPlat9 = Number(plataformaId) === 9;
 
     let diasSumados = 0;
     if (!mantenerReporteAbiertoPlat9) {
@@ -2394,7 +2393,12 @@ async function reemplazarServicio(options = {}) {
     } else {
       const { error: keepReportadoErr } = await supabase
         .from("ventas")
-        .update({ reportado: true })
+        .update({
+          pendiente: true,
+          reportado: true,
+          aviso_admin: false,
+          entrega_aviso: false,
+        })
         .eq("id_venta", ventaId);
       if (keepReportadoErr) throw keepReportadoErr;
     }
@@ -2468,7 +2472,7 @@ async function reemplazarServicio(options = {}) {
       }
       rerenderActivosDesdeMap();
 
-      notify("Reemplazo realizado. El reporte seguirá abierto hasta que pendiente sea false.");
+      notify("Reemplazo realizado. El reporte queda abierto y solo un admin puede cerrarlo manualmente.");
       if (shouldCloseModal) closeModal();
       return { ok: true, kept_open: true };
     }
