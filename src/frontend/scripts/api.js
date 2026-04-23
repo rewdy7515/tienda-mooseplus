@@ -2242,20 +2242,23 @@ export async function notifyReporteIncorrectDataWhatsapp(
 
 export async function notifyVentaAdminReportWhatsapp(
   idVenta,
-  { correo = false, clave = false, imagen = "" } = {},
+  { correo = false, clave = false, imagen = "", modo = "datos_incorrectos" } = {},
 ) {
   await ensureServerSession();
   const ventaId = Number(idVenta);
   if (!Number.isFinite(ventaId) || ventaId <= 0) {
     return { error: "id_venta invalido" };
   }
+  const mode = String(modo || "datos_incorrectos").trim().toLowerCase();
+  const modeValue = mode === "problemas_correo" ? "problemas_correo" : "datos_incorrectos";
   const payload = {
     id_venta: ventaId,
     correo: correo === true,
     clave: clave === true,
     imagen: String(imagen || "").trim(),
+    modo: modeValue,
   };
-  if (!payload.correo && !payload.clave) {
+  if (modeValue === "datos_incorrectos" && !payload.correo && !payload.clave) {
     return { error: "Debe seleccionar al menos Correo o Contraseña." };
   }
   try {

@@ -2147,6 +2147,17 @@ Datos erroneos:
 ${bodyBullets}${resetClaveMsg}${updateSection}`;
 };
 
+const buildWhatsappVentaProblemasCorreoMessage = ({ idVenta = null, updateDataUrl = "" } = {}) => {
+  const updateUrl = String(updateDataUrl || "").trim() || buildWhatsappUpdateDataUrl({ idVenta });
+  const fallbackUrl =
+    "https://www.mooseplus.com/src/frontend/pages/entregar_servicios.html?id_venta=5074&modificar_datos=1";
+  return `El correo enviado no está permitiendo agregar la suscripción de Spotify.
+Por favor envienos un nuevo correo a traves de:
+${updateUrl || fallbackUrl}
+
+Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta anterior.`;
+};
+
 const buildWhatsappOrderDetailUrl = (idOrden = null) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) return "";
@@ -3051,13 +3062,18 @@ const sendVentaAdminReportToWhatsappOwner = async ({
   incluirCorreo = false,
   incluirClave = false,
   imagen = "",
+  modo = "datos_incorrectos",
   manageWhatsappLifecycle = true,
 } = {}) => {
   const ventaId = toPositiveInt(idVenta);
   if (!ventaId) {
     return { sent: false, skipped: true, reason: "invalid_sale" };
   }
-  if (incluirCorreo !== true && incluirClave !== true) {
+  const reportMode =
+    String(modo || "datos_incorrectos").trim().toLowerCase() === "problemas_correo"
+      ? "problemas_correo"
+      : "datos_incorrectos";
+  if (reportMode === "datos_incorrectos" && incluirCorreo !== true && incluirClave !== true) {
     return {
       sent: false,
       skipped: true,
@@ -3106,15 +3122,22 @@ const sendVentaAdminReportToWhatsappOwner = async ({
     toPositiveInt(ventaRow?.cuenta_miembro?.id_plataforma) ||
     null;
   const isSpotify = platformId === 9;
+  const updateDataUrl = buildWhatsappUpdateDataUrl({ idVenta: ventaId });
 
-  const message = buildWhatsappVentaReporteAdminMessage({
-    idVenta: ventaId,
-    incluirCorreo,
-    incluirClave,
-    imagen,
-    incluirResetClaveSpotify: isSpotify,
-    updateDataUrl: buildWhatsappUpdateDataUrl({ idVenta: ventaId }),
-  });
+  const message =
+    reportMode === "problemas_correo"
+      ? buildWhatsappVentaProblemasCorreoMessage({
+          idVenta: ventaId,
+          updateDataUrl,
+        })
+      : buildWhatsappVentaReporteAdminMessage({
+          idVenta: ventaId,
+          incluirCorreo,
+          incluirClave,
+          imagen,
+          incluirResetClaveSpotify: isSpotify,
+          updateDataUrl,
+        });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
   if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
@@ -3177,6 +3200,7 @@ const sendVentaAdminReportToWhatsappOwner = async ({
     sent: true,
     skipped: false,
     reason: null,
+    modo: reportMode,
     id_venta: ventaId,
     id_usuario_destino: targetUserId,
     phone: targetPhone,
@@ -8673,7 +8697,13 @@ app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
     }
     const incluirCorreo = isTrue(req.body?.correo ?? req.body?.incluirCorreo);
     const incluirClave = isTrue(req.body?.clave ?? req.body?.incluirClave);
-    if (!incluirCorreo && !incluirClave) {
+    const reportMode =
+      String(req.body?.modo ?? req.body?.mode ?? "datos_incorrectos")
+        .trim()
+        .toLowerCase() === "problemas_correo"
+        ? "problemas_correo"
+        : "datos_incorrectos";
+    if (reportMode === "datos_incorrectos" && !incluirCorreo && !incluirClave) {
       return res.status(400).json({ error: "Debe seleccionar Correo o Contraseña." });
     }
     const imagen = String(req.body?.imagen || "").trim();
@@ -8683,6 +8713,7 @@ app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
       incluirCorreo,
       incluirClave,
       imagen,
+      modo: reportMode,
       manageWhatsappLifecycle: true,
     });
     if (result?.sent) {
@@ -8730,12 +8761,14 @@ app.post("/api/whatsapp/ventas/notificar-reporte-admin", async (req, res) => {
       }
 
       try {
+        const notifCorreo = reportMode === "problemas_correo" ? true : incluirCorreo;
+        const notifClave = reportMode === "problemas_correo" ? false : incluirClave;
         await createWebNotificationForIncorrectData({
           idUsuario: result?.id_usuario_destino || markVentaRows?.id_usuario,
           idCuenta: markVentaRows?.id_cuenta_miembro || markVentaRows?.id_cuenta,
-          titulo: "Reporte de Admin.",
-          incluirCorreo,
-          incluirClave,
+          titulo: reportMode === "problemas_correo" ? "Problemas con correo" : "Reporte de Admin.",
+          incluirCorreo: notifCorreo,
+          incluirClave: notifClave,
           idVenta: ventaId,
         });
       } catch (notifErr) {
@@ -11668,9 +11701,6 @@ const processOrderFromItems = async ({
       Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
     const ventaAnt = ventaMap[it.id_venta] || {};
     const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
-    const entregaInmediataRenov = isTrue(platformInfo?.entrega_inmediata);
-    const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
-    if (renovarPendiente) renovacionesPendientesCount += 1;
     const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
     const isCuentaCompletaRenov =
       isCuentaCompletaByFlags(cuentaVenta) ||
@@ -11688,7 +11718,7 @@ const processOrderFromItems = async ({
       recordatorio_enviado: false,
       recordatorio_corte_enviado: false,
       aviso_admin: false,
-      pendiente: renovarPendiente,
+      pendiente: false,
       suspendido: false,
     };
     if (isSuspendidaAnt) {
@@ -12384,9 +12414,6 @@ const processOrderFromItems = async ({
           : 1;
       const ventaAnt = implicitVentaMap[ventaId] || {};
       const isSuspendidaAnt = isTrue(ventaAnt?.suspendido);
-      const entregaInmediataRenov = isTrue(platformInfo?.entrega_inmediata);
-      const renovarPendiente = isSuspendidaAnt && entregaInmediataRenov;
-      if (renovarPendiente) implicitRenovacionesPendientesCount += 1;
       const cuentaVenta = ventaAnt?.cuenta_principal || ventaAnt?.cuenta_miembro || null;
       const isCuentaCompletaRenov =
         isCuentaCompletaByFlags(cuentaVenta) ||
@@ -12404,7 +12431,7 @@ const processOrderFromItems = async ({
         recordatorio_enviado: false,
         recordatorio_corte_enviado: false,
         aviso_admin: false,
-        pendiente: renovarPendiente,
+        pendiente: false,
         suspendido: false,
       };
       if (isSuspendidaAnt) {
@@ -12948,24 +12975,6 @@ const resolveUsuarioFromAuthToken = async (token) => {
     return Array.isArray(data) ? data : [];
   };
 
-  const { data: byAuthRows, error: byAuthErr } = await supabaseAdmin
-    .from("usuarios")
-    .select("id_usuario, correo, id_auth, nombre, apellido, telefono, fecha_registro")
-    .eq("id_auth", authUserId)
-    .limit(2);
-  if (byAuthErr) throw byAuthErr;
-  if (Array.isArray(byAuthRows) && byAuthRows.length > 1) {
-    throw asCodeError("USER_AUTH_DUPLICATED");
-  }
-  if (Array.isArray(byAuthRows) && byAuthRows.length === 1) {
-    const idUsuarioByAuth = Number(byAuthRows[0]?.id_usuario);
-    if (Number.isFinite(idUsuarioByAuth) && idUsuarioByAuth > 0) {
-      const patch = buildUsuarioPatch(byAuthRows[0], { forceProfile: false });
-      await updateUsuarioPatch(idUsuarioByAuth, patch);
-      return idUsuarioByAuth;
-    }
-  }
-
   if (signupRegistrationToken) {
     let tokenPayload = null;
     try {
@@ -12997,6 +13006,24 @@ const resolveUsuarioFromAuthToken = async (token) => {
     const patch = buildUsuarioPatch(targetRow, { forceProfile: true });
     await updateUsuarioPatch(idUsuarioToken, patch);
     return idUsuarioToken;
+  }
+
+  const { data: byAuthRows, error: byAuthErr } = await supabaseAdmin
+    .from("usuarios")
+    .select("id_usuario, correo, id_auth, nombre, apellido, telefono, fecha_registro")
+    .eq("id_auth", authUserId)
+    .limit(2);
+  if (byAuthErr) throw byAuthErr;
+  if (Array.isArray(byAuthRows) && byAuthRows.length > 1) {
+    throw asCodeError("USER_AUTH_DUPLICATED");
+  }
+  if (Array.isArray(byAuthRows) && byAuthRows.length === 1) {
+    const idUsuarioByAuth = Number(byAuthRows[0]?.id_usuario);
+    if (Number.isFinite(idUsuarioByAuth) && idUsuarioByAuth > 0) {
+      const patch = buildUsuarioPatch(byAuthRows[0], { forceProfile: false });
+      await updateUsuarioPatch(idUsuarioByAuth, patch);
+      return idUsuarioByAuth;
+    }
   }
 
   const rows = await fetchUsuariosByCorreo(authEmail);

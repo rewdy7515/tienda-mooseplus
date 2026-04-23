@@ -229,6 +229,19 @@
         padding: 6px 8px;
         font-weight: 700;
       }
+      .pp-select-wrap {
+        display: inline-flex;
+        align-items: center;
+        margin-left: 8px;
+      }
+      .pp-sale-select {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+      }
+      .pp-selected-row {
+        background: #f0f9ff;
+      }
       .madre-options {
         position: fixed;
         top: 0;
@@ -283,6 +296,7 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
+        text-align: right;
       }
       .admin-reporte-subtitle {
         margin: 0;
@@ -290,10 +304,34 @@
         font-weight: 800;
         color: #111827;
       }
+      .admin-reporte-modes {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .admin-reporte-mode-btn {
+        min-width: 160px;
+      }
+      .admin-reporte-mode-btn.is-active {
+        background: #111827;
+        color: #fff;
+        border-color: #111827;
+      }
+      .admin-reporte-checks-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+      }
+      .admin-reporte-checks-wrap.hidden {
+        display: none;
+      }
       .admin-reporte-checks {
         display: flex;
         flex-direction: column;
         gap: 8px;
+        align-items: flex-end;
       }
       .admin-reporte-mensaje-preview {
         margin: 0;
@@ -306,12 +344,14 @@
         line-height: 1.4;
         white-space: pre-wrap;
         word-break: break-word;
+        text-align: right;
       }
       .admin-reporte-preview {
         min-height: 30px;
         margin: 0;
         font-size: 13px;
         color: #6b7280;
+        text-align: right;
       }
     </style>
   </head>
@@ -378,10 +418,17 @@
             <input type="file" id="admin-reporte-imagen" class="form-input" accept="image/*" />
             <p id="admin-reporte-imagen-preview" class="admin-reporte-preview">Sin imagen seleccionada.</p>
           </div>
-          <p class="admin-reporte-subtitle">Datos erroneos</p>
-          <div class="admin-reporte-checks">
-            <label><input type="checkbox" id="admin-reporte-check-correo" /> Correo</label>
-            <label><input type="checkbox" id="admin-reporte-check-clave" /> Contraseña</label>
+          <p class="admin-reporte-subtitle">Tipo de reporte</p>
+          <div class="admin-reporte-modes">
+            <button type="button" id="admin-reporte-mode-datos" class="btn-outline admin-reporte-mode-btn is-active" aria-pressed="true">Datos incorrectos</button>
+            <button type="button" id="admin-reporte-mode-correo" class="btn-outline admin-reporte-mode-btn" aria-pressed="false">Problemas con correo</button>
+          </div>
+          <div id="admin-reporte-checks-wrap" class="admin-reporte-checks-wrap">
+            <p class="admin-reporte-subtitle">Datos erroneos</p>
+            <div class="admin-reporte-checks">
+              <label><input type="checkbox" id="admin-reporte-check-correo" /> Correo</label>
+              <label><input type="checkbox" id="admin-reporte-check-clave" /> Contraseña</label>
+            </div>
           </div>
           <p class="admin-reporte-subtitle">Mensaje que recibirá el cliente</p>
           <pre id="admin-reporte-mensaje-preview" class="admin-reporte-mensaje-preview"></pre>
@@ -430,23 +477,29 @@
       const modalAdminReporteCloseBtn = document.querySelector("#modal-admin-reporte-close");
       const adminReporteImagenInput = document.querySelector("#admin-reporte-imagen");
       const adminReporteImagenPreview = document.querySelector("#admin-reporte-imagen-preview");
+      const adminReporteModeDatosBtn = document.querySelector("#admin-reporte-mode-datos");
+      const adminReporteModeCorreoBtn = document.querySelector("#admin-reporte-mode-correo");
+      const adminReporteChecksWrap = document.querySelector("#admin-reporte-checks-wrap");
       const adminReporteCheckCorreo = document.querySelector("#admin-reporte-check-correo");
       const adminReporteCheckClave = document.querySelector("#admin-reporte-check-clave");
       const adminReporteMensajePreview = document.querySelector("#admin-reporte-mensaje-preview");
       const btnEnviarAdminReporte = document.querySelector("#btn-enviar-admin-reporte");
+      const ADMIN_REPORT_MODE_DATOS = "datos_incorrectos";
+      const ADMIN_REPORT_MODE_PROBLEMAS_CORREO = "problemas_correo";
 
       let currentUser = null;
       let pendingEntregaBtn = null;
+      let pendingEntregaBtns = [];
       let proveedorSeleccionadoId = null;
       let proveedoresSugeridos = [];
       let proveedorFetchCounter = 0;
       let reemplazosCache = null;
       let reemplazosCachePromise = null;
+      const selectedVentaIds = new Set();
       let adminReportVentaContext = {
-        idVenta: null,
-        idUsuario: null,
-        idPlataforma: null,
+        targets: [],
       };
+      let adminReportMode = ADMIN_REPORT_MODE_DATOS;
       const MADRE_DEBUG = true;
       const logMadreDebug = (...args) => {
         if (!MADRE_DEBUG) return;
@@ -480,6 +533,35 @@
         if (!Number.isFinite(parsed) || parsed <= 0) return null;
         return Math.trunc(parsed);
       };
+      const getSelectedVentaIds = () => Array.from(selectedVentaIds.values());
+      const syncSelectedVentaIdsWithDOM = () => {
+        if (!tablasEl) return;
+        const visibleIds = new Set();
+        tablasEl.querySelectorAll(".pp-sale-select").forEach((checkbox) => {
+          const ventaId = toPositiveId(checkbox?.dataset?.venta);
+          if (!ventaId) return;
+          visibleIds.add(ventaId);
+          const checked = selectedVentaIds.has(ventaId);
+          checkbox.checked = checked;
+          const row = checkbox.closest("tr");
+          if (row) row.classList.toggle("pp-selected-row", checked);
+        });
+        Array.from(selectedVentaIds).forEach((ventaId) => {
+          if (!visibleIds.has(ventaId)) selectedVentaIds.delete(ventaId);
+        });
+      };
+      const collectActionTargets = (selector, fallbackBtn = null) => {
+        const selectedIds = getSelectedVentaIds();
+        if (!selectedIds.length) return fallbackBtn ? [fallbackBtn] : [];
+        const targets = selectedIds
+          .map((ventaId) =>
+            tablasEl?.querySelector(`.pp-sale-select[data-venta="${ventaId}"]`)?.closest("tr") || null,
+          )
+          .map((row) => row?.querySelector(selector) || null)
+          .filter((btn) => btn && !btn.disabled);
+        if (targets.length) return targets;
+        return fallbackBtn ? [fallbackBtn] : [];
+      };
       const normalizeCredentialValue = (value) => {
         const raw = String(value || "").trim();
         if (!raw) return "";
@@ -501,7 +583,22 @@
         return targetUrl.toString();
       };
       const buildAdminReportPreviewMessage = () => {
-        const ventaId = toPositiveId(adminReportVentaContext?.idVenta) || "-";
+        const targets = Array.isArray(adminReportVentaContext?.targets)
+          ? adminReportVentaContext.targets
+          : [];
+        const firstTarget = targets[0] || null;
+        const ventaId = toPositiveId(firstTarget?.idVenta) || "-";
+        const totalVentas = targets.length;
+        const updateUrl = buildEntregarServiciosModificarDatosUrl(ventaId);
+        if (adminReportMode === ADMIN_REPORT_MODE_PROBLEMAS_CORREO) {
+          const fallbackUrl =
+            "https://www.mooseplus.com/src/frontend/pages/entregar_servicios.html?id_venta=5074&modificar_datos=1";
+          return `El correo enviado no está permitiendo agregar la suscripción de Spotify.
+Por favor envienos un nuevo correo a traves de:
+${updateUrl || fallbackUrl}
+
+Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta anterior.`;
+        }
         const correoMarcado = adminReporteCheckCorreo?.checked === true;
         const claveMarcada = adminReporteCheckClave?.checked === true;
         const hasImage = Boolean((adminReporteImagenInput?.files || [])[0]);
@@ -512,23 +609,42 @@
         if (correoMarcado) bullets.push("* Correo");
         if (claveMarcada) bullets.push("* Contraseña");
         const bodyBullets = bullets.length ? bullets.join("\n") : "* -";
-        const isSpotify = Number(adminReportVentaContext?.idPlataforma) === 9;
+        const isSingleSpotify = totalVentas === 1 && Number(firstTarget?.idPlataforma) === 9;
         const resetClaveMsg =
-          claveMarcada && isSpotify
+          claveMarcada && isSingleSpotify
             ? "\n\nPuedes restablecer tu contraseña de Spotify a través de este link:\nhttps://accounts.spotify.com/es/password-reset"
             : "";
-        const updateUrl = buildEntregarServiciosModificarDatosUrl(ventaId);
-        const updateSection = updateUrl
-          ? `\n\nDespues de restablecer los datos actualizalos por la pagina:\n${updateUrl}`
+        const updateUrlSingle = totalVentas === 1 ? updateUrl : "";
+        const updateSection = updateUrlSingle
+          ? `\n\nDespues de restablecer los datos actualizalos por la pagina:\n${updateUrlSingle}`
           : "";
         const imageSection = hasImage ? "[Imagen adjunta]\n" : "";
-        return `${imageSection}Reporte de Admin.\n\`Venta #${ventaId}\`\nRespuesta:\nDatos erroneos:\n${bodyBullets}${resetClaveMsg}${updateSection}`;
+        const targetLine =
+          totalVentas > 1
+            ? `\`${totalVentas} ventas seleccionadas\``
+            : `\`Venta #${ventaId}\``;
+        return `${imageSection}Reporte de Admin.\n${targetLine}\nRespuesta:\nDatos erroneos:\n${bodyBullets}${resetClaveMsg}${updateSection}`;
+      };
+      const setAdminReportMode = (nextMode) => {
+        const mode =
+          nextMode === ADMIN_REPORT_MODE_PROBLEMAS_CORREO
+            ? ADMIN_REPORT_MODE_PROBLEMAS_CORREO
+            : ADMIN_REPORT_MODE_DATOS;
+        adminReportMode = mode;
+        const isDatos = mode === ADMIN_REPORT_MODE_DATOS;
+        adminReporteModeDatosBtn?.classList.toggle("is-active", isDatos);
+        adminReporteModeCorreoBtn?.classList.toggle("is-active", !isDatos);
+        adminReporteModeDatosBtn?.setAttribute("aria-pressed", isDatos ? "true" : "false");
+        adminReporteModeCorreoBtn?.setAttribute("aria-pressed", isDatos ? "false" : "true");
+        adminReporteChecksWrap?.classList.toggle("hidden", !isDatos);
+        updateAdminReportMessagePreview();
       };
       const updateAdminReportMessagePreview = () => {
         if (!adminReporteMensajePreview) return;
         adminReporteMensajePreview.textContent = buildAdminReportPreviewMessage();
       };
       const resetAdminReportModalState = () => {
+        setAdminReportMode(ADMIN_REPORT_MODE_DATOS);
         if (adminReporteImagenInput) adminReporteImagenInput.value = "";
         if (adminReporteImagenPreview) adminReporteImagenPreview.textContent = "Sin imagen seleccionada.";
         if (adminReporteCheckCorreo) adminReporteCheckCorreo.checked = false;
@@ -538,20 +654,23 @@
       const closeAdminReportModal = () => {
         modalAdminReporteEl?.classList.add("hidden");
         document.body.classList.remove("modal-open");
-        adminReportVentaContext = { idVenta: null, idUsuario: null, idPlataforma: null };
+        adminReportVentaContext = { targets: [] };
         resetAdminReportModalState();
       };
-      const openAdminReportModal = (btn = null) => {
-        const ventaId = toPositiveId(btn?.dataset?.venta);
-        if (!ventaId) {
+      const openAdminReportModal = (btn = null, targetButtons = []) => {
+        const rawTargets = targetButtons?.length ? targetButtons : btn ? [btn] : [];
+        const targets = rawTargets
+          .map((targetBtn) => ({
+            idVenta: toPositiveId(targetBtn?.dataset?.venta),
+            idUsuario: toPositiveId(targetBtn?.dataset?.usuario),
+            idPlataforma: toPositiveId(targetBtn?.dataset?.idPlataforma),
+          }))
+          .filter((target) => target.idVenta);
+        if (!targets.length) {
           alert("No se pudo identificar la venta.");
           return;
         }
-        adminReportVentaContext = {
-          idVenta: ventaId,
-          idUsuario: toPositiveId(btn?.dataset?.usuario),
-          idPlataforma: toPositiveId(btn?.dataset?.idPlataforma),
-        };
+        adminReportVentaContext = { targets };
         resetAdminReportModalState();
         modalAdminReporteEl?.classList.remove("hidden");
         document.body.classList.add("modal-open");
@@ -973,8 +1092,13 @@
         return isTrue(btn.dataset.precioCompleta);
       };
 
-      const openModalActivacion = (btn) => {
+      const openModalActivacion = (btn, targets = []) => {
         pendingEntregaBtn = btn || null;
+        pendingEntregaBtns = Array.isArray(targets) && targets.length
+          ? targets.filter(Boolean)
+          : pendingEntregaBtn
+            ? [pendingEntregaBtn]
+            : [];
         proveedorSeleccionadoId = null;
         proveedoresSugeridos = [];
         setModalStatus("");
@@ -1001,6 +1125,7 @@
         modalActivarEl?.classList.add("hidden");
         document.body.classList.remove("modal-open");
         pendingEntregaBtn = null;
+        pendingEntregaBtns = [];
         proveedorSeleccionadoId = null;
         setModalStatus("");
         renderProvSuggestions([], true);
@@ -1127,8 +1252,13 @@
                           ? `<span class="pedido-asignado">Asignado a: ${escapeHtml(getPedidoAsignadoLabel(r))}</span>`
                           : `<button class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
                       }
+                      <span class="pp-select-wrap" title="Seleccionar venta">
+                        <input type="checkbox" class="pp-sale-select" aria-label="Seleccionar venta #${r.id_venta}" data-venta="${r.id_venta}" ${
+                          selectedVentaIds.has(toPositiveId(r.id_venta)) ? "checked" : ""
+                        } />
+                      </span>
                       <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-pendiente="${r.pendiente ? "true" : "false"}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
-                      <button class="btn-outline btn-alert" title="${datosIncorrectosBloqueado ? "Ya reportado" : "Datos incorrectos"}" aria-label="${datosIncorrectosBloqueado ? "Datos incorrectos bloqueado" : "Datos incorrectos"}" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}" ${datosIncorrectosBloqueado ? "disabled" : ""}>Datos incorrectos</button>
+                      <button class="btn-outline btn-alert" title="${datosIncorrectosBloqueado ? "Ya reportado" : "Reporte admin"}" aria-label="${datosIncorrectosBloqueado ? "Reporte admin bloqueado" : "Reporte admin"}" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}" ${datosIncorrectosBloqueado ? "disabled" : ""}>Reporte admin</button>
                       ${
                         r.cuenta_madre
                           ? `<span class="madre-switch-wrap" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">
@@ -1209,6 +1339,7 @@
         if (!entries.length) {
           setStatus("No hay pedidos pendientes.");
           tablasEl.innerHTML = "";
+          selectedVentaIds.clear();
           return;
         }
         setStatus("");
@@ -1244,6 +1375,7 @@
         const sectionCompletas = renderSection("Cuentas completas", groupedCompletas);
         const sectionIndividuales = renderSection("Cuentas individuales", groupedIndividuales);
         tablasEl.innerHTML = [sectionCompletas, sectionIndividuales].filter(Boolean).join("");
+        syncSelectedVentaIdsWithDOM();
       };
 
       const loadPendientes = async () => {
@@ -1937,8 +2069,59 @@
         copyBtn.dataset.copy = encodeURIComponent(copyText);
         btn.parentElement?.appendChild(status);
         btn.parentElement?.appendChild(copyBtn);
+        const ventaIdNum = toPositiveId(idVenta);
+        if (ventaIdNum) {
+          selectedVentaIds.delete(ventaIdNum);
+          const row = btn.closest("tr");
+          if (row) row.classList.remove("pp-selected-row");
+        }
         btn.remove();
       };
+
+      const entregarVentasEnLote = async (targets, activationData = null) => {
+        const queue = (targets || []).filter(Boolean);
+        if (!queue.length) return;
+        const errors = [];
+        for (const actionBtn of queue) {
+          try {
+            await handleEntregarServicio(actionBtn, activationData);
+          } catch (err) {
+            errors.push({
+              idVenta: toPositiveId(actionBtn?.dataset?.venta) || "-",
+              message: err?.message || "Error desconocido",
+            });
+          }
+        }
+        if (queue.length > 1) {
+          await loadPendientes();
+        }
+        if (errors.length) {
+          const successCount = queue.length - errors.length;
+          const resume = errors
+            .slice(0, 3)
+            .map((item) => `#${item.idVenta}: ${item.message}`)
+            .join("\n");
+          if (successCount > 0) {
+            alert(`Se entregaron ${successCount} venta(s), pero ${errors.length} fallaron.\n${resume}`);
+          } else {
+            alert(`No se pudieron entregar las ventas seleccionadas.\n${resume}`);
+          }
+        }
+      };
+
+      tablasEl?.addEventListener("change", (e) => {
+        const checkbox = e.target.closest(".pp-sale-select");
+        if (!checkbox) return;
+        const ventaId = toPositiveId(checkbox.dataset.venta);
+        if (!ventaId) return;
+        if (checkbox.checked) {
+          selectedVentaIds.add(ventaId);
+        } else {
+          selectedVentaIds.delete(ventaId);
+        }
+        const row = checkbox.closest("tr");
+        if (row) row.classList.toggle("pp-selected-row", checkbox.checked);
+      });
 
       tablasEl?.addEventListener("click", async (e) => {
         const editLinkMadreBtn = e.target.closest(".btn-edit-link-madre");
@@ -2200,17 +2383,28 @@
         const alertBtn = e.target.closest(".btn-alert");
         if (alertBtn) {
           if (alertBtn.disabled) return;
-          openAdminReportModal(alertBtn);
+          const alertTargets = collectActionTargets(".btn-alert", alertBtn);
+          if (!alertTargets.length) {
+            alert("No hay ventas seleccionadas para reportar.");
+            return;
+          }
+          openAdminReportModal(alertBtn, alertTargets);
           return;
         }
         const btn = e.target.closest(".btn-entregar");
         if (!btn) return;
         try {
-          if (requiereModalActivacion(btn)) {
-            openModalActivacion(btn);
+          const targets = collectActionTargets(".btn-entregar", btn);
+          const needsModal = targets.some((targetBtn) => requiereModalActivacion(targetBtn));
+          if (needsModal) {
+            openModalActivacion(btn, targets);
             return;
           }
-          await handleEntregarServicio(btn);
+          if (targets.length > 1) {
+            await entregarVentasEnLote(targets);
+          } else {
+            await handleEntregarServicio(btn);
+          }
         } catch (err) {
           console.error("entregar servicio error", err);
           alert(err?.message || "No se pudo entregar el servicio.");
@@ -2585,17 +2779,27 @@
         }
         updateAdminReportMessagePreview();
       });
+      adminReporteModeDatosBtn?.addEventListener("click", () => {
+        setAdminReportMode(ADMIN_REPORT_MODE_DATOS);
+      });
+      adminReporteModeCorreoBtn?.addEventListener("click", () => {
+        setAdminReportMode(ADMIN_REPORT_MODE_PROBLEMAS_CORREO);
+      });
       adminReporteCheckCorreo?.addEventListener("change", updateAdminReportMessagePreview);
       adminReporteCheckClave?.addEventListener("change", updateAdminReportMessagePreview);
       btnEnviarAdminReporte?.addEventListener("click", async () => {
-        const ventaId = toPositiveId(adminReportVentaContext?.idVenta);
-        if (!ventaId) {
-          alert("No se pudo identificar la venta.");
+        const targets = (Array.isArray(adminReportVentaContext?.targets)
+          ? adminReportVentaContext.targets
+        : []
+        ).filter((target) => toPositiveId(target?.idVenta));
+        if (!targets.length) {
+          alert("No se pudo identificar las ventas.");
           return;
         }
-        const incluirCorreo = adminReporteCheckCorreo?.checked === true;
-        const incluirClave = adminReporteCheckClave?.checked === true;
-        if (!incluirCorreo && !incluirClave) {
+        const isDatosMode = adminReportMode === ADMIN_REPORT_MODE_DATOS;
+        const incluirCorreo = isDatosMode ? adminReporteCheckCorreo?.checked === true : false;
+        const incluirClave = isDatosMode ? adminReporteCheckClave?.checked === true : false;
+        if (isDatosMode && !incluirCorreo && !incluirClave) {
           alert("Selecciona al menos Correo o Contraseña.");
           return;
         }
@@ -2603,27 +2807,49 @@
         if (btn) btn.disabled = true;
         try {
           let imageUrl = "";
-          const imageFile = (adminReporteImagenInput?.files || [])[0] || null;
-          if (imageFile) {
+          const imageFile = isDatosMode ? (adminReporteImagenInput?.files || [])[0] || null : null;
+          if (isDatosMode && imageFile) {
             const fallbackUserId = toPositiveId(currentUser?.id_usuario) || 0;
-            const imageOwnerId = toPositiveId(adminReportVentaContext?.idUsuario) || fallbackUserId;
+            const imageOwnerId = toPositiveId(targets[0]?.idUsuario) || fallbackUserId;
             imageUrl = await uploadAdminReportImage(imageFile, imageOwnerId);
           }
-          const waRes = await notifyVentaAdminReportWhatsapp(ventaId, {
-            correo: incluirCorreo,
-            clave: incluirClave,
-            imagen: imageUrl,
-          });
-          if (waRes?.error) {
-            alert(waRes.error || "No se pudo enviar el mensaje.");
+          let sentCount = 0;
+          const failed = [];
+          for (const target of targets) {
+            const ventaId = toPositiveId(target?.idVenta);
+            if (!ventaId) continue;
+            const waRes = await notifyVentaAdminReportWhatsapp(ventaId, {
+              correo: incluirCorreo,
+              clave: incluirClave,
+              imagen: imageUrl,
+              modo: adminReportMode,
+            });
+            if (waRes?.error || (waRes?.ok === false && waRes?.sent !== true)) {
+              failed.push({
+                idVenta: ventaId,
+                reason: waRes?.error || "No se pudo enviar el mensaje.",
+              });
+              continue;
+            }
+            selectedVentaIds.delete(ventaId);
+            sentCount += 1;
+          }
+          if (!sentCount) {
+            const reason = failed[0]?.reason || "No se pudo enviar el mensaje.";
+            alert(reason);
             return;
           }
-          if (waRes?.ok === false && waRes?.sent !== true) {
-            alert("No se pudo enviar el mensaje.");
-            return;
+          if (failed.length) {
+            const resume = failed
+              .slice(0, 3)
+              .map((item) => `#${item.idVenta}: ${item.reason}`)
+              .join("\n");
+            alert(`Se enviaron ${sentCount} mensaje(s), pero ${failed.length} fallaron.\n${resume}`);
+          } else {
+            alert(`Mensaje enviado al cliente (${sentCount} venta(s)).`);
           }
-          alert("Mensaje enviado al cliente.");
           closeAdminReportModal();
+          await loadPendientes();
         } catch (err) {
           console.error("enviar reporte admin whatsapp error", err);
           alert("No se pudo enviar el mensaje.");
@@ -2672,8 +2898,13 @@
         hideProvSuggestions();
       });
       modalActivarEntregarBtn?.addEventListener("click", async () => {
-        const btn = pendingEntregaBtn;
-        if (!btn) {
+        const targets =
+          Array.isArray(pendingEntregaBtns) && pendingEntregaBtns.length
+            ? pendingEntregaBtns.filter(Boolean)
+            : pendingEntregaBtn
+              ? [pendingEntregaBtn]
+              : [];
+        if (!targets.length) {
           closeModalActivacion();
           return;
         }
@@ -2707,7 +2938,11 @@
         const payload = { costo: costoVal, idProveedor: provId };
         closeModalActivacion();
         try {
-          await handleEntregarServicio(btn, payload);
+          if (targets.length > 1) {
+            await entregarVentasEnLote(targets, payload);
+          } else {
+            await handleEntregarServicio(targets[0], payload);
+          }
         } catch (err) {
           console.error("entregar servicio con activacion error", err);
           alert(err?.message || "No se pudo entregar el servicio.");

@@ -1272,9 +1272,16 @@
           if (updVentaErr) throw updVentaErr;
         }
 
-        const targetCuentaId = toPositiveId(
-          venta?.id_cuenta_miembro || venta?.cuentas_miembro?.id_cuenta || venta?.cuentas?.id_cuenta,
+        const targetCuentaMiembroId = toPositiveId(
+          venta?.id_cuenta_miembro || venta?.cuentas_miembro?.id_cuenta,
         );
+        const targetCuentaPrincipalId = toPositiveId(venta?.id_cuenta || venta?.cuentas?.id_cuenta);
+        const memberContext =
+          !!targetCuentaMiembroId ||
+          isTrue(venta?.cuentas?.venta_miembro) ||
+          !!toPositiveId(venta?.cuentas_miembro?.id_cuenta_madre);
+        // Regla de seguridad: si la venta es de miembro, nunca tocar credenciales de cuenta madre.
+        const targetCuentaId = memberContext ? targetCuentaMiembroId : targetCuentaPrincipalId;
         const cuentaPayload = {};
         if (correoChanged) cuentaPayload.correo = normalizeCorreo(correo);
         if (claveChanged) cuentaPayload.clave = String(clave || "").trim();
@@ -1522,7 +1529,7 @@
             if (!target) return null;
             const { data: exactRows, error: exactErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, id_cuenta_madre, id_plataforma, clave, correo")
+              .select("id_cuenta, id_cuenta_madre, id_plataforma, clave, correo, cuenta_madre")
               .eq("correo", target)
               .order("id_cuenta", { ascending: true })
               .limit(1);
@@ -1530,7 +1537,7 @@
             if (exactRows?.[0]?.id_cuenta) return exactRows[0];
             const { data: ilikeRows, error: ilikeErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, id_cuenta_madre, id_plataforma, clave, correo")
+              .select("id_cuenta, id_cuenta_madre, id_plataforma, clave, correo, cuenta_madre")
               .ilike("correo", target)
               .order("id_cuenta", { ascending: true })
               .limit(20);
@@ -1664,7 +1671,14 @@
             if (linkErr) throw linkErr;
           }
 
-          if (needsClave && cuentaExist?.id_cuenta && claveVal && claveVal !== (cuentaExist.clave || "")) {
+          const cuentaExistEsMadre = isTrue(cuentaExist?.cuenta_madre);
+          if (
+            needsClave &&
+            cuentaExist?.id_cuenta &&
+            claveVal &&
+            claveVal !== (cuentaExist.clave || "") &&
+            (!needsMadre || !cuentaExistEsMadre)
+          ) {
             const { error: claveErr } = await supabase
               .from("cuentas")
               .update({ clave: claveVal })
