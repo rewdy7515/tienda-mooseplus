@@ -445,6 +445,7 @@
         loadCurrentUser,
         clearServerSession,
         entregarGiftCardPendiente,
+        notificarSpotifyProveedorPendientes,
         notifyVentaDeliveredWhatsapp,
         notifyReporteSolvedWhatsapp,
         notifyVentaAdminReportWhatsapp,
@@ -927,6 +928,38 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
             reason: "exception",
             error: message,
           };
+        }
+      };
+      const notifySpotifyProveedorBestEffort = async (ventaIds = [], source = "pedidos_pendientes") => {
+        const ids = Array.from(
+          new Set(
+            (Array.isArray(ventaIds) ? ventaIds : [])
+              .map((value) => toPositiveId(value))
+              .filter((value) => value > 0),
+          ),
+        );
+        if (!ids.length) return { ok: false, skipped: true, reason: "no_sale_ids" };
+        try {
+          const result = await notificarSpotifyProveedorPendientes({
+            ventaIds: ids,
+            source,
+          });
+          if (result?.error) {
+            console.warn("[pedidos_pendientes] spotify proveedor notify skipped/error", {
+              venta_ids: ids,
+              error: result.error,
+              status: result.status || null,
+            });
+            return { ok: false, skipped: true, reason: "request_error", error: result.error };
+          }
+          return { ok: true, skipped: false, result };
+        } catch (err) {
+          const message = err?.message || String(err);
+          console.error("[pedidos_pendientes] spotify proveedor notify exception", {
+            venta_ids: ids,
+            error: message,
+          });
+          return { ok: false, skipped: false, reason: "exception", error: message };
         }
       };
       const notifyReporteSolvedWhatsappBestEffort = async (idReporte) => {
@@ -1622,7 +1655,7 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           btn.parentElement?.appendChild(pinBadge);
           btn.parentElement?.appendChild(copyBtn);
           btn.remove();
-          return;
+          return null;
         }
         const { data: reemplazosBloqueados, error: replErr } = await loadReemplazosBloqueados();
         if (replErr) throw replErr;
@@ -2076,21 +2109,31 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           if (row) row.classList.remove("pp-selected-row");
         }
         btn.remove();
+        return ventaIdNum || null;
       };
 
       const entregarVentasEnLote = async (targets, activationData = null) => {
         const queue = (targets || []).filter(Boolean);
         if (!queue.length) return;
         const errors = [];
+        const deliveredVentaIds = [];
         for (const actionBtn of queue) {
           try {
-            await handleEntregarServicio(actionBtn, activationData);
+            const deliveredId = await handleEntregarServicio(actionBtn, activationData);
+            const deliveredVentaId = toPositiveId(deliveredId);
+            if (deliveredVentaId) deliveredVentaIds.push(deliveredVentaId);
           } catch (err) {
             errors.push({
               idVenta: toPositiveId(actionBtn?.dataset?.venta) || "-",
               message: err?.message || "Error desconocido",
             });
           }
+        }
+        if (deliveredVentaIds.length) {
+          await notifySpotifyProveedorBestEffort(
+            deliveredVentaIds,
+            queue.length > 1 ? "pedidos_pendientes_batch_deliver" : "pedidos_pendientes_single_deliver",
+          );
         }
         if (queue.length > 1) {
           await loadPendientes();
@@ -2403,7 +2446,13 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           if (targets.length > 1) {
             await entregarVentasEnLote(targets);
           } else {
-            await handleEntregarServicio(btn);
+            const deliveredId = await handleEntregarServicio(btn);
+            if (toPositiveId(deliveredId)) {
+              await notifySpotifyProveedorBestEffort(
+                [deliveredId],
+                "pedidos_pendientes_single_deliver",
+              );
+            }
           }
         } catch (err) {
           console.error("entregar servicio error", err);
@@ -2941,7 +2990,13 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           if (targets.length > 1) {
             await entregarVentasEnLote(targets, payload);
           } else {
-            await handleEntregarServicio(targets[0], payload);
+            const deliveredId = await handleEntregarServicio(targets[0], payload);
+            if (toPositiveId(deliveredId)) {
+              await notifySpotifyProveedorBestEffort(
+                [deliveredId],
+                "pedidos_pendientes_single_deliver_activation",
+              );
+            }
           }
         } catch (err) {
           console.error("entregar servicio con activacion error", err);

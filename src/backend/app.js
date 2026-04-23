@@ -2511,6 +2511,60 @@ const notifySpotifyProviderPendingSales = async ({
   };
 };
 
+const maybeAutoNotifySpotifyProviderForOrder = async ({
+  idOrden = null,
+  providerId = 11,
+  manageWhatsappLifecycle = true,
+  source = "spotify_provider_pending_auto_single",
+} = {}) => {
+  const resolvedOrderId = toPositiveInt(idOrden);
+  if (!resolvedOrderId) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "invalid_order_id",
+      id_orden: null,
+    };
+  }
+
+  const { rows, missingMensajeProveedorColumn } = await fetchSpotifyProviderPendingSales({
+    idOrden: resolvedOrderId,
+  });
+  if (missingMensajeProveedorColumn) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "mensaje_proveedor_column_missing",
+      id_orden: resolvedOrderId,
+    };
+  }
+  if (!rows.length) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "no_pending_sales_with_credentials",
+      id_orden: resolvedOrderId,
+    };
+  }
+  if (rows.length > 1) {
+    return {
+      sent: false,
+      skipped: true,
+      reason: "multiple_pending_sales_waiting_grouped_send",
+      id_orden: resolvedOrderId,
+      venta_ids: uniqPositiveIds(rows.map((row) => row?.id_venta)),
+      total_pendientes: rows.length,
+    };
+  }
+
+  return notifySpotifyProviderPendingSales({
+    idOrden: resolvedOrderId,
+    providerId,
+    manageWhatsappLifecycle,
+    source,
+  });
+};
+
 const buildWhatsappVentaEntregadaMessage = ({
   idVenta = null,
   idOrden = null,
@@ -6857,90 +6911,237 @@ const autoProcessMatchedOrder = async (match = {}) => {
     return { processed: false, reason: "id_orden_invalido" };
   }
 
-  const { data: orden, error: ordErr } = await supabaseAdmin
-    .from("ordenes")
-    .select(
-      "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada",
-    )
-    .eq("id_orden", idOrden)
-    .maybeSingle();
-  if (ordErr) throw ordErr;
-  if (!orden?.id_orden) {
-    return { processed: false, reason: "orden_no_encontrada", id_orden: idOrden };
-  }
-  if (isTrue(orden?.orden_cancelada)) {
-    return { processed: false, reason: "orden_cancelada", id_orden: idOrden };
-  }
-  if (Number(orden?.id_metodo_de_pago) !== 1) {
-    return { processed: false, reason: "metodo_no_pagomovil", id_orden: idOrden };
-  }
-
-  const idUsuarioVentas = toPositiveInt(match?.id_usuario) || toPositiveInt(orden?.id_usuario);
-  if (!idUsuarioVentas) {
-    return { processed: false, reason: "id_usuario_invalido", id_orden: idOrden };
-  }
-
-  const syncPagoMovilCredito = async () => {
-    try {
-      await markPagoMovilRowAsCredited({
-        pagoId: match?.pago_id,
-        idUsuario: idUsuarioVentas,
-        referenciaMatch: match?.referencia_match,
-      });
-      return { ok: true, error: null };
-    } catch (err) {
-      const errorMsg = err?.message || String(err);
-      console.error("[autoProcessMatchedOrder] pagomoviles sync error", {
-        id_orden: idOrden,
-        pago_id: toPositiveInt(match?.pago_id) || null,
-        id_usuario: idUsuarioVentas,
-        error: errorMsg,
-      });
-      return { ok: false, error: errorMsg };
-    }
-  };
-
-  const { data: ventasExist, error: ventasErr } = await supabaseAdmin
-    .from("ventas")
-    .select("id_venta, pendiente")
-    .eq("id_orden", idOrden);
-  if (ventasErr) throw ventasErr;
-
-  if ((ventasExist || []).length) {
-    const pendientesCount = (ventasExist || []).filter((row) => isTrue(row?.pendiente)).length;
-    let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
-    let saldoReconciliacionError = null;
-    const saldoEsperadoOrden = await resolveSaldoAplicadoForOrderVerification({ orden });
-    const ordenUpdate = {
-      pago_verificado: true,
-      en_espera: pendientesCount > 0,
+  const orderProcessLock = acquireOrderProcessLock(idOrden, {
+    source: "auto_process_matched_order",
+  });
+  if (!orderProcessLock?.acquired) {
+    return {
+      processed: false,
+      reason: "orden_en_proceso",
+      id_orden: idOrden,
+      lock: orderProcessLock?.lock || null,
     };
-    if (!(toFiniteMoney(orden?.saldo_aplicado_usd) > 0) && saldoEsperadoOrden > 0) {
+  }
+
+  try {
+    const { data: orden, error: ordErr } = await supabaseAdmin
+      .from("ordenes")
+      .select(
+        "id_orden, id_usuario, id_carrito, referencia, comprobante, id_metodo_de_pago, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada",
+      )
+      .eq("id_orden", idOrden)
+      .maybeSingle();
+    if (ordErr) throw ordErr;
+    if (!orden?.id_orden) {
+      return { processed: false, reason: "orden_no_encontrada", id_orden: idOrden };
+    }
+    if (isTrue(orden?.orden_cancelada)) {
+      return { processed: false, reason: "orden_cancelada", id_orden: idOrden };
+    }
+    if (Number(orden?.id_metodo_de_pago) !== 1) {
+      return { processed: false, reason: "metodo_no_pagomovil", id_orden: idOrden };
+    }
+
+    const idUsuarioVentas = toPositiveInt(match?.id_usuario) || toPositiveInt(orden?.id_usuario);
+    if (!idUsuarioVentas) {
+      return { processed: false, reason: "id_usuario_invalido", id_orden: idOrden };
+    }
+
+    const syncPagoMovilCredito = async () => {
       try {
-        const saldoDebitRes = await debitSaldoUsdFromUser({
+        await markPagoMovilRowAsCredited({
+          pagoId: match?.pago_id,
           idUsuario: idUsuarioVentas,
-          montoUsd: saldoEsperadoOrden,
-          source: "auto_process_order:already_processed",
+          referenciaMatch: match?.referencia_match,
         });
-        saldoReconciliado = {
-          debitado: !!saldoDebitRes?.debitado,
-          monto: Number(saldoDebitRes?.monto) || 0,
-          saldoNuevo: saldoDebitRes?.saldoNuevo ?? null,
-        };
-        ordenUpdate.saldo_aplicado_usd = saldoEsperadoOrden;
-      } catch (saldoErr) {
-        saldoReconciliacionError = saldoErr?.message || "saldo_reconciliation_failed";
-        console.error("[autoProcessMatchedOrder] saldo reconciliation error", {
+        return { ok: true, error: null };
+      } catch (err) {
+        const errorMsg = err?.message || String(err);
+        console.error("[autoProcessMatchedOrder] pagomoviles sync error", {
           id_orden: idOrden,
+          pago_id: toPositiveInt(match?.pago_id) || null,
           id_usuario: idUsuarioVentas,
-          expected_saldo_usd: saldoEsperadoOrden,
-          error: saldoReconciliacionError,
+          error: errorMsg,
+        });
+        return { ok: false, error: errorMsg };
+      }
+    };
+
+    const { data: ventasExist, error: ventasErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta, pendiente")
+      .eq("id_orden", idOrden);
+    if (ventasErr) throw ventasErr;
+
+    if ((ventasExist || []).length) {
+      const pendientesCount = (ventasExist || []).filter((row) => isTrue(row?.pendiente)).length;
+      let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
+      let saldoReconciliacionError = null;
+      const saldoEsperadoOrden = await resolveSaldoAplicadoForOrderVerification({ orden });
+      const ordenUpdate = {
+        pago_verificado: true,
+        en_espera: pendientesCount > 0,
+      };
+      if (!(toFiniteMoney(orden?.saldo_aplicado_usd) > 0) && saldoEsperadoOrden > 0) {
+        try {
+          const saldoDebitRes = await debitSaldoUsdFromUser({
+            idUsuario: idUsuarioVentas,
+            montoUsd: saldoEsperadoOrden,
+            source: "auto_process_order:already_processed",
+          });
+          saldoReconciliado = {
+            debitado: !!saldoDebitRes?.debitado,
+            monto: Number(saldoDebitRes?.monto) || 0,
+            saldoNuevo: saldoDebitRes?.saldoNuevo ?? null,
+          };
+          ordenUpdate.saldo_aplicado_usd = saldoEsperadoOrden;
+        } catch (saldoErr) {
+          saldoReconciliacionError = saldoErr?.message || "saldo_reconciliation_failed";
+          console.error("[autoProcessMatchedOrder] saldo reconciliation error", {
+            id_orden: idOrden,
+            id_usuario: idUsuarioVentas,
+            expected_saldo_usd: saldoEsperadoOrden,
+            error: saldoReconciliacionError,
+          });
+        }
+      }
+      const { error: updOrdErr } = await supabaseAdmin
+        .from("ordenes")
+        .update(ordenUpdate)
+        .eq("id_orden", idOrden);
+      if (updOrdErr) throw updOrdErr;
+      try {
+        const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
+          idOrden,
+          manageWhatsappLifecycle: true,
+        });
+        if (!waDeliveredRes?.sent) {
+          console.log("[autoProcessMatchedOrder] whatsapp orden entregada post-verificacion skipped", {
+            id_orden: idOrden,
+            reason: waDeliveredRes?.reason || "unknown",
+            error: waDeliveredRes?.error || null,
+          });
+        }
+      } catch (waDeliveredErr) {
+        console.error("[autoProcessMatchedOrder] whatsapp orden entregada post-verificacion error", {
+          id_orden: idOrden,
+          error: waDeliveredErr?.message || waDeliveredErr,
         });
       }
+      const pagoSync = await syncPagoMovilCredito();
+      return {
+        processed: true,
+        reason: "orden_ya_procesada",
+        id_orden: idOrden,
+        ventas: ventasExist.length,
+        pendientes: pendientesCount,
+        pago_sync_ok: pagoSync.ok,
+        pago_sync_error: pagoSync.error,
+        saldo_debitado: saldoReconciliado.debitado,
+        saldo_debitado_usd: saldoReconciliado.monto,
+        saldo_usuario_nuevo: saldoReconciliado.saldoNuevo,
+        saldo_debitado_error: saldoReconciliacionError,
+      };
     }
+
+    if (isTrue(orden?.pago_verificado)) {
+      const pagoSync = await syncPagoMovilCredito();
+      return {
+        processed: false,
+        reason: "orden_ya_verificada",
+        id_orden: idOrden,
+        pago_sync_ok: pagoSync.ok,
+        pago_sync_error: pagoSync.error,
+      };
+    }
+
+    const completeNoItemsOrder = async ({ montoAuto = 0, motivo = "sin_items" } = {}) => {
+      const saldoInfo = await creditSaldoUsdToUser({
+        idUsuario: idUsuarioVentas,
+        montoUsd: montoAuto,
+      });
+      const { error: updOrdErr } = await supabaseAdmin
+        .from("ordenes")
+        .update({
+          pago_verificado: true,
+          en_espera: false,
+        })
+        .eq("id_orden", idOrden);
+      if (updOrdErr) throw updOrdErr;
+      const pagoSync = await syncPagoMovilCredito();
+
+      return {
+        processed: true,
+        reason: motivo,
+        id_orden: idOrden,
+        ventas: 0,
+        pendientes: 0,
+        saldo_acreditado: saldoInfo.acreditado,
+        excedente_acreditado: saldoInfo.monto,
+        saldo_nuevo: saldoInfo.saldoNuevo,
+        pago_sync_ok: pagoSync.ok,
+        pago_sync_error: pagoSync.error,
+      };
+    };
+
+    if (!toPositiveInt(orden?.id_carrito)) {
+      return completeNoItemsOrder({
+        montoAuto: Number(orden?.total) || 0,
+        motivo: "orden_sin_carrito",
+      });
+    }
+
+    const context = await buildCheckoutContext({
+      idUsuarioVentas,
+      carritoId: orden.id_carrito,
+      totalCliente: orden.total,
+    });
+    const orderTotalProcesado = parseOptionalCheckoutNumber(orden?.total);
+    const montoBaseCobrado = Number.isFinite(orderTotalProcesado)
+      ? roundCheckoutMoney(orderTotalProcesado)
+      : await resolveMontoBaseCarrito({
+          carritoId: orden.id_carrito,
+          fallbackTotal: context.total,
+        });
+
+    if (!context.items?.length) {
+      return completeNoItemsOrder({
+        montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
+        motivo: "carrito_sin_items",
+      });
+    }
+
+    const archivos = normalizeFilesArray(orden?.comprobante);
+    const result = await processOrderFromItems({
+      ordenId: idOrden,
+      idUsuarioSesion: idUsuarioVentas,
+      idUsuarioVentas,
+      items: context.items,
+      priceMap: context.priceMap,
+      platInfoById: context.platInfoById,
+      platNameById: context.platNameById,
+      pickPrecio: context.pickPrecio,
+      descuentos: context.descuentos,
+      discountColumns: context.discountColumns,
+      discountColumnById: context.discountColumnById,
+      isCliente: context.isCliente,
+      referencia: orden?.referencia,
+      archivos,
+      id_metodo_de_pago: orden?.id_metodo_de_pago,
+      carritoId: orden.id_carrito,
+      montoHistorialTotalOverride: montoBaseCobrado,
+      snapshotTotalUsd: orden?.total ?? context?.total ?? null,
+      snapshotMontoBsTotal: orden?.monto_bs ?? null,
+      snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
+      saldoAplicadoExpectedUsd: await resolveSaldoAplicadoForOrderVerification({ orden }),
+    });
+
     const { error: updOrdErr } = await supabaseAdmin
       .from("ordenes")
-      .update(ordenUpdate)
+      .update({
+        pago_verificado: true,
+        en_espera: result.pendientesCount > 0,
+      })
       .eq("id_orden", idOrden);
     if (updOrdErr) throw updOrdErr;
     try {
@@ -6949,163 +7150,32 @@ const autoProcessMatchedOrder = async (match = {}) => {
         manageWhatsappLifecycle: true,
       });
       if (!waDeliveredRes?.sent) {
-        console.log("[autoProcessMatchedOrder] whatsapp orden entregada post-verificacion skipped", {
+        console.log("[autoProcessMatchedOrder] whatsapp orden entregada post-procesado skipped", {
           id_orden: idOrden,
           reason: waDeliveredRes?.reason || "unknown",
           error: waDeliveredRes?.error || null,
         });
       }
     } catch (waDeliveredErr) {
-      console.error("[autoProcessMatchedOrder] whatsapp orden entregada post-verificacion error", {
+      console.error("[autoProcessMatchedOrder] whatsapp orden entregada post-procesado error", {
         id_orden: idOrden,
         error: waDeliveredErr?.message || waDeliveredErr,
       });
     }
     const pagoSync = await syncPagoMovilCredito();
-    return {
-      processed: true,
-      reason: "orden_ya_procesada",
-      id_orden: idOrden,
-      ventas: ventasExist.length,
-      pendientes: pendientesCount,
-      pago_sync_ok: pagoSync.ok,
-      pago_sync_error: pagoSync.error,
-      saldo_debitado: saldoReconciliado.debitado,
-      saldo_debitado_usd: saldoReconciliado.monto,
-      saldo_usuario_nuevo: saldoReconciliado.saldoNuevo,
-      saldo_debitado_error: saldoReconciliacionError,
-    };
-  }
-
-  if (isTrue(orden?.pago_verificado)) {
-    const pagoSync = await syncPagoMovilCredito();
-    return {
-      processed: false,
-      reason: "orden_ya_verificada",
-      id_orden: idOrden,
-      pago_sync_ok: pagoSync.ok,
-      pago_sync_error: pagoSync.error,
-    };
-  }
-
-  const completeNoItemsOrder = async ({ montoAuto = 0, motivo = "sin_items" } = {}) => {
-    const saldoInfo = await creditSaldoUsdToUser({
-      idUsuario: idUsuarioVentas,
-      montoUsd: montoAuto,
-    });
-    const { error: updOrdErr } = await supabaseAdmin
-      .from("ordenes")
-      .update({
-        pago_verificado: true,
-        en_espera: false,
-      })
-      .eq("id_orden", idOrden);
-    if (updOrdErr) throw updOrdErr;
-    const pagoSync = await syncPagoMovilCredito();
 
     return {
       processed: true,
-      reason: motivo,
+      reason: "orden_procesada",
       id_orden: idOrden,
-      ventas: 0,
-      pendientes: 0,
-      saldo_acreditado: saldoInfo.acreditado,
-      excedente_acreditado: saldoInfo.monto,
-      saldo_nuevo: saldoInfo.saldoNuevo,
+      ventas: result.ventasCount,
+      pendientes: result.pendientesCount,
       pago_sync_ok: pagoSync.ok,
       pago_sync_error: pagoSync.error,
     };
-  };
-
-  if (!toPositiveInt(orden?.id_carrito)) {
-    return completeNoItemsOrder({
-      montoAuto: Number(orden?.total) || 0,
-      motivo: "orden_sin_carrito",
-    });
+  } finally {
+    releaseOrderProcessLock(idOrden);
   }
-
-  const context = await buildCheckoutContext({
-    idUsuarioVentas,
-    carritoId: orden.id_carrito,
-    totalCliente: orden.total,
-  });
-  const orderTotalProcesado = parseOptionalCheckoutNumber(orden?.total);
-  const montoBaseCobrado = Number.isFinite(orderTotalProcesado)
-    ? roundCheckoutMoney(orderTotalProcesado)
-    : await resolveMontoBaseCarrito({
-        carritoId: orden.id_carrito,
-        fallbackTotal: context.total,
-      });
-
-  if (!context.items?.length) {
-    return completeNoItemsOrder({
-      montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
-      motivo: "carrito_sin_items",
-    });
-  }
-
-  const archivos = normalizeFilesArray(orden?.comprobante);
-  const result = await processOrderFromItems({
-    ordenId: idOrden,
-    idUsuarioSesion: idUsuarioVentas,
-    idUsuarioVentas,
-    items: context.items,
-    priceMap: context.priceMap,
-    platInfoById: context.platInfoById,
-    platNameById: context.platNameById,
-    pickPrecio: context.pickPrecio,
-    descuentos: context.descuentos,
-    discountColumns: context.discountColumns,
-    discountColumnById: context.discountColumnById,
-    isCliente: context.isCliente,
-    referencia: orden?.referencia,
-    archivos,
-    id_metodo_de_pago: orden?.id_metodo_de_pago,
-    carritoId: orden.id_carrito,
-    montoHistorialTotalOverride: montoBaseCobrado,
-    snapshotTotalUsd: orden?.total ?? context?.total ?? null,
-    snapshotMontoBsTotal: orden?.monto_bs ?? null,
-    snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
-    saldoAplicadoExpectedUsd: await resolveSaldoAplicadoForOrderVerification({ orden }),
-  });
-
-  const { error: updOrdErr } = await supabaseAdmin
-    .from("ordenes")
-    .update({
-      pago_verificado: true,
-      en_espera: result.pendientesCount > 0,
-    })
-    .eq("id_orden", idOrden);
-  if (updOrdErr) throw updOrdErr;
-  try {
-    const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
-      idOrden,
-      manageWhatsappLifecycle: true,
-    });
-    if (!waDeliveredRes?.sent) {
-      console.log("[autoProcessMatchedOrder] whatsapp orden entregada post-procesado skipped", {
-        id_orden: idOrden,
-        reason: waDeliveredRes?.reason || "unknown",
-        error: waDeliveredRes?.error || null,
-      });
-    }
-  } catch (waDeliveredErr) {
-    console.error("[autoProcessMatchedOrder] whatsapp orden entregada post-procesado error", {
-      id_orden: idOrden,
-      error: waDeliveredErr?.message || waDeliveredErr,
-    });
-  }
-  const pagoSync = await syncPagoMovilCredito();
-
-  return {
-    processed: true,
-    reason: "orden_procesada",
-    id_orden: idOrden,
-    ventas: result.ventasCount,
-    pendientes: result.pendientesCount,
-    pago_sync_ok: pagoSync.ok,
-    pago_sync_error: pagoSync.error,
-  };
 };
 
 const autoMatchPagoMovilAgainstOrders = async (
@@ -12736,6 +12806,29 @@ const processOrderFromItems = async ({
         error: updUserErr?.message || updUserErr,
       });
     }
+  }
+
+  try {
+    const providerNotifyResult = await maybeAutoNotifySpotifyProviderForOrder({
+      idOrden: ordenId,
+      providerId: 11,
+      manageWhatsappLifecycle: true,
+      source: "process_order_auto_single",
+    });
+    if (!providerNotifyResult?.sent) {
+      console.log("[checkout] spotify proveedor notify auto", {
+        id_orden: toPositiveInt(ordenId) || null,
+        sent: false,
+        skipped: providerNotifyResult?.skipped === true,
+        reason: providerNotifyResult?.reason || null,
+        total_pendientes: providerNotifyResult?.total_pendientes ?? null,
+      });
+    }
+  } catch (providerNotifyErr) {
+    console.error("[checkout] spotify proveedor notify auto error", {
+      id_orden: toPositiveInt(ordenId) || null,
+      error: providerNotifyErr?.message || providerNotifyErr,
+    });
   }
 
   console.log("[checkout] processOrderFromItems end", {

@@ -45,6 +45,11 @@
         cursor: pointer;
         font-weight: 700;
       }
+      .prefill-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
       .toggle {
         position: relative;
         width: 50px;
@@ -92,9 +97,14 @@
     <main class="categorias-dinamicas">
       <h2>Agregar pines</h2>
       <div class="pines-wrapper">
-        <button id="btn-prefill-netflix" class="prefill-btn" type="button">
-          Netflix 15USD
-        </button>
+        <div class="prefill-row">
+          <button id="btn-prefill-netflix" class="prefill-btn" type="button">
+            Netflix 15USD
+          </button>
+          <button id="btn-prefill-apple-itunes" class="prefill-btn" type="button">
+            Apple itunes 10usd
+          </button>
+        </div>
         <div class="pines-field">
           <label for="select-proveedor">Proveedor</label>
           <select id="select-proveedor">
@@ -150,6 +160,7 @@
       const btnAgregar = document.getElementById("btn-agregar-pines");
       const inputCosto = document.getElementById("input-costo");
       const btnPrefillNetflix = document.getElementById("btn-prefill-netflix");
+      const btnPrefillAppleItunes = document.getElementById("btn-prefill-apple-itunes");
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
@@ -263,6 +274,25 @@
           selectValor.disabled = false;
         }
         setEstado("Prefijo Netflix 15USD seleccionado.");
+      });
+
+      btnPrefillAppleItunes?.addEventListener("click", async () => {
+        if (selectProveedor) selectProveedor.value = "12";
+        if (selectPlataforma) selectPlataforma.value = "15";
+        await cargarValores("15");
+        const opts = Array.from(selectValor?.options || []).filter((o) => o.value);
+        const opt10 = opts.find((o) => Number.parseFloat(String(o.value)) === 10);
+        if (opt10 && selectValor) {
+          selectValor.value = opt10.value;
+          selectValor.disabled = false;
+          setEstado("Prefijo Apple itunes 10usd seleccionado.");
+          return;
+        }
+        if (opts.length && selectValor) {
+          selectValor.value = opts[0].value;
+          selectValor.disabled = false;
+        }
+        setEstado("No se encontró valor 10USD para Apple iTunes. Se seleccionó el primer valor disponible.");
       });
 
       btnAgregar?.addEventListener("click", async () => {
