@@ -2395,8 +2395,8 @@ async function reemplazarServicio(options = {}) {
         .from("ventas")
         .update({
           pendiente: true,
-          reportado: true,
-          aviso_admin: false,
+          reportado: false,
+          aviso_admin: true,
           entrega_aviso: false,
         })
         .eq("id_venta", ventaId);
