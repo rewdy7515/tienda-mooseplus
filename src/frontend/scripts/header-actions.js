@@ -22,6 +22,7 @@ import { loadPaginaBranding } from "./branding.js";
 if (!window.__headerActionsInit) {
   window.__headerActionsInit = true;
   const HEADER_AVATAR_CACHE_PREFIX = "headerAvatarCache";
+  const CLIENT_VIEW_MODE_STORAGE_KEY = "indexClientViewMode";
   const pagesRoot = window.__headerPages || "";
   const basePagesUrl = (() => {
     try {
@@ -816,14 +817,30 @@ if (!window.__headerActionsInit) {
       const historialLink = document.querySelector(".historial-link");
       const reportesLink = document.querySelector(".reportes-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
-      const isSuper =
+      const isSuperRaw =
         isTrue(roles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
-      const isAdmin =
+      const isAdminRaw =
         isTrue(roles?.permiso_admin) ||
-        isSuper ||
+        isSuperRaw ||
         isTrue(user?.permiso_admin);
-      const isSuperHist =
-        isTrue(roles?.permiso_superadmin) || isTrue(user?.permiso_superadmin);
+      const currentPath = String(window.location.pathname || "").toLowerCase();
+      const isIndexLikePath =
+        currentPath === "/" ||
+        currentPath.endsWith("/index.html") ||
+        currentPath.endsWith("/src/frontend/pages/") ||
+        currentPath.endsWith("/src/frontend/pages/index.html");
+      const clientViewRequested = (() => {
+        if (!isIndexLikePath) return false;
+        try {
+          return sessionStorage.getItem(CLIENT_VIEW_MODE_STORAGE_KEY) === "1";
+        } catch (_err) {
+          return false;
+        }
+      })();
+      const forceClientView = isSuperRaw && clientViewRequested;
+      const isSuper = forceClientView ? false : isSuperRaw;
+      const isAdmin = forceClientView ? false : isAdminRaw;
+      const isSuperHist = isSuper;
 
       // Bloqueo de acceso a páginas admin si no tiene permisos
       const isAdminPath = window.location.pathname.includes("/pages/admin/");

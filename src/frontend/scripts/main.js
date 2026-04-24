@@ -80,6 +80,9 @@ const homeBannersDots = document.querySelector("#home-banners-dots");
 const whatsappHetznerToggleWrap = document.querySelector("#whatsapp-hetzner-toggle-wrap");
 const whatsappHetznerToggleInput = document.querySelector("#whatsapp-hetzner-toggle-input");
 const whatsappHetznerToggleStatus = document.querySelector("#whatsapp-hetzner-toggle-status");
+const clientViewToggleWrap = document.querySelector("#client-view-toggle-wrap");
+const clientViewToggleInput = document.querySelector("#client-view-toggle-input");
+const clientViewToggleStatus = document.querySelector("#client-view-toggle-status");
 const whatsappToggleConfirmModal = document.querySelector("#whatsapp-toggle-confirm-modal");
 const whatsappToggleConfirmMessageEl = document.querySelector("#whatsapp-toggle-confirm-message");
 const whatsappToggleConfirmYesBtn = document.querySelector("#whatsapp-toggle-confirm-yes");
@@ -106,6 +109,7 @@ const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 180;
 const MOBILE_PULL_REFRESH_THRESHOLD_PX = 160;
 const MOBILE_PULL_REFRESH_AXIS_LOCK_PX = 14;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
+const CLIENT_VIEW_MODE_STORAGE_KEY = "indexClientViewMode";
 const PAGE_LOADER_LOGO_FALLBACK = STATIC_HEADER_LOGO_HREF;
 const PUSH_PERMISSION_DISMISS_PREFIX = "pushPermissionPromptDismissed";
 const WHATSAPP_QR_WARNING_TITLE = "Bot sin sesion de whatsapp";
@@ -555,6 +559,63 @@ const initWhatsappHetznerToggle = async ({ isSuperadmin = false } = {}) => {
       whatsappHetznerToggleBusy = false;
       whatsappHetznerToggleInput.disabled = false;
     }
+  });
+};
+
+const isClientViewModeRequested = () => {
+  if (typeof window === "undefined" || !isIndexLikePath(window.location.pathname)) return false;
+  try {
+    return sessionStorage.getItem(CLIENT_VIEW_MODE_STORAGE_KEY) === "1";
+  } catch (_err) {
+    return false;
+  }
+};
+
+const setClientViewModeRequested = (enabled = false) => {
+  if (typeof window === "undefined") return;
+  try {
+    if (enabled) {
+      sessionStorage.setItem(CLIENT_VIEW_MODE_STORAGE_KEY, "1");
+    } else {
+      sessionStorage.removeItem(CLIENT_VIEW_MODE_STORAGE_KEY);
+    }
+  } catch (_err) {
+    // noop
+  }
+};
+
+const setClientViewToggleStatus = (message = "") => {
+  if (!clientViewToggleStatus) return;
+  clientViewToggleStatus.textContent = message;
+};
+
+const initClientViewToggle = ({ isSuperadmin = false, enabled = false } = {}) => {
+  if (!clientViewToggleWrap || !clientViewToggleInput) return;
+
+  if (!isSuperadmin) {
+    setClientViewModeRequested(false);
+    clientViewToggleWrap.classList.add("hidden");
+    clientViewToggleInput.checked = false;
+    clientViewToggleInput.disabled = true;
+    setClientViewToggleStatus("");
+    return;
+  }
+
+  clientViewToggleWrap.classList.remove("hidden");
+  clientViewToggleInput.disabled = false;
+  clientViewToggleInput.checked = enabled === true;
+  setClientViewToggleStatus(
+    enabled === true
+      ? "Activa: estás viendo index.html como cliente (sin permisos admin)."
+      : "Desactiva: estás viendo index.html con permisos reales de superadmin.",
+  );
+
+  if (clientViewToggleInput.dataset.bound === "1") return;
+  clientViewToggleInput.dataset.bound = "1";
+  clientViewToggleInput.addEventListener("change", () => {
+    const nextValue = clientViewToggleInput.checked === true;
+    setClientViewModeRequested(nextValue);
+    window.location.reload();
   });
 };
 
@@ -2520,10 +2581,36 @@ async function init() {
       console.error("avatar onboarding prompt error", err);
     });
     const sessionRoles = getSessionRoles();
-    maybePromptHomePushPermission({ currentUser, sessionRoles }).catch((err) => {
+    const actualIsSuper =
+      isTrue(sessionRoles?.permiso_superadmin) || isTrue(currentUser?.permiso_superadmin);
+    const actualIsAdmin =
+      isTrue(sessionRoles?.permiso_admin) ||
+      actualIsSuper ||
+      isTrue(currentUser?.permiso_admin);
+    const clientViewRequested = isClientViewModeRequested();
+    const clientViewActive = actualIsSuper && clientViewRequested;
+    initClientViewToggle({
+      isSuperadmin: actualIsSuper,
+      enabled: clientViewActive,
+    });
+    const effectiveAccesoCliente =
+      clientViewActive ||
+      isTrue(sessionRoles?.acceso_cliente) ||
+      isTrue(currentUser?.acceso_cliente);
+    const isAdmin = clientViewActive ? false : actualIsAdmin;
+    const isSuper = clientViewActive ? false : actualIsSuper;
+    maybePromptHomePushPermission({
+      currentUser,
+      sessionRoles: {
+        ...(sessionRoles || {}),
+        acceso_cliente: effectiveAccesoCliente,
+        permiso_admin: isAdmin,
+        permiso_superadmin: isSuper,
+      },
+    }).catch((err) => {
       console.error("home push permission prompt error", err);
     });
-    const canSeeRate = !!currentUser && isExplicitFalse(currentUser?.acceso_cliente);
+    const canSeeRate = !!currentUser && !effectiveAccesoCliente;
     if (tasaActualEl) {
       if (!canSeeRate) {
         stopTasaAutoRefresh();
@@ -2535,13 +2622,6 @@ async function init() {
         startTasaAutoRefresh();
       }
     }
-    const isAdmin =
-      isTrue(sessionRoles?.permiso_admin) ||
-      isTrue(sessionRoles?.permiso_superadmin) ||
-      isTrue(currentUser?.permiso_admin) ||
-      isTrue(currentUser?.permiso_superadmin);
-    const isSuper =
-      isTrue(sessionRoles?.permiso_superadmin) || isTrue(currentUser?.permiso_superadmin);
     if (isSuper) {
       const serverMarkup = await fetchP2PMarkup();
       if (Number.isFinite(serverMarkup)) {
@@ -2590,10 +2670,7 @@ async function init() {
       : [];
     renderHomeBanners(plataformasDisponibles, categorias, customHomeBanners);
     // Si no hay sesión, mostrar precios detal por defecto.
-    const esCliente =
-      !currentUser ||
-      isTrue(sessionRoles?.acceso_cliente) ||
-      isTrue(currentUser?.acceso_cliente);
+    const esCliente = !currentUser || effectiveAccesoCliente;
     setDiscountAudience(esCliente);
     const usarMayor = !esCliente;
     const preciosVisibles = (precios || [])

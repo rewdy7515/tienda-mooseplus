@@ -1156,7 +1156,7 @@
         try {
           const { data: cuentas, error: cErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, id_plataforma, correo, clave, fecha_corte")
+            .select("id_cuenta, id_plataforma, id_proveedor, correo, clave, fecha_corte")
             .in("correo", correos)
             .eq("id_plataforma", 9);
           if (cErr) throw cErr;
@@ -1176,6 +1176,7 @@
               return {
                 id_cuenta: c.id_cuenta,
                 id_plataforma: c.id_plataforma || 9,
+                id_proveedor: Number(c.id_proveedor) || null,
                 nextIso,
                 correo: c.correo || "",
                 clave: c.clave || "",
@@ -1210,10 +1211,13 @@
 
           let whatsappWarn = "";
           try {
+            const spotifyProv11Items = updates
+              .filter((u) => Number(u.id_proveedor) === 11)
+              .map((u) => ({ correo: u.correo, clave: u.clave }));
             const waResult = await sendSpotifyProviderRenewalWhatsapp(
-              updates.map((u) => ({ correo: u.correo, clave: u.clave })),
+              spotifyProv11Items,
             );
-            if (!waResult?.sent) {
+            if (spotifyProv11Items.length > 0 && !waResult?.sent) {
               whatsappWarn = " La renovación se registró, pero no se pudo enviar WhatsApp al proveedor.";
             }
           } catch (waErr) {

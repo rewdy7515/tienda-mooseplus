@@ -108,6 +108,20 @@
   border: 2px solid #fff;
 }
 
+.username-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-menu-caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid rgba(255, 255, 255, 0.92);
+}
+
 .user-dropdown {
   position: absolute;
   top: 110%;

@@ -306,6 +306,20 @@ main {
   font-weight: 700;
 }
 
+.username-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-menu-caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid rgba(255, 255, 255, 0.92);
+}
+
 .user-dropdown {
   position: absolute;
   top: 100%;
@@ -3277,6 +3291,92 @@ input[type="number"].input-inline {
 }
 
 .whatsapp-hetzner-toggle-status {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.client-view-toggle-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px 16px;
+}
+
+.client-view-toggle-wrap.hidden {
+  display: none;
+}
+
+.client-view-toggle {
+  width: min(100%, 720px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid #dbe5f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+}
+
+.client-view-toggle-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.client-view-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.client-view-toggle-slider {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background-color 0.2s ease;
+  flex: 0 0 auto;
+}
+
+.client-view-toggle-slider::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.client-view-toggle input:checked + .client-view-toggle-slider {
+  background: #22c55e;
+}
+
+.client-view-toggle input:checked + .client-view-toggle-slider::after {
+  transform: translateX(20px);
+}
+
+.client-view-toggle input:disabled + .client-view-toggle-slider {
+  opacity: 0.65;
+}
+
+.client-view-toggle-status {
   width: min(100%, 720px);
   margin: 0 auto;
   color: #0f172a;

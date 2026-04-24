@@ -22,6 +22,7 @@ import {
   setSessionRoles,
   attachLogoHome,
   setSessionUserId,
+  clearSession,
 } from "./session.js";
 
 requireSession();
@@ -396,6 +397,7 @@ const isRenewalAuthError = (value) => {
   if (!message) return false;
   return (
     message.includes("usuario no autenticado") ||
+    message.includes("no corresponde al usuario de la sesión actual") ||
     message.includes("sesión") ||
     message.includes("auth") ||
     message.includes("login")
@@ -409,6 +411,18 @@ const redirectToLoginWithRenewalToken = (token) => {
     loginUrl.searchParams.set("rr", value);
   }
   window.location.replace(loginUrl.toString());
+};
+
+const recoverRenewalLinkSessionConflict = async (token) => {
+  try {
+    await supabase.auth.signOut();
+  } catch (_err) {
+    // noop
+  }
+  clearSession();
+  clearCachedCart();
+  await clearServerSession();
+  redirectToLoginWithRenewalToken(token);
 };
 
 const confirmRemoveModal = () => {
@@ -1276,8 +1290,11 @@ async function init() {
       setStatus("Añadiendo renovaciones al carrito...");
       const applyResp = await applyRenewalReminderToken(renewalToken);
       if (applyResp?.error) {
-        if (isRenewalAuthError(applyResp.error)) {
-          redirectToLoginWithRenewalToken(renewalToken);
+        if (
+          applyResp?.code === "SESSION_USER_MISMATCH" ||
+          isRenewalAuthError(applyResp.error)
+        ) {
+          await recoverRenewalLinkSessionConflict(renewalToken);
           return;
         }
         keepStatusMessage = true;

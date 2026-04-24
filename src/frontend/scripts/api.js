@@ -1372,7 +1372,11 @@ export async function applyRenewalReminderToken(token) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { error: data?.error || "No se pudieron agregar las renovaciones al carrito." };
+      return {
+        error: data?.error || "No se pudieron agregar las renovaciones al carrito.",
+        status: Number(res.status) || 0,
+        code: String(data?.code || "").trim(),
+      };
     }
     return data;
   } catch (err) {

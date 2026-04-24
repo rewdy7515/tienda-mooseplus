@@ -412,6 +412,11 @@ const ORDER_PROCESS_LOCK_STALE_MS = Math.max(
   Number(process.env.ORDER_PROCESS_LOCK_STALE_MS) || 10 * 60 * 1000,
 );
 const orderProcessLocks = new Map();
+const ORDER_PROCESS_LOCK_OWNER = [
+  "backend",
+  process.pid,
+  Math.random().toString(36).slice(2, 10),
+].join("-");
 const acquireOrderProcessLock = (idOrden, meta = {}) => {
   const orderId = toPositiveInt(idOrden);
   if (!orderId) return { acquired: false, reason: "invalid_order" };
@@ -448,6 +453,92 @@ const releaseOrderProcessLock = (idOrden) => {
   const orderId = toPositiveInt(idOrden);
   if (!orderId) return;
   orderProcessLocks.delete(orderId);
+};
+const isMissingOrderProcessLockRpc = (err) => {
+  const msg = String(err?.message || "").toLowerCase();
+  const code = String(err?.code || "").toLowerCase();
+  return code === "pgrst202" || msg.includes("acquire_order_process_lock");
+};
+const acquireSharedOrderProcessLock = async (idOrden, meta = {}) => {
+  const localLock = acquireOrderProcessLock(idOrden, meta);
+  if (!localLock?.acquired) return localLock;
+  const orderId = toPositiveInt(idOrden);
+  const staleSeconds = Math.max(120, Math.floor(ORDER_PROCESS_LOCK_STALE_MS / 1000));
+  try {
+    const { data, error } = await supabaseAdmin.rpc("acquire_order_process_lock", {
+      p_order_id: orderId,
+      p_owner: ORDER_PROCESS_LOCK_OWNER,
+      p_stale_seconds: staleSeconds,
+    });
+    if (error) {
+      if (isMissingOrderProcessLockRpc(error)) {
+        console.warn("[ordenes/procesar] rpc lock no disponible; usando lock local", {
+          id_orden: orderId,
+          source: localLock?.lock?.source || null,
+          error: error?.message || String(error),
+        });
+        return {
+          ...localLock,
+          lock: {
+            ...(localLock.lock || {}),
+            owner: ORDER_PROCESS_LOCK_OWNER,
+            shared: false,
+            rpc_missing: true,
+          },
+        };
+      }
+      releaseOrderProcessLock(orderId);
+      return {
+        acquired: false,
+        reason: "db_lock_error",
+        error: error?.message || String(error),
+      };
+    }
+    if (data !== true) {
+      releaseOrderProcessLock(orderId);
+      return {
+        acquired: false,
+        reason: "already_processing_shared",
+      };
+    }
+    return {
+      ...localLock,
+      lock: {
+        ...(localLock.lock || {}),
+        owner: ORDER_PROCESS_LOCK_OWNER,
+        shared: true,
+      },
+    };
+  } catch (err) {
+    releaseOrderProcessLock(orderId);
+    return {
+      acquired: false,
+      reason: "db_lock_exception",
+      error: err?.message || String(err),
+    };
+  }
+};
+const releaseSharedOrderProcessLock = async (idOrden) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) return;
+  releaseOrderProcessLock(orderId);
+  try {
+    const { error } = await supabaseAdmin.rpc("release_order_process_lock", {
+      p_order_id: orderId,
+      p_owner: ORDER_PROCESS_LOCK_OWNER,
+    });
+    if (error && !isMissingOrderProcessLockRpc(error)) {
+      console.warn("[ordenes/procesar] release shared lock error", {
+        id_orden: orderId,
+        error: error?.message || String(error),
+      });
+    }
+  } catch (err) {
+    console.warn("[ordenes/procesar] release shared lock exception", {
+      id_orden: orderId,
+      error: err?.message || String(err),
+    });
+  }
 };
 let monthlyMetricsClosureSchedulerStarted = false;
 let monthlyMetricsClosureIntervalId = null;
@@ -6911,7 +7002,7 @@ const autoProcessMatchedOrder = async (match = {}) => {
     return { processed: false, reason: "id_orden_invalido" };
   }
 
-  const orderProcessLock = acquireOrderProcessLock(idOrden, {
+  const orderProcessLock = await acquireSharedOrderProcessLock(idOrden, {
     source: "auto_process_matched_order",
   });
   if (!orderProcessLock?.acquired) {
@@ -7174,7 +7265,7 @@ const autoProcessMatchedOrder = async (match = {}) => {
       pago_sync_error: pagoSync.error,
     };
   } finally {
-    releaseOrderProcessLock(idOrden);
+    await releaseSharedOrderProcessLock(idOrden);
   }
 };
 
@@ -9693,8 +9784,7 @@ const verifyRenewalCartToken = (tokenValue, options = {}) => {
 
 const buildRenewalCartUrl = ({ idUsuario, ventaIds = [] } = {}) => {
   const token = buildRenewalCartToken({ idUsuario, ventaIds });
-  const renewUrl = new URL("/cart.html", PUBLIC_SITE_URL);
-  renewUrl.searchParams.set("rr", token);
+  const renewUrl = new URL(`/r/${encodeURIComponent(token)}`, PUBLIC_SITE_URL);
   return renewUrl.toString();
 };
 
@@ -11762,10 +11852,10 @@ const processOrderFromItems = async ({
   }
 
   let renovacionesPendientesCount = 0;
-  const renovPromises = renovaciones.map((it) => {
+  const appliedRenovaciones = [];
+  for (const it of renovaciones) {
     const price = priceMap[it.id_precio] || {};
     const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
-    const platformInfo = platId ? platInfoById?.[platId] || {} : {};
     const monto = roundCheckoutMoney(Number(it?.monto) || 0);
     const mesesVal =
       Number.isFinite(Number(it.meses)) && Number(it.meses) > 0 ? Math.round(Number(it.meses)) : 1;
@@ -11801,15 +11891,21 @@ const processOrderFromItems = async ({
         updatePayload.cuenta_pagada_admin = false;
       }
     }
-    return supabaseAdmin
+    const { data: updatedRows, error: renovErr } = await supabaseAdmin
       .from("ventas")
       .update(updatePayload)
-      .eq("id_venta", it.id_venta);
-  });
-  if (renovPromises.length) {
-    const renovRes = await Promise.all(renovPromises);
-    const renovErr = renovRes.find((r) => r?.error);
-    if (renovErr?.error) throw renovErr.error;
+      .eq("id_venta", it.id_venta)
+      .or(`id_orden.is.null,id_orden.neq.${ordenId}`)
+      .select("id_venta");
+    if (renovErr) throw renovErr;
+    if ((updatedRows || []).length > 0) {
+      appliedRenovaciones.push(it);
+    } else {
+      console.warn("[checkout] renovacion omitida por idempotencia", {
+        ordenId,
+        id_venta: toPositiveInt(it?.id_venta) || null,
+      });
+    }
   }
   // Filtra items nuevos (no renovaciones) para asignación de stock
   const itemsNuevos = (items || []).filter((it) => !it.id_venta);
@@ -12514,11 +12610,20 @@ const processOrderFromItems = async ({
           updatePayload.cuenta_pagada_admin = false;
         }
       }
-      const { error: implicitUpdErr } = await supabaseAdmin
+      const { data: implicitUpdatedRows, error: implicitUpdErr } = await supabaseAdmin
         .from("ventas")
         .update(updatePayload)
-        .eq("id_venta", ventaId);
+        .eq("id_venta", ventaId)
+        .or(`id_orden.is.null,id_orden.neq.${ordenId}`)
+        .select("id_venta");
       if (implicitUpdErr) throw implicitUpdErr;
+      if ((implicitUpdatedRows || []).length === 0) {
+        console.warn("[checkout] renovacion implicita omitida por idempotencia", {
+          ordenId,
+          id_venta: ventaId,
+        });
+        continue;
+      }
 
       implicitRenewalHistRows.push({
         id_usuario_cliente: ventaAnt?.id_usuario || idUsuarioVentas,
@@ -12616,7 +12721,7 @@ const processOrderFromItems = async ({
     });
   });
   // Renovaciones
-  renovaciones.forEach((it) => {
+  appliedRenovaciones.forEach((it) => {
     const price = priceMap[it.id_precio] || {};
     const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
     const ventaAnt = ventaMap[it.id_venta] || {};
@@ -12685,13 +12790,48 @@ const processOrderFromItems = async ({
         });
       }
     }
-    const { error: histErr } = await supabaseAdmin.from("historial_ventas").insert(histRows);
+    const existingHistKeys = new Set();
+    const histVentaIds = uniqPositiveIds(histRows.map((row) => row?.id_venta));
+    if (toPositiveInt(ordenId) && histVentaIds.length) {
+      const { data: existingHistRows, error: existingHistErr } = await supabaseAdmin
+        .from("historial_ventas")
+        .select("id_venta, renovacion")
+        .eq("id_orden", ordenId)
+        .in("id_venta", histVentaIds);
+      if (existingHistErr) throw existingHistErr;
+      (existingHistRows || []).forEach((row) => {
+        const ventaId = toPositiveInt(row?.id_venta);
+        if (!ventaId) return;
+        const key = `${ventaId}:${isTrue(row?.renovacion) ? 1 : 0}`;
+        existingHistKeys.add(key);
+      });
+    }
+    const histRowsToInsert = histRows.filter((row) => {
+      const ventaId = toPositiveInt(row?.id_venta);
+      if (!ventaId) return true;
+      const key = `${ventaId}:${isTrue(row?.renovacion) ? 1 : 0}`;
+      return !existingHistKeys.has(key);
+    });
+    if (histRowsToInsert.length !== histRows.length) {
+      console.warn("[checkout] historial_ventas duplicados evitados", {
+        ordenId,
+        originales: histRows.length,
+        insertados: histRowsToInsert.length,
+        omitidos: histRows.length - histRowsToInsert.length,
+      });
+    }
+    if (!histRowsToInsert.length) {
+      histRows.length = 0;
+    }
+    const { error: histErr } = histRowsToInsert.length
+      ? await supabaseAdmin.from("historial_ventas").insert(histRowsToInsert)
+      : { error: null };
     if (histErr) {
       if (!isMissingHistorialGiftCardColumnError(histErr)) throw histErr;
       historialGiftCardLinkFallback = true;
       const { error: histFallbackErr } = await supabaseAdmin
         .from("historial_ventas")
-        .insert(stripHistorialGiftCardColumn(histRows));
+        .insert(stripHistorialGiftCardColumn(histRowsToInsert));
       if (histFallbackErr) throw histFallbackErr;
     }
 
@@ -14942,7 +15082,10 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
     const payload = verifyRenewalCartToken(token);
     const sessionUserId = await getSessionUsuario(req);
     if (Number(sessionUserId) !== Number(payload.uid)) {
-      return res.status(403).json({ error: "El link no corresponde al usuario de la sesión actual." });
+      return res.status(403).json({
+        code: "SESSION_USER_MISMATCH",
+        error: "El link no corresponde al usuario de la sesión actual.",
+      });
     }
 
     const ventaIds = uniqPositiveIds(payload.ventaIds || []).sort((a, b) => a - b);
@@ -19779,7 +19922,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     return res.status(400).json({ error: "saldo_a_favor inválido. Debe ser mayor o igual a 0." });
   }
   const forceWhatsappPagoVerificado = isTrue(req.body?.force_whatsapp_pago_verificado);
-  const orderProcessLock = acquireOrderProcessLock(idOrden, {
+  const orderProcessLock = await acquireSharedOrderProcessLock(idOrden, {
     source: "api_ordenes_procesar",
   });
   if (!orderProcessLock?.acquired) {
@@ -20181,7 +20324,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     }
     res.status(500).json({ error: err.message });
   } finally {
-    releaseOrderProcessLock(idOrden);
+    await releaseSharedOrderProcessLock(idOrden);
   }
 });
 
