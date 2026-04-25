@@ -225,6 +225,7 @@
         supabase,
         fetchVentasOrden,
         fetchOrdenByVenta,
+        fetchVentaEntregaByVenta,
         notificarSpotifyProveedorPendientes,
       } from "../scripts/api.js";
       import { buildServiceCopyText } from "../scripts/copy-format.js";
@@ -940,25 +941,35 @@
           }
 
           let effectiveOrderId = toPositiveId(idOrdenParam);
+          let ventas = [];
+          let usuarioOrden = {};
           if (idVentaParam) {
             const ordenByVentaResp = await fetchOrdenByVenta(idVentaParam);
-            if (ordenByVentaResp?.error) {
+            const fallbackVentaDirecta = Number(ordenByVentaResp?.status) === 409;
+            if (ordenByVentaResp?.error && !fallbackVentaDirecta) {
               setStatus(ordenByVentaResp.error || `No se pudo ubicar la venta #${idVentaParam}.`);
               if (tablasEl) tablasEl.innerHTML = "";
               setVerificacionNoteVisible(false);
               return;
             }
             const ventaOrderId = toPositiveId(ordenByVentaResp?.id_orden);
-            if (!ventaOrderId) {
-              setStatus(`La venta #${idVentaParam} no tiene una orden válida asociada.`);
-              if (tablasEl) tablasEl.innerHTML = "";
-              setVerificacionNoteVisible(false);
-              return;
+            if (ventaOrderId) {
+              effectiveOrderId = ventaOrderId;
+            } else {
+              const ventaDirectaResp = await fetchVentaEntregaByVenta(idVentaParam);
+              if (ventaDirectaResp?.error) {
+                setStatus(ventaDirectaResp.error || `No se pudo cargar la venta #${idVentaParam}.`);
+                if (tablasEl) tablasEl.innerHTML = "";
+                setVerificacionNoteVisible(false);
+                return;
+              }
+              ventas = Array.isArray(ventaDirectaResp?.ventas) ? ventaDirectaResp.ventas : [];
+              usuarioOrden = ventaDirectaResp?.usuario || {};
+              currentOrderId = toPositiveId(ventas?.[0]?.id_orden) || null;
             }
-            effectiveOrderId = ventaOrderId;
           }
 
-          if (!effectiveOrderId) {
+          if (!effectiveOrderId && !idVentaParam) {
             if (tablasEl) tablasEl.innerHTML = "";
             setStatus("");
             setVerificacionNoteVisible(false);
@@ -966,25 +977,29 @@
             mainEl?.classList.add("hidden");
             return;
           }
-          currentOrderId = effectiveOrderId;
+
+          if (!ventas.length && effectiveOrderId) {
+            currentOrderId = effectiveOrderId;
+            const resp = await fetchVentasOrden(effectiveOrderId);
+            if (resp?.error) {
+              setStatus(resp.error);
+              if (tablasEl) tablasEl.innerHTML = "";
+              setVerificacionNoteVisible(false);
+              return;
+            }
+            usuarioOrden = resp?.usuario || {};
+            ventas = resp?.ventas || [];
+          }
+
           const user = await loadCurrentUser();
           currentUserId = toPositiveId(user?.id_usuario);
           canAnnotateCliente = user?.acceso_cliente === false;
-          let ventas = [];
-          const resp = await fetchVentasOrden(effectiveOrderId);
-          if (resp?.error) {
-            setStatus(resp.error);
-            if (tablasEl) tablasEl.innerHTML = "";
-            setVerificacionNoteVisible(false);
-            return;
-          }
-          const usuarioOrden = resp?.usuario || {};
           signupHeaderShortUrl = String(usuarioOrden?.signup_url_corto || "").trim();
           shouldUseSignupHeaderOnCopy =
             usuarioOrden?.registrado === false && !!signupHeaderShortUrl;
-          ventas = resp?.ventas || [];
-          console.log("entregar_servicios ventas por orden", {
-            idOrden: effectiveOrderId,
+          console.log("entregar_servicios ventas", {
+            idOrden: effectiveOrderId || null,
+            idVenta: idVentaParam || null,
             total: ventas.length,
           });
 

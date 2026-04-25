@@ -380,6 +380,112 @@
         opacity: 0.6;
         cursor: not-allowed;
       }
+      .btn-add-platform {
+        border: none;
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: #0f766e;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn-add-platform:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .add-platform-modal-card {
+        width: min(1120px, 96vw);
+        max-width: 1120px;
+      }
+      .add-platform-modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 80vh;
+        overflow: auto;
+      }
+      .add-platform-form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 12px;
+      }
+      .add-platform-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .add-platform-field.full {
+        grid-column: 1 / -1;
+      }
+      .add-platform-field label {
+        font-size: 12px;
+        font-weight: 700;
+        color: #374151;
+      }
+      .add-platform-field input[type="text"],
+      .add-platform-field input[type="number"],
+      .add-platform-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+        background: #fff;
+      }
+      .add-platform-field textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+      .add-platform-field .hint {
+        margin: 0;
+        font-size: 11px;
+        color: #6b7280;
+      }
+      .add-platform-check {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #111827;
+      }
+      .add-platform-check input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: #16a34a;
+      }
+      .add-platform-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .btn-modal-secondary {
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: #f3f4f6;
+        color: #111827;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn-modal-primary {
+        border: none;
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: #111;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      @media (max-width: 900px) {
+        .add-platform-form {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -388,6 +494,9 @@
 
     <main class="categorias-dinamicas">
       <div class="bulk-save-row">
+        <button type="button" id="btn-add-platform" class="btn-add-platform">
+          Añadir plataforma
+        </button>
         <button type="button" id="btn-save-all-discounts" class="btn-save-all">
           Guardar todo
         </button>
@@ -412,6 +521,33 @@
       </div>
     </div>
 
+    <div id="add-platform-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card add-platform-modal-card">
+        <button
+          type="button"
+          id="add-platform-modal-close"
+          class="modal-close"
+          aria-label="Cerrar"
+        >
+          ×
+        </button>
+        <div class="modal-body add-platform-modal-body">
+          <h3>Añadir plataforma</h3>
+          <p class="status" id="add-platform-status"></p>
+          <form id="add-platform-form" class="add-platform-form"></form>
+          <div class="add-platform-actions">
+            <button type="button" id="btn-add-platform-cancel" class="btn-modal-secondary">
+              Cancelar
+            </button>
+            <button type="button" id="btn-add-platform-save" class="btn-modal-primary">
+              Guardar plataforma
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
       import { requireSession, attachLogout, attachLogoHome } from "../../scripts/session.js";
       import { clearServerSession, supabase } from "../../scripts/api.js";
@@ -423,10 +559,61 @@
       const wrapper = document.getElementById("precios-wrapper");
       const estadoEl = document.getElementById("estado");
       const btnSaveAllDiscountsEl = document.getElementById("btn-save-all-discounts");
+      const btnAddPlatformEl = document.getElementById("btn-add-platform");
       const descuentosModalEl = document.getElementById("descuentos-modal");
       const descuentosModalCloseEl = document.getElementById("descuentos-modal-close");
       const descuentosModalBackdropEl = descuentosModalEl?.querySelector(".modal-backdrop");
       const descuentosTableEl = document.getElementById("descuentos-table");
+      const addPlatformModalEl = document.getElementById("add-platform-modal");
+      const addPlatformModalCloseEl = document.getElementById("add-platform-modal-close");
+      const addPlatformModalBackdropEl = addPlatformModalEl?.querySelector(".modal-backdrop");
+      const addPlatformStatusEl = document.getElementById("add-platform-status");
+      const addPlatformFormEl = document.getElementById("add-platform-form");
+      const btnAddPlatformCancelEl = document.getElementById("btn-add-platform-cancel");
+      const btnAddPlatformSaveEl = document.getElementById("btn-add-platform-save");
+
+      const PLATFORM_INSERT_FIELDS = [
+        { key: "nombre", type: "text", required: true },
+        { key: "usa_pines", type: "bool", required: true, defaultValue: false },
+        { key: "entrega_inmediata", type: "bool", required: true, defaultValue: false },
+        { key: "num_max_dispositivos", type: "int" },
+        { key: "miembros", type: "bool", defaultValue: false },
+        { key: "imagen", type: "text" },
+        { key: "id_categoria", type: "int" },
+        { key: "por_pantalla", type: "bool", defaultValue: false },
+        { key: "por_acceso", type: "bool", defaultValue: false },
+        { key: "tarjeta_de_regalo", type: "bool", defaultValue: false },
+        { key: "max_dig_pin", type: "int" },
+        { key: "descuento_meses", type: "bool", defaultValue: false },
+        { key: "cuenta_madre", type: "bool", defaultValue: false },
+        { key: "corte_por_clave", type: "bool", defaultValue: false },
+        { key: "corte_de_usuario", type: "bool", defaultValue: false },
+        { key: "correo_cliente", type: "bool", defaultValue: false },
+        { key: "clave_cliente", type: "bool", defaultValue: false },
+        { key: "no_disponible", type: "bool", defaultValue: false },
+        { key: "mas_perfiles", type: "bool", defaultValue: false },
+        { key: "color_1", type: "text" },
+        { key: "color_2", type: "text" },
+        { key: "corte_directo", type: "bool", defaultValue: false },
+        { key: "max_miembros", type: "int" },
+        { key: "mostrar_stock", type: "bool", defaultValue: false },
+        { key: "color_3", type: "text" },
+        { key: "banner", type: "text" },
+        { key: "link_pagina", type: "text" },
+        { key: "posicion", type: "int" },
+        { key: "id_descuento_mes", type: "int" },
+        { key: "id_descuento_cantidad", type: "int" },
+        { key: "aplica_descuento_mes_detal", type: "bool", defaultValue: true },
+        { key: "aplica_descuento_mes_mayor", type: "bool", defaultValue: true },
+        { key: "aplica_descuento_cantidad_detal", type: "bool", defaultValue: true },
+        { key: "aplica_descuento_cantidad_mayor", type: "bool", defaultValue: true },
+        { key: "id_descuento_mes_detal", type: "int" },
+        { key: "id_descuento_mes_mayor", type: "int" },
+        { key: "id_descuento_cantidad_detal", type: "int" },
+        { key: "id_descuento_cantidad_mayor", type: "int" },
+        { key: "indicacion_iniciar", type: "textarea", full: true },
+        { key: "politica_uso", type: "textarea", full: true },
+      ];
 
       const FALLBACK_DISCOUNT_COLUMNS = [
         "descuento_1",
@@ -448,6 +635,165 @@
 
       const setEstado = (msg) => {
         if (estadoEl) estadoEl.textContent = msg || "";
+      };
+      const setAddPlatformStatus = (msg = "", isError = false) => {
+        if (!addPlatformStatusEl) return;
+        addPlatformStatusEl.textContent = msg || "";
+        addPlatformStatusEl.classList.toggle("is-error", !!isError);
+      };
+      const formatPlatformFieldLabel = (key = "") =>
+        String(key || "")
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (m) => m.toUpperCase());
+      const setAddPlatformButtonsBusy = (isBusy = false) => {
+        if (btnAddPlatformSaveEl) btnAddPlatformSaveEl.disabled = !!isBusy;
+        if (btnAddPlatformCancelEl) btnAddPlatformCancelEl.disabled = !!isBusy;
+      };
+      const renderAddPlatformForm = () => {
+        if (!addPlatformFormEl) return;
+        const rows = [
+          `
+            <div class="add-platform-field">
+              <label for="add-platform-id_plataforma">id_plataforma</label>
+              <input
+                id="add-platform-id_plataforma"
+                type="text"
+                value="Se genera automáticamente"
+                readonly
+                disabled
+              />
+              <p class="hint">Esta columna es identidad y no se envía en el insert.</p>
+            </div>
+          `,
+          ...PLATFORM_INSERT_FIELDS.map((field) => {
+            const inputId = `add-platform-${field.key}`;
+            const label = formatPlatformFieldLabel(field.key);
+            const fieldClass = field.full ? "add-platform-field full" : "add-platform-field";
+            if (field.type === "bool") {
+              const checked = field.defaultValue ? "checked" : "";
+              return `
+                <div class="${fieldClass}">
+                  <label for="${inputId}">${label}</label>
+                  <label class="add-platform-check">
+                    <input id="${inputId}" name="${field.key}" type="checkbox" ${checked} />
+                    <span>Activo</span>
+                  </label>
+                </div>
+              `;
+            }
+            if (field.type === "textarea") {
+              return `
+                <div class="${fieldClass}">
+                  <label for="${inputId}">${label}</label>
+                  <textarea id="${inputId}" name="${field.key}" placeholder=""></textarea>
+                </div>
+              `;
+            }
+            const inputType = field.type === "int" ? "number" : "text";
+            const stepAttr = field.type === "int" ? ' step="1"' : "";
+            const minAttr = field.type === "int" ? ' min="0"' : "";
+            const requiredAttr = field.required ? "required" : "";
+            return `
+              <div class="${fieldClass}">
+                <label for="${inputId}">${label}${field.required ? " *" : ""}</label>
+                <input
+                  id="${inputId}"
+                  name="${field.key}"
+                  type="${inputType}"
+                  ${stepAttr}
+                  ${minAttr}
+                  ${requiredAttr}
+                />
+              </div>
+            `;
+          }),
+        ];
+        addPlatformFormEl.innerHTML = rows.join("");
+      };
+      const resetAddPlatformForm = () => {
+        if (!addPlatformFormEl) return;
+        PLATFORM_INSERT_FIELDS.forEach((field) => {
+          const input = addPlatformFormEl.querySelector(`[name="${field.key}"]`);
+          if (!input) return;
+          if (field.type === "bool") {
+            input.checked = !!field.defaultValue;
+            return;
+          }
+          input.value = "";
+        });
+      };
+      const buildAddPlatformPayload = () => {
+        if (!addPlatformFormEl) return null;
+        const payload = {};
+        for (const field of PLATFORM_INSERT_FIELDS) {
+          const input = addPlatformFormEl.querySelector(`[name="${field.key}"]`);
+          if (!input) continue;
+          if (field.type === "bool") {
+            payload[field.key] = !!input.checked;
+            continue;
+          }
+          const raw = String(input.value || "").trim();
+          if (field.required && !raw) {
+            throw new Error(`El campo ${field.key} es obligatorio.`);
+          }
+          if (!raw) {
+            payload[field.key] = null;
+            continue;
+          }
+          if (field.type === "int") {
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed)) {
+              throw new Error(`El campo ${field.key} debe ser numérico.`);
+            }
+            payload[field.key] = Math.trunc(parsed);
+            continue;
+          }
+          payload[field.key] = raw;
+        }
+        return payload;
+      };
+      const openAddPlatformModal = () => {
+        renderAddPlatformForm();
+        resetAddPlatformForm();
+        setAddPlatformStatus("");
+        addPlatformModalEl?.classList.remove("hidden");
+        syncBodyModalState();
+      };
+      const closeAddPlatformModal = () => {
+        addPlatformModalEl?.classList.add("hidden");
+        syncBodyModalState();
+      };
+      const saveNewPlatform = async () => {
+        try {
+          setAddPlatformButtonsBusy(true);
+          setAddPlatformStatus("Guardando plataforma...");
+          const payload = buildAddPlatformPayload();
+          const { data, error } = await supabase
+            .from("plataformas")
+            .insert(payload)
+            .select("id_plataforma, nombre")
+            .single();
+          if (error) throw error;
+          setAddPlatformStatus(
+            `Plataforma creada (#${data?.id_plataforma || "?"} - ${data?.nombre || "-"})`
+          );
+          closeAddPlatformModal();
+          await cargar();
+          setEstado(`Plataforma creada: #${data?.id_plataforma || "?"} ${data?.nombre || ""}`.trim());
+        } catch (err) {
+          console.error("add platform error", err);
+          setAddPlatformStatus(
+            err?.message || "No se pudo crear la plataforma.",
+            true
+          );
+        } finally {
+          setAddPlatformButtonsBusy(false);
+        }
+      };
+      const syncBodyModalState = () => {
+        const descuentosOpen = !descuentosModalEl?.classList.contains("hidden");
+        const addPlatformOpen = !addPlatformModalEl?.classList.contains("hidden");
+        document.body.classList.toggle("modal-open", descuentosOpen || addPlatformOpen);
       };
 
       const logDescuentoDebug = (...args) => {
@@ -923,12 +1269,12 @@
       const abrirModalDescuentos = () => {
         renderModalDescuentos();
         descuentosModalEl?.classList.remove("hidden");
-        document.body.classList.add("modal-open");
+        syncBodyModalState();
       };
 
       const cerrarModalDescuentos = () => {
         descuentosModalEl?.classList.add("hidden");
-        document.body.classList.remove("modal-open");
+        syncBodyModalState();
       };
 
       const formatCantidad = (cantidad, flags = {}, completa = false) => {
@@ -2502,11 +2848,16 @@
 
       descuentosModalCloseEl?.addEventListener("click", cerrarModalDescuentos);
       descuentosModalBackdropEl?.addEventListener("click", cerrarModalDescuentos);
+      btnAddPlatformEl?.addEventListener("click", openAddPlatformModal);
+      addPlatformModalCloseEl?.addEventListener("click", closeAddPlatformModal);
+      addPlatformModalBackdropEl?.addEventListener("click", closeAddPlatformModal);
+      btnAddPlatformCancelEl?.addEventListener("click", closeAddPlatformModal);
+      btnAddPlatformSaveEl?.addEventListener("click", saveNewPlatform);
       btnSaveAllDiscountsEl?.addEventListener("click", saveAllDiscountControls);
       document.addEventListener("keydown", (ev) => {
-        if (ev.key === "Escape" && !descuentosModalEl?.classList.contains("hidden")) {
-          cerrarModalDescuentos();
-        }
+        if (ev.key !== "Escape") return;
+        if (!addPlatformModalEl?.classList.contains("hidden")) closeAddPlatformModal();
+        if (!descuentosModalEl?.classList.contains("hidden")) cerrarModalDescuentos();
       });
 
       cargar();

@@ -450,6 +450,54 @@
       .platform-group-items .platform-logo-row {
         flex: 0 0 170px;
       }
+      .platform-categories-list {
+        width: 100%;
+        max-height: 420px;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 4px;
+      }
+      .platform-category-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+        gap: 10px;
+        align-items: center;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 10px;
+        background: #fff;
+      }
+      .platform-category-row.is-dirty {
+        border-color: #f59e0b;
+        background: #fffbeb;
+      }
+      .platform-category-name {
+        margin: 0;
+        font-size: 14px;
+        color: #111827;
+        word-break: break-word;
+      }
+      .platform-category-meta {
+        margin: 4px 0 0;
+        font-size: 11px;
+        color: #6b7280;
+      }
+      .platform-category-select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 13px;
+        background: #fff;
+      }
+      .platform-category-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
       .asset-ext-badge {
         position: absolute;
         top: 6px;
@@ -828,6 +876,9 @@
         .logo-editor {
           flex-direction: column;
         }
+        .platform-category-row {
+          grid-template-columns: 1fr;
+        }
         .store-assets-grid {
           grid-template-columns: 1fr;
         }
@@ -878,6 +929,39 @@
                 Plataforma: -
               </p>
               <p id="logo-status" class="status logo-status"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <button
+            type="button"
+            class="btn-outline preview-toggle"
+            id="btn-platform-categories-toggle"
+          >
+            Categorías de plataformas
+          </button>
+          <div id="platform-categories-editor" class="logo-editor hidden">
+            <div class="logo-current">
+              <p class="logo-label">Asignar categoría por plataforma</p>
+              <p class="status logo-status">
+                Cambia la categoría y luego guarda. Esta sección solo modifica <code>plataformas.id_categoria</code>.
+              </p>
+              <div id="platform-categories-list" class="platform-categories-list">
+                <p class="status icono-empty">Sin plataformas cargadas.</p>
+              </div>
+            </div>
+            <div class="logo-upload">
+              <p class="logo-label">Guardar cambios</p>
+              <div class="platform-category-actions">
+                <button type="button" class="btn-primary" id="btn-platform-categories-save">
+                  Guardar categorías
+                </button>
+                <button type="button" class="btn-outline" id="btn-platform-categories-reset">
+                  Descartar cambios
+                </button>
+              </div>
+              <p id="platform-categories-status" class="status logo-status"></p>
             </div>
           </div>
         </div>
@@ -1085,12 +1169,15 @@
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
 
       const platformLogosToggleBtn = document.querySelector("#btn-platform-logos-toggle");
+      const platformCategoriesToggleBtn = document.querySelector("#btn-platform-categories-toggle");
       const metodosPagoToggleBtn = document.querySelector("#btn-metodos-pago-toggle");
       const platformBannersToggleBtn = document.querySelector("#btn-platform-banners-toggle");
       const storeLogoToggleBtn = document.querySelector("#btn-store-logo-toggle");
       const editor = document.querySelector("#logo-editor");
+      const platformCategoriesEditor = document.querySelector("#platform-categories-editor");
       const metodosPagoEditor = document.querySelector("#metodos-pago-editor");
       const platformLogosCurrentEl = document.querySelector("#platform-logos-current");
+      const platformCategoriesListEl = document.querySelector("#platform-categories-list");
       const bannerEditor = document.querySelector("#banner-editor");
       const storeLogoEditor = document.querySelector("#store-logo-editor");
       const platformLogosListEl = document.querySelector("#platform-logos-list");
@@ -1103,6 +1190,9 @@
       const metodoPagoInput = document.querySelector("#metodo-pago-file");
       const btnMetodoPagoUpdate = document.querySelector("#btn-metodo-pago-update");
       const metodosPagoStatusEl = document.querySelector("#metodos-pago-status");
+      const btnPlatformCategoriesSave = document.querySelector("#btn-platform-categories-save");
+      const btnPlatformCategoriesReset = document.querySelector("#btn-platform-categories-reset");
+      const platformCategoriesStatusEl = document.querySelector("#platform-categories-status");
       const storeLogoInput = document.querySelector("#store-logo-input");
       const btnStoreLogoUpdate = document.querySelector("#btn-store-logo-upload");
       const storeIconInput = document.querySelector("#store-icon-input");
@@ -1165,6 +1255,7 @@
 
       let plataformasMap = {};
       let metodosPagoMap = {};
+      let categoriasCatalog = [];
       let selectedId = null;
       let selectedMetodoPagoId = null;
       let paginaPreview = null;
@@ -1176,6 +1267,8 @@
       let platformLogoOrderSaving = false;
       let platformLogoOrderDirty = false;
       let platformLogosImporting = false;
+      let platformCategorySaving = false;
+      const pendingPlatformCategoryUpdates = new Map();
 
       const setStatus = (msg, isError = false) => {
         if (!statusEl) return;
@@ -1222,6 +1315,21 @@
         homeBannersStatusEl.textContent = msg || "";
         homeBannersStatusEl.classList.toggle("is-error", isError);
         homeBannersStatusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+      const setPlatformCategoriesStatus = (msg, isError = false) => {
+        if (!platformCategoriesStatusEl) return;
+        platformCategoriesStatusEl.textContent = msg || "";
+        platformCategoriesStatusEl.classList.toggle("is-error", isError);
+        platformCategoriesStatusEl.classList.toggle("is-success", !isError && !!msg);
+      };
+      const updatePlatformCategoriesButtonsState = () => {
+        const hasPending = pendingPlatformCategoryUpdates.size > 0;
+        if (btnPlatformCategoriesSave) {
+          btnPlatformCategoriesSave.disabled = platformCategorySaving || !hasPending;
+        }
+        if (btnPlatformCategoriesReset) {
+          btnPlatformCategoriesReset.disabled = platformCategorySaving || !hasPending;
+        }
       };
 
       const escapeHtml = (value) =>
@@ -1357,6 +1465,22 @@
         const rel = row?.categorias;
         const nameFromRel = Array.isArray(rel) ? rel?.[0]?.nombre : rel?.nombre;
         const name = String(row?.categoria_nombre || nameFromRel || "").trim();
+        return name || "Sin categoría";
+      };
+      const parseNullableCategoryId = (value) => {
+        const raw = String(value ?? "").trim();
+        if (!raw) return null;
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return Math.trunc(parsed);
+      };
+      const getCategoryNameById = (idCategoria) => {
+        const categoryId = parseNullableCategoryId(idCategoria);
+        if (!categoryId) return "Sin categoría";
+        const row = (categoriasCatalog || []).find(
+          (cat) => Number(cat?.id_categoria) === Number(categoryId),
+        );
+        const name = String(row?.nombre || "").trim();
         return name || "Sin categoría";
       };
 
@@ -1708,6 +1832,71 @@
             `;
           })
           .join("");
+      };
+      const renderPlatformCategoriesList = () => {
+        if (!platformCategoriesListEl) return;
+        const rows = Object.values(plataformasMap || {})
+          .filter((row) => Number.isFinite(Number(row?.id_plataforma)))
+          .sort((a, b) => String(a?.nombre || "").localeCompare(String(b?.nombre || ""), "es"));
+        if (!rows.length) {
+          platformCategoriesListEl.innerHTML =
+            '<p class="status icono-empty">Sin plataformas cargadas.</p>';
+          updatePlatformCategoriesButtonsState();
+          return;
+        }
+        const categoryOptions = (categoriasCatalog || [])
+          .map((cat) => {
+            const catId = Number(cat?.id_categoria || 0);
+            if (!Number.isFinite(catId) || catId <= 0) return "";
+            const name = String(cat?.nombre || "").trim();
+            return `<option value="${catId}">${escapeHtml(name || `Categoría #${catId}`)}</option>`;
+          })
+          .filter(Boolean)
+          .join("");
+
+        platformCategoriesListEl.innerHTML = rows
+          .map((row) => {
+            const rowId = Number(row?.id_plataforma || 0);
+            const currentCategoryId = parseNullableCategoryId(row?.id_categoria);
+            const hasPending = pendingPlatformCategoryUpdates.has(rowId);
+            const nextCategoryId = hasPending
+              ? parseNullableCategoryId(pendingPlatformCategoryUpdates.get(rowId))
+              : currentCategoryId;
+            const isDirty = hasPending && nextCategoryId !== currentCategoryId;
+            const currentLabel = getCategoryNameById(currentCategoryId);
+            const nextValue = nextCategoryId == null ? "" : String(nextCategoryId);
+            return `
+              <article class="platform-category-row ${isDirty ? "is-dirty" : ""}" data-id-plataforma="${rowId}">
+                <div>
+                  <p class="platform-category-name">${escapeHtml(row?.nombre || `Plataforma #${rowId}`)}</p>
+                  <p class="platform-category-meta">
+                    ID plataforma: ${rowId} · Categoría actual: ${escapeHtml(currentLabel)}
+                  </p>
+                </div>
+                <div>
+                  <select class="platform-category-select" data-id-plataforma="${rowId}">
+                    <option value="">Sin categoría</option>
+                    ${categoryOptions}
+                  </select>
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+
+        platformCategoriesListEl
+          .querySelectorAll("select.platform-category-select[data-id-plataforma]")
+          .forEach((selectEl) => {
+            const rowId = Number(selectEl.dataset.idPlataforma || 0);
+            const row = plataformasMap[rowId];
+            const currentCategoryId = parseNullableCategoryId(row?.id_categoria);
+            const nextCategoryId = pendingPlatformCategoryUpdates.has(rowId)
+              ? parseNullableCategoryId(pendingPlatformCategoryUpdates.get(rowId))
+              : currentCategoryId;
+            selectEl.value = nextCategoryId == null ? "" : String(nextCategoryId);
+          });
+
+        updatePlatformCategoriesButtonsState();
       };
       const renderMetodosPagoList = () => {
         if (!metodosPagoListEl) return;
@@ -2605,12 +2794,72 @@
             };
             return acc;
           }, {});
+          pendingPlatformCategoryUpdates.clear();
           renderPlatformLogosList();
+          renderPlatformCategoriesList();
           const selectedPlat = selectedId ? plataformasMap[selectedId] : null;
           renderEditor(selectedPlat || null);
         } catch (err) {
           console.error("load plataformas error", err);
           setStatus("No se pudieron cargar las plataformas.", true);
+        }
+      };
+      const loadCategorias = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("categorias")
+            .select("id_categoria, nombre")
+            .order("nombre", { ascending: true });
+          if (error) throw error;
+          categoriasCatalog = Array.isArray(data) ? data : [];
+          renderPlatformCategoriesList();
+        } catch (err) {
+          console.error("load categorias error", err);
+          categoriasCatalog = [];
+          renderPlatformCategoriesList();
+          setPlatformCategoriesStatus("No se pudieron cargar las categorías.", true);
+        }
+      };
+      const savePlatformCategories = async () => {
+        if (platformCategorySaving) return;
+        const updates = Array.from(pendingPlatformCategoryUpdates.entries())
+          .map(([idPlataformaRaw, idCategoriaRaw]) => ({
+            idPlataforma: Number(idPlataformaRaw || 0),
+            idCategoria: parseNullableCategoryId(idCategoriaRaw),
+          }))
+          .filter((row) => Number.isFinite(row.idPlataforma) && row.idPlataforma > 0);
+        if (!updates.length) {
+          setPlatformCategoriesStatus("No hay cambios pendientes.");
+          updatePlatformCategoriesButtonsState();
+          return;
+        }
+
+        platformCategorySaving = true;
+        updatePlatformCategoriesButtonsState();
+        try {
+          setPlatformCategoriesStatus(`Guardando ${updates.length} cambio(s)...`);
+          for (const row of updates) {
+            const { error } = await supabase
+              .from("plataformas")
+              .update({ id_categoria: row.idCategoria })
+              .eq("id_plataforma", row.idPlataforma);
+            if (error) throw error;
+            if (plataformasMap[row.idPlataforma]) {
+              plataformasMap[row.idPlataforma].id_categoria = row.idCategoria;
+              plataformasMap[row.idPlataforma].categoria_nombre =
+                getCategoryNameById(row.idCategoria);
+            }
+          }
+          pendingPlatformCategoryUpdates.clear();
+          renderPlatformCategoriesList();
+          renderPlatformLogosList();
+          setPlatformCategoriesStatus("Categorías actualizadas correctamente.");
+        } catch (err) {
+          console.error("save platform categories error", err);
+          setPlatformCategoriesStatus("No se pudieron guardar las categorías.", true);
+        } finally {
+          platformCategorySaving = false;
+          updatePlatformCategoriesButtonsState();
         }
       };
 
@@ -2647,6 +2896,16 @@
         if (willOpen) {
           setStatus("");
           renderPlatformLogosList();
+        }
+      });
+      platformCategoriesToggleBtn?.addEventListener("click", async () => {
+        if (!platformCategoriesEditor) return;
+        const willOpen = platformCategoriesEditor.classList.contains("hidden");
+        platformCategoriesEditor.classList.toggle("hidden");
+        if (willOpen) {
+          setPlatformCategoriesStatus("");
+          await loadCategorias();
+          renderPlatformCategoriesList();
         }
       });
       metodosPagoToggleBtn?.addEventListener("click", async () => {
@@ -2843,6 +3102,35 @@
         if (!Number.isFinite(nextId) || nextId <= 0) return;
         selectedMetodoPagoId = nextId;
         renderMetodosPagoList();
+      });
+      platformCategoriesListEl?.addEventListener("change", (e) => {
+        const selectEl = e.target.closest("select.platform-category-select[data-id-plataforma]");
+        if (!selectEl) return;
+        const rowId = Number(selectEl.dataset.idPlataforma || 0);
+        if (!Number.isFinite(rowId) || rowId <= 0) return;
+        const originalCategoryId = parseNullableCategoryId(plataformasMap[rowId]?.id_categoria);
+        const nextCategoryId = parseNullableCategoryId(selectEl.value);
+        if (nextCategoryId === originalCategoryId) {
+          pendingPlatformCategoryUpdates.delete(rowId);
+        } else {
+          pendingPlatformCategoryUpdates.set(rowId, nextCategoryId);
+        }
+        renderPlatformCategoriesList();
+        if (pendingPlatformCategoryUpdates.size > 0) {
+          setPlatformCategoriesStatus(
+            `${pendingPlatformCategoryUpdates.size} cambio(s) pendiente(s).`,
+          );
+        } else {
+          setPlatformCategoriesStatus("Sin cambios pendientes.");
+        }
+      });
+      btnPlatformCategoriesSave?.addEventListener("click", async () => {
+        await savePlatformCategories();
+      });
+      btnPlatformCategoriesReset?.addEventListener("click", () => {
+        pendingPlatformCategoryUpdates.clear();
+        renderPlatformCategoriesList();
+        setPlatformCategoriesStatus("Cambios descartados.");
       });
 
       metodosPagoListEl?.addEventListener("dragenter", (e) => {
@@ -3714,6 +4002,7 @@
       }
 
       init();
+      loadCategorias();
       loadPlataformas();
       loadMetodosPago();
       loadPreview();

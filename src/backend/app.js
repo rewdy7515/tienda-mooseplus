@@ -18259,9 +18259,49 @@ app.get("/api/ventas/orden-por-venta", async (req, res) => {
       return res.status(404).json({ error: "Venta no encontrada." });
     }
 
-    const idOrden = toPositiveInt(ventaRow?.id_orden);
+    let idOrden = toPositiveInt(ventaRow?.id_orden);
+    if (!idOrden) {
+      const { data: histRow, error: histErr } = await supabaseAdmin
+        .from("historial_ventas")
+        .select("id_orden, id_historial_ventas")
+        .eq("id_venta", idVenta)
+        .not("id_orden", "is", null)
+        .order("id_historial_ventas", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (histErr) throw histErr;
+      idOrden = toPositiveInt(histRow?.id_orden);
+    }
+    if (!idOrden) {
+      const { data: itemRow, error: itemErr } = await supabaseAdmin
+        .from("ordenes_items")
+        .select("id_orden, id_item_orden")
+        .eq("id_venta", idVenta)
+        .not("id_orden", "is", null)
+        .order("id_item_orden", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (itemErr) throw itemErr;
+      idOrden = toPositiveInt(itemRow?.id_orden);
+    }
     if (!idOrden) {
       return res.status(409).json({ error: "La venta no tiene orden asociada." });
+    }
+
+    // Autorrepara ventas antiguas/inconsistentes que quedaron sin id_orden.
+    if (!toPositiveInt(ventaRow?.id_orden)) {
+      const { error: repairErr } = await supabaseAdmin
+        .from("ventas")
+        .update({ id_orden: idOrden })
+        .eq("id_venta", idVenta)
+        .is("id_orden", null);
+      if (repairErr) {
+        console.warn("[ventas/orden-por-venta] no se pudo reparar id_orden en venta", {
+          id_venta: idVenta,
+          id_orden: idOrden,
+          error: repairErr?.message || repairErr,
+        });
+      }
     }
 
     let ownerId = toPositiveInt(ventaRow?.id_usuario);
@@ -18447,6 +18487,114 @@ app.get("/api/ventas/orden", async (req, res) => {
   } catch (err) {
     console.error("[ventas/orden] error", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Venta directa (para entregar_servicios con id_venta sin id_orden)
+app.get("/api/ventas/entrega-por-venta", async (req, res) => {
+  try {
+    const idVenta = toPositiveInt(req.query?.id_venta);
+    if (!idVenta) {
+      return res.status(400).json({ error: "id_venta inválido" });
+    }
+    const idUsuarioSesion = await getOrCreateUsuario(req);
+    if (!idUsuarioSesion) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+
+    const { data: permRow, error: permErr } = await supabaseAdmin
+      .from("usuarios")
+      .select("permiso_superadmin")
+      .eq("id_usuario", idUsuarioSesion)
+      .maybeSingle();
+    if (permErr) throw permErr;
+    const isSuper = isTrue(permRow?.permiso_superadmin);
+
+    const { data: ventaRow, error: ventaErr } = await supabaseAdmin
+      .from("ventas")
+      .select(
+        `
+        id_venta,
+        id_usuario,
+        meses_contratados,
+        renovacion,
+        fecha_corte,
+        id_perfil,
+        id_cuenta_miembro,
+        id_precio,
+        id_tarjeta_de_regalo,
+        pendiente,
+        id_orden,
+        completa,
+        mensaje_proveedor,
+        correo_miembro,
+        clave_miembro,
+        cuentas:cuentas!ventas_id_cuenta_fkey(id_cuenta, correo, clave, pin, id_plataforma, venta_perfil, venta_miembro),
+        cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, correo, clave, pin, id_plataforma, id_cuenta_madre),
+        perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
+        tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(id_tarjeta_de_regalo, pin, vendido_a),
+        precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta, region, valor_tarjeta_de_regalo, moneda)
+      `
+      )
+      .eq("id_venta", idVenta)
+      .maybeSingle();
+    if (ventaErr) throw ventaErr;
+    if (!ventaRow?.id_venta) {
+      return res.status(404).json({ error: "Venta no encontrada." });
+    }
+
+    let ownerId = toPositiveInt(ventaRow?.id_usuario);
+    const orderIdFromSale = toPositiveInt(ventaRow?.id_orden);
+    if (!ownerId && orderIdFromSale) {
+      const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+        .from("ordenes")
+        .select("id_orden, id_usuario")
+        .eq("id_orden", orderIdFromSale)
+        .maybeSingle();
+      if (ordenErr) throw ordenErr;
+      ownerId = toPositiveInt(ordenRow?.id_usuario);
+    }
+
+    if (!isSuper && (!ownerId || Number(ownerId) !== Number(idUsuarioSesion))) {
+      return res.status(403).json({ error: "La venta no pertenece al usuario." });
+    }
+
+    let usuarioRegistrado = null;
+    let signupRegistroUrlCorto = "";
+    if (ownerId) {
+      const { data: usuarioOrdenRow, error: usuarioOrdenErr } = await supabaseAdmin
+        .from("usuarios")
+        .select("id_usuario, fecha_registro, id_auth")
+        .eq("id_usuario", ownerId)
+        .maybeSingle();
+      if (usuarioOrdenErr) throw usuarioOrdenErr;
+      if (usuarioOrdenRow) {
+        usuarioRegistrado = isUsuarioWebRegistrado(usuarioOrdenRow);
+        if (!usuarioRegistrado) {
+          try {
+            signupRegistroUrlCorto = buildSignupShortUrl(ownerId);
+          } catch (signupUrlErr) {
+            console.warn("[ventas/entrega-por-venta] no se pudo generar signup short link", {
+              id_venta: idVenta,
+              id_usuario: ownerId,
+              err: signupUrlErr?.message || signupUrlErr,
+            });
+          }
+        }
+      }
+    }
+
+    return res.json({
+      ventas: [ventaRow],
+      usuario: {
+        id_usuario: ownerId || null,
+        registrado: usuarioRegistrado,
+        signup_url_corto: signupRegistroUrlCorto || "",
+      },
+    });
+  } catch (err) {
+    console.error("[ventas/entrega-por-venta] error", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
