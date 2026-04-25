@@ -7225,6 +7225,7 @@ const autoProcessMatchedOrder = async (match = {}) => {
       snapshotMontoBsTotal: orden?.monto_bs ?? null,
       snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
       saldoAplicadoExpectedUsd: await resolveSaldoAplicadoForOrderVerification({ orden }),
+      allowSaldoInsuficiente: true,
     });
 
     const { error: updOrdErr } = await supabaseAdmin
@@ -11678,6 +11679,7 @@ const processOrderFromItems = async ({
   snapshotTasaBs = null,
   saldoAplicadoExpectedUsd = 0,
   montoExtraHistorialUsd = 0,
+  allowSaldoInsuficiente = false,
 }) => {
   console.log("[checkout] processOrderFromItems start", {
     ordenId,
@@ -11686,39 +11688,61 @@ const processOrderFromItems = async ({
     itemsCount: items?.length || 0,
     carritoId,
   });
-  let saldoConsumption = await consumeSaldoFromCarritoIfNeeded({
-    carritoId,
-    source: "processOrderFromItems",
-    saldoAplicadoFallback: saldoAplicadoExpectedUsd,
-    idUsuarioFallback: idUsuarioVentas,
-  });
-  const saldoExpected = toFiniteMoney(saldoAplicadoExpectedUsd);
-  if (!saldoConsumption?.consumed && Number.isFinite(saldoExpected) && saldoExpected > 0) {
-    const skipReason = String(saldoConsumption?.reason || "");
-    const canForceDebit = skipReason === "saldo_not_enabled" || skipReason === "saldo_amount_zero";
-    if (canForceDebit) {
-      const forcedDebit = await debitSaldoUsdFromUser({
-        idUsuario: idUsuarioVentas,
-        montoUsd: saldoExpected,
-        source: `processOrderFromItems:forced_${skipReason || "unknown"}`,
+  let saldoConsumption = null;
+  try {
+    saldoConsumption = await consumeSaldoFromCarritoIfNeeded({
+      carritoId,
+      source: "processOrderFromItems",
+      saldoAplicadoFallback: saldoAplicadoExpectedUsd,
+      idUsuarioFallback: idUsuarioVentas,
+    });
+    const saldoExpected = toFiniteMoney(saldoAplicadoExpectedUsd);
+    if (!saldoConsumption?.consumed && Number.isFinite(saldoExpected) && saldoExpected > 0) {
+      const skipReason = String(saldoConsumption?.reason || "");
+      const canForceDebit = skipReason === "saldo_not_enabled" || skipReason === "saldo_amount_zero";
+      if (canForceDebit) {
+        const forcedDebit = await debitSaldoUsdFromUser({
+          idUsuario: idUsuarioVentas,
+          montoUsd: saldoExpected,
+          source: `processOrderFromItems:forced_${skipReason || "unknown"}`,
+        });
+        saldoConsumption = {
+          consumed: !!forcedDebit?.debitado,
+          id_carrito: Number.isFinite(Number(carritoId)) ? Number(carritoId) : null,
+          id_usuario: forcedDebit?.id_usuario || toPositiveInt(idUsuarioVentas) || null,
+          monto: Number(forcedDebit?.monto) || 0,
+          saldo_aplicado: saldoExpected,
+          saldo_nuevo: forcedDebit?.saldoNuevo ?? null,
+          saldo_origen: `forced_${skipReason || "unknown"}`,
+        };
+        console.log("[checkout] saldo forzado por monto esperado", {
+          ordenId,
+          id_carrito: carritoId,
+          reason: skipReason || "unknown",
+          id_usuario: saldoConsumption?.id_usuario || null,
+          monto: saldoConsumption?.monto || 0,
+          saldo_nuevo: saldoConsumption?.saldo_nuevo ?? null,
+        });
+      }
+    }
+  } catch (saldoErr) {
+    if (allowSaldoInsuficiente === true && isSaldoInsuficienteError(saldoErr)) {
+      console.warn("[checkout] saldo insuficiente ignorado durante reproceso de orden", {
+        id_orden: toPositiveInt(ordenId) || null,
+        id_usuario: toPositiveInt(idUsuarioVentas) || null,
+        id_carrito: toPositiveInt(carritoId) || null,
+        saldo_aplicado_esperado: toFiniteMoney(saldoAplicadoExpectedUsd) || 0,
+        error: saldoErr?.message || String(saldoErr || ""),
       });
       saldoConsumption = {
-        consumed: !!forcedDebit?.debitado,
-        id_carrito: Number.isFinite(Number(carritoId)) ? Number(carritoId) : null,
-        id_usuario: forcedDebit?.id_usuario || toPositiveInt(idUsuarioVentas) || null,
-        monto: Number(forcedDebit?.monto) || 0,
-        saldo_aplicado: saldoExpected,
-        saldo_nuevo: forcedDebit?.saldoNuevo ?? null,
-        saldo_origen: `forced_${skipReason || "unknown"}`,
+        consumed: false,
+        skipped: true,
+        reason: "saldo_insuficiente_ignored",
+        id_carrito: toPositiveInt(carritoId) || null,
+        id_usuario: toPositiveInt(idUsuarioVentas) || null,
       };
-      console.log("[checkout] saldo forzado por monto esperado", {
-        ordenId,
-        id_carrito: carritoId,
-        reason: skipReason || "unknown",
-        id_usuario: saldoConsumption?.id_usuario || null,
-        monto: saldoConsumption?.monto || 0,
-        saldo_nuevo: saldoConsumption?.saldo_nuevo ?? null,
-      });
+    } else {
+      throw saldoErr;
     }
   }
   if (saldoConsumption?.consumed) {
@@ -13625,6 +13649,12 @@ const debitSaldoUsdFromUser = async ({
     saldoAplicado: amount,
     saldoNuevo,
   };
+};
+const isSaldoInsuficienteError = (err) => {
+  const code = String(err?.code || "").trim().toUpperCase();
+  if (code === "SALDO_INSUFICIENTE") return true;
+  const msg = String(err?.message || "").toLowerCase();
+  return msg.includes("saldo insuficiente");
 };
 
 const consumeSaldoFromCarritoIfNeeded = async ({
@@ -20389,6 +20419,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
       saldoAplicadoExpectedUsd: await resolveSaldoAplicadoForOrderVerification({ orden }),
       montoExtraHistorialUsd: saldoAFavor,
+      allowSaldoInsuficiente: true,
     });
     console.log("[ordenes/procesar] procesado", {
       id_orden: idOrden,
