@@ -89,6 +89,12 @@ const isImageFile = (file) => {
   return /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif|tiff?|ico)$/i.test(name);
 };
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const isTrueFlag = (value) =>
+  value === true || value === "true" || value === "1" || value === 1 || value === "t";
+const toPositiveInt = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+};
 const parseFlexibleDecimal = (value) => {
   if (value == null) return null;
   const raw = String(value).trim().replace(/\s+/g, "").replace(/[^0-9,.-]/g, "");
@@ -898,11 +904,19 @@ const verifyPagoMovil = async () => {
   }
   console.log("[pago movil] input", { refDigits, montoBs, tasaBs, totalUsd, cartId });
 
-  const resp = await supabase
+  const sessionUserId = toPositiveInt(currentUserId || requireSession());
+  let pagosQuery = supabase
     .from("pagomoviles")
-    .select("id, referencia, texto, monto_bs, saldo_acreditado")
-    .or("saldo_acreditado.is.null,saldo_acreditado.eq.false")
+    .select("id, referencia, texto, monto_bs, saldo_acreditado, saldo_acreditado_a")
     .order("id", { ascending: false });
+  if (sessionUserId > 0) {
+    pagosQuery = pagosQuery.or(
+      `saldo_acreditado.is.null,saldo_acreditado.eq.false,and(saldo_acreditado.eq.true,saldo_acreditado_a.eq.${sessionUserId})`,
+    );
+  } else {
+    pagosQuery = pagosQuery.or("saldo_acreditado.is.null,saldo_acreditado.eq.false");
+  }
+  const resp = await pagosQuery;
   const pagos = resp.data || [];
   const pagoErr = resp.error;
   if (pagoErr) throw pagoErr;
@@ -1006,19 +1020,18 @@ const verifyPagoMovil = async () => {
     alert("Pago no encontrado");
     return { ok: false };
   }
-  if (match.saldo_acreditado === true) {
+  if (isTrueFlag(match?.saldo_acreditado) && toPositiveInt(match?.saldo_acreditado_a) !== sessionUserId) {
     alert("Operación fallida: pago anteriormente registrado");
     return { ok: false };
   }
 
-  const sessionUserId = currentUserId || requireSession();
   const pagoMonto = montoNum(match.monto_bs);
   if (!Number.isFinite(pagoMonto)) {
     alert("Pago no encontrado");
     return { ok: false };
   }
 
-  if (sessionUserId) {
+  if (sessionUserId && !isTrueFlag(match?.saldo_acreditado)) {
     const refMatch = bestMatch?.refResolution?.ref || null;
     const updates = {
       saldo_acreditado_a: sessionUserId,

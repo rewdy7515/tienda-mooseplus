@@ -916,6 +916,19 @@
         </div>
         <div class="dashboard-web-grid">
           <article class="dashboard-block dashboard-web-span-2">
+            <h3>Conversión diaria web (ingresan vs compran)</h3>
+            <div class="dashboard-auth-pie-wrap">
+              <svg
+                id="chart-conversion-web-pie"
+                class="dashboard-auth-pie"
+                viewBox="0 0 220 220"
+                preserveAspectRatio="xMidYMid meet"
+              ></svg>
+              <div id="chart-conversion-web-pie-legend" class="dashboard-auth-pie-legend"></div>
+            </div>
+            <p class="dashboard-mini-note" id="chart-conversion-web-pie-note">-</p>
+          </article>
+          <article class="dashboard-block dashboard-web-span-2">
             <h3>Ingresos diarios de clientes web</h3>
             <p class="dashboard-mini-note" id="trafico-diario-note">-</p>
             <svg
@@ -1091,6 +1104,9 @@
       const authWebDailyNoteEl = document.querySelector("#auth-web-daily-note");
       const authWebDailyChart = document.querySelector("#chart-auth-web-diario");
       const emptyAuthWebDailyChart = document.querySelector("#empty-chart-auth-web-diario");
+      const conversionWebPieChart = document.querySelector("#chart-conversion-web-pie");
+      const conversionWebPieLegend = document.querySelector("#chart-conversion-web-pie-legend");
+      const conversionWebPieNote = document.querySelector("#chart-conversion-web-pie-note");
       const traficoDiarioNoteEl = document.querySelector("#trafico-diario-note");
       const traficoDiarioChart = document.querySelector("#chart-trafico-diario");
       const emptyTraficoDiarioChart = document.querySelector("#empty-chart-trafico-diario");
@@ -1221,6 +1237,17 @@
         const m = normalizeIsoDate(dateVal).match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (!m) return String(dateVal || "").trim();
         return `${m[3]}/${m[2]}/${m[1]}`;
+      };
+      const isoDateToUtcMs = (dateVal) => {
+        const m = normalizeIsoDate(dateVal).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return NaN;
+        return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      };
+      const getInclusiveDateRangeDays = (startDate, endDate) => {
+        const startMs = isoDateToUtcMs(startDate);
+        const endMs = isoDateToUtcMs(endDate);
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 0;
+        return Math.floor((endMs - startMs) / 86400000) + 1;
       };
       const getPointRxScale = (svgEl, viewBoxW, viewBoxH) => {
         const vw = Number(svgEl?.clientWidth) || 0;
@@ -2522,6 +2549,131 @@
             ? `Base de cálculo: ${intFmt.format(active)} clientes activos (${coverageRangeTxt}).`
             : "Sin clientes activos para calcular la cobertura de registro web.";
       };
+      const buildWebConversionData = (analiticaWeb, historialRows = [], fallbackRange = null) => {
+        const trafico = analiticaWeb?.trafico || {};
+        const traficoDiarioMes = trafico?.diario_mes || {};
+        const rangoActual = traficoDiarioMes?.rango_actual || trafico?.rango_actual || fallbackRange || {};
+        const startDate = normalizeIsoDate(rangoActual?.start || fallbackRange?.start || "");
+        const endDate = normalizeIsoDate(rangoActual?.end || fallbackRange?.end || "");
+        const daysInRange = getInclusiveDateRangeDays(startDate, endDate);
+        const traficoRows = Array.isArray(traficoDiarioMes?.actual)
+          ? traficoDiarioMes.actual
+              .map((row) => ({
+                dia: Number(row?.dia) || 0,
+                cantidad: Number(row?.cantidad) || 0,
+              }))
+              .filter((row) => Number.isInteger(row.dia) && row.dia > 0 && row.cantidad > 0)
+          : [];
+        const totalIngresan = traficoRows.reduce((acc, row) => acc + (Number(row?.cantidad) || 0), 0);
+        const promedioIngresan = daysInRange > 0 ? totalIngresan / daysInRange : 0;
+
+        const startMs = isoDateToUtcMs(startDate);
+        const endMs = isoDateToUtcMs(endDate);
+        const compradoresPorDiaMap = new Map();
+        (Array.isArray(historialRows) ? historialRows : []).forEach((row) => {
+          if (!isHistorialIngresoRow(row)) return;
+          const dayKey = normalizeIsoDate(row?.fecha_pago);
+          if (!dayKey) return;
+          const dayMs = isoDateToUtcMs(dayKey);
+          if (
+            Number.isFinite(startMs) &&
+            Number.isFinite(endMs) &&
+            (dayMs < startMs || dayMs > endMs)
+          ) {
+            return;
+          }
+          const idUsuario = Number(row?.id_usuario_cliente);
+          if (!Number.isInteger(idUsuario) || idUsuario <= 0) return;
+          if (!compradoresPorDiaMap.has(dayKey)) {
+            compradoresPorDiaMap.set(dayKey, new Set());
+          }
+          compradoresPorDiaMap.get(dayKey).add(idUsuario);
+        });
+        let totalCompran = 0;
+        compradoresPorDiaMap.forEach((setVal) => {
+          totalCompran += setVal.size;
+        });
+        const promedioCompranReal = daysInRange > 0 ? totalCompran / daysInRange : 0;
+        const promedioCompran = Math.min(promedioCompranReal, promedioIngresan);
+        const promedioNoCompran = Math.max(0, promedioIngresan - promedioCompran);
+        const conversionPct = promedioIngresan > 0 ? (promedioCompran / promedioIngresan) * 100 : 0;
+        return {
+          startDate,
+          endDate,
+          daysInRange,
+          promedioIngresan,
+          promedioCompran,
+          promedioCompranReal,
+          promedioNoCompran,
+          conversionPct,
+        };
+      };
+      const renderWebConversionPieChart = (conversionData = null) => {
+        if (!conversionWebPieChart || !conversionWebPieLegend || !conversionWebPieNote) return;
+        const data = conversionData || {};
+        const promedioIngresan = Number(data?.promedioIngresan) || 0;
+        const promedioCompran = Number(data?.promedioCompran) || 0;
+        const promedioCompranReal = Number(data?.promedioCompranReal) || 0;
+        const promedioNoCompran = Number(data?.promedioNoCompran) || 0;
+        const conversionPct = Math.max(0, Math.min(100, Number(data?.conversionPct) || 0));
+        const cx = 110;
+        const cy = 110;
+        const radius = 70;
+        const stroke = 28;
+        const circumference = 2 * Math.PI * radius;
+        const buyArc = (conversionPct / 100) * circumference;
+        const noBuyArc = circumference - buyArc;
+        conversionWebPieChart.innerHTML = `
+          <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="#e2e8f0" stroke-width="${stroke}" />
+          <circle
+            cx="${cx}" cy="${cy}" r="${radius}"
+            fill="none" stroke="#0f766e" stroke-width="${stroke}" stroke-linecap="butt"
+            transform="rotate(-90 ${cx} ${cy})"
+            stroke-dasharray="${buyArc.toFixed(2)} ${Math.max(0, circumference - buyArc).toFixed(2)}"
+          />
+          <circle
+            cx="${cx}" cy="${cy}" r="${radius}"
+            fill="none" stroke="#94a3b8" stroke-width="${stroke}" stroke-linecap="butt"
+            transform="rotate(-90 ${cx} ${cy})"
+            stroke-dasharray="${noBuyArc.toFixed(2)} ${Math.max(0, circumference - noBuyArc).toFixed(2)}"
+            stroke-dashoffset="${(-buyArc).toFixed(2)}"
+          />
+          <text x="${cx}" y="${cy - 2}" text-anchor="middle" fill="#0f172a" font-size="26" font-weight="800">${conversionPct.toFixed(1)}%</text>
+          <text x="${cx}" y="${cy + 18}" text-anchor="middle" fill="#64748b" font-size="12">conversión diaria</text>
+        `;
+        conversionWebPieLegend.innerHTML = `
+          <div class="dashboard-auth-pie-item">
+            <span class="dashboard-auth-pie-item-main">
+              <span class="dashboard-auth-pie-dot" style="background:#0f766e;"></span>
+              Compran (promedio/día)
+            </span>
+            <span class="dashboard-auth-pie-value">${formatAverageValue(promedioCompran)} (${conversionPct.toFixed(1)}%)</span>
+          </div>
+          <div class="dashboard-auth-pie-item">
+            <span class="dashboard-auth-pie-item-main">
+              <span class="dashboard-auth-pie-dot" style="background:#94a3b8;"></span>
+              No compran (promedio/día)
+            </span>
+            <span class="dashboard-auth-pie-value">${formatAverageValue(promedioNoCompran)} (${(100 - conversionPct).toFixed(1)}%)</span>
+          </div>
+          <div class="dashboard-auth-pie-item">
+            <span class="dashboard-auth-pie-item-main">Ingresan (promedio/día)</span>
+            <span class="dashboard-auth-pie-value">${formatAverageValue(promedioIngresan)}</span>
+          </div>
+        `;
+        const rangeText =
+          data?.startDate && data?.endDate
+            ? `${formatIsoDateLabel(data.startDate)} al ${formatIsoDateLabel(data.endDate)}`
+            : "periodo seleccionado";
+        const adjustedText =
+          promedioCompranReal > promedioCompran
+            ? " (ajustado al total de ingresados para el gráfico)"
+            : "";
+        conversionWebPieNote.textContent =
+          promedioIngresan > 0
+            ? `Promedio diario (${rangeText}): ingresan ${formatAverageValue(promedioIngresan)} clientes y compran ${formatAverageValue(promedioCompranReal)} clientes${adjustedText}.`
+            : `Sin ingresos diarios de clientes web para calcular conversión (${rangeText}).`;
+      };
       const renderTrafficDailyMonthLineChart = (trafico = {}) => {
         if (!traficoDiarioChart) return;
         traficoDiarioChart.innerHTML = "";
@@ -2766,7 +2918,13 @@
             `${currentLabel}: ${intFmt.format(totalCurrent)} ingresos únicos (${currentRangeText}). ${prevLabel}: ${intFmt.format(totalPrev)} ingresos únicos (${prevRangeText}).`;
         }
       };
-      const renderAnaliticaWeb = (analiticaWeb, monthVal, activeClientsCount = 0) => {
+      const renderAnaliticaWeb = (
+        analiticaWeb,
+        monthVal,
+        activeClientsCount = 0,
+        historialRows = [],
+        range = null,
+      ) => {
         const authRows = Array.isArray(analiticaWeb?.auth?.registros_por_mes)
           ? analiticaWeb.auth.registros_por_mes.map((row) => ({
               monthKey: String(row?.monthKey || "").trim(),
@@ -2816,6 +2974,8 @@
         const traficoPrev = analiticaWeb?.trafico?.anterior || {};
         const traficoRangoActual = analiticaWeb?.trafico?.rango_actual || {};
         const traficoRangoAnterior = analiticaWeb?.trafico?.rango_anterior || {};
+        const conversionData = buildWebConversionData(analiticaWeb, historialRows, range);
+        renderWebConversionPieChart(conversionData);
         renderTrafficDailyMonthLineChart(analiticaWeb?.trafico || {});
         const semanaRows = Array.isArray(traficoActual?.por_dia_semana)
           ? traficoActual.por_dia_semana.map((row) => ({
@@ -3501,6 +3661,7 @@
         platformMonthlyData,
         platformDailyData,
         analiticaWeb,
+        historialRows,
         range,
         prevRange,
         compareSuffix,
@@ -3530,6 +3691,8 @@
           analiticaWeb,
           monthKeyFromDate(range?.start) || "",
           stats.clientesActivosCount || 0,
+          historialRows || [],
+          range,
         );
 
         if (summaryNoteEl) {
@@ -3662,6 +3825,7 @@
             platformSalesMonthlyRows,
             platformSalesDailyRows,
             analiticaWebData || getEmptyAnaliticaWeb(),
+            historial,
             range,
             prevRange || range,
             compareCtx.compareSuffix,

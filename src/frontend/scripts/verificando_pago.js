@@ -53,6 +53,12 @@ let lastOrdenChannelWarnAt = 0;
 const MANUAL_VERIFICATION_PENDING_MSG =
   "Pago no detectado, se envió una notificación a un admin para que verifique manualmente";
 const normalizeReferenceDigits = (value) => String(value || "").replace(/\D/g, "");
+const isTrue = (value) =>
+  value === true || value === "true" || value === "1" || value === 1 || value === "t";
+const toPositiveInt = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+};
 const getReferenceMatchScore = (targetRef = "", candidateRef = "") => {
   const target = normalizeReferenceDigits(targetRef);
   const candidate = normalizeReferenceDigits(candidateRef);
@@ -454,11 +460,19 @@ const verifyPago = async () => {
   const montoBaseBs = Number.isFinite(montoBsOrden) ? montoBsOrden : null;
   const tasaBase = tasaBs;
 
-  const resp = await supabase
+  const sessionUserId = toPositiveInt(currentUserId || requireSession());
+  let pagosQuery = supabase
     .from("pagomoviles")
-    .select("id, referencia, texto, monto_bs, saldo_acreditado")
-    .or("saldo_acreditado.is.null,saldo_acreditado.eq.false")
+    .select("id, referencia, texto, monto_bs, saldo_acreditado, saldo_acreditado_a")
     .order("id", { ascending: false });
+  if (sessionUserId > 0) {
+    pagosQuery = pagosQuery.or(
+      `saldo_acreditado.is.null,saldo_acreditado.eq.false,and(saldo_acreditado.eq.true,saldo_acreditado_a.eq.${sessionUserId})`,
+    );
+  } else {
+    pagosQuery = pagosQuery.or("saldo_acreditado.is.null,saldo_acreditado.eq.false");
+  }
+  const resp = await pagosQuery;
   if (resp.error) throw resp.error;
   const pagos = resp.data || [];
   const matchData = pickBestPagoMatch(pagos, { reference: refDigits, montoBaseBs });
@@ -474,12 +488,14 @@ const verifyPago = async () => {
     }
     return;
   }
-  if (match.saldo_acreditado === true) {
-    setStatus("Pago ya procesado.");
-    return;
+  if (isTrue(match?.saldo_acreditado)) {
+    const creditedTo = toPositiveInt(match?.saldo_acreditado_a);
+    if (creditedTo > 0 && creditedTo !== sessionUserId) {
+      setStatus("Pago ya procesado.");
+      return;
+    }
   }
 
-  const sessionUserId = currentUserId || requireSession();
   const pagoMonto = montoNum(match.monto_bs);
   if (!Number.isFinite(pagoMonto)) {
     if (countdownExpired) {
@@ -490,7 +506,7 @@ const verifyPago = async () => {
     return;
   }
 
-  if (sessionUserId) {
+  if (sessionUserId && !isTrue(match?.saldo_acreditado)) {
     const refMatch = matchData?.refMatch || null;
     const updates = {
       saldo_acreditado_a: sessionUserId,
