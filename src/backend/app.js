@@ -671,16 +671,118 @@ const giftCardDeliveryError = (code, message) => {
   return err;
 };
 
+const isMissingVentasIdOrdenColumnError = (err) => {
+  const message = String(err?.message || err?.details || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("ventas") &&
+    message.includes("id_orden") &&
+    (message.includes("does not exist") || message.includes("schema cache"))
+  );
+};
+
+const fetchVentasByOrder = async ({
+  idOrden = null,
+  select = "id_venta",
+  onlyPending = false,
+  limit = null,
+  ascending = true,
+} = {}) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) return [];
+
+  const selectCols = String(select || "id_venta").trim() || "id_venta";
+  const limitNum = toPositiveInt(limit);
+  const orderAscending = ascending !== false;
+
+  const { data: snapshotRows, error: snapshotErr } = await supabaseAdmin
+    .from("ordenes_items")
+    .select("id_venta")
+    .eq("id_orden", orderId)
+    .not("id_venta", "is", null);
+  if (snapshotErr) throw snapshotErr;
+
+  const ventaIds = uniqPositiveIds((snapshotRows || []).map((row) => row?.id_venta));
+  if (ventaIds.length) {
+    let query = supabaseAdmin
+      .from("ventas")
+      .select(selectCols)
+      .in("id_venta", ventaIds)
+      .order("id_venta", { ascending: orderAscending });
+    if (onlyPending) query = query.eq("pendiente", true);
+    if (limitNum > 0) query = query.limit(limitNum);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  }
+
+  // Fallback legacy para órdenes históricas sin snapshot en ordenes_items.
+  let fallbackQuery = supabaseAdmin
+    .from("ventas")
+    .select(selectCols)
+    .eq("id_orden", orderId)
+    .order("id_venta", { ascending: orderAscending });
+  if (onlyPending) fallbackQuery = fallbackQuery.eq("pendiente", true);
+  if (limitNum > 0) fallbackQuery = fallbackQuery.limit(limitNum);
+  const { data: fallbackData, error: fallbackErr } = await fallbackQuery;
+  if (fallbackErr) {
+    if (isMissingVentasIdOrdenColumnError(fallbackErr)) return [];
+    throw fallbackErr;
+  }
+  return fallbackData || [];
+};
+
+const resolveOrderIdByVentaId = async ({ idVenta = null, fallbackOrderId = null } = {}) => {
+  const saleId = toPositiveInt(idVenta);
+  const orderIdHint = toPositiveInt(fallbackOrderId);
+  if (orderIdHint) return orderIdHint;
+  if (!saleId) return null;
+
+  const { data: itemRow, error: itemErr } = await supabaseAdmin
+    .from("ordenes_items")
+    .select("id_orden, id_item_orden")
+    .eq("id_venta", saleId)
+    .not("id_orden", "is", null)
+    .order("id_item_orden", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (itemErr) throw itemErr;
+  const orderIdFromItem = toPositiveInt(itemRow?.id_orden);
+  if (orderIdFromItem) return orderIdFromItem;
+
+  const { data: histRow, error: histErr } = await supabaseAdmin
+    .from("historial_ventas")
+    .select("id_orden, id_historial_ventas")
+    .eq("id_venta", saleId)
+    .not("id_orden", "is", null)
+    .order("id_historial_ventas", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (histErr) throw histErr;
+  const orderIdFromHist = toPositiveInt(histRow?.id_orden);
+  if (orderIdFromHist) return orderIdFromHist;
+
+  const { data: ventaRow, error: ventaErr } = await supabaseAdmin
+    .from("ventas")
+    .select("id_orden")
+    .eq("id_venta", saleId)
+    .maybeSingle();
+  if (ventaErr) {
+    if (isMissingVentasIdOrdenColumnError(ventaErr)) return null;
+    throw ventaErr;
+  }
+
+  return toPositiveInt(ventaRow?.id_orden) || null;
+};
+
 const syncOrderPendingStateById = async (idOrden) => {
   const ordenId = toPositiveInt(idOrden);
   if (!ordenId) return;
-
-  const { data: pendingRows, error: pendingErr } = await supabaseAdmin
-    .from("ventas")
-    .select("id_venta")
-    .eq("id_orden", ordenId)
-    .eq("pendiente", true);
-  if (pendingErr) throw pendingErr;
+  const pendingRows = await fetchVentasByOrder({
+    idOrden: ordenId,
+    select: "id_venta",
+    onlyPending: true,
+  });
 
   const { error: updOrdenErr } = await supabaseAdmin
     .from("ordenes")
@@ -745,7 +847,6 @@ const deliverPendingGiftCardVenta = async ({
       `
       id_venta,
       id_usuario,
-      id_orden,
       id_precio,
       id_tarjeta_de_regalo,
       pendiente,
@@ -771,7 +872,7 @@ const deliverPendingGiftCardVenta = async ({
   }
 
   const idUsuarioVenta = toPositiveInt(venta?.id_usuario);
-  const idOrden = toPositiveInt(venta?.id_orden);
+  const idOrden = await resolveOrderIdByVentaId({ idVenta: ventaId });
   const idPlataforma = toPositiveInt(venta?.precios?.id_plataforma);
   if (!idUsuarioVenta || !idPlataforma) {
     throw giftCardDeliveryError(
@@ -2483,18 +2584,27 @@ const fetchSpotifyProviderPendingSales = async ({ idOrden = null, saleIds = [] }
     return { rows: [], missingMensajeProveedorColumn: false };
   }
 
-  let query = supabaseAdmin
+  let candidateSaleIds = resolvedSaleIds;
+  if (!candidateSaleIds.length && resolvedOrderId) {
+    const orderRows = await fetchVentasByOrder({
+      idOrden: resolvedOrderId,
+      select: "id_venta",
+    });
+    candidateSaleIds = uniqPositiveIds((orderRows || []).map((row) => row?.id_venta));
+  }
+  if (!candidateSaleIds.length) {
+    return { rows: [], missingMensajeProveedorColumn: false };
+  }
+
+  const { data, error } = await supabaseAdmin
     .from("ventas")
     .select(
-      "id_venta, id_orden, completa, mensaje_proveedor, correo_miembro, clave_miembro, precios:precios!ventas_id_precio_fkey(id_plataforma)",
+      "id_venta, completa, mensaje_proveedor, correo_miembro, clave_miembro, precios:precios!ventas_id_precio_fkey(id_plataforma)",
     )
     .eq("completa", true)
-    .eq("mensaje_proveedor", false);
-
-  if (resolvedOrderId) query = query.eq("id_orden", resolvedOrderId);
-  if (resolvedSaleIds.length) query = query.in("id_venta", resolvedSaleIds);
-
-  const { data, error } = await query.order("id_venta", { ascending: true });
+    .eq("mensaje_proveedor", false)
+    .in("id_venta", candidateSaleIds)
+    .order("id_venta", { ascending: true });
   if (error) {
     if (isMissingColumnError(error, "mensaje_proveedor")) {
       return { rows: [], missingMensajeProveedorColumn: true };
@@ -2505,7 +2615,7 @@ const fetchSpotifyProviderPendingSales = async ({ idOrden = null, saleIds = [] }
   const rows = (data || [])
     .map((row) => ({
       id_venta: toPositiveInt(row?.id_venta) || null,
-      id_orden: toPositiveInt(row?.id_orden) || null,
+      id_orden: resolvedOrderId || null,
       id_plataforma: toPositiveInt(row?.precios?.id_plataforma) || null,
       mensaje_proveedor: row?.mensaje_proveedor === true,
       correo: String(row?.correo_miembro || "").trim(),
@@ -2557,18 +2667,22 @@ const notifySpotifyProviderPendingSales = async ({
   }
 
   const ventaIds = uniqPositiveIds(rows.map((row) => row.id_venta));
+  const resolvedOrderIdFromRows =
+    resolvedOrderId ||
+    (await resolveOrderIdByVentaId({ idVenta: ventaIds?.[0] || null })) ||
+    null;
   const waResult = await sendSpotifyRenewalsToProviderWhatsapp({
     renewals: rows,
     providerId,
     manageWhatsappLifecycle,
     source,
-    idOrden: resolvedOrderId || toPositiveInt(rows[0]?.id_orden) || null,
+    idOrden: resolvedOrderIdFromRows,
   });
 
   if (!waResult?.sent) {
     return {
       ...waResult,
-      id_orden: resolvedOrderId || toPositiveInt(rows[0]?.id_orden) || null,
+      id_orden: resolvedOrderIdFromRows,
       venta_ids: ventaIds,
       total_pendientes: rows.length,
     };
@@ -2577,12 +2691,11 @@ const notifySpotifyProviderPendingSales = async ({
   let markedCount = 0;
   let markError = null;
   if (ventaIds.length) {
-    let markQuery = supabaseAdmin
+    const markQuery = supabaseAdmin
       .from("ventas")
       .update({ mensaje_proveedor: true })
       .in("id_venta", ventaIds)
       .eq("mensaje_proveedor", false);
-    if (resolvedOrderId) markQuery = markQuery.eq("id_orden", resolvedOrderId);
     const { data: markedRows, error: markErr } = await markQuery.select("id_venta");
     if (markErr) {
       markError = markErr;
@@ -2593,7 +2706,7 @@ const notifySpotifyProviderPendingSales = async ({
 
   return {
     ...waResult,
-    id_orden: resolvedOrderId || toPositiveInt(rows[0]?.id_orden) || null,
+    id_orden: resolvedOrderIdFromRows,
     venta_ids: ventaIds,
     total_pendientes: rows.length,
     mensaje_proveedor_actualizadas: markedCount,
@@ -3458,7 +3571,7 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   } else {
     const { data, error } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta, id_usuario, id_orden, pendiente, reportado")
+      .select("id_venta, id_usuario, pendiente, reportado")
       .eq("id_venta", ventaId)
       .maybeSingle();
     if (error) throw error;
@@ -3472,7 +3585,10 @@ const sendVentaEntregadaToWhatsappOwner = async ({
   }
 
   const targetUserId = toPositiveInt(ventaRow?.id_usuario);
-  const ordenId = toPositiveInt(ventaRow?.id_orden);
+  const ordenId = await resolveOrderIdByVentaId({
+    idVenta: ventaId,
+    fallbackOrderId: ventaRow?.id_orden,
+  });
   if (!targetUserId) {
     return {
       sent: false,
@@ -3674,7 +3790,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
   } else {
     const { data, error } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta, id_usuario, id_orden, pendiente, reportado")
+      .select("id_venta, id_usuario, pendiente, reportado")
       .eq("id_venta", ventaId)
       .maybeSingle();
     if (error) throw error;
@@ -3691,7 +3807,10 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
   }
 
   const targetUserId = toPositiveInt(ventaRow?.id_usuario);
-  const ordenId = toPositiveInt(ventaRow?.id_orden);
+  const ordenId = await resolveOrderIdByVentaId({
+    idVenta: ventaId,
+    fallbackOrderId: ventaRow?.id_orden,
+  });
   if (!targetUserId) {
     return {
       sent: false,
@@ -3849,13 +3968,11 @@ const notifyVentaEntregadaAfterOrderVerified = async ({
     return { sent: false, skipped: true, reason: "invalid_order" };
   }
 
-  const { data: ventasRows, error: ventasErr } = await supabaseAdmin
-    .from("ventas")
-    .select("id_venta, pendiente, reportado")
-    .eq("id_orden", ordenId)
-    .order("id_venta", { ascending: true })
-    .limit(120);
-  if (ventasErr) throw ventasErr;
+  const ventasRows = await fetchVentasByOrder({
+    idOrden: ordenId,
+    select: "id_venta, pendiente, reportado",
+    limit: 120,
+  });
 
   const ventasNoReportadas = (ventasRows || []).filter((row) => !isTrue(row?.reportado));
   const ventaTarget =
@@ -7058,11 +7175,10 @@ const autoProcessMatchedOrder = async (match = {}) => {
       }
     };
 
-    const { data: ventasExist, error: ventasErr } = await supabaseAdmin
-      .from("ventas")
-      .select("id_venta, pendiente")
-      .eq("id_orden", idOrden);
-    if (ventasErr) throw ventasErr;
+    const ventasExist = await fetchVentasByOrder({
+      idOrden,
+      select: "id_venta, pendiente",
+    });
 
     if ((ventasExist || []).length) {
       const pendientesCount = (ventasExist || []).filter((row) => isTrue(row?.pendiente)).length;
@@ -11877,7 +11993,29 @@ const processOrderFromItems = async ({
 
   let renovacionesPendientesCount = 0;
   const appliedRenovaciones = [];
+  const explicitRenewalAppliedVentaIds = new Set();
+  if (toPositiveInt(ordenId) && idsVentasRenovar.length) {
+    const { data: explicitRenewRows, error: explicitRenewErr } = await supabaseAdmin
+      .from("historial_ventas")
+      .select("id_venta")
+      .eq("id_orden", ordenId)
+      .eq("renovacion", true)
+      .in("id_venta", idsVentasRenovar);
+    if (explicitRenewErr) throw explicitRenewErr;
+    (explicitRenewRows || []).forEach((row) => {
+      const appliedVentaId = toPositiveInt(row?.id_venta);
+      if (appliedVentaId) explicitRenewalAppliedVentaIds.add(appliedVentaId);
+    });
+  }
   for (const it of renovaciones) {
+    const renewalVentaId = toPositiveInt(it?.id_venta);
+    if (renewalVentaId && explicitRenewalAppliedVentaIds.has(renewalVentaId)) {
+      console.warn("[checkout] renovacion omitida por historial existente", {
+        ordenId,
+        id_venta: renewalVentaId,
+      });
+      continue;
+    }
     const price = priceMap[it.id_precio] || {};
     const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
     const monto = roundCheckoutMoney(Number(it?.monto) || 0);
@@ -11896,7 +12034,6 @@ const processOrderFromItems = async ({
       fecha_pago: isoHoy,
       fecha_corte,
       monto,
-      id_orden: ordenId,
       renovacion: true,
       meses_contratados: mesesVal,
       recordatorio_enviado: false,
@@ -11919,11 +12056,11 @@ const processOrderFromItems = async ({
       .from("ventas")
       .update(updatePayload)
       .eq("id_venta", it.id_venta)
-      .or(`id_orden.is.null,id_orden.neq.${ordenId}`)
       .select("id_venta");
     if (renovErr) throw renovErr;
     if ((updatedRows || []).length > 0) {
       appliedRenovaciones.push(it);
+      if (renewalVentaId) explicitRenewalAppliedVentaIds.add(renewalVentaId);
     } else {
       console.warn("[checkout] renovacion omitida por idempotencia", {
         ordenId,
@@ -12542,7 +12679,6 @@ const processOrderFromItems = async ({
       id_cuenta: a.id_cuenta,
       id_perfil: a.id_perfil,
       // id_sub_cuenta no existe en la tabla ventas; si se requiere, agregar columna en DB
-      id_orden: ordenId,
       monto: montoLinea,
       pendiente: !!a.pendiente,
       entrega_aviso: !isTrue(a?.pendiente),
@@ -12576,6 +12712,20 @@ const processOrderFromItems = async ({
   if (spotifyImplicitRenewals.length) {
     const implicitVentaIds = uniqPositiveIds(spotifyImplicitRenewals.map((row) => row?.id_venta));
     const implicitVentaMap = {};
+    const implicitRenewalAppliedVentaIds = new Set();
+    if (toPositiveInt(ordenId) && implicitVentaIds.length) {
+      const { data: implicitRenewRows, error: implicitRenewErr } = await supabaseAdmin
+        .from("historial_ventas")
+        .select("id_venta")
+        .eq("id_orden", ordenId)
+        .eq("renovacion", true)
+        .in("id_venta", implicitVentaIds);
+      if (implicitRenewErr) throw implicitRenewErr;
+      (implicitRenewRows || []).forEach((histRow) => {
+        const appliedVentaId = toPositiveInt(histRow?.id_venta);
+        if (appliedVentaId) implicitRenewalAppliedVentaIds.add(appliedVentaId);
+      });
+    }
     if (implicitVentaIds.length) {
       const { data: implicitVentas, error: implicitVentasErr } = await supabaseAdmin
         .from("ventas")
@@ -12593,6 +12743,13 @@ const processOrderFromItems = async ({
     for (const row of spotifyImplicitRenewals) {
       const ventaId = toPositiveInt(row?.id_venta);
       if (!ventaId) continue;
+      if (implicitRenewalAppliedVentaIds.has(ventaId)) {
+        console.warn("[checkout] renovacion implicita omitida por historial existente", {
+          ordenId,
+          id_venta: ventaId,
+        });
+        continue;
+      }
       const price = priceMap[row?.id_precio] || {};
       const platId = Number(price?.id_plataforma) || 9;
       const platformInfo = platInfoById[platId] || {};
@@ -12615,7 +12772,6 @@ const processOrderFromItems = async ({
         fecha_pago: isoHoy,
         fecha_corte,
         monto,
-        id_orden: ordenId,
         renovacion: true,
         meses_contratados: mesesVal,
         recordatorio_enviado: false,
@@ -12638,7 +12794,6 @@ const processOrderFromItems = async ({
         .from("ventas")
         .update(updatePayload)
         .eq("id_venta", ventaId)
-        .or(`id_orden.is.null,id_orden.neq.${ordenId}`)
         .select("id_venta");
       if (implicitUpdErr) throw implicitUpdErr;
       if ((implicitUpdatedRows || []).length === 0) {
@@ -12648,6 +12803,7 @@ const processOrderFromItems = async ({
         });
         continue;
       }
+      implicitRenewalAppliedVentaIds.add(ventaId);
 
       implicitRenewalHistRows.push({
         id_usuario_cliente: ventaAnt?.id_usuario || idUsuarioVentas,
@@ -18281,7 +18437,7 @@ app.get("/api/ventas/orden-por-venta", async (req, res) => {
 
     const { data: ventaRow, error: ventaErr } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta, id_orden, id_usuario")
+      .select("id_venta, id_usuario")
       .eq("id_venta", idVenta)
       .maybeSingle();
     if (ventaErr) throw ventaErr;
@@ -18289,49 +18445,9 @@ app.get("/api/ventas/orden-por-venta", async (req, res) => {
       return res.status(404).json({ error: "Venta no encontrada." });
     }
 
-    let idOrden = toPositiveInt(ventaRow?.id_orden);
-    if (!idOrden) {
-      const { data: histRow, error: histErr } = await supabaseAdmin
-        .from("historial_ventas")
-        .select("id_orden, id_historial_ventas")
-        .eq("id_venta", idVenta)
-        .not("id_orden", "is", null)
-        .order("id_historial_ventas", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (histErr) throw histErr;
-      idOrden = toPositiveInt(histRow?.id_orden);
-    }
-    if (!idOrden) {
-      const { data: itemRow, error: itemErr } = await supabaseAdmin
-        .from("ordenes_items")
-        .select("id_orden, id_item_orden")
-        .eq("id_venta", idVenta)
-        .not("id_orden", "is", null)
-        .order("id_item_orden", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (itemErr) throw itemErr;
-      idOrden = toPositiveInt(itemRow?.id_orden);
-    }
+    const idOrden = await resolveOrderIdByVentaId({ idVenta });
     if (!idOrden) {
       return res.status(409).json({ error: "La venta no tiene orden asociada." });
-    }
-
-    // Autorrepara ventas antiguas/inconsistentes que quedaron sin id_orden.
-    if (!toPositiveInt(ventaRow?.id_orden)) {
-      const { error: repairErr } = await supabaseAdmin
-        .from("ventas")
-        .update({ id_orden: idOrden })
-        .eq("id_venta", idVenta)
-        .is("id_orden", null);
-      if (repairErr) {
-        console.warn("[ventas/orden-por-venta] no se pudo reparar id_orden en venta", {
-          id_venta: idVenta,
-          id_orden: idOrden,
-          error: repairErr?.message || repairErr,
-        });
-      }
     }
 
     let ownerId = toPositiveInt(ventaRow?.id_usuario);
@@ -18414,10 +18530,9 @@ app.get("/api/ventas/orden", async (req, res) => {
       }
     }
     console.log("[ventas/orden] request", { id_orden: idOrden });
-    const { data, error } = await supabaseAdmin
-      .from("ventas")
-      .select(
-        `
+    const liveVentasRows = await fetchVentasByOrder({
+      idOrden,
+      select: `
         id_venta,
         meses_contratados,
         renovacion,
@@ -18427,7 +18542,6 @@ app.get("/api/ventas/orden", async (req, res) => {
         id_precio,
         id_tarjeta_de_regalo,
         pendiente,
-        id_orden,
         completa,
         mensaje_proveedor,
         correo_miembro,
@@ -18437,13 +18551,13 @@ app.get("/api/ventas/orden", async (req, res) => {
         perfiles:perfiles(id_perfil, n_perfil, pin, perfil_hogar),
         tarjetas_de_regalo:tarjetas_de_regalo!ventas_id_tarjeta_de_regalo_fkey(id_tarjeta_de_regalo, pin, vendido_a),
         precios:precios(id_precio, id_plataforma, plan, completa, sub_cuenta, region, valor_tarjeta_de_regalo, moneda)
-      `
-      )
-      .eq("id_orden", idOrden)
-      .order("id_venta", { ascending: false });
-    if (error) throw error;
+      `,
+      ascending: false,
+    });
 
-    const liveVentas = Array.isArray(data) ? data : [];
+    const liveVentas = Array.isArray(liveVentasRows)
+      ? liveVentasRows.map((row) => ({ ...row, id_orden: idOrden }))
+      : [];
     const liveVentaIds = new Set(
       liveVentas.map((row) => toPositiveInt(row?.id_venta)).filter((value) => value > 0),
     );
@@ -18554,7 +18668,6 @@ app.get("/api/ventas/entrega-por-venta", async (req, res) => {
         id_precio,
         id_tarjeta_de_regalo,
         pendiente,
-        id_orden,
         completa,
         mensaje_proveedor,
         correo_miembro,
@@ -18574,7 +18687,7 @@ app.get("/api/ventas/entrega-por-venta", async (req, res) => {
     }
 
     let ownerId = toPositiveInt(ventaRow?.id_usuario);
-    const orderIdFromSale = toPositiveInt(ventaRow?.id_orden);
+    const orderIdFromSale = await resolveOrderIdByVentaId({ idVenta });
     if (!ownerId && orderIdFromSale) {
       const { data: ordenRow, error: ordenErr } = await supabaseAdmin
         .from("ordenes")
@@ -18615,7 +18728,7 @@ app.get("/api/ventas/entrega-por-venta", async (req, res) => {
     }
 
     return res.json({
-      ventas: [ventaRow],
+      ventas: [{ ...ventaRow, id_orden: orderIdFromSale || null }],
       usuario: {
         id_usuario: ownerId || null,
         registrado: usuarioRegistrado,
@@ -20240,12 +20353,11 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     ) {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
-    const { data: ventasExist, error: ventasErr } = await supabaseAdmin
-      .from("ventas")
-      .select("id_venta")
-      .eq("id_orden", idOrden)
-      .limit(1);
-    if (ventasErr) throw ventasErr;
+    const ventasExist = await fetchVentasByOrder({
+      idOrden,
+      select: "id_venta",
+      limit: 1,
+    });
     if (ventasExist?.length) {
       const ordenPatch = {};
       let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
@@ -20275,12 +20387,11 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         }
       }
       if (!orden?.pago_verificado) {
-        const { data: pendRows, error: pendErr } = await supabaseAdmin
-          .from("ventas")
-          .select("id_venta")
-          .eq("id_orden", idOrden)
-          .eq("pendiente", true);
-        if (pendErr) throw pendErr;
+        const pendRows = await fetchVentasByOrder({
+          idOrden,
+          select: "id_venta",
+          onlyPending: true,
+        });
         ordenPatch.pago_verificado = true;
         ordenPatch.en_espera = (pendRows || []).length > 0;
       }
