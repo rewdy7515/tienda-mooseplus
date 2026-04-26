@@ -816,6 +816,18 @@ const fetchVentasByOrder = async ({
   return fallbackData || [];
 };
 
+const hasHistorialVentasForOrder = async (idOrden) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) return false;
+  const { data, error } = await supabaseAdmin
+    .from("historial_ventas")
+    .select("id_historial_ventas")
+    .eq("id_orden", orderId)
+    .limit(1);
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+};
+
 const resolveOrderIdByVentaId = async ({ idVenta = null, fallbackOrderId = null } = {}) => {
   const saleId = toPositiveInt(idVenta);
   const orderIdHint = toPositiveInt(fallbackOrderId);
@@ -7278,12 +7290,13 @@ const autoProcessMatchedOrder = async (
       }
     };
 
-    const ventasExist = await fetchVentasByOrder({
-      idOrden,
-      select: "id_venta, pendiente",
-    });
+    const alreadyProcessed = await hasHistorialVentasForOrder(idOrden);
 
-    if ((ventasExist || []).length) {
+    if (alreadyProcessed) {
+      const ventasExist = await fetchVentasByOrder({
+        idOrden,
+        select: "id_venta, pendiente",
+      });
       const pendientesCount = (ventasExist || []).filter((row) => isTrue(row?.pendiente)).length;
       let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
       let saldoReconciliacionError = null;
@@ -21696,12 +21709,12 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     ) {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
-    const ventasExist = await fetchVentasByOrder({
-      idOrden,
-      select: "id_venta",
-      limit: 1,
-    });
-    if (ventasExist?.length) {
+    const alreadyProcessed = await hasHistorialVentasForOrder(idOrden);
+    if (alreadyProcessed) {
+      const ventasExist = await fetchVentasByOrder({
+        idOrden,
+        select: "id_venta",
+      });
       const ordenPatch = {};
       let saldoReconciliado = { debitado: false, monto: 0, saldoNuevo: null };
       let saldoReconciliacionError = null;
