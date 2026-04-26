@@ -714,11 +714,16 @@ async function saveAutoReemplazoConfig(value) {
   const next = value === true;
   const { error } = await supabase
     .from("configuracion_sistema")
-    .update({
-      valor_bool: next,
-      actualizado_en: new Date().toISOString(),
-    })
-    .eq("clave", AUTO_REEMPLAZO_CFG_KEY);
+    .upsert(
+      [
+        {
+          clave: AUTO_REEMPLAZO_CFG_KEY,
+          valor_bool: next,
+          actualizado_en: new Date().toISOString(),
+        },
+      ],
+      { onConflict: "clave" },
+    );
   if (error) throw error;
 }
 

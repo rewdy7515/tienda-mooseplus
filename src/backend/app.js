@@ -108,6 +108,64 @@ const shouldStartWhatsapp =
   process.env.ENABLE_WHATSAPP === "true" && process.env.VERCEL !== "1";
 const INTERNAL_WORKER_TRIGGER_TOKEN = String(process.env.INTERNAL_WORKER_TRIGGER_TOKEN || "")
   .trim();
+const BINANCE_GMAIL_PAYMENTS_TABLE = "binance_gmail_pagos";
+const BINANCE_GMAIL_APP_NAME = "GMAIL_BINANCE";
+const BINANCE_GMAIL_SYNC_ENABLED =
+  process.env.BINANCE_GMAIL_SYNC_ENABLED === "true" && process.env.VERCEL !== "1";
+const BINANCE_GMAIL_SYNC_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.BINANCE_GMAIL_SYNC_INTERVAL_MS) || 45000,
+);
+const BINANCE_GMAIL_MAX_RESULTS = Math.max(
+  1,
+  Math.min(100, Number(process.env.BINANCE_GMAIL_MAX_RESULTS) || 20),
+);
+const BINANCE_GMAIL_LOOKBACK_MINUTES = Math.max(
+  10,
+  Number(process.env.BINANCE_GMAIL_LOOKBACK_MINUTES) || 240,
+);
+const BINANCE_GMAIL_ORDER_WINDOW_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.BINANCE_GMAIL_ORDER_WINDOW_MS) || 3 * 60 * 60 * 1000,
+);
+const BINANCE_GMAIL_AMOUNT_TOLERANCE = Math.max(
+  0,
+  Number(process.env.BINANCE_GMAIL_AMOUNT_TOLERANCE) || 0.01,
+);
+const BINANCE_GMAIL_LABEL_IDS = String(process.env.BINANCE_GMAIL_LABEL_IDS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const BINANCE_GMAIL_QUERY = String(
+  process.env.BINANCE_GMAIL_QUERY ||
+    'from:(binance.com) ("received" OR "recibido" OR "payment" OR "pago" OR "paid")',
+).trim();
+const GMAIL_OAUTH_CLIENT_ID = String(process.env.GMAIL_OAUTH_CLIENT_ID || "").trim();
+const GMAIL_OAUTH_CLIENT_SECRET = String(process.env.GMAIL_OAUTH_CLIENT_SECRET || "").trim();
+const GMAIL_OAUTH_REDIRECT_URI = String(process.env.GMAIL_OAUTH_REDIRECT_URI || "").trim();
+const GMAIL_OAUTH_SCOPES = String(
+  process.env.GMAIL_OAUTH_SCOPES || "https://www.googleapis.com/auth/gmail.readonly",
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const BINANCE_GMAIL_OAUTH_STATE_TTL_MS = Math.max(
+  60 * 1000,
+  Number(process.env.BINANCE_GMAIL_OAUTH_STATE_TTL_MS) || 10 * 60 * 1000,
+);
+const BINANCE_GMAIL_METODO_CACHE_MS = Math.max(
+  10 * 1000,
+  Number(process.env.BINANCE_GMAIL_METODO_CACHE_MS) || 5 * 60 * 1000,
+);
+const BINANCE_UNIQUE_AMOUNT_ENABLED = process.env.BINANCE_UNIQUE_AMOUNT_ENABLED !== "false";
+const BINANCE_UNIQUE_AMOUNT_MAX_DECIMAL_STEP = Math.max(
+  1,
+  Math.min(9, Number(process.env.BINANCE_UNIQUE_AMOUNT_MAX_DECIMAL_STEP) || 9),
+);
+const BINANCE_UNIQUE_AMOUNT_MIN_PENDING = Math.max(
+  1,
+  Number(process.env.BINANCE_UNIQUE_AMOUNT_MIN_PENDING) || 1,
+);
 
 const hasValidInternalWorkerTriggerToken = (req = {}) => {
   if (!INTERNAL_WORKER_TRIGGER_TOKEN) return false;
@@ -406,6 +464,22 @@ let autoGiftCardPendingDeliveryInitialized = false;
 let autoGiftCardPendingDeliveryCursor = 0;
 let autoPendingStockDeliveryInProgress = false;
 let autoCreditedPagoMovilOrderProcessInProgress = false;
+let binanceGmailSyncInProgress = false;
+let binanceGmailSyncLastRunAt = null;
+let binanceGmailSyncLastError = null;
+let binanceGmailSyncLastResult = {
+  fetched: 0,
+  parsed: 0,
+  stored: 0,
+  duplicates: 0,
+  matched: 0,
+  processed: 0,
+  skipped: 0,
+  failed: 0,
+};
+let cachedGmailRefreshToken = String(process.env.GMAIL_OAUTH_REFRESH_TOKEN || "").trim();
+let cachedBinanceMetodoPagoIds = { ids: [], ts: 0 };
+const binanceGmailOauthStateMap = new Map();
 let monthlyMetricsClosureInProgress = false;
 const ORDER_PROCESS_LOCK_STALE_MS = Math.max(
   2 * 60 * 1000,
@@ -702,7 +776,17 @@ const fetchVentasByOrder = async ({
     .not("id_venta", "is", null);
   if (snapshotErr) throw snapshotErr;
 
-  const ventaIds = uniqPositiveIds((snapshotRows || []).map((row) => row?.id_venta));
+  const { data: historialRows, error: historialErr } = await supabaseAdmin
+    .from("historial_ventas")
+    .select("id_venta")
+    .eq("id_orden", orderId)
+    .not("id_venta", "is", null);
+  if (historialErr) throw historialErr;
+
+  const ventaIds = uniqPositiveIds([
+    ...(snapshotRows || []).map((row) => row?.id_venta),
+    ...(historialRows || []).map((row) => row?.id_venta),
+  ]);
   if (ventaIds.length) {
     let query = supabaseAdmin
       .from("ventas")
@@ -7113,11 +7197,21 @@ const creditSaldoUsdToUser = async ({ idUsuario = null, montoUsd = 0 } = {}) => 
   return { acreditado: true, monto: amount, saldoNuevo };
 };
 
-const autoProcessMatchedOrder = async (match = {}) => {
+const autoProcessMatchedOrder = async (
+  match = {},
+  { allowedMetodoPagoIds = [1], syncPagoMovil = true } = {},
+) => {
   const idOrden = toPositiveInt(match?.id_orden);
   if (!idOrden) {
     return { processed: false, reason: "id_orden_invalido" };
   }
+  const allowedMetodoIds = Array.from(
+    new Set(
+      (Array.isArray(allowedMetodoPagoIds) ? allowedMetodoPagoIds : [])
+        .map((value) => toPositiveInt(value))
+        .filter(Boolean),
+    ),
+  );
 
   const orderProcessLock = await acquireSharedOrderProcessLock(idOrden, {
     source: "auto_process_matched_order",
@@ -7146,8 +7240,14 @@ const autoProcessMatchedOrder = async (match = {}) => {
     if (isTrue(orden?.orden_cancelada)) {
       return { processed: false, reason: "orden_cancelada", id_orden: idOrden };
     }
-    if (Number(orden?.id_metodo_de_pago) !== 1) {
-      return { processed: false, reason: "metodo_no_pagomovil", id_orden: idOrden };
+    const metodoPagoId = toPositiveInt(orden?.id_metodo_de_pago);
+    if (allowedMetodoIds.length && !allowedMetodoIds.includes(metodoPagoId || 0)) {
+      return {
+        processed: false,
+        reason: "metodo_no_permitido",
+        id_orden: idOrden,
+        id_metodo_de_pago: metodoPagoId,
+      };
     }
 
     const idUsuarioVentas = toPositiveInt(match?.id_usuario) || toPositiveInt(orden?.id_usuario);
@@ -7156,6 +7256,9 @@ const autoProcessMatchedOrder = async (match = {}) => {
     }
 
     const syncPagoMovilCredito = async () => {
+      if (syncPagoMovil !== true) {
+        return { ok: true, skipped: true, error: null };
+      }
       try {
         await markPagoMovilRowAsCredited({
           pagoId: match?.pago_id,
@@ -7541,6 +7644,929 @@ const processCreditedPagoMovilOrders = async () => {
   }
 };
 
+const parseFlexibleMoneyNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  let clean = raw.replace(/[^\d.,-]/g, "");
+  if (!clean) return null;
+  if (clean.includes(".") && clean.includes(",")) {
+    clean = clean.replace(/\./g, "").replace(",", ".");
+  } else if (clean.includes(",")) {
+    clean = clean.replace(",", ".");
+  }
+  const num = Number(clean);
+  return Number.isFinite(num) ? num : null;
+};
+
+const getBinanceMetodoPagoIdsFromEnv = () =>
+  Array.from(
+    new Set(
+      String(process.env.BINANCE_METODO_PAGO_IDS || "")
+        .split(",")
+        .map((value) => toPositiveInt(value))
+        .filter(Boolean),
+    ),
+  );
+
+const resolveBinanceMetodoPagoIds = async ({ forceRefresh = false } = {}) => {
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    Array.isArray(cachedBinanceMetodoPagoIds.ids) &&
+    cachedBinanceMetodoPagoIds.ids.length &&
+    now - Number(cachedBinanceMetodoPagoIds.ts || 0) < BINANCE_GMAIL_METODO_CACHE_MS
+  ) {
+    return [...cachedBinanceMetodoPagoIds.ids];
+  }
+
+  const ids = new Set(getBinanceMetodoPagoIdsFromEnv());
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("metodos_de_pago")
+      .select("id_metodo_de_pago, nombre")
+      .ilike("nombre", "%binance%");
+    if (error) throw error;
+    (Array.isArray(data) ? data : [])
+      .map((row) => toPositiveInt(row?.id_metodo_de_pago))
+      .filter(Boolean)
+      .forEach((id) => ids.add(id));
+  } catch (err) {
+    console.error("[binance:metodos] no se pudo consultar metodos_de_pago", {
+      error: err?.message || err,
+    });
+  }
+
+  const resolvedIds = Array.from(ids).sort((a, b) => a - b);
+  cachedBinanceMetodoPagoIds = { ids: resolvedIds, ts: now };
+  return resolvedIds;
+};
+
+const isBinanceMetodoPago = async (metodoPagoRow = {}) => {
+  const metodoId = toPositiveInt(metodoPagoRow?.id_metodo_de_pago);
+  const nombre = String(metodoPagoRow?.nombre || "")
+    .trim()
+    .toLowerCase();
+  if (nombre.includes("binance")) return true;
+  if (!metodoId) return false;
+  const knownIds = await resolveBinanceMetodoPagoIds();
+  return knownIds.includes(metodoId);
+};
+
+const resolveOrderUsdAmountForBinance = (orden = {}) => {
+  const montoObjetivo = parseFlexibleMoneyNumber(orden?.monto_usdt_objetivo);
+  if (Number.isFinite(montoObjetivo) && montoObjetivo > 0) {
+    return Math.round(montoObjetivo * 1000) / 1000;
+  }
+  const montoTransferido = parseFlexibleMoneyNumber(orden?.monto_transferido);
+  if (Number.isFinite(montoTransferido) && montoTransferido > 0) {
+    return Math.round(montoTransferido * 1000) / 1000;
+  }
+  const total = parseFlexibleMoneyNumber(orden?.total);
+  if (Number.isFinite(total) && total > 0) {
+    return Math.round(total * 1000) / 1000;
+  }
+  return null;
+};
+
+const isOrderInsideBinanceActiveWindow = (orden = {}, nowMs = Date.now()) => {
+  const expiraEn = String(orden?.monto_objetivo_expira_en || "").trim();
+  if (expiraEn) {
+    const expiraDate = new Date(expiraEn);
+    if (!Number.isNaN(expiraDate.getTime())) {
+      return expiraDate.getTime() >= nowMs;
+    }
+  }
+  const orderDate = parseCaracasOrderDateTime(orden?.fecha, orden?.hora_orden);
+  if (!orderDate) return false;
+  const elapsedMs = nowMs - orderDate.getTime();
+  if (!Number.isFinite(elapsedMs)) return false;
+  return elapsedMs >= -5 * 60 * 1000 && elapsedMs <= BINANCE_GMAIL_ORDER_WINDOW_MS;
+};
+
+const extractUniqueThirdDecimalStep = (amount, baseAmount) => {
+  const parsedAmount = parseFlexibleMoneyNumber(amount);
+  const parsedBase = parseFlexibleMoneyNumber(baseAmount);
+  if (!Number.isFinite(parsedAmount) || !Number.isFinite(parsedBase)) return null;
+  const diffMillis = Math.round((parsedAmount - parsedBase) * 1000);
+  if (!Number.isFinite(diffMillis)) return null;
+  if (diffMillis < 1 || diffMillis > BINANCE_UNIQUE_AMOUNT_MAX_DECIMAL_STEP) return null;
+  return diffMillis;
+};
+
+const resolveUniqueBinanceCheckoutTotal = async ({
+  baseTotalUsd = 0,
+  metodoPagoRow = {},
+  reuseOrderId = null,
+} = {}) => {
+  const base = parseFlexibleMoneyNumber(baseTotalUsd);
+  if (!Number.isFinite(base) || base <= 0) {
+    return { applied: false, total: baseTotalUsd, reason: "invalid_base_total" };
+  }
+  if (!BINANCE_UNIQUE_AMOUNT_ENABLED) {
+    return { applied: false, total: Math.round(base * 100) / 100, reason: "disabled" };
+  }
+  const isBinanceMethod = await isBinanceMetodoPago(metodoPagoRow);
+  if (!isBinanceMethod) {
+    return { applied: false, total: Math.round(base * 100) / 100, reason: "metodo_no_binance" };
+  }
+
+  const metodoPagoId = toPositiveInt(metodoPagoRow?.id_metodo_de_pago);
+  if (!metodoPagoId) {
+    return { applied: false, total: Math.round(base * 100) / 100, reason: "invalid_metodo_pago" };
+  }
+
+  const baseRounded = Math.round(base * 100) / 100;
+  const reuseId = toPositiveInt(reuseOrderId);
+  if (reuseId) {
+    const { data: existingOrder, error: existingOrderErr } = await supabaseAdmin
+      .from("ordenes")
+      .select(
+        "id_orden, id_metodo_de_pago, total, monto_transferido, monto_usdt_objetivo, binance_decimal_slot, monto_objetivo_expira_en, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada, fecha, hora_orden",
+      )
+      .eq("id_orden", reuseId)
+      .maybeSingle();
+    if (existingOrderErr) throw existingOrderErr;
+    const existingTotal = resolveOrderUsdAmountForBinance(existingOrder);
+    const sameMethod = toPositiveInt(existingOrder?.id_metodo_de_pago) === metodoPagoId;
+    const insideBucket =
+      Number.isFinite(existingTotal) &&
+      existingTotal >= baseRounded &&
+      existingTotal < baseRounded + 0.01;
+    const reusableState =
+      isTrue(existingOrder?.marcado_pago) &&
+      isTrue(existingOrder?.checkout_finalizado) &&
+      !isTrue(existingOrder?.pago_verificado) &&
+      !isTrue(existingOrder?.orden_cancelada);
+    if (sameMethod && insideBucket && reusableState) {
+      const reusedStep = extractUniqueThirdDecimalStep(existingTotal, baseRounded);
+      if (reusedStep) {
+        return {
+          applied: true,
+          total: Math.round(existingTotal * 1000) / 1000,
+          step: reusedStep,
+          reused: true,
+          activeConflicts: null,
+        };
+      }
+    }
+  }
+
+  let pendingOrdersQuery = supabaseAdmin
+    .from("ordenes")
+    .select(
+      "id_orden, total, monto_transferido, monto_usdt_objetivo, binance_decimal_slot, monto_objetivo_expira_en, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada",
+    )
+    .eq("id_metodo_de_pago", metodoPagoId)
+    .eq("marcado_pago", true)
+    .eq("checkout_finalizado", true)
+    .eq("pago_verificado", false)
+    .eq("orden_cancelada", false)
+    .gte("total", baseRounded)
+    .lt("total", baseRounded + 0.01)
+    .order("id_orden", { ascending: true })
+    .limit(1000);
+  if (reuseId) {
+    pendingOrdersQuery = pendingOrdersQuery.neq("id_orden", reuseId);
+  }
+  const { data: pendingRows, error: pendingErr } = await pendingOrdersQuery;
+  if (pendingErr) throw pendingErr;
+  const pendingOrders = Array.isArray(pendingRows) ? pendingRows : [];
+  const activeOrders = pendingOrders.filter((row) => isOrderInsideBinanceActiveWindow(row));
+  const usedSteps = new Set(
+    activeOrders
+      .map((row) => extractUniqueThirdDecimalStep(resolveOrderUsdAmountForBinance(row), baseRounded))
+      .filter((step) => Number.isFinite(step) && step >= 1),
+  );
+
+  const totalActiveIncludingCurrent = activeOrders.length + 1;
+  if (totalActiveIncludingCurrent < BINANCE_UNIQUE_AMOUNT_MIN_PENDING) {
+    return { applied: false, total: baseRounded, reason: "below_min_pending" };
+  }
+
+  let step = 1;
+  while (usedSteps.has(step) && step <= BINANCE_UNIQUE_AMOUNT_MAX_DECIMAL_STEP) {
+    step += 1;
+  }
+  if (step > BINANCE_UNIQUE_AMOUNT_MAX_DECIMAL_STEP) {
+    const err = new Error(
+      `No hay más slots de monto único para base ${baseRounded.toFixed(2)} (tope ${BINANCE_UNIQUE_AMOUNT_MAX_DECIMAL_STEP}).`,
+    );
+    err.code = "BINANCE_UNIQUE_AMOUNT_CAP_REACHED";
+    throw err;
+  }
+
+  const uniqueTotal = Math.round((baseRounded + step / 1000) * 1000) / 1000;
+  return {
+    applied: true,
+    total: uniqueTotal,
+    step,
+    reused: false,
+    activeConflicts: activeOrders.length,
+  };
+};
+
+const cleanupBinanceGmailOauthStates = () => {
+  const now = Date.now();
+  for (const [state, meta] of binanceGmailOauthStateMap.entries()) {
+    if (now - Number(meta?.createdAt || 0) > BINANCE_GMAIL_OAUTH_STATE_TTL_MS) {
+      binanceGmailOauthStateMap.delete(state);
+    }
+  }
+};
+
+const requireBinanceGmailOauthConfig = () => {
+  if (!GMAIL_OAUTH_CLIENT_ID || !GMAIL_OAUTH_CLIENT_SECRET || !GMAIL_OAUTH_REDIRECT_URI) {
+    const err = new Error(
+      "Faltan GMAIL_OAUTH_CLIENT_ID, GMAIL_OAUTH_CLIENT_SECRET o GMAIL_OAUTH_REDIRECT_URI.",
+    );
+    err.code = "BINANCE_GMAIL_OAUTH_CONFIG_MISSING";
+    throw err;
+  }
+};
+
+const buildBinanceGmailOauthUrl = ({ state }) => {
+  requireBinanceGmailOauthConfig();
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", GMAIL_OAUTH_CLIENT_ID);
+  url.searchParams.set("redirect_uri", GMAIL_OAUTH_REDIRECT_URI);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", GMAIL_OAUTH_SCOPES.join(" "));
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("include_granted_scopes", "true");
+  if (state) {
+    url.searchParams.set("state", state);
+  }
+  return url.toString();
+};
+
+const exchangeGoogleOauthCodeForTokens = async ({ code }) => {
+  requireBinanceGmailOauthConfig();
+  const payload = new URLSearchParams({
+    code: String(code || "").trim(),
+    client_id: GMAIL_OAUTH_CLIENT_ID,
+    client_secret: GMAIL_OAUTH_CLIENT_SECRET,
+    redirect_uri: GMAIL_OAUTH_REDIRECT_URI,
+    grant_type: "authorization_code",
+  });
+  const resp = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: payload.toString(),
+  });
+  const raw = await resp.text();
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (_err) {
+    parsed = {};
+  }
+  if (!resp.ok) {
+    const err = new Error(parsed?.error_description || parsed?.error || `OAuth error ${resp.status}`);
+    err.code = "BINANCE_GMAIL_OAUTH_EXCHANGE_FAILED";
+    err.status = resp.status;
+    err.details = parsed;
+    throw err;
+  }
+  return parsed || {};
+};
+
+const getConfiguredGmailRefreshToken = () => {
+  const fromCache = String(cachedGmailRefreshToken || "").trim();
+  if (fromCache) return fromCache;
+  const fromEnv = String(process.env.GMAIL_OAUTH_REFRESH_TOKEN || "").trim();
+  if (fromEnv) {
+    cachedGmailRefreshToken = fromEnv;
+    return fromEnv;
+  }
+  return "";
+};
+
+const fetchGoogleAccessTokenWithRefreshToken = async () => {
+  requireBinanceGmailOauthConfig();
+  const refreshToken = getConfiguredGmailRefreshToken();
+  if (!refreshToken) {
+    const err = new Error(
+      "No hay refresh token configurado. Completa OAuth y guarda GMAIL_OAUTH_REFRESH_TOKEN.",
+    );
+    err.code = "BINANCE_GMAIL_REFRESH_TOKEN_MISSING";
+    throw err;
+  }
+  const payload = new URLSearchParams({
+    client_id: GMAIL_OAUTH_CLIENT_ID,
+    client_secret: GMAIL_OAUTH_CLIENT_SECRET,
+    refresh_token: refreshToken,
+    grant_type: "refresh_token",
+  });
+  const resp = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: payload.toString(),
+  });
+  const raw = await resp.text();
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (_err) {
+    parsed = {};
+  }
+  if (!resp.ok || !String(parsed?.access_token || "").trim()) {
+    const err = new Error(
+      parsed?.error_description || parsed?.error || `Token refresh error ${resp.status}`,
+    );
+    err.code = "BINANCE_GMAIL_ACCESS_TOKEN_FAILED";
+    err.status = resp.status;
+    err.details = parsed;
+    throw err;
+  }
+  return String(parsed.access_token).trim();
+};
+
+const buildGmailApiUrl = (path, query = {}) => {
+  const url = new URL(`https://gmail.googleapis.com${String(path || "")}`);
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === "") return;
+    if (Array.isArray(value)) {
+      value
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .forEach((item) => url.searchParams.append(key, item));
+      return;
+    }
+    url.searchParams.set(key, String(value));
+  });
+  return url.toString();
+};
+
+const gmailApiRequest = async ({ accessToken, path, query = {} } = {}) => {
+  const token = String(accessToken || "").trim();
+  if (!token) {
+    const err = new Error("access token inválido para Gmail API");
+    err.code = "BINANCE_GMAIL_ACCESS_TOKEN_INVALID";
+    throw err;
+  }
+  const url = buildGmailApiUrl(path, query);
+  const resp = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+  const raw = await resp.text();
+  let parsed = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (_err) {
+    parsed = {};
+  }
+  if (!resp.ok) {
+    const err = new Error(parsed?.error?.message || `Gmail API error ${resp.status}`);
+    err.code = "BINANCE_GMAIL_API_ERROR";
+    err.status = resp.status;
+    err.details = parsed;
+    throw err;
+  }
+  return parsed || {};
+};
+
+const decodeGmailBodyData = (rawData) => {
+  const raw = String(rawData || "").trim();
+  if (!raw) return "";
+  try {
+    return decodeBase64Url(raw).toString("utf8");
+  } catch (_err) {
+    return "";
+  }
+};
+
+const stripHtmlTags = (value) =>
+  String(value || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const collectGmailPayloadTexts = (payload = {}, collected = []) => {
+  if (!payload || typeof payload !== "object") return collected;
+  const mime = String(payload.mimeType || "").toLowerCase();
+  const bodyData = decodeGmailBodyData(payload?.body?.data);
+  if (bodyData) {
+    if (mime.includes("text/html")) {
+      const stripped = stripHtmlTags(bodyData);
+      if (stripped) collected.push(stripped);
+    } else {
+      collected.push(String(bodyData).replace(/\s+/g, " ").trim());
+    }
+  }
+  const parts = Array.isArray(payload.parts) ? payload.parts : [];
+  parts.forEach((part) => collectGmailPayloadTexts(part, collected));
+  return collected;
+};
+
+const getGmailHeaderValue = (payload = {}, targetHeader = "") => {
+  const target = String(targetHeader || "").trim().toLowerCase();
+  if (!target) return "";
+  const headers = Array.isArray(payload?.headers) ? payload.headers : [];
+  const match = headers.find((header) => {
+    const name = String(header?.name || "").trim().toLowerCase();
+    return name === target;
+  });
+  return String(match?.value || "").trim();
+};
+
+const extractEmailFromHeader = (fromHeader = "") => {
+  const raw = String(fromHeader || "").trim();
+  if (!raw) return "";
+  const explicit = raw.match(/<([^>]+)>/);
+  const email = (explicit?.[1] || raw).trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return raw;
+  return email;
+};
+
+const normalizeBinanceAmount = (value) => {
+  const parsed = parseFlexibleMoneyNumber(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.round(parsed * 1000) / 1000;
+};
+
+const extractBinanceAmountFromText = (value = "") => {
+  const text = String(value || "");
+  if (!text) return null;
+  const patterns = [
+    /\b([0-9]{1,6}(?:[.,][0-9]{1,8})?)\s*(USDT|BUSD|USD)\b/gi,
+    /\b(USDT|BUSD|USD)\s*([0-9]{1,6}(?:[.,][0-9]{1,8})?)\b/gi,
+    /(?:monto|amount)\s*(?:recibido|received|paid|pagado)?\s*[:：]?\s*([0-9]{1,6}(?:[.,][0-9]{1,8})?)/gi,
+  ];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const candidate = normalizeBinanceAmount(match?.[1] || match?.[2]);
+      if (Number.isFinite(candidate) && candidate > 0) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+};
+
+const extractBinanceReferenceFromText = (value = "") => {
+  const text = String(value || "");
+  if (!text) return "";
+  const patterns = [
+    /(?:order|orden)\s*(?:id|n(?:o|ro)?|#)?\s*[:#-]?\s*([A-Z0-9-]{6,64})/i,
+    /(?:transaction|transacci(?:o|ó)n)\s*(?:id|hash|#)?\s*[:#-]?\s*([A-Z0-9-]{6,64})/i,
+    /(?:referencia|reference)\s*[:#-]?\s*([A-Z0-9-]{6,64})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    return String(match[1]).trim();
+  }
+  return "";
+};
+
+const extractGmailMessageDateIso = (message = {}) => {
+  const internalDate = Number(message?.internalDate);
+  if (Number.isFinite(internalDate) && internalDate > 0) {
+    const fromInternal = new Date(internalDate);
+    if (!Number.isNaN(fromInternal.getTime())) return fromInternal.toISOString();
+  }
+  const headerDate = getGmailHeaderValue(message?.payload, "date");
+  if (headerDate) {
+    const parsed = new Date(headerDate);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return new Date().toISOString();
+};
+
+const toCaracasTimeString = (isoDate) => {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Caracas",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const map = parts.reduce((acc, part) => {
+    if (part.type !== "literal") acc[part.type] = part.value;
+    return acc;
+  }, {});
+  if (!map.hour || !map.minute || !map.second) return null;
+  return `${map.hour}:${map.minute}:${map.second}`;
+};
+
+const buildBinanceGmailPaymentCandidate = (message = {}) => {
+  const messageId = String(message?.id || "").trim();
+  if (!messageId) return null;
+  const threadId = String(message?.threadId || "").trim();
+  const payload = message?.payload || {};
+  const subject = getGmailHeaderValue(payload, "subject") || "Binance";
+  const fromHeader = getGmailHeaderValue(payload, "from");
+  const fromEmail = extractEmailFromHeader(fromHeader);
+  const snippet = String(message?.snippet || "").trim();
+  const payloadTexts = collectGmailPayloadTexts(payload, []);
+  const textParts = [subject, snippet, ...payloadTexts].filter(Boolean);
+  const fullText = textParts.join(" ").replace(/\s+/g, " ").trim();
+  const amount = extractBinanceAmountFromText(fullText);
+  const monedaMatch = fullText.match(/\b(USDT|BUSD|USD)\b/i);
+  const moneda = String(monedaMatch?.[1] || "USDT").toUpperCase();
+  const referencia = extractBinanceReferenceFromText(fullText);
+  const fechaIso = extractGmailMessageDateIso(message);
+  const horaRecibido = toCaracasTimeString(fechaIso);
+  const hash = crypto
+    .createHash("sha256")
+    .update(
+      [
+        BINANCE_GMAIL_APP_NAME,
+        messageId,
+        threadId,
+        subject,
+        fromEmail,
+        fechaIso,
+        amount ?? "",
+        referencia,
+      ].join("|"),
+    )
+    .digest("hex");
+
+  return {
+    gmail_message_id: messageId,
+    gmail_thread_id: threadId || null,
+    titulo: subject,
+    texto: fullText || snippet || null,
+    fecha: fechaIso,
+    fecha_correo: fechaIso,
+    hora_recibido: horaRecibido,
+    referencia: referencia || null,
+    monto_usdt: Number.isFinite(amount) ? amount : null,
+    moneda,
+    remitente: fromEmail || null,
+    hash,
+    raw_payload: {
+      snippet,
+      from: fromHeader || null,
+    },
+  };
+};
+
+const findBinanceGmailPaymentByMessageId = async (messageId = "") => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+  const { data, error } = await supabaseAdmin
+    .from(BINANCE_GMAIL_PAYMENTS_TABLE)
+    .select(
+      "id, gmail_message_id, monto_usdt, referencia, pago_verificado, id_orden, id_usuario, estado, detalle_estado",
+    )
+    .eq("gmail_message_id", id)
+    .maybeSingle();
+  if (error) {
+    if (isMissingTableError(error, BINANCE_GMAIL_PAYMENTS_TABLE)) {
+      const err = new Error(
+        `Falta la tabla ${BINANCE_GMAIL_PAYMENTS_TABLE}. Ejecuta el SQL de creación primero.`,
+      );
+      err.code = "BINANCE_GMAIL_TABLE_MISSING";
+      throw err;
+    }
+    throw error;
+  }
+  return data || null;
+};
+
+const insertBinanceGmailPayment = async (candidate = {}) => {
+  const messageId = String(candidate?.gmail_message_id || "").trim();
+  if (!messageId) return { stored: false, duplicate: false, row: null };
+
+  const existing = await findBinanceGmailPaymentByMessageId(messageId);
+  if (existing?.id) {
+    return { stored: false, duplicate: true, row: existing };
+  }
+
+  const payload = {
+    titulo: String(candidate?.titulo || "Binance").trim() || "Binance",
+    texto: String(candidate?.texto || "").trim() || null,
+    fecha: String(candidate?.fecha || "").trim() || new Date().toISOString(),
+    dispositivo: "gmail_api",
+    app: BINANCE_GMAIL_APP_NAME,
+    hash: String(candidate?.hash || "").trim() || null,
+    referencia: String(candidate?.referencia || "").trim() || null,
+    monto_usdt: Number.isFinite(Number(candidate?.monto_usdt))
+      ? Number(candidate.monto_usdt)
+      : null,
+    moneda: String(candidate?.moneda || "USDT").trim().toUpperCase(),
+    remitente: String(candidate?.remitente || "").trim() || null,
+    gmail_message_id: messageId,
+    gmail_thread_id: String(candidate?.gmail_thread_id || "").trim() || null,
+    fecha_correo: String(candidate?.fecha_correo || "").trim() || null,
+    pago_verificado: false,
+    hora_recibido: String(candidate?.hora_recibido || "").trim() || null,
+    raw_payload:
+      candidate?.raw_payload && typeof candidate.raw_payload === "object"
+        ? candidate.raw_payload
+        : null,
+    estado: Number.isFinite(Number(candidate?.monto_usdt)) ? "pendiente" : "sin_monto",
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from(BINANCE_GMAIL_PAYMENTS_TABLE)
+    .insert(payload)
+    .select(
+      "id, gmail_message_id, monto_usdt, referencia, pago_verificado, id_orden, id_usuario, estado, detalle_estado",
+    )
+    .maybeSingle();
+  if (error) {
+    if (
+      isMissingTableError(error, BINANCE_GMAIL_PAYMENTS_TABLE) ||
+      isMissingColumnError(error, "gmail_message_id")
+    ) {
+      const err = new Error(
+        `Falta la tabla/columnas de ${BINANCE_GMAIL_PAYMENTS_TABLE}. Ejecuta el SQL de creación primero.`,
+      );
+      err.code = "BINANCE_GMAIL_TABLE_MISSING";
+      throw err;
+    }
+    if (isUniqueViolationError(error, "gmail_message_id") || isUniqueViolationError(error, "hash")) {
+      const duplicateRow = await findBinanceGmailPaymentByMessageId(messageId);
+      return { stored: false, duplicate: true, row: duplicateRow };
+    }
+    throw error;
+  }
+
+  return { stored: true, duplicate: false, row: data || null };
+};
+
+const updateBinanceGmailPaymentById = async (rowId, patch = {}) => {
+  const id = toPositiveInt(rowId);
+  if (!id || !patch || typeof patch !== "object" || !Object.keys(patch).length) return;
+  const payload = { ...patch };
+  const { error } = await supabaseAdmin
+    .from(BINANCE_GMAIL_PAYMENTS_TABLE)
+    .update(payload)
+    .eq("id", id);
+  if (error) {
+    if (
+      isMissingTableError(error, BINANCE_GMAIL_PAYMENTS_TABLE) ||
+      isMissingColumnError(error, "gmail_message_id")
+    ) {
+      const err = new Error(
+        `Falta la tabla/columnas de ${BINANCE_GMAIL_PAYMENTS_TABLE}. Ejecuta el SQL de creación primero.`,
+      );
+      err.code = "BINANCE_GMAIL_TABLE_MISSING";
+      throw err;
+    }
+    throw error;
+  }
+};
+
+const autoMatchBinanceGmailPaymentAgainstOrders = async (paymentRow = {}) => {
+  const monto = parseFlexibleMoneyNumber(paymentRow?.monto_usdt);
+  if (!Number.isFinite(monto) || monto <= 0) {
+    return { matched: false, reason: "monto_invalido" };
+  }
+
+  const metodoPagoIds = await resolveBinanceMetodoPagoIds();
+  if (!metodoPagoIds.length) {
+    return { matched: false, reason: "metodo_binance_no_configurado" };
+  }
+
+  const { data: pendingRows, error: pendingErr } = await supabaseAdmin
+    .from("ordenes")
+    .select(
+      "id_orden, id_usuario, id_metodo_de_pago, total, monto_transferido, monto_usdt_objetivo, binance_decimal_slot, monto_objetivo_expira_en, fecha, hora_orden, marcado_pago, checkout_finalizado, pago_verificado, orden_cancelada",
+    )
+    .in("id_metodo_de_pago", metodoPagoIds)
+    .eq("marcado_pago", true)
+    .eq("checkout_finalizado", true)
+    .eq("pago_verificado", false)
+    .eq("orden_cancelada", false)
+    .order("id_orden", { ascending: false })
+    .limit(800);
+  if (pendingErr) throw pendingErr;
+
+  const orders = Array.isArray(pendingRows) ? pendingRows : [];
+  const activeOrders = orders.filter((row) => isOrderInsideBinanceActiveWindow(row));
+  const matchedOrders = activeOrders.filter((row) => {
+    const targetAmount = resolveOrderUsdAmountForBinance(row);
+    if (!Number.isFinite(targetAmount) || targetAmount <= 0) return false;
+    return Math.abs(targetAmount - monto) <= BINANCE_GMAIL_AMOUNT_TOLERANCE;
+  });
+
+  if (!matchedOrders.length) {
+    return { matched: false, reason: "no_order_match", metodo_pago_ids: metodoPagoIds };
+  }
+  if (matchedOrders.length > 1) {
+    return {
+      matched: false,
+      reason: "ambiguous_amount",
+      metodo_pago_ids: metodoPagoIds,
+      candidate_orders: matchedOrders.map((row) => toPositiveInt(row?.id_orden)).filter(Boolean),
+    };
+  }
+
+  const selected = matchedOrders[0];
+  return {
+    matched: true,
+    id_orden: selected.id_orden,
+    id_usuario: selected.id_usuario || null,
+    monto_usdt_pago: Math.round(monto * 1000) / 1000,
+    metodo_pago_ids: metodoPagoIds,
+  };
+};
+
+const processBinanceGmailPaymentRow = async (row = {}) => {
+  const rowId = toPositiveInt(row?.id);
+  if (!rowId) return { processed: false, matched: false, reason: "invalid_row_id" };
+
+  if (isTrue(row?.pago_verificado) && toPositiveInt(row?.id_orden)) {
+    return {
+      processed: false,
+      matched: true,
+      reason: "already_verified",
+      id_orden: toPositiveInt(row?.id_orden),
+    };
+  }
+
+  const match = await autoMatchBinanceGmailPaymentAgainstOrders(row);
+  if (!match?.matched) {
+    await updateBinanceGmailPaymentById(rowId, {
+      estado: String(match?.reason || "sin_match").slice(0, 80),
+      detalle_estado:
+        match?.candidate_orders && Array.isArray(match.candidate_orders)
+          ? `candidate_orders=${match.candidate_orders.join(",")}`
+          : null,
+      procesado_en: new Date().toISOString(),
+    });
+    return { processed: false, matched: false, reason: match?.reason || "sin_match" };
+  }
+
+  const processResult = await autoProcessMatchedOrder(
+    {
+      id_orden: match.id_orden,
+      id_usuario: match.id_usuario,
+    },
+    {
+      allowedMetodoPagoIds: match?.metodo_pago_ids || [],
+      syncPagoMovil: false,
+    },
+  );
+  const markedAsVerified =
+    processResult?.processed === true ||
+    processResult?.reason === "orden_ya_verificada" ||
+    processResult?.reason === "orden_ya_procesada";
+  await updateBinanceGmailPaymentById(rowId, {
+    id_orden: toPositiveInt(match.id_orden),
+    id_usuario: toPositiveInt(match.id_usuario),
+    pago_verificado: markedAsVerified,
+    estado: String(processResult?.reason || "orden_match").slice(0, 80),
+    detalle_estado: processResult?.error
+      ? String(processResult.error).slice(0, 280)
+      : processResult?.processed
+        ? "orden_procesada"
+        : null,
+    procesado_en: new Date().toISOString(),
+  });
+  return {
+    processed: processResult?.processed === true,
+    matched: true,
+    reason: processResult?.reason || null,
+    id_orden: toPositiveInt(match.id_orden),
+  };
+};
+
+const syncBinanceGmailPayments = async ({
+  maxResults = BINANCE_GMAIL_MAX_RESULTS,
+  lookbackMinutes = BINANCE_GMAIL_LOOKBACK_MINUTES,
+  source = "manual",
+} = {}) => {
+  if (binanceGmailSyncInProgress) {
+    return { skipped: true, reason: "in_progress", ...binanceGmailSyncLastResult };
+  }
+  binanceGmailSyncInProgress = true;
+  const summary = {
+    fetched: 0,
+    parsed: 0,
+    stored: 0,
+    duplicates: 0,
+    matched: 0,
+    processed: 0,
+    skipped: 0,
+    failed: 0,
+    source,
+  };
+
+  try {
+    const accessToken = await fetchGoogleAccessTokenWithRefreshToken();
+    const max = Math.max(1, Math.min(100, Number(maxResults) || BINANCE_GMAIL_MAX_RESULTS));
+    const lookback = Math.max(10, Number(lookbackMinutes) || BINANCE_GMAIL_LOOKBACK_MINUTES);
+    const afterEpoch = Math.floor((Date.now() - lookback * 60 * 1000) / 1000);
+    const queryParts = [BINANCE_GMAIL_QUERY, `after:${afterEpoch}`].filter(Boolean);
+    const gmailQuery = queryParts.join(" ").trim();
+
+    const listResp = await gmailApiRequest({
+      accessToken,
+      path: "/gmail/v1/users/me/messages",
+      query: {
+        maxResults: max,
+        q: gmailQuery,
+        labelIds: BINANCE_GMAIL_LABEL_IDS,
+      },
+    });
+    const messages = Array.isArray(listResp?.messages) ? listResp.messages : [];
+    summary.fetched = messages.length;
+
+    for (const msg of messages) {
+      const messageId = String(msg?.id || "").trim();
+      if (!messageId) {
+        summary.skipped += 1;
+        continue;
+      }
+      try {
+        const fullMessage = await gmailApiRequest({
+          accessToken,
+          path: `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`,
+          query: { format: "full" },
+        });
+        const candidate = buildBinanceGmailPaymentCandidate(fullMessage);
+        if (!candidate) {
+          summary.skipped += 1;
+          continue;
+        }
+        summary.parsed += 1;
+        const inserted = await insertBinanceGmailPayment(candidate);
+        const row = inserted?.row || null;
+        if (inserted?.duplicate) {
+          summary.duplicates += 1;
+        } else if (inserted?.stored) {
+          summary.stored += 1;
+        }
+
+        if (!row?.id) {
+          summary.skipped += 1;
+          continue;
+        }
+        if (!Number.isFinite(parseFlexibleMoneyNumber(row?.monto_usdt))) {
+          await updateBinanceGmailPaymentById(row.id, {
+            estado: "sin_monto",
+            detalle_estado: "No se pudo extraer monto del correo.",
+            procesado_en: new Date().toISOString(),
+          });
+          summary.skipped += 1;
+          continue;
+        }
+
+        const processResult = await processBinanceGmailPaymentRow(row);
+        if (processResult?.matched) summary.matched += 1;
+        if (processResult?.processed) summary.processed += 1;
+        if (!processResult?.processed) summary.skipped += 1;
+      } catch (itemErr) {
+        summary.failed += 1;
+        console.error("[binance:gmail] item error", {
+          message_id: messageId,
+          error: itemErr?.message || itemErr,
+        });
+      }
+    }
+
+    binanceGmailSyncLastError = null;
+    binanceGmailSyncLastResult = { ...summary };
+    return summary;
+  } catch (err) {
+    const code = String(err?.code || "");
+    if (
+      code === "BINANCE_GMAIL_OAUTH_CONFIG_MISSING" ||
+      code === "BINANCE_GMAIL_REFRESH_TOKEN_MISSING" ||
+      code === "BINANCE_GMAIL_ACCESS_TOKEN_FAILED"
+    ) {
+      const skippedSummary = {
+        ...summary,
+        skipped: summary.skipped + 1,
+        reason: code,
+      };
+      binanceGmailSyncLastResult = skippedSummary;
+      binanceGmailSyncLastError = err?.message || code;
+      return skippedSummary;
+    }
+    binanceGmailSyncLastError = err?.message || "sync_error";
+    throw err;
+  } finally {
+    binanceGmailSyncLastRunAt = new Date().toISOString();
+    binanceGmailSyncInProgress = false;
+  }
+};
+
 if (AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_ENABLED) {
   console.log(
     `[ordenes:auto-credit-sync] conciliación por pagos acreditados activa (cada ${Math.round(
@@ -7556,6 +8582,125 @@ if (AUTO_CREDITED_PAGOMOVIL_ORDER_PROCESS_ENABLED) {
     console.error("[ordenes:auto-credit-sync] worker init error", err);
   });
 }
+
+if (BINANCE_GMAIL_SYNC_ENABLED) {
+  console.log(
+    `[binance:gmail] worker activo (cada ${Math.round(
+      BINANCE_GMAIL_SYNC_INTERVAL_MS / 1000,
+    )}s, max ${BINANCE_GMAIL_MAX_RESULTS} correos).`,
+  );
+  setInterval(() => {
+    syncBinanceGmailPayments({ source: "worker" }).catch((err) => {
+      console.error("[binance:gmail] worker error", err);
+    });
+  }, BINANCE_GMAIL_SYNC_INTERVAL_MS);
+  syncBinanceGmailPayments({ source: "worker_init" }).catch((err) => {
+    console.error("[binance:gmail] worker init error", err);
+  });
+}
+
+app.get("/api/admin/binance-gmail/oauth/url", async (req, res) => {
+  try {
+    const sessionUserId = await requireAdminSession(req);
+    cleanupBinanceGmailOauthStates();
+    const state = crypto.randomBytes(24).toString("hex");
+    const redirectRaw = String(req.query?.redirect_url || "").trim();
+    const redirectUrl = isAllowedPublicRedirectUrl(redirectRaw) ? redirectRaw : null;
+    binanceGmailOauthStateMap.set(state, {
+      createdAt: Date.now(),
+      idUsuario: sessionUserId,
+      redirectUrl,
+    });
+    const authUrl = buildBinanceGmailOauthUrl({ state });
+    return res.json({
+      ok: true,
+      auth_url: authUrl,
+      state,
+      redirect_uri: GMAIL_OAUTH_REDIRECT_URI || null,
+      scopes: GMAIL_OAUTH_SCOPES,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    if (err?.code === "BINANCE_GMAIL_OAUTH_CONFIG_MISSING") {
+      return res.status(500).json({ error: err.message });
+    }
+    console.error("[binance-gmail/oauth/url] error", err);
+    return res.status(500).json({ error: "No se pudo generar la URL OAuth de Gmail." });
+  }
+});
+
+app.get("/api/admin/binance-gmail/oauth/callback", async (req, res) => {
+  try {
+    cleanupBinanceGmailOauthStates();
+    const code = String(req.query?.code || "").trim();
+    const state = String(req.query?.state || "").trim();
+    const googleError = String(req.query?.error || "").trim();
+    const stateMeta = state ? binanceGmailOauthStateMap.get(state) : null;
+    if (!stateMeta || Date.now() - Number(stateMeta?.createdAt || 0) > BINANCE_GMAIL_OAUTH_STATE_TTL_MS) {
+      if (state) binanceGmailOauthStateMap.delete(state);
+      return res.status(400).json({ error: "State OAuth inválido o expirado." });
+    }
+    binanceGmailOauthStateMap.delete(state);
+
+    if (googleError) {
+      if (stateMeta?.redirectUrl) {
+        const redirect = new URL(stateMeta.redirectUrl);
+        redirect.searchParams.set("gmail_oauth", "error");
+        redirect.searchParams.set("reason", googleError);
+        return res.redirect(302, redirect.toString());
+      }
+      return res.status(400).json({ error: `OAuth cancelado: ${googleError}` });
+    }
+    if (!code) {
+      return res.status(400).json({ error: "Falta code en callback OAuth." });
+    }
+
+    const tokens = await exchangeGoogleOauthCodeForTokens({ code });
+    const refreshToken = String(tokens?.refresh_token || "").trim();
+    if (refreshToken) {
+      cachedGmailRefreshToken = refreshToken;
+    }
+
+    if (stateMeta?.redirectUrl) {
+      const redirect = new URL(stateMeta.redirectUrl);
+      redirect.searchParams.set("gmail_oauth", "ok");
+      redirect.searchParams.set("refresh_token_received", refreshToken ? "1" : "0");
+      if (!refreshToken) {
+        redirect.searchParams.set("reason", "no_refresh_token");
+      }
+      return res.redirect(302, redirect.toString());
+    }
+
+    return res.json({
+      ok: true,
+      refresh_token_received: !!refreshToken,
+      refresh_token: refreshToken || null,
+      scope: String(tokens?.scope || "").trim() || null,
+      token_type: String(tokens?.token_type || "").trim() || null,
+      expires_in: Number(tokens?.expires_in || 0) || null,
+      warning: refreshToken
+        ? null
+        : "Google no devolvió refresh_token. Revoca el acceso y vuelve a autorizar con prompt=consent.",
+    });
+  } catch (err) {
+    if (err?.code === "BINANCE_GMAIL_OAUTH_EXCHANGE_FAILED") {
+      return res.status(400).json({
+        error: err?.message || "No se pudo intercambiar el code OAuth.",
+        details: err?.details || null,
+      });
+    }
+    if (err?.code === "BINANCE_GMAIL_OAUTH_CONFIG_MISSING") {
+      return res.status(500).json({ error: err.message });
+    }
+    console.error("[binance-gmail/oauth/callback] error", err);
+    return res.status(500).json({ error: "Error procesando callback OAuth de Gmail." });
+  }
+});
 
 app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async (req, res) => {
   clearCorsHeaders(res);
@@ -7700,6 +8845,91 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
 });
 
 app.use(jsonParser);
+
+app.get("/api/admin/binance-gmail/status", async (req, res) => {
+  try {
+    const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
+    if (!hasWorkerToken) {
+      await requireAdminSession(req);
+    }
+    const metodoIds = await resolveBinanceMetodoPagoIds();
+    return res.json({
+      ok: true,
+      enabled: BINANCE_GMAIL_SYNC_ENABLED,
+      inProgress: binanceGmailSyncInProgress,
+      lastRunAt: binanceGmailSyncLastRunAt,
+      lastResult: binanceGmailSyncLastResult,
+      lastError: binanceGmailSyncLastError,
+      workerIntervalMs: BINANCE_GMAIL_SYNC_INTERVAL_MS,
+      oauthConfigured:
+        !!GMAIL_OAUTH_CLIENT_ID && !!GMAIL_OAUTH_CLIENT_SECRET && !!GMAIL_OAUTH_REDIRECT_URI,
+      hasRefreshToken: !!getConfiguredGmailRefreshToken(),
+      redirectUri: GMAIL_OAUTH_REDIRECT_URI || null,
+      scopes: GMAIL_OAUTH_SCOPES,
+      query: BINANCE_GMAIL_QUERY,
+      lookbackMinutes: BINANCE_GMAIL_LOOKBACK_MINUTES,
+      maxResults: BINANCE_GMAIL_MAX_RESULTS,
+      amountTolerance: BINANCE_GMAIL_AMOUNT_TOLERANCE,
+      orderWindowMs: BINANCE_GMAIL_ORDER_WINDOW_MS,
+      binanceMetodoPagoIds: metodoIds,
+      usingWorkerToken: hasWorkerToken,
+      workerTokenConfigured: INTERNAL_WORKER_TRIGGER_TOKEN.length > 0,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[binance-gmail/status] error", err);
+    return res.status(500).json({ error: "No se pudo consultar estado de Binance Gmail." });
+  }
+});
+
+app.post("/api/admin/binance-gmail/sync", async (req, res) => {
+  try {
+    const hasWorkerToken = hasValidInternalWorkerTriggerToken(req);
+    if (!hasWorkerToken) {
+      await requireAdminSession(req);
+    }
+    const maxResults = Number(req.body?.max_results || req.body?.maxResults || BINANCE_GMAIL_MAX_RESULTS);
+    const lookbackMinutes = Number(
+      req.body?.lookback_minutes || req.body?.lookbackMinutes || BINANCE_GMAIL_LOOKBACK_MINUTES,
+    );
+    const source = String(req.body?.source || (hasWorkerToken ? "worker_token" : "admin_manual"))
+      .trim()
+      .slice(0, 80);
+    const result = await syncBinanceGmailPayments({
+      maxResults,
+      lookbackMinutes,
+      source: source || "manual",
+    });
+    return res.json({
+      ok: true,
+      usingWorkerToken: hasWorkerToken,
+      ...result,
+    });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    if (err?.code === "BINANCE_GMAIL_TABLE_MISSING") {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err?.code === "BINANCE_GMAIL_OAUTH_CONFIG_MISSING") {
+      return res.status(500).json({ error: err.message });
+    }
+    if (err?.code === "BINANCE_GMAIL_REFRESH_TOKEN_MISSING") {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("[binance-gmail/sync] error", err);
+    return res.status(500).json({ error: "No se pudo sincronizar correos Gmail de Binance." });
+  }
+});
 
 app.get("/api/web-push/status", async (req, res) => {
   try {
@@ -11188,6 +12418,18 @@ const parseOrdenSnapshotPrecioIdFromDetalle = (detalle = "") => {
   return toPositiveInt(match?.[1]) || null;
 };
 
+const parseOrdenSnapshotQtyMesesFromDetalle = (detalle = "") => {
+  const text = String(detalle || "");
+  const qtyMatch = text.match(
+    /(?:^|\|)\s*(\d+)\s+(?:pantalla|pantallas|acceso|accesos|item|items|tarjeta|tarjetas)\b/i,
+  );
+  const mesesMatch = text.match(/(?:^|\|)\s*(\d+)\s+mes(?:es)?\b/i);
+  return {
+    cantidad: toPositiveInt(qtyMatch?.[1]) || null,
+    meses: toPositiveInt(mesesMatch?.[1]) || null,
+  };
+};
+
 const resolveOrderProcessingContextFromSnapshot = async ({
   ordenId,
   totalCliente = null,
@@ -11256,22 +12498,15 @@ const resolveOrderProcessingContextFromSnapshot = async ({
       });
     }
 
+    const parsedQtyMeses = parseOrdenSnapshotQtyMesesFromDetalle(detalle);
     const cantidad =
       Number.isFinite(Number(fallbackItem?.cantidad)) && Number(fallbackItem?.cantidad) > 0
         ? Math.max(1, Math.round(Number(fallbackItem.cantidad)))
-        : null;
+        : parsedQtyMeses.cantidad || 1;
     const meses =
       Number.isFinite(Number(fallbackItem?.meses)) && Number(fallbackItem?.meses) > 0
         ? Math.max(1, Math.round(Number(fallbackItem.meses)))
-        : null;
-    if (!cantidad || !meses) {
-      parseErrors.push({
-        id_item_orden: itemId,
-        id_venta: ventaId,
-        detalle,
-        reason: "cantidad_meses_no_disponibles_en_carrito_items",
-      });
-    }
+        : parsedQtyMeses.meses || 1;
     const montoUsd = parseOptionalCheckoutNumber(row?.monto_usd);
     if (Number.isFinite(montoUsd)) {
       snapshotItemAmountMap.set(itemId, roundCheckoutMoney(montoUsd));
@@ -12561,8 +13796,10 @@ const processOrderFromItems = async ({
   }));
   const sourceRowsConvertedToRenewals = new Set();
   const sourceRowsForInsertedVentas = [];
+  const sourceRowsFinalAmountByIdx = new Map();
+  const sourceRowsInsertedVentaByIdx = new Map();
+  const sourceRowsImplicitRenewalByIdx = new Map();
   const spotifyImplicitRenewals = [];
-  const implicitResolvedVentaByItemId = new Map();
   const implicitRenewalItemIds = new Set();
   const normalizeComparableEmail = (value) => String(value || "").trim().toLowerCase();
   const explicitRenewalVentaIdsSet = new Set(
@@ -12616,6 +13853,10 @@ const processOrderFromItems = async ({
   const usedImplicitRenewVentaIds = new Set();
   const ventasToInsert = [];
   for (const a of sourceRowsForVentas) {
+    const sourceRowIdx =
+      Number.isFinite(Number(a?.__source_row_idx)) && Number(a.__source_row_idx) >= 0
+        ? Math.trunc(Number(a.__source_row_idx))
+        : null;
     const mesesValRaw = a.meses || 1;
     const mesesVal =
       Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
@@ -12645,6 +13886,9 @@ const processOrderFromItems = async ({
       }
       return Number(a.monto) || 0;
     })();
+    if (sourceRowIdx !== null) {
+      sourceRowsFinalAmountByIdx.set(sourceRowIdx, roundCheckoutMoney(montoLinea));
+    }
 
     const correoCuentaNorm = normalizeComparableEmail(cuentaFlags?.correo);
     if (Number(platId) === 9 && !isTrue(a?.pendiente) && correoCuentaNorm) {
@@ -12656,8 +13900,12 @@ const processOrderFromItems = async ({
       const matchedSaleId = toPositiveInt(matchedSale?.id_venta);
       if (matchedSaleId) {
         usedImplicitRenewVentaIds.add(matchedSaleId);
-        sourceRowsConvertedToRenewals.add(a.__source_row_idx);
+        if (sourceRowIdx !== null) {
+          sourceRowsConvertedToRenewals.add(sourceRowIdx);
+          sourceRowsImplicitRenewalByIdx.set(sourceRowIdx, matchedSaleId);
+        }
         spotifyImplicitRenewals.push({
+          source_row_idx: sourceRowIdx,
           id_item_carrito: itemId || null,
           id_venta: matchedSaleId,
           id_precio: a.id_precio,
@@ -12665,7 +13913,6 @@ const processOrderFromItems = async ({
           monto: montoLinea,
         });
         if (itemId) {
-          implicitResolvedVentaByItemId.set(itemId, matchedSaleId);
           implicitRenewalItemIds.add(itemId);
         }
         continue;
@@ -12707,6 +13954,17 @@ const processOrderFromItems = async ({
     if (ventaErr) throw ventaErr;
     insertedVentas = ventasRes || [];
   }
+  insertedVentas.forEach((venta, idx) => {
+    const source = sourceRowsForInsertedVentas[idx] || {};
+    const sourceIdx =
+      Number.isFinite(Number(source?.__source_row_idx)) && Number(source.__source_row_idx) >= 0
+        ? Math.trunc(Number(source.__source_row_idx))
+        : null;
+    const ventaId = toPositiveInt(venta?.id_venta);
+    if (sourceIdx !== null && ventaId) {
+      sourceRowsInsertedVentaByIdx.set(sourceIdx, ventaId);
+    }
+  });
   let implicitRenovacionesPendientesCount = 0;
   const implicitRenewalHistRows = [];
   if (spotifyImplicitRenewals.length) {
@@ -12824,30 +14082,6 @@ const processOrderFromItems = async ({
       });
     }
   }
-  const resolvedVentaByItemId = new Map();
-  (items || []).forEach((item) => {
-    const itemId = toPositiveInt(item?.id_item);
-    const ventaId = toPositiveInt(item?.id_venta);
-    if (itemId && ventaId && !resolvedVentaByItemId.has(itemId)) {
-      resolvedVentaByItemId.set(itemId, ventaId);
-    }
-  });
-  insertedVentas.forEach((venta, idx) => {
-    const source = sourceRowsForInsertedVentas[idx] || {};
-    const itemId = toPositiveInt(source?.id_item_carrito);
-    const ventaId = toPositiveInt(venta?.id_venta);
-    if (itemId && ventaId && !resolvedVentaByItemId.has(itemId)) {
-      resolvedVentaByItemId.set(itemId, ventaId);
-    }
-  });
-  implicitResolvedVentaByItemId.forEach((ventaId, itemId) => {
-    const itemIdNum = toPositiveInt(itemId);
-    const ventaIdNum = toPositiveInt(ventaId);
-    if (itemIdNum && ventaIdNum && !resolvedVentaByItemId.has(itemIdNum)) {
-      resolvedVentaByItemId.set(itemIdNum, ventaIdNum);
-    }
-  });
-
   const giftSoldIds = Array.from(
     new Set(
       (insertedVentas || [])
@@ -13015,42 +14249,103 @@ const processOrderFromItems = async ({
       if (histFallbackErr) throw histFallbackErr;
     }
 
-    const deliveredGiftCardVentaIds = insertedVentas
-      .map((venta, idx) => {
-        const src = ventasToInsert[idx] || {};
-        if (src?.pendiente) return null;
-        if (!toPositiveInt(venta?.id_tarjeta_de_regalo)) return null;
-        return toPositiveInt(venta?.id_venta);
-      })
-      .filter((value) => value > 0);
-
-    if (deliveredGiftCardVentaIds.length && !historialGiftCardLinkFallback) {
-      const { error: deleteDeliveredGiftErr } = await supabaseAdmin
-        .from("ventas")
-        .delete()
-        .in("id_venta", deliveredGiftCardVentaIds);
-      if (deleteDeliveredGiftErr) throw deleteDeliveredGiftErr;
-      insertedVentas = insertedVentas.filter(
-        (venta) => !deliveredGiftCardVentaIds.includes(toPositiveInt(venta?.id_venta)),
-      );
+    if (historialGiftCardLinkFallback) {
+      console.warn("[checkout] historial gift card sin columna id_tarjeta_de_regalo", {
+        ordenId,
+      });
     }
   }
 
-  const snapshotItems = (items || []).map((item) => {
-    const itemId = toPositiveInt(item?.id_item);
-    if (!itemId) return item;
-    const resolvedVentaId = toPositiveInt(resolvedVentaByItemId.get(itemId));
-    const forceRenewal = implicitRenewalItemIds.has(itemId);
-    if (forceRenewal) {
-      return {
-        ...item,
-        id_venta: resolvedVentaId || toPositiveInt(item?.id_venta) || null,
-        renovacion: true,
-      };
+  const snapshotItems = [];
+  const snapshotAmountMap = new Map();
+  let snapshotItemSeq = 1;
+  const pushSnapshotItem = (row, montoUsd = null) => {
+    const normalizedItem = {
+      id_item: snapshotItemSeq,
+      id_precio: toPositiveInt(row?.id_precio) || null,
+      cantidad:
+        Number.isFinite(Number(row?.cantidad)) && Number(row?.cantidad) > 0
+          ? Math.max(1, Math.round(Number(row?.cantidad)))
+          : 1,
+      meses:
+        Number.isFinite(Number(row?.meses)) && Number(row?.meses) > 0
+          ? Math.max(1, Math.round(Number(row?.meses)))
+          : 1,
+      renovacion: isTrue(row?.renovacion),
+      id_venta: toPositiveInt(row?.id_venta) || null,
+      id_cuenta: toPositiveInt(row?.id_cuenta) || null,
+      id_perfil: toPositiveInt(row?.id_perfil) || null,
+    };
+    snapshotItems.push(normalizedItem);
+    const parsedMonto = parseOptionalCheckoutNumber(montoUsd);
+    if (Number.isFinite(parsedMonto)) {
+      snapshotAmountMap.set(snapshotItemSeq, roundCheckoutMoney(parsedMonto));
     }
-    if (!resolvedVentaId || resolvedVentaId === toPositiveInt(item?.id_venta)) return item;
-    return { ...item, id_venta: resolvedVentaId };
+    snapshotItemSeq += 1;
+  };
+  const readSourceRowIdx = (row) =>
+    Number.isFinite(Number(row?.__source_row_idx)) && Number(row.__source_row_idx) >= 0
+      ? Math.trunc(Number(row.__source_row_idx))
+      : null;
+
+  const renewalSnapshotItems = (items || []).filter((item) => toPositiveInt(item?.id_venta));
+  renewalSnapshotItems.forEach((item) => {
+    const itemId = toPositiveInt(item?.id_item);
+    const defaultLineAmount = computeCheckoutItemBaseAmount({
+      item,
+      priceInfo: priceMap[item.id_precio] || {},
+      platformInfo: platInfoById[Number(priceMap[item.id_precio]?.id_plataforma) || 0] || {},
+      pickPrecio,
+      descuentos,
+      discountColumns,
+      discountColumnById,
+      isCliente,
+    });
+    const lineAmount = getLineAmountForItem(item, defaultLineAmount);
+    pushSnapshotItem(
+      {
+        ...item,
+        renovacion: implicitRenewalItemIds.has(itemId) ? true : isTrue(item?.renovacion),
+      },
+      lineAmount,
+    );
   });
+
+  const sourceRowsOrdered = [...sourceRowsForVentas].sort((a, b) => {
+    const idxA = readSourceRowIdx(a);
+    const idxB = readSourceRowIdx(b);
+    return (idxA ?? 0) - (idxB ?? 0);
+  });
+  sourceRowsOrdered.forEach((row) => {
+    const sourceIdx = readSourceRowIdx(row);
+    const implicitVentaId =
+      sourceIdx !== null ? toPositiveInt(sourceRowsImplicitRenewalByIdx.get(sourceIdx)) : null;
+    const insertedVentaId =
+      sourceIdx !== null ? toPositiveInt(sourceRowsInsertedVentaByIdx.get(sourceIdx)) : null;
+    const resolvedVentaId = implicitVentaId || insertedVentaId || null;
+    const amountFromSourceIdx =
+      sourceIdx !== null ? sourceRowsFinalAmountByIdx.get(sourceIdx) : Number(row?.monto) || 0;
+    const mesesValRaw = row?.meses || 1;
+    const mesesVal =
+      Number.isFinite(Number(mesesValRaw)) && Number(mesesValRaw) > 0
+        ? Math.max(1, Math.round(Number(mesesValRaw)))
+        : 1;
+    const isRenewal = sourceIdx !== null ? sourceRowsConvertedToRenewals.has(sourceIdx) : false;
+
+    pushSnapshotItem(
+      {
+        id_precio: toPositiveInt(row?.id_precio) || null,
+        cantidad: 1,
+        meses: mesesVal,
+        renovacion: isRenewal,
+        id_venta: resolvedVentaId,
+        id_cuenta: toPositiveInt(row?.id_cuenta) || null,
+        id_perfil: toPositiveInt(row?.id_perfil) || null,
+      },
+      amountFromSourceIdx,
+    );
+  });
+
   await syncOrdenItemsSnapshot({
     ordenId,
     items: snapshotItems,
@@ -13065,7 +14360,7 @@ const processOrderFromItems = async ({
     totalUsd: snapshotTotalUsd,
     montoBsTotal: snapshotMontoBsTotal,
     tasaBs: snapshotTasaBs,
-    customItemAmountMap: hasCustomItemAmounts ? itemAmountMapById : null,
+    customItemAmountMap: snapshotAmountMap.size ? snapshotAmountMap : hasCustomItemAmounts ? itemAmountMapById : null,
   });
 
   // marca recursos como ocupados
@@ -19711,14 +21006,12 @@ app.post("/api/checkout", async (req, res) => {
         checkoutTotal = 0;
       }
     }
-    const montoBaseCobrado = checkoutTotal;
+    let montoBaseCobrado = checkoutTotal;
     const ordenSaldoUsage = {
       usaSaldo: !!usaSaldoCarrito,
       saldoAplicadoUsd,
       totalBrutoUsd: hasCustomItemAmounts ? roundCheckoutMoney(checkoutTotal) : totalServidor,
     };
-    console.log("[checkout] carrito items", items);
-    console.log("[checkout] precios usados", priceMap);
 
     const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
     const pad2 = (val) => String(val).padStart(2, "0");
@@ -19736,37 +21029,66 @@ app.post("/api/checkout", async (req, res) => {
     }
     const metodoVerificacionAutomatica = isTrue(metodoPagoRow?.verificacion_automatica);
     const metodoEsBolivares = isTrue(metodoPagoRow?.bolivares);
+    const metodoEsBinance = await isBinanceMetodoPago(metodoPagoRow);
+    const parsedOrderId = Number(id_orden);
     if (metodoVerificacionAutomatica === false && archivos.length === 0) {
       return res.status(400).json({ error: "comprobante es requerido para este método." });
     }
+    let binanceUniqueAmountMeta = null;
+    if (!metodoEsBolivares && metodoEsBinance && referenciaTrim.toUpperCase() !== "SALDO") {
+      binanceUniqueAmountMeta = await resolveUniqueBinanceCheckoutTotal({
+        baseTotalUsd: checkoutTotal,
+        metodoPagoRow,
+        reuseOrderId: parsedOrderId,
+      });
+      if (binanceUniqueAmountMeta?.applied && Number(binanceUniqueAmountMeta?.total) > 0) {
+        checkoutTotal = Number(binanceUniqueAmountMeta.total);
+      }
+    }
+    montoBaseCobrado = checkoutTotal;
+    if (hasCustomItemAmounts) {
+      ordenSaldoUsage.totalBrutoUsd = roundCheckoutMoney(checkoutTotal);
+    }
+    console.log("[checkout] carrito items", items);
+    console.log("[checkout] precios usados", priceMap);
+
     const metodoPagoIdNum = Number(id_metodo_de_pago);
-    const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const roundByMethod = (n, metodoId) => {
+      const idMetodo = Number(metodoId);
+      const decimals = metodoEsBinance && idMetodo !== 3 && idMetodo !== 4 ? 3 : 2;
+      const factor = decimals === 3 ? 1000 : 100;
+      return Math.round((Number(n) || 0) * factor) / factor;
+    };
     const calcularMontoRecibidoReal = (montoTransferidoRaw, metodoId) => {
       const monto = Number(montoTransferidoRaw);
       if (!Number.isFinite(monto) || monto <= 0) return 0;
       const idMetodo = Number(metodoId);
       if (idMetodo === 4) {
-        return round2(monto - (monto * 0.054 + 0.3));
+        return roundByMethod(monto - (monto * 0.054 + 0.3), metodoId);
       }
       if (idMetodo === 3) {
-        return round2(monto * 0.8);
+        return roundByMethod(monto * 0.8, metodoId);
       }
-      return round2(monto);
+      return roundByMethod(monto, metodoId);
     };
-    const montoTransferidoNum = Number(
+    const montoTransferidoNum = parseFlexibleMoneyNumber(
       String(monto_transferido ?? "")
         .trim()
-        .replace(",", ".")
+        .replace(",", "."),
     );
     const montoTransferido =
-      !metodoEsBolivares && Number.isFinite(montoTransferidoNum) && montoTransferidoNum > 0
-        ? Math.round(montoTransferidoNum * 100) / 100
+      !metodoEsBolivares && binanceUniqueAmountMeta?.applied
+        ? roundByMethod(checkoutTotal, metodoPagoIdNum)
+        : !metodoEsBolivares && Number.isFinite(montoTransferidoNum) && montoTransferidoNum > 0
+          ? roundByMethod(montoTransferidoNum, metodoPagoIdNum)
         : null;
     if (!metodoEsBolivares && montoTransferido === null) {
       return res.status(400).json({ error: "monto_transferido es requerido para este método." });
     }
     const requiereVerificacionPago =
-      !bypassVerificacion && Number(id_metodo_de_pago) === 1 && referenciaTrim.toUpperCase() !== "SALDO";
+      !bypassVerificacion &&
+      referenciaTrim.toUpperCase() !== "SALDO" &&
+      (Number(id_metodo_de_pago) === 1 || metodoEsBinance);
     const requiereEntregaManual = !bypassVerificacion && metodoVerificacionAutomatica === false;
     const monto_bs =
       Number.isFinite(checkoutTotal) && Number.isFinite(tasaBs)
@@ -19780,6 +21102,17 @@ app.post("/api/checkout", async (req, res) => {
     const montoMayor = excedenteTransferido > 0;
     const requierePendiente = requiereVerificacionPago || requiereEntregaManual || montoMayor;
     const en_espera = requierePendiente;
+    const isBinanceObjective = !metodoEsBolivares && metodoEsBinance && referenciaTrim.toUpperCase() !== "SALDO";
+    const montoObjetivoGeneradoEn = isBinanceObjective ? new Date().toISOString() : null;
+    const montoObjetivoExpiraEn = isBinanceObjective
+      ? new Date(Date.now() + BINANCE_GMAIL_ORDER_WINDOW_MS).toISOString()
+      : null;
+    const montoUsdtObjetivo = isBinanceObjective && Number.isFinite(checkoutTotal)
+      ? Math.round(checkoutTotal * 1000) / 1000
+      : null;
+    const binanceDecimalSlot = isBinanceObjective
+      ? toPositiveInt(binanceUniqueAmountMeta?.step) || 1
+      : null;
     console.log("[checkout] contexto", {
       itemsCount: items?.length || 0,
       total: checkoutTotal,
@@ -19790,13 +21123,19 @@ app.post("/api/checkout", async (req, res) => {
       excedente_transferido: excedenteTransferido,
       monto_mayor: montoMayor,
       metodoVerificacionAutomatica,
+      metodoEsBinance,
+      binance_unique_applied: !!binanceUniqueAmountMeta?.applied,
+      binance_unique_step: binanceUniqueAmountMeta?.step || null,
+      binance_unique_reused: !!binanceUniqueAmountMeta?.reused,
+      monto_usdt_objetivo: montoUsdtObjetivo,
+      binance_decimal_slot: binanceDecimalSlot,
+      monto_objetivo_expira_en: montoObjetivoExpiraEn,
       requiereVerificacionPago,
       requiereEntregaManual,
       requierePendiente,
       en_espera,
     });
 
-    const parsedOrderId = Number(id_orden);
     const checkoutOrderPayload = {
       id_usuario: idUsuarioVentas,
       id_admin:
@@ -19807,6 +21146,10 @@ app.post("/api/checkout", async (req, res) => {
       tasa_bs: tasaBs,
       monto_bs,
       monto_transferido: montoTransferido,
+      monto_usdt_objetivo: montoUsdtObjetivo,
+      binance_decimal_slot: binanceDecimalSlot,
+      monto_objetivo_generado_en: montoObjetivoGeneradoEn,
+      monto_objetivo_expira_en: montoObjetivoExpiraEn,
       monto_mayor: montoMayor,
       id_metodo_de_pago,
       marcado_pago: true,

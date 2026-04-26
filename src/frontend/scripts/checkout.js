@@ -71,7 +71,9 @@ const METODO_RECARGO_USD_PERCENT = 0.0349;
 const METODO_RECARGO_USD_FIJO = 0.49;
 const METODO_COMISION_20_ID = 3;
 const METODO_COMISION_20_PERCENT = 0.2;
+const METODO_BINANCE_USDT_ID = 2;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const round3 = (n) => Math.round((Number(n) + Number.EPSILON) * 1000) / 1000;
 const formatBsDisplay = (amount) => {
   const value = Number(amount);
   if (!Number.isFinite(value)) return "-";
@@ -159,6 +161,11 @@ const getTotalUsdMostrado = (baseUsd, metodoId) => {
   const montoBase = Number(baseUsd);
   if (!Number.isFinite(montoBase)) return 0;
   const id = Number(metodoId);
+  if (id === METODO_BINANCE_USDT_ID) {
+    const base2 = round2(montoBase);
+    const alreadyUnique = Math.abs(montoBase - base2) >= 0.0005;
+    return alreadyUnique ? round3(montoBase) : round3(base2 + 0.001);
+  }
   if (id === METODO_RECARGO_USD_ID) {
     return round2(montoBase * (1 + METODO_RECARGO_USD_PERCENT) + METODO_RECARGO_USD_FIJO);
   }
@@ -818,9 +825,9 @@ const renderTotal = () => {
   const isBs = (metodo && Number(metodoId) === 1) || (!metodo && onlyMetodoBs);
   const tasaVal = Number.isFinite(tasaBs) ? tasaBs : null;
   const totalUsdMostrado = getTotalUsdMostrado(totalUsd, metodoId);
-  const isMetodoUsdt = Number(metodoId) === 2;
+  const isMetodoUsdt = Number(metodoId) === METODO_BINANCE_USDT_ID;
   const totalUsdText = isMetodoUsdt
-    ? `${totalUsdMostrado.toFixed(2)} USDT`
+    ? `${totalUsdMostrado.toFixed(3)} USDT`
     : `$${totalUsdMostrado.toFixed(2)}`;
   const usdLabel =
     Number(metodoId) === METODO_RECARGO_USD_ID || Number(metodoId) === METODO_COMISION_20_ID
@@ -1421,9 +1428,12 @@ btnSendPayment?.addEventListener("click", async () => {
         montoTransferidoInput?.focus();
         return;
       }
-      montoTransferidoValue = round2(parsedMontoTransferido);
+      const isMetodoBinance = metodoId === METODO_BINANCE_USDT_ID;
+      montoTransferidoValue = isMetodoBinance ? round3(parsedMontoTransferido) : round2(parsedMontoTransferido);
       if (montoTransferidoInput) {
-        montoTransferidoInput.value = String(montoTransferidoValue.toFixed(2));
+        montoTransferidoInput.value = String(
+          isMetodoBinance ? montoTransferidoValue.toFixed(3) : montoTransferidoValue.toFixed(2),
+        );
       }
     }
     if (isMetodoBs) {
@@ -1693,5 +1703,10 @@ montoTransferidoInput?.addEventListener("input", () => {
 montoTransferidoInput?.addEventListener("blur", () => {
   const parsed = parseFlexibleDecimal(montoTransferidoInput.value);
   if (!Number.isFinite(parsed) || parsed <= 0) return;
-  montoTransferidoInput.value = parsed.toFixed(2);
+  const metodoId = getMetodoIdSeleccionado();
+  if (Number(metodoId) === METODO_BINANCE_USDT_ID) {
+    montoTransferidoInput.value = round3(parsed).toFixed(3);
+    return;
+  }
+  montoTransferidoInput.value = round2(parsed).toFixed(2);
 });
