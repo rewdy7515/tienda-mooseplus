@@ -205,6 +205,43 @@ const buildInventarioVentaUrl = (idVenta) => {
   return targetUrl.toString();
 };
 
+const buildInventarioCorreoUrl = (correoRaw = "") => {
+  const correo = String(correoRaw || "").trim();
+  const targetUrl = new URL("../inventario.html", window.location.href);
+  if (correo) targetUrl.searchParams.set("correo", correo);
+  return targetUrl.toString();
+};
+
+const extractEmailsFromText = (value = "") => {
+  const source = String(value || "");
+  const matches = source.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  const seen = new Set();
+  const out = [];
+  matches.forEach((mail) => {
+    const trimmed = String(mail || "").trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) return;
+    seen.add(key);
+    out.push(trimmed);
+  });
+  return out;
+};
+
+const renderCorreoInventarioLinks = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "-") return "-";
+  const emails = extractEmailsFromText(raw);
+  if (!emails.length) return escapeHtml(raw);
+  return emails
+    .map(
+      (email) =>
+        `<a href="${escapeHtml(
+          buildInventarioCorreoUrl(email),
+        )}" target="_blank" rel="noopener noreferrer">${escapeHtml(email)}</a>`,
+    )
+    .join("<br>");
+};
+
 const goToEntregarServiciosModificarDatos = (idVenta) => {
   const ventaId = toPositiveId(idVenta);
   if (!ventaId) return false;
@@ -595,7 +632,9 @@ function openModalSol(row) {
   const ventaId = toPositiveId(row?.id_venta);
   const creds = getReportCredentials(row);
   if (modalSolVenta) modalSolVenta.textContent = ventaId ? String(ventaId) : "-";
-  modalSolCorreo.textContent = creds.correo || "-";
+  if (modalSolCorreo) {
+    modalSolCorreo.innerHTML = renderCorreoInventarioLinks(creds.correo || "-");
+  }
   modalSolClave.textContent = creds.clave || "-";
   modalSolPerfil.textContent =
     row.perfiles?.n_perfil !== undefined && row.perfiles?.n_perfil !== null

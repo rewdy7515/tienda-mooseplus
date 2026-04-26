@@ -445,9 +445,22 @@
 
       const getReferenciaRaw = (orden) => String(orden?.referencia || "").trim();
       const isSaldoReferencia = (orden) => getReferenciaRaw(orden).toUpperCase() === "SALDO";
+      const hasExplicitOrderSaldoFlag = (orden) =>
+        orden?.usa_saldo !== null && orden?.usa_saldo !== undefined;
       const isOrdenConSaldo = (orden) => {
         const cart = carritoMap[orden?.id_carrito] || null;
-        return isTrue(orden?.usa_saldo) || isTrue(cart?.usa_saldo);
+        if (hasExplicitOrderSaldoFlag(orden)) {
+          return isTrue(orden?.usa_saldo);
+        }
+        const saldoAplicado = Number(orden?.saldo_aplicado_usd);
+        if (Number.isFinite(saldoAplicado) && saldoAplicado > 0) return true;
+        const totalBruto = Number(orden?.total_bruto_usd);
+        const totalNeto = Number(orden?.total);
+        if (Number.isFinite(totalBruto) && Number.isFinite(totalNeto)) {
+          return round2(totalBruto - totalNeto) > 0;
+        }
+        // Fallback legado: solo cuando la orden no guarda su propio estado de saldo.
+        return isTrue(cart?.usa_saldo);
       };
 
       const resolveSaldoAplicadoUsd = (orden) => {
@@ -470,11 +483,13 @@
           if (diff > 0) return diff;
         }
 
-        const cartMontoUsd = Number(cart?.monto_usd);
-        const cartMontoFinal = Number(cart?.monto_final);
-        if (Number.isFinite(cartMontoUsd) && Number.isFinite(cartMontoFinal)) {
-          const cartDiff = round2(cartMontoUsd - cartMontoFinal);
-          if (cartDiff > 0) return cartDiff;
+        if (!hasExplicitOrderSaldoFlag(orden)) {
+          const cartMontoUsd = Number(cart?.monto_usd);
+          const cartMontoFinal = Number(cart?.monto_final);
+          if (Number.isFinite(cartMontoUsd) && Number.isFinite(cartMontoFinal)) {
+            const cartDiff = round2(cartMontoUsd - cartMontoFinal);
+            if (cartDiff > 0) return cartDiff;
+          }
         }
 
         if (isSaldoReferencia(orden)) {
@@ -801,6 +816,7 @@
           allOrdenes[idx] = {
             ...allOrdenes[idx],
             orden_cancelada: true,
+            id_carrito: null,
           };
         }
         renderOrdenes();
@@ -1143,14 +1159,32 @@
           if (!Number.isFinite(idOrden)) return;
           const confirmed = window.confirm("¿Rechazar este servicio?");
           if (!confirmed) return;
+          const ordenRow = allOrdenes.find((o) => Number(o.id_orden) === idOrden) || null;
+          const carritoId = Number(ordenRow?.id_carrito);
           const { error } = await supabase
             .from("ordenes")
-            .update({ orden_cancelada: true })
+            .update({ orden_cancelada: true, id_carrito: null })
             .eq("id_orden", idOrden);
           if (error) {
             console.error("rechazar orden error", error);
             window.alert("No se pudo rechazar la orden.");
             return;
+          }
+          if (Number.isFinite(carritoId) && carritoId > 0) {
+            const { error: deleteItemsErr } = await supabase
+              .from("carrito_items")
+              .delete()
+              .eq("id_carrito", carritoId);
+            if (deleteItemsErr) {
+              console.error("rechazar orden cleanup carrito_items error", deleteItemsErr);
+            }
+            const { error: deleteCartErr } = await supabase
+              .from("carritos")
+              .delete()
+              .eq("id_carrito", carritoId);
+            if (deleteCartErr) {
+              console.error("rechazar orden cleanup carritos error", deleteCartErr);
+            }
           }
           markOrdenRechazada(idOrden);
           setStatus(`Orden #${idOrden} rechazada.`);

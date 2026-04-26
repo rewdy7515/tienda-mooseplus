@@ -7352,6 +7352,19 @@ const autoProcessMatchedOrder = async (
         });
       }
       const pagoSync = await syncPagoMovilCredito();
+      try {
+        await cleanupClosedOrderCarrito({
+          idOrden: idOrden,
+          idCarrito: orden?.id_carrito,
+          source: "auto_process_order:already_processed",
+        });
+      } catch (cleanupErr) {
+        console.error("[autoProcessMatchedOrder] cleanup carrito already_processed error", {
+          id_orden: toPositiveInt(idOrden) || null,
+          id_carrito: toPositiveInt(orden?.id_carrito) || null,
+          error: cleanupErr?.message || cleanupErr,
+        });
+      }
       return {
         processed: true,
         reason: "orden_ya_procesada",
@@ -7369,6 +7382,19 @@ const autoProcessMatchedOrder = async (
 
     if (isTrue(orden?.pago_verificado)) {
       const pagoSync = await syncPagoMovilCredito();
+      try {
+        await cleanupClosedOrderCarrito({
+          idOrden: idOrden,
+          idCarrito: orden?.id_carrito,
+          source: "auto_process_order:already_verified",
+        });
+      } catch (cleanupErr) {
+        console.error("[autoProcessMatchedOrder] cleanup carrito already_verified error", {
+          id_orden: toPositiveInt(idOrden) || null,
+          id_carrito: toPositiveInt(orden?.id_carrito) || null,
+          error: cleanupErr?.message || cleanupErr,
+        });
+      }
       return {
         processed: false,
         reason: "orden_ya_verificada",
@@ -7391,6 +7417,19 @@ const autoProcessMatchedOrder = async (
         })
         .eq("id_orden", idOrden);
       if (updOrdErr) throw updOrdErr;
+      try {
+        await cleanupClosedOrderCarrito({
+          idOrden: idOrden,
+          idCarrito: orden?.id_carrito,
+          source: "auto_process_order:no_items",
+        });
+      } catch (cleanupErr) {
+        console.error("[autoProcessMatchedOrder] cleanup carrito no_items error", {
+          id_orden: toPositiveInt(idOrden) || null,
+          id_carrito: toPositiveInt(orden?.id_carrito) || null,
+          error: cleanupErr?.message || cleanupErr,
+        });
+      }
       const pagoSync = await syncPagoMovilCredito();
 
       return {
@@ -7468,6 +7507,19 @@ const autoProcessMatchedOrder = async (
       })
       .eq("id_orden", idOrden);
     if (updOrdErr) throw updOrdErr;
+    try {
+      await cleanupClosedOrderCarrito({
+        idOrden: idOrden,
+        idCarrito: orden?.id_carrito,
+        source: "auto_process_order:verified",
+      });
+    } catch (cleanupErr) {
+      console.error("[autoProcessMatchedOrder] cleanup carrito verified error", {
+        id_orden: toPositiveInt(idOrden) || null,
+        id_carrito: toPositiveInt(orden?.id_carrito) || null,
+        error: cleanupErr?.message || cleanupErr,
+      });
+    }
     try {
       const waDeliveredRes = await notifyVentaEntregadaAfterOrderVerified({
         idOrden,
@@ -14940,6 +14992,108 @@ const getCurrentCarrito = async (idUsuario) => {
   return data?.id_carrito || null;
 };
 
+const createCarritoForUser = async (idUsuario) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return null;
+  const { data: inserted, error: insertErr } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from("carritos")
+        .insert({
+          id_usuario: userId,
+          fecha_creacion: new Date().toISOString(),
+          usa_saldo: false,
+          saldo_usado: 0,
+        })
+        .select("id_carrito")
+        .single(),
+    "cart:createCarritoForUser",
+  );
+  if (insertErr) throw insertErr;
+  return toPositiveInt(inserted?.id_carrito) || null;
+};
+
+const shouldRotateLatestCarrito = async (carritoId) => {
+  const carritoNum = toPositiveInt(carritoId);
+  if (!carritoNum) return false;
+  const { data: orderRow, error: orderErr } = await supabaseAdmin
+    .from("ordenes")
+    .select("id_orden, checkout_finalizado")
+    .eq("id_carrito", carritoNum)
+    .order("id_orden", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (orderErr) throw orderErr;
+  return isTrue(orderRow?.checkout_finalizado);
+};
+
+const rotateUserCarritoAfterCheckout = async ({
+  idUsuario = null,
+  previousCarritoId = null,
+  source = "checkout",
+} = {}) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return null;
+  const newCarritoId = await createCarritoForUser(userId);
+  console.log("[cart] nuevo carrito post-checkout", {
+    source,
+    id_usuario: userId,
+    id_carrito_anterior: toPositiveInt(previousCarritoId) || null,
+    id_carrito_nuevo: newCarritoId,
+  });
+  return newCarritoId;
+};
+
+const cleanupClosedOrderCarrito = async ({
+  idOrden = null,
+  idCarrito = null,
+  source = "order_closed",
+} = {}) => {
+  const carritoNum = toPositiveInt(idCarrito);
+  if (!carritoNum) return { cleaned: false, reason: "invalid_carrito" };
+
+  const { data: orderRows, error: orderErr } = await supabaseAdmin
+    .from("ordenes")
+    .select("id_orden, pago_verificado, orden_cancelada")
+    .eq("id_carrito", carritoNum);
+  if (orderErr) throw orderErr;
+  const rows = Array.isArray(orderRows) ? orderRows : [];
+  const hasOpenOrders = rows.some(
+    (row) => !isTrue(row?.pago_verificado) && !isTrue(row?.orden_cancelada),
+  );
+  if (hasOpenOrders) {
+    return { cleaned: false, reason: "open_orders_referencing_cart" };
+  }
+
+  if (rows.length) {
+    const { error: detachErr } = await supabaseAdmin
+      .from("ordenes")
+      .update({ id_carrito: null })
+      .eq("id_carrito", carritoNum);
+    if (detachErr) throw detachErr;
+  }
+
+  const { error: deleteItemsErr } = await supabaseAdmin
+    .from("carrito_items")
+    .delete()
+    .eq("id_carrito", carritoNum);
+  if (deleteItemsErr) throw deleteItemsErr;
+
+  const { error: deleteCartErr } = await supabaseAdmin
+    .from("carritos")
+    .delete()
+    .eq("id_carrito", carritoNum);
+  if (deleteCartErr) throw deleteCartErr;
+
+  console.log("[cart] carrito cerrado eliminado", {
+    source,
+    id_orden: toPositiveInt(idOrden) || null,
+    id_carrito: carritoNum,
+    referencias_ordenes: rows.length,
+  });
+  return { cleaned: true, id_carrito: carritoNum };
+};
+
 const buildCarritoLockedError = (pendingOrderId = null) => {
   const err = new Error(
     "Este carrito tiene una orden en verificacion. No se puede modificar hasta que se procese o cancele.",
@@ -15347,12 +15501,14 @@ const syncCarritoOfficialRate = async ({
 };
 
 const getOrCreateCarrito = async (idUsuario) => {
+  const userId = toPositiveInt(idUsuario);
+  if (!userId) return null;
   const { data, error } = await runSupabaseQueryWithRetry(
     () =>
       supabaseAdmin
         .from("carritos")
         .select("id_carrito")
-        .eq("id_usuario", idUsuario)
+        .eq("id_usuario", userId)
         // fecha_creacion es DATE; para evitar empates del mismo día usamos id_carrito.
         .order("id_carrito", { ascending: false })
         .limit(1)
@@ -15360,24 +15516,12 @@ const getOrCreateCarrito = async (idUsuario) => {
     "cart:getOrCreateCarrito:select",
   );
   if (error) throw error;
-  if (data) return data.id_carrito;
-
-  const { data: inserted, error: insertErr } = await runSupabaseQueryWithRetry(
-    () =>
-      supabaseAdmin
-        .from("carritos")
-        .insert({
-          id_usuario: idUsuario,
-          fecha_creacion: new Date().toISOString(),
-          usa_saldo: false,
-          saldo_usado: 0,
-        })
-        .select("id_carrito")
-        .single(),
-    "cart:getOrCreateCarrito:insert",
-  );
-  if (insertErr) throw insertErr;
-  return inserted.id_carrito;
+  if (data?.id_carrito) {
+    const shouldRotate = await shouldRotateLatestCarrito(data.id_carrito);
+    if (!shouldRotate) return data.id_carrito;
+    return createCarritoForUser(userId);
+  }
+  return createCarritoForUser(userId);
 };
 
 const BINANCE_RAW_CACHE_MS = 2 * 60 * 1000;
@@ -21244,6 +21388,21 @@ app.post("/api/checkout", async (req, res) => {
       customItemAmountMap: hasCustomItemAmounts ? customItemAmountMap : null,
     });
 
+    let nuevoCarritoId = null;
+    try {
+      nuevoCarritoId = await rotateUserCarritoAfterCheckout({
+        idUsuario: idUsuarioSesion,
+        previousCarritoId: carritoId,
+        source: "checkout",
+      });
+    } catch (rotateErr) {
+      console.error("[checkout] error creando nuevo carrito post-checkout", {
+        id_usuario: toPositiveInt(idUsuarioSesion) || null,
+        id_carrito_anterior: toPositiveInt(carritoId) || null,
+        error: rotateErr?.message || rotateErr,
+      });
+    }
+
     if (requierePendiente) {
       if (requiereEntregaManual && Number.isFinite(ordenId) && ordenId > 0) {
         try {
@@ -21267,6 +21426,7 @@ app.post("/api/checkout", async (req, res) => {
       return res.json({
         ok: true,
         id_orden: ordenId,
+        id_carrito_nuevo: nuevoCarritoId,
         total: checkoutTotal,
         ventas: 0,
         pendiente_verificacion: true,
@@ -21310,10 +21470,24 @@ app.post("/api/checkout", async (req, res) => {
       .from("ordenes")
       .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
       .eq("id_orden", ordenId);
+    try {
+      await cleanupClosedOrderCarrito({
+        idOrden: ordenId,
+        idCarrito: carritoId,
+        source: "checkout_verified",
+      });
+    } catch (cleanupErr) {
+      console.error("[checkout] error limpiando carrito de orden cerrada", {
+        id_orden: toPositiveInt(ordenId) || null,
+        id_carrito: toPositiveInt(carritoId) || null,
+        error: cleanupErr?.message || cleanupErr,
+      });
+    }
 
     res.json({
       ok: true,
       id_orden: ordenId,
+      id_carrito_nuevo: nuevoCarritoId,
       total: checkoutTotal,
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
@@ -21679,6 +21853,19 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         .eq("id_orden", idOrden);
 
       await syncPagoMovilCredito();
+      try {
+        await cleanupClosedOrderCarrito({
+          idOrden: idOrden,
+          idCarrito: orden?.id_carrito,
+          source: "ordenes_procesar:no_items",
+        });
+      } catch (cleanupErr) {
+        console.error("[ordenes/procesar] cleanup carrito no-items error", {
+          id_orden: toPositiveInt(idOrden) || null,
+          id_carrito: toPositiveInt(orden?.id_carrito) || null,
+          error: cleanupErr?.message || cleanupErr,
+        });
+      }
 
       return res.json({
         ok: true,
@@ -21788,6 +21975,19 @@ app.post("/api/ordenes/procesar", async (req, res) => {
             error: waDeliveredErr?.message || waDeliveredErr,
           });
         }
+      }
+      try {
+        await cleanupClosedOrderCarrito({
+          idOrden: idOrden,
+          idCarrito: orden?.id_carrito,
+          source: "ordenes_procesar:already_processed",
+        });
+      } catch (cleanupErr) {
+        console.error("[ordenes/procesar] cleanup carrito already_processed error", {
+          id_orden: toPositiveInt(idOrden) || null,
+          id_carrito: toPositiveInt(orden?.id_carrito) || null,
+          error: cleanupErr?.message || cleanupErr,
+        });
       }
       return res.json({
         ok: true,
@@ -21908,6 +22108,19 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       .from("ordenes")
       .update(ordenUpdate)
       .eq("id_orden", idOrden);
+    try {
+      await cleanupClosedOrderCarrito({
+        idOrden: idOrden,
+        idCarrito: orden?.id_carrito,
+        source: "ordenes_procesar:verified",
+      });
+    } catch (cleanupErr) {
+      console.error("[ordenes/procesar] cleanup carrito verified error", {
+        id_orden: toPositiveInt(idOrden) || null,
+        id_carrito: toPositiveInt(orden?.id_carrito) || null,
+        error: cleanupErr?.message || cleanupErr,
+      });
+    }
 
     await syncPagoMovilCredito();
     try {

@@ -99,6 +99,21 @@ const buildEntregaUrl = () => `entregar_servicios.html?id_orden=${encodeURICompo
 const ORDEN_SELECT_FIELDS =
   "id_orden, id_carrito, id_usuario, referencia, total, monto_bs, en_espera, hora_orden, fecha, id_metodo_de_pago, pago_verificado, monto_completo, orden_cancelada, recargar_saldo";
 
+const cleanupOrderCartIfClosed = async (orderRow = null) => {
+  const orderId = toPositiveInt(orderRow?.id_orden || idOrden);
+  const cartId = toPositiveInt(orderRow?.id_carrito);
+  if (!orderId || !cartId) return;
+  const { error: itemsErr } = await supabase.from("carrito_items").delete().eq("id_carrito", cartId);
+  if (itemsErr) console.error("cleanup carrito_items error", itemsErr);
+  const { error: cartErr } = await supabase.from("carritos").delete().eq("id_carrito", cartId);
+  if (cartErr) console.error("cleanup carritos error", cartErr);
+  const { error: detachErr } = await supabase
+    .from("ordenes")
+    .update({ id_carrito: null })
+    .eq("id_orden", orderId);
+  if (detachErr) console.error("cleanup orden id_carrito error", detachErr);
+};
+
 const setStatus = (msg) => {
   if (statusEl) statusEl.textContent = msg || "";
 };
@@ -531,6 +546,7 @@ const verifyPago = async () => {
         .from("ordenes")
         .update({ pago_verificado: true, orden_cancelada: true, monto_completo: null, en_espera: false })
         .eq("id_orden", orden.id_orden);
+      await cleanupOrderCartIfClosed(orden);
       orden.pago_verificado = true;
       orden.orden_cancelada = true;
       orderProcessed = true;
@@ -558,6 +574,7 @@ const verifyPago = async () => {
       .from("ordenes")
       .update({ pago_verificado: true, orden_cancelada: true, monto_completo: null, en_espera: false })
       .eq("id_orden", orden.id_orden);
+    await cleanupOrderCartIfClosed(orden);
     orden.pago_verificado = true;
     orden.orden_cancelada = true;
     orderProcessed = true;
