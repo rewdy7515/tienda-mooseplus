@@ -21570,6 +21570,10 @@ app.post("/api/checkout", async (req, res) => {
       saldoAplicadoUsd,
       totalBrutoUsd: hasCustomItemAmounts ? roundCheckoutMoney(checkoutTotal) : totalServidor,
     };
+    const saldoCubreTotalCheckout =
+      ordenSaldoUsage.usaSaldo &&
+      Number(ordenSaldoUsage.saldoAplicadoUsd) > 0 &&
+      Number(checkoutTotal) <= 0;
 
     const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
     const pad2 = (val) => String(val).padStart(2, "0");
@@ -21589,11 +21593,16 @@ app.post("/api/checkout", async (req, res) => {
     const metodoEsBolivares = isTrue(metodoPagoRow?.bolivares);
     const metodoEsBinance = await isBinanceMetodoPago(metodoPagoRow);
     const parsedOrderId = Number(id_orden);
-    if (metodoVerificacionAutomatica === false && archivos.length === 0) {
+    if (metodoVerificacionAutomatica === false && archivos.length === 0 && !saldoCubreTotalCheckout) {
       return res.status(400).json({ error: "comprobante es requerido para este método." });
     }
     let binanceUniqueAmountMeta = null;
-    if (!metodoEsBolivares && metodoEsBinance && referenciaTrim.toUpperCase() !== "SALDO") {
+    if (
+      !metodoEsBolivares &&
+      metodoEsBinance &&
+      referenciaTrim.toUpperCase() !== "SALDO" &&
+      !saldoCubreTotalCheckout
+    ) {
       binanceUniqueAmountMeta = await resolveUniqueBinanceCheckoutTotal({
         baseTotalUsd: checkoutTotal,
         metodoPagoRow,
@@ -21640,14 +21649,16 @@ app.post("/api/checkout", async (req, res) => {
         : !metodoEsBolivares && Number.isFinite(montoTransferidoNum) && montoTransferidoNum > 0
           ? roundByMethod(montoTransferidoNum, metodoPagoIdNum)
         : null;
-    if (!metodoEsBolivares && montoTransferido === null) {
+    if (!metodoEsBolivares && montoTransferido === null && !saldoCubreTotalCheckout) {
       return res.status(400).json({ error: "monto_transferido es requerido para este método." });
     }
     const requiereVerificacionPago =
       !bypassVerificacion &&
+      !saldoCubreTotalCheckout &&
       referenciaTrim.toUpperCase() !== "SALDO" &&
       (Number(id_metodo_de_pago) === 1 || metodoEsBinance);
-    const requiereEntregaManual = !bypassVerificacion && metodoVerificacionAutomatica === false;
+    const requiereEntregaManual =
+      !bypassVerificacion && !saldoCubreTotalCheckout && metodoVerificacionAutomatica === false;
     const monto_bs =
       Number.isFinite(checkoutTotal) && Number.isFinite(tasaBs)
         ? Math.round(checkoutTotal * tasaBs * 100) / 100
@@ -21660,7 +21671,11 @@ app.post("/api/checkout", async (req, res) => {
     const montoMayor = excedenteTransferido > 0;
     const requierePendiente = requiereVerificacionPago || requiereEntregaManual || montoMayor;
     const en_espera = requierePendiente;
-    const isBinanceObjective = !metodoEsBolivares && metodoEsBinance && referenciaTrim.toUpperCase() !== "SALDO";
+    const isBinanceObjective =
+      !metodoEsBolivares &&
+      metodoEsBinance &&
+      referenciaTrim.toUpperCase() !== "SALDO" &&
+      !saldoCubreTotalCheckout;
     const montoObjetivoGeneradoEn = isBinanceObjective ? new Date().toISOString() : null;
     const montoObjetivoExpiraEn = isBinanceObjective
       ? new Date(Date.now() + BINANCE_GMAIL_ORDER_WINDOW_MS).toISOString()
@@ -21671,6 +21686,8 @@ app.post("/api/checkout", async (req, res) => {
     const binanceDecimalSlot = isBinanceObjective
       ? toPositiveInt(binanceUniqueAmountMeta?.step) || 1
       : null;
+    const autoVerificarOrden =
+      !montoMayor && (saldoCubreTotalCheckout || (bypassVerificacion && !requiereEntregaManual));
     console.log("[checkout] contexto", {
       itemsCount: items?.length || 0,
       total: checkoutTotal,
@@ -21688,9 +21705,11 @@ app.post("/api/checkout", async (req, res) => {
       monto_usdt_objetivo: montoUsdtObjetivo,
       binance_decimal_slot: binanceDecimalSlot,
       monto_objetivo_expira_en: montoObjetivoExpiraEn,
+      saldo_cubre_total_checkout: saldoCubreTotalCheckout,
       requiereVerificacionPago,
       requiereEntregaManual,
       requierePendiente,
+      auto_verificar_orden: autoVerificarOrden,
       en_espera,
     });
 
@@ -21716,11 +21735,11 @@ app.post("/api/checkout", async (req, res) => {
       en_espera,
       hora_orden,
       id_carrito: carritoId,
-      pago_verificado: montoMayor ? false : bypassVerificacion && !requiereEntregaManual ? true : false,
+      pago_verificado: autoVerificarOrden,
       monto_completo: null,
       checkout_finalizado: true,
       aviso_verificacion_manual: false,
-      aviso_verificacion_pago: montoMayor ? false : bypassVerificacion && !requiereEntregaManual ? true : false,
+      aviso_verificacion_pago: autoVerificarOrden,
       usa_saldo: ordenSaldoUsage.usaSaldo,
       saldo_aplicado_usd: Number.isFinite(Number(ordenSaldoUsage.saldoAplicadoUsd))
         ? Number(ordenSaldoUsage.saldoAplicadoUsd)
@@ -21765,7 +21784,7 @@ app.post("/api/checkout", async (req, res) => {
       console.log("[checkout] orden creada", {
         id_orden: ordenId,
         en_espera,
-        pago_verificado: bypassVerificacion ? true : false,
+        pago_verificado: autoVerificarOrden,
       });
     }
     if (!ordenId) {
