@@ -16255,7 +16255,7 @@ const fetchHistorialClienteRowsUntil = async (periodEnd = "") => {
     (from, to) =>
       supabaseAdmin
         .from("historial_ventas")
-        .select("fecha_pago, id_usuario_cliente")
+        .select("fecha_pago, id_usuario_cliente, id_tarjeta_de_regalo, id_plataforma, venta_cliente")
         .not("fecha_pago", "is", null)
         .not("id_usuario_cliente", "is", null)
         .lte("fecha_pago", periodEndVal)
@@ -16264,27 +16264,84 @@ const fetchHistorialClienteRowsUntil = async (periodEnd = "") => {
   );
 };
 
-const buildMonthlyBuyerUserIdsFromHistorialRows = (historialRows = [], monthKey = "") => {
+const fetchAllVentasUserIds = async () => {
+  const rows = await fetchAllSupabaseRows(
+    (from, to) =>
+      supabaseAdmin
+        .from("ventas")
+        .select("id_usuario")
+        .not("id_usuario", "is", null)
+        .range(from, to),
+    { label: "monthly_metrics:ventas:all_user_ids" },
+  );
+  return uniqPositiveIds((rows || []).map((row) => row?.id_usuario));
+};
+
+const fetchGiftPlatformIds = async () => {
+  const { data, error } = await runSupabaseQueryWithRetry(
+    () =>
+      supabaseAdmin
+        .from("plataformas")
+        .select("id_plataforma")
+        .eq("tarjeta_de_regalo", true),
+    "monthly_metrics:gift_platform_ids",
+  );
+  if (error) throw error;
+  return uniqPositiveIds((data || []).map((row) => row?.id_plataforma));
+};
+
+const isHistorialIngresoRowForMonthlyMetrics = (row = {}, giftPlatformIdsSet = new Set()) => {
+  const ventaClienteRaw = row?.venta_cliente;
+  if (ventaClienteRaw === true || ventaClienteRaw === false) {
+    return ventaClienteRaw;
+  }
+  const giftId = toPositiveInt(row?.id_tarjeta_de_regalo);
+  if (giftId > 0) return true;
+  const platId = toPositiveInt(row?.id_plataforma);
+  return platId > 0 && giftPlatformIdsSet.has(platId);
+};
+
+const buildMonthlyGiftOnlyUserIdsFromHistorialRows = (
+  historialRows = [],
+  monthKey = "",
+  allVentasUserIds = [],
+  giftPlatformIds = [],
+) => {
   const monthKeyVal = String(monthKey || "").trim();
   if (!/^\d{4}-\d{2}$/.test(monthKeyVal)) return [];
+
+  const allVentasUserIdsSet = new Set(uniqPositiveIds(allVentasUserIds));
+  const giftPlatformIdsSet = new Set(uniqPositiveIds(giftPlatformIds));
+
   return uniqPositiveIds(
     (historialRows || [])
       .filter((row) => getMonthKeyFromDate(row?.fecha_pago) === monthKeyVal)
-      .map((row) => row?.id_usuario_cliente),
+      .filter((row) => {
+        const isIngreso = isHistorialIngresoRowForMonthlyMetrics(row, giftPlatformIdsSet);
+        if (!isIngreso) return false;
+        const hasLinkedGift = toPositiveInt(row?.id_tarjeta_de_regalo) > 0;
+        const isGiftPlatform = giftPlatformIdsSet.has(toPositiveInt(row?.id_plataforma));
+        return hasLinkedGift || isGiftPlatform;
+      })
+      .map((row) => toPositiveInt(row?.id_usuario_cliente))
+      .filter((idUsuario) => idUsuario > 0 && !allVentasUserIdsSet.has(idUsuario)),
   );
 };
 
 const buildMonthlyActiveMetricsSnapshotFromVentasRows = (
   ventasRows = [],
   periodEnd = "",
-  monthlyBuyerUserIds = [],
+  {
+    historialRows = [],
+    allVentasUserIds = [],
+    giftPlatformIds = [],
+  } = {},
 ) => {
   const periodEndVal = String(periodEnd || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEndVal)) {
     throw new Error("periodo_mes inválido para calcular snapshot mensual.");
   }
   const monthKey = getMonthKeyFromDate(periodEndVal);
-  const buyerUserIds = uniqPositiveIds(monthlyBuyerUserIds);
   const activeRows = (ventasRows || []).filter((row) => {
     const notSuspended = !isTrue(row?.suspendido);
     const notPending = !isTrue(row?.pendiente);
@@ -16294,25 +16351,39 @@ const buildMonthlyActiveMetricsSnapshotFromVentasRows = (
       isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= periodEndVal);
     return paidBeforeOrOnPeriod && notSuspended && notPending && notRejected && activeByDate;
   });
+  const activeVentaUserIds = uniqPositiveIds((activeRows || []).map((row) => row?.id_usuario));
+  const monthlyGiftOnlyUserIds = buildMonthlyGiftOnlyUserIdsFromHistorialRows(
+    historialRows,
+    monthKey,
+    allVentasUserIds,
+    giftPlatformIds,
+  );
+  const mergedActiveUserIds = uniqPositiveIds([...activeVentaUserIds, ...monthlyGiftOnlyUserIds]);
 
   return {
     periodo_mes: periodEndVal,
     monthKey,
-    clientes_activos: buyerUserIds.length,
+    clientes_activos: mergedActiveUserIds.length,
     ventas_activas: activeRows.length,
-    activeUserIds: buyerUserIds,
+    activeUserIds: mergedActiveUserIds,
   };
 };
 
 const computeMonthlyActiveMetricsSnapshot = async (periodEnd) => {
   const ventasRows = await fetchVentasRowsUntil(periodEnd);
   const historialRows = await fetchHistorialClienteRowsUntil(periodEnd);
-  const monthKey = getMonthKeyFromDate(periodEnd);
-  const monthlyBuyerUserIds = buildMonthlyBuyerUserIdsFromHistorialRows(historialRows, monthKey);
+  const [allVentasUserIds, giftPlatformIds] = await Promise.all([
+    fetchAllVentasUserIds(),
+    fetchGiftPlatformIds(),
+  ]);
   return buildMonthlyActiveMetricsSnapshotFromVentasRows(
     ventasRows,
     periodEnd,
-    monthlyBuyerUserIds,
+    {
+      historialRows,
+      allVentasUserIds,
+      giftPlatformIds,
+    },
   );
 };
 
@@ -16451,20 +16522,24 @@ const runMonthlyMetricsClosureIfNeeded = async ({ reason = "scheduler", force = 
       };
     }
 
-    const ventasRows = await fetchVentasRowsUntil(periodEnd);
-    const historialRows = await fetchHistorialClienteRowsUntil(periodEnd);
+    const [ventasRows, historialRows, allVentasUserIds, giftPlatformIds] = await Promise.all([
+      fetchVentasRowsUntil(periodEnd),
+      fetchHistorialClienteRowsUntil(periodEnd),
+      fetchAllVentasUserIds(),
+      fetchGiftPlatformIds(),
+    ]);
     const processedMonths = [];
     for (const monthKey of targetMonthKeys) {
       const monthPeriodEnd = getMonthEndDateFromMonthKey(monthKey);
       if (!monthPeriodEnd) continue;
-      const monthlyBuyerUserIds = buildMonthlyBuyerUserIdsFromHistorialRows(
-        historialRows,
-        monthKey,
-      );
       const snapshot = buildMonthlyActiveMetricsSnapshotFromVentasRows(
         ventasRows,
         monthPeriodEnd,
-        monthlyBuyerUserIds,
+        {
+          historialRows,
+          allVentasUserIds,
+          giftPlatformIds,
+        },
       );
       await persistMonthlyActiveClientsSnapshot(snapshot);
       await persistMonthlyMetricsSummary(snapshot);
@@ -19299,7 +19374,10 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
       traficoMesAnteriorResp,
       traficoMesActualDailyResp,
       traficoMesAnteriorDailyResp,
-      historialClientesActivosResp,
+      historialClientesActivosRows,
+      ventasRowsHastaAuthCoverage,
+      allVentasUserIds,
+      giftPlatformIds,
     ] = await Promise.all([
       supabaseAdmin
         .from("usuarios")
@@ -19355,12 +19433,24 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         .select("fecha, id_usuario")
         .gte("fecha", trafficMonthPreviousRange.start)
         .lt("fecha", trafficMonthPreviousRange.nextStart),
-      supabaseAdmin
-        .from("historial_ventas")
-        .select("id_usuario_cliente, fecha_pago")
-        .not("id_usuario_cliente", "is", null)
-        .gte("fecha_pago", authCoverageRange.start)
-        .lt("fecha_pago", authCoverageRange.nextStart),
+      fetchAllSupabaseRows(
+        (from, to) =>
+          supabaseAdmin
+            .from("historial_ventas")
+            .select(
+              "id_usuario_cliente, fecha_pago, id_tarjeta_de_regalo, id_plataforma, venta_cliente",
+            )
+            .not("id_usuario_cliente", "is", null)
+            .gte("fecha_pago", authCoverageRange.start)
+            .lt("fecha_pago", authCoverageRange.nextStart)
+            .range(from, to),
+        {
+          label: `dashboard_analitica_web:historial_clientes:${authCoverageRange.start}:${authCoverageRange.end}`,
+        },
+      ),
+      fetchVentasRowsUntil(authCoverageRange.end),
+      fetchAllVentasUserIds(),
+      fetchGiftPlatformIds(),
     ]);
 
     if (usuariosResp.error) throw usuariosResp.error;
@@ -19375,7 +19465,6 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     let traficoMesAnteriorRows = traficoMesAnteriorResp.data || [];
     let traficoMesActualDailyRows = traficoMesActualDailyResp.data || [];
     let traficoMesAnteriorDailyRows = traficoMesAnteriorDailyResp.data || [];
-    let historialClientesActivosRows = historialClientesActivosResp.data || [];
     if (traficoActualResp.error) {
       if (!isMissingTableError(traficoActualResp.error, WEB_TRAFFIC_EVENTS_TABLE)) {
         throw traficoActualResp.error;
@@ -19435,9 +19524,6 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
         throw traficoMesAnteriorDailyResp.error;
       }
       traficoMesAnteriorDailyRows = [];
-    }
-    if (historialClientesActivosResp.error) {
-      throw historialClientesActivosResp.error;
     }
 
     const countedTrafficEventTypes = new Set(["vista_pagina", "inicio_sesion_web"]);
@@ -19649,9 +19735,36 @@ app.get("/api/dashboard/analitica-web", async (req, res) => {
     };
     const isClienteAuthRow = (row) => resolveAuthAccesoCliente(row) === true;
     const isVendedorAuthRow = (row) => resolveAuthAccesoCliente(row) !== true;
-    const clientesActivosPeriodoIds = uniqPositiveIds(
-      (historialClientesActivosRows || []).map((row) => row?.id_usuario_cliente),
+    const authCoverageEnd = String(authCoverageRange.end || "").trim();
+    const activeRowsForAuthCoverage = (ventasRowsHastaAuthCoverage || []).filter((row) => {
+      const notSuspended = !isTrue(row?.suspendido);
+      const notPending = !isTrue(row?.pendiente);
+      const notRejected = !isTrue(row?.pago_rechazado);
+      const paidBeforeOrOnPeriod = String(row?.fecha_pago || "").trim() <= authCoverageEnd;
+      const activeByDate =
+        isTrue(row?.infinito) || (row?.fecha_corte && String(row.fecha_corte) >= authCoverageEnd);
+      return paidBeforeOrOnPeriod && notSuspended && notPending && notRejected && activeByDate;
+    });
+    const activeVentaUserIdsForAuthCoverage = uniqPositiveIds(
+      activeRowsForAuthCoverage.map((row) => row?.id_usuario),
     );
+    const allVentasUserIdsSet = new Set(uniqPositiveIds(allVentasUserIds || []));
+    const giftPlatformIdsSet = new Set(uniqPositiveIds(giftPlatformIds || []));
+    const giftOnlyUserIdsForAuthCoverage = uniqPositiveIds(
+      (historialClientesActivosRows || [])
+        .filter((row) => isHistorialIngresoRowForMonthlyMetrics(row, giftPlatformIdsSet))
+        .filter((row) => {
+          const hasLinkedGift = toPositiveInt(row?.id_tarjeta_de_regalo) > 0;
+          const isGiftPlatform = giftPlatformIdsSet.has(toPositiveInt(row?.id_plataforma));
+          return hasLinkedGift || isGiftPlatform;
+        })
+        .map((row) => toPositiveInt(row?.id_usuario_cliente))
+        .filter((idUsuario) => idUsuario > 0 && !allVentasUserIdsSet.has(idUsuario)),
+    );
+    const clientesActivosPeriodoIds = uniqPositiveIds([
+      ...activeVentaUserIdsForAuthCoverage,
+      ...giftOnlyUserIdsForAuthCoverage,
+    ]);
     const clientesAuthConfirmadosLinkedHastaPeriodo = new Set(
       authConfirmedRows
         .filter((row) => {

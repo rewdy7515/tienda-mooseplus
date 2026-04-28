@@ -1280,6 +1280,12 @@
         now.setHours(0, 0, 0, 0);
         return now;
       };
+      const toIsoDate = (dateValue) => {
+        const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
+        if (Number.isNaN(d.getTime())) return "";
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
 
       const resolveEstadoLabel = (fechaRaw, suspendido) => {
         if (isTrue(suspendido)) return "suspendido";
@@ -1820,8 +1826,8 @@
             return price ? pickPrecio(price, acceso) : 0;
           };
 
-          const hoy = new Date();
-          const fechaPago = hoy.toISOString().slice(0, 10);
+          const hoy = todayCaracas();
+          const fechaPago = toIsoDate(hoy);
           const registradoPor = window.__RC_USER_ID__ || null;
           const metodoId = metodo ? Number(metodo) : null;
           const refValue = ref || null;
@@ -2171,9 +2177,9 @@
         }
         const monto = montoManual !== null ? montoManual : montoBase * meses;
         const baseFecha = modalRowContext.fecha_corte || "";
-        const baseForCalc = baseFecha || new Date().toISOString().slice(0, 10);
+        const baseForCalc = baseFecha || toIsoDate(todayCaracas());
         const nuevaFecha = addMonths(baseForCalc, meses) || baseForCalc;
-        const fechaPago = new Date().toISOString().slice(0, 10);
+        const fechaPago = toIsoDate(todayCaracas());
         const registradoPor = window.__RC_USER_ID__ || null;
         const platIdNum = modalRowContext.id_plataforma ? Number(modalRowContext.id_plataforma) : null;
         let ventaCompleta = false;

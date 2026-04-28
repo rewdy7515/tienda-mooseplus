@@ -1990,7 +1990,7 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
             id_usuario_cliente: idUsuario ? Number(idUsuario) : null,
             id_proveedor: proveedorId,
             monto: costoActivacion,
-            fecha_pago: new Date().toISOString().slice(0, 10),
+            fecha_pago: getCaracasDateISO(),
             venta_cliente: false,
             renovacion: false,
             id_venta: Number(idVenta),

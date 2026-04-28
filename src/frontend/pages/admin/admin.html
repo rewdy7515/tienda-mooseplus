@@ -318,6 +318,16 @@
         const pad = (n) => String(n).padStart(2, "0");
         return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       };
+      const getCaracasTodayIso = () => {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(new Date());
+        const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+        return `${pick("year")}-${pick("month")}-${pick("day")}`;
+      };
       const getNextMonthStart = () => {
         const now = new Date();
         const start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -1164,7 +1174,7 @@
             acc[c.correo] = c;
             return acc;
           }, {});
-          const todayIso = new Date().toISOString().slice(0, 10);
+          const todayIso = getCaracasTodayIso();
           const updates = correos
             .map((correo) => cuentaMap[correo])
             .filter(Boolean)

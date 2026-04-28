@@ -700,7 +700,7 @@
         try {
         const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
         const today = new Date();
-        const fechaPagada = today.toISOString().slice(0, 10);
+        const fechaPagada = getCaracasTodayIso();
         const fechaCorte =
           fechaCorteInput?.value?.trim() ||
           (() => {

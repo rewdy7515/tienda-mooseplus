@@ -699,6 +699,11 @@
         </div>
         <div class="dashboard-kpis-secondary">
           <article class="dashboard-kpi">
+            <p class="dashboard-kpi-label">Estimado utilidad neta fin de mes</p>
+            <p class="dashboard-kpi-value" id="kpi-neto-estimado">$0.00</p>
+            <p class="dashboard-kpi-compare" id="cmp-neto-estimado">= Mes cerrado</p>
+          </article>
+          <article class="dashboard-kpi">
             <p class="dashboard-kpi-label">Margen neto</p>
             <p class="dashboard-kpi-value" id="kpi-margen">0%</p>
             <p class="dashboard-kpi-compare" id="cmp-margen">= Sin cambio vs mes anterior</p>
@@ -1042,6 +1047,7 @@
       const kpiIngresos = document.querySelector("#kpi-ingresos");
       const kpiGastos = document.querySelector("#kpi-gastos");
       const kpiNeto = document.querySelector("#kpi-neto");
+      const kpiNetoEstimado = document.querySelector("#kpi-neto-estimado");
       const kpiMovs = document.querySelector("#kpi-movs");
       const kpiClientesActivos = document.querySelector("#kpi-clientes-activos");
       const kpiVentasActivas = document.querySelector("#kpi-ventas-activas");
@@ -1056,6 +1062,7 @@
       const kpiMargen = document.querySelector("#kpi-margen");
 
       const cmpNeto = document.querySelector("#cmp-neto");
+      const cmpNetoEstimado = document.querySelector("#cmp-neto-estimado");
       const cmpIngresos = document.querySelector("#cmp-ingresos");
       const cmpGastos = document.querySelector("#cmp-gastos");
       const cmpMargen = document.querySelector("#cmp-margen");
@@ -1771,7 +1778,24 @@
         prevStats,
         compareSuffix = "vs mes anterior",
         activeCompareSuffix = compareSuffix,
+        projection = {},
       ) => {
+        const projectedNeto = toNumber(projection?.netoEstimadoFinMes);
+        const netoActual = toNumber(stats?.netoTotal);
+        if (kpiNetoEstimado) {
+          kpiNetoEstimado.textContent = formatMoney(projectedNeto);
+          kpiNetoEstimado.classList.toggle("pos", projectedNeto >= 0);
+          kpiNetoEstimado.classList.toggle("neg", projectedNeto < 0);
+        }
+        if (cmpNetoEstimado) {
+          if (projection?.isProjectionActive) {
+            setCompare(cmpNetoEstimado, "money", projectedNeto, netoActual, "vs neto actual");
+          } else {
+            cmpNetoEstimado.classList.remove("up", "down");
+            cmpNetoEstimado.classList.add("same");
+            cmpNetoEstimado.textContent = "= Mes cerrado";
+          }
+        }
         if (kpiIngresos) kpiIngresos.textContent = formatMoney(stats.ingresosTotal);
         if (kpiGastos) kpiGastos.textContent = formatMoney(stats.gastosTotal);
         if (kpiNeto) {
@@ -3522,27 +3546,53 @@
           gifts: giftData || [],
         };
       };
-      const countUniqueClientesFromHistorial = (historialRows = []) => {
-        const uniqueIds = new Set();
-        (historialRows || []).forEach((row) => {
-          const idUsuario = Number(row?.id_usuario_cliente);
-          if (Number.isFinite(idUsuario) && idUsuario > 0) {
-            uniqueIds.add(Math.trunc(idUsuario));
-          }
+      const toPositiveUserId = (value) => {
+        const idUsuario = Number(value);
+        return Number.isFinite(idUsuario) && idUsuario > 0 ? Math.trunc(idUsuario) : 0;
+      };
+      const isHistorialGiftCardSaleRow = (row) =>
+        isHistorialIngresoRow(row) && (hasLinkedGiftCard(row) || isGiftPlatformRow(row));
+      const fetchVentaUserIdsSet = async () => {
+        const data = await fetchAllPages(() =>
+          supabase.from("ventas").select("id_usuario").not("id_usuario", "is", null),
+        );
+        const userIds = new Set();
+        (data || []).forEach((row) => {
+          const userId = toPositiveUserId(row?.id_usuario);
+          if (userId) userIds.add(userId);
         });
-        return uniqueIds.size;
+        return userIds;
+      };
+      const countActiveClientesWithGiftCardOnly = ({
+        activeUserIds = new Set(),
+        historialRows = [],
+        ventasUserIds = new Set(),
+      } = {}) => {
+        const activeUsers = activeUserIds instanceof Set ? activeUserIds : new Set();
+        const allVentaUsers = ventasUserIds instanceof Set ? ventasUserIds : new Set();
+        const giftOnlyUsers = new Set();
+        (historialRows || []).forEach((row) => {
+          if (!isHistorialGiftCardSaleRow(row)) return;
+          const userId = toPositiveUserId(row?.id_usuario_cliente);
+          if (!userId) return;
+          if (allVentaUsers.has(userId)) return;
+          giftOnlyUsers.add(userId);
+        });
+        const uniqueUsers = new Set([...activeUsers, ...giftOnlyUsers]);
+        return uniqueUsers.size;
       };
       const fetchActiveCounts = async (endDate) => {
         if (!endDate) {
-          return { clientesActivosCount: 0, ventasActivasCount: 0 };
+          return { clientesActivosCount: 0, ventasActivasCount: 0, activeUserIds: new Set() };
         }
-        const { data, error } = await supabase
-          .from("ventas")
-          .select("id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado")
-          .not("id_usuario", "is", null)
-          .not("fecha_pago", "is", null)
-          .lte("fecha_pago", endDate);
-        if (error) throw error;
+        const data = await fetchAllPages(() =>
+          supabase
+            .from("ventas")
+            .select("id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado")
+            .not("id_usuario", "is", null)
+            .not("fecha_pago", "is", null)
+            .lte("fecha_pago", endDate),
+        );
         const rows = (data || []).filter((row) => {
           const notSuspended = !isTrue(row?.suspendido);
           const notPending = !isTrue(row?.pendiente);
@@ -3553,25 +3603,27 @@
         });
         const users = new Set(
           rows
-            .map((row) => Number(row?.id_usuario))
-            .filter((id) => Number.isFinite(id) && id > 0),
+            .map((row) => toPositiveUserId(row?.id_usuario))
+            .filter((id) => id > 0),
         );
         return {
           clientesActivosCount: users.size,
           ventasActivasCount: rows.length,
+          activeUserIds: users,
         };
       };
       const fetchActiveByPlatform = async (endDate) => {
         if (!endDate) return [];
-        const { data, error } = await supabase
-          .from("ventas")
-          .select(
-            "id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado, cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, plataformas(nombre, color_1))",
-          )
-          .not("id_usuario", "is", null)
-          .not("fecha_pago", "is", null)
-          .lte("fecha_pago", endDate);
-        if (error) throw error;
+        const data = await fetchAllPages(() =>
+          supabase
+            .from("ventas")
+            .select(
+              "id_venta, id_usuario, fecha_pago, fecha_corte, infinito, suspendido, pendiente, pago_rechazado, cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, plataformas(nombre, color_1))",
+            )
+            .not("id_usuario", "is", null)
+            .not("fecha_pago", "is", null)
+            .lte("fecha_pago", endDate),
+        );
         const rows = (data || []).filter((row) => {
           const notSuspended = !isTrue(row?.suspendido);
           const notPending = !isTrue(row?.pendiente);
@@ -3668,11 +3720,12 @@
         activeCompareSuffix,
         isProgressCut,
         adjustments = {},
+        projection = {},
       ) => {
         trendLastStats = trendStats || null;
         trendLastPrevStats = prevTrendStats || null;
         trendLastRange = range || null;
-        fillKpis(stats, prevStats, compareSuffix, activeCompareSuffix);
+        fillKpis(stats, prevStats, compareSuffix, activeCompareSuffix, projection);
         fillWebKpis(analiticaWeb);
         renderPlatforms(stats.platformRows);
         renderProviders(stats.providerRows);
@@ -3762,6 +3815,8 @@
           const previousAdjustment = getSheetsJanuaryAdjustment(prevRange);
           const currentNominaAdjustment = getNominaQuincenalAdjustment(range);
           const previousNominaAdjustment = getNominaQuincenalAdjustment(prevRange);
+          const selectedMonthFullRange = monthRange(monthVal);
+          const fullMonthNominaAdjustment = getNominaQuincenalAdjustment(selectedMonthFullRange);
           const prevMonthFullRange = monthRange(previousMonthKey(monthVal));
           const shouldLoadPrevTrendFull = compareCtx.isProgressCut && !!prevMonthFullRange;
           const previousActiveEndDate =
@@ -3777,6 +3832,7 @@
             prevTrendData,
             currentActive,
             previousActive,
+            ventasUserIdsSet,
             monthlyPlatformData,
             analiticaWebData,
           ] = await Promise.all([
@@ -3787,6 +3843,7 @@
               : Promise.resolve(null),
             fetchActiveCounts(range.end),
             fetchActiveCounts(previousActiveEndDate),
+            fetchVentaUserIdsSet(),
             fetchPlatformSalesMonthly(),
             fetchAnaliticaWeb(monthVal),
           ]);
@@ -3807,15 +3864,32 @@
             shouldLoadPrevTrendFull && prevTrendData
               ? prevTrendData.historial || []
               : prevData.historial || [];
-          stats.clientesActivosCount = countUniqueClientesFromHistorial(historial);
+          stats.clientesActivosCount = countActiveClientesWithGiftCardOnly({
+            activeUserIds: currentActive?.activeUserIds,
+            historialRows: historial,
+            ventasUserIds: ventasUserIdsSet,
+          });
           stats.ventasActivasCount = currentActive?.ventasActivasCount || 0;
-          prevStats.clientesActivosCount =
-            countUniqueClientesFromHistorial(prevHistorialForClientesActivos);
+          prevStats.clientesActivosCount = countActiveClientesWithGiftCardOnly({
+            activeUserIds: previousActive?.activeUserIds,
+            historialRows: prevHistorialForClientesActivos,
+            ventasUserIds: ventasUserIdsSet,
+          });
           prevStats.ventasActivasCount = previousActive?.ventasActivasCount || 0;
           applyIncomeAdjustment(stats, currentAdjustment);
           applyIncomeAdjustment(prevStats, previousAdjustment);
           applyNominaAdjustment(stats, currentNominaAdjustment);
           applyNominaAdjustment(prevStats, previousNominaAdjustment);
+          const elapsedDays = Math.max(1, isoDay(range?.end));
+          const totalMonthDays = Math.max(elapsedDays, isoDay(selectedMonthFullRange?.end));
+          const nominaCurrentAmount = toNumber(currentNominaAdjustment?.amount);
+          const nominaFullAmount = toNumber(fullMonthNominaAdjustment?.amount);
+          const netoSinNominaActual = toNumber(stats.netoTotal) + nominaCurrentAmount;
+          const promedioDiarioSinNomina = elapsedDays > 0 ? netoSinNominaActual / elapsedDays : 0;
+          const netoEstimadoFinMes =
+            compareCtx.isProgressCut && totalMonthDays > elapsedDays
+              ? promedioDiarioSinNomina * totalMonthDays - nominaFullAmount
+              : toNumber(stats.netoTotal);
           renderAll(
             stats,
             prevStats,
@@ -3836,6 +3910,10 @@
               previous: previousAdjustment,
               nominaCurrent: currentNominaAdjustment,
               nominaPrevious: previousNominaAdjustment,
+            },
+            {
+              netoEstimadoFinMes,
+              isProjectionActive: compareCtx.isProgressCut && totalMonthDays > elapsedDays,
             },
           );
           const loadedLabel = formatMonthLabel(monthVal);
