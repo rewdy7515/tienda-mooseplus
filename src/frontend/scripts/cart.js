@@ -170,6 +170,7 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
     const qty = Number(item.cantidad || price.cantidad || 1) || 1;
     const qtyDescuento = Math.max(1, Number(item.qty_descuento || qty) || qty);
     const meses = Number(item.meses || price.duracion || 1) || 1;
+    const isCuentaCompleta = isTrue(price?.completa);
     const baseUnit = flags.por_pantalla ? "pantalla" : flags.por_acceso ? "dispositivo" : "mes";
     const plural = qty === 1 ? "" : baseUnit === "mes" ? "es" : "s";
     const mesesTxt = `${meses} mes${meses === 1 ? "" : "es"}`;
@@ -218,6 +219,9 @@ const mapCartItems = (items = [], catalog = {}, acceso = null) => {
       if (flags.tarjeta_de_regalo) {
         const region = price.region || "-";
         return `Región: ${region} · Cantidad: ${qty}`;
+      }
+      if (isCuentaCompleta) {
+        return `${qty} cuenta${qty === 1 ? "" : "s"} completa${qty === 1 ? "" : "s"} · ${mesesTxt}`;
       }
       return `${qty} ${baseUnit}${plural} · ${mesesTxt}`;
     })();

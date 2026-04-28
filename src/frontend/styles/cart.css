@@ -389,6 +389,10 @@ body.cart-drawer-open {
   overflow-wrap: anywhere;
 }
 
+.cart-detail-mobile-only {
+  display: none;
+}
+
 .cart-amount-usd {
   margin: 0;
   color: #111827;
@@ -473,23 +477,27 @@ body.cart-drawer-open {
 
 .cart-page-table th:nth-child(1),
 .cart-page-table td:nth-child(1) {
-  width: 34%;
+  width: 28%;
   overflow: visible;
 }
 .cart-page-table th:nth-child(2),
 .cart-page-table td:nth-child(2) {
-  width: 14%;
+  width: 16%;
 }
 .cart-page-table th:nth-child(3),
 .cart-page-table td:nth-child(3) {
-  width: 14%;
+  width: 12%;
 }
 .cart-page-table th:nth-child(4),
 .cart-page-table td:nth-child(4) {
-  width: 14%;
+  width: 12%;
 }
 .cart-page-table th:nth-child(5),
 .cart-page-table td:nth-child(5) {
+  width: 12%;
+}
+.cart-page-table th:nth-child(6),
+.cart-page-table td:nth-child(6) {
   width: 24%;
 }
 
@@ -540,7 +548,7 @@ body.cart-drawer-open {
   margin-top: 4px;
 }
 
-.cart-page-table td:nth-child(5) .cart-discount-line .discount-badge {
+.cart-page-table td:nth-child(6) .cart-discount-line .discount-badge {
   margin-left: 0;
   margin-right: 0;
 }
@@ -681,6 +689,10 @@ body.cart-drawer-open {
     gap: 12px;
   }
 
+  .cart-detail-mobile-only {
+    display: block;
+  }
+
   .cart-card-remove {
     align-self: flex-end;
     margin-right: 4px;
@@ -783,38 +795,42 @@ body.cart-drawer-open {
   }
 
   .cart-left .cart-page-table td:nth-child(3) {
+    display: none;
+  }
+
+  .cart-left .cart-page-table td:nth-child(4) {
     grid-area: months;
     text-align: center;
   }
 
-  .cart-left .cart-page-table td:nth-child(4) {
+  .cart-left .cart-page-table td:nth-child(5) {
     grid-area: qty;
     text-align: center;
   }
 
-  .cart-left .cart-page-table td:nth-child(5) {
+  .cart-left .cart-page-table td:nth-child(6) {
     grid-area: subtotal;
     text-align: center;
   }
 
-  .cart-left .cart-page-table td:nth-child(3)::before,
   .cart-left .cart-page-table td:nth-child(4)::before,
-  .cart-left .cart-page-table td:nth-child(5)::before {
+  .cart-left .cart-page-table td:nth-child(5)::before,
+  .cart-left .cart-page-table td:nth-child(6)::before {
     display: block;
     font-size: 12px;
     color: #6b7280;
     margin-bottom: 6px;
   }
 
-  .cart-left .cart-page-table td:nth-child(3)::before {
+  .cart-left .cart-page-table td:nth-child(4)::before {
     content: "Meses";
   }
 
-  .cart-left .cart-page-table td:nth-child(4)::before {
+  .cart-left .cart-page-table td:nth-child(5)::before {
     content: "Cantidad";
   }
 
-  .cart-left .cart-page-table td:nth-child(5)::before {
+  .cart-left .cart-page-table td:nth-child(6)::before {
     content: "Subtotal";
   }
 

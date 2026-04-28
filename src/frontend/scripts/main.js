@@ -1063,8 +1063,7 @@ const maybePromptAvatarProfileSetup = async (currentUser) => {
 
   const foto = String(currentUser?.foto_perfil || "").trim();
   const fondo = normalizeHexColor(currentUser?.fondo_perfil);
-  const fotoValida = await isAvatarImageUrlValid(foto);
-  if (fotoValida) return;
+  if (foto && fondo) return;
 
   avatarModalWasPrompted = true;
   avatarModalUserId = userId;
@@ -2095,6 +2094,14 @@ const mapCartItems = (items, precios, plataformas) => {
       }
       const qty = item.cantidad || price.cantidad || 1;
       const meses = item.meses || price.duracion || 1;
+      const isCuentaCompleta =
+        price?.completa === true ||
+        price?.completa === "true" ||
+        price?.completa === 1 ||
+        price?.completa === "1";
+      if (isCuentaCompleta) {
+        return `${qty} ${qty === 1 ? "cuenta completa" : "cuentas completas"} · ${meses} mes${meses === 1 ? "" : "es"}`;
+      }
       const baseUnit = flags.por_pantalla
         ? "pantalla"
         : flags.por_acceso

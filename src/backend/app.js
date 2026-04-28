@@ -828,6 +828,116 @@ const hasHistorialVentasForOrder = async (idOrden) => {
   return Array.isArray(data) && data.length > 0;
 };
 
+const getOrderSnapshotRenewalVentaIds = async (idOrden) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) return [];
+  const { data, error } = await supabaseAdmin
+    .from("ordenes_items")
+    .select("id_venta")
+    .eq("id_orden", orderId)
+    .eq("renovacion", true)
+    .not("id_venta", "is", null);
+  if (error) throw error;
+  return uniqPositiveIds((data || []).map((row) => row?.id_venta));
+};
+
+const getOrderRenewalConsistency = async (idOrden) => {
+  const orderId = toPositiveInt(idOrden);
+  if (!orderId) {
+    return {
+      id_orden: null,
+      hasRenewalSnapshotRows: false,
+      snapshotRenewalVentaIds: [],
+      missingHistorialVentaIds: [],
+      missingVentasVentaIds: [],
+      stillSuspendedVentaIds: [],
+      consistent: true,
+    };
+  }
+
+  const snapshotRenewalVentaIds = await getOrderSnapshotRenewalVentaIds(orderId);
+  if (!snapshotRenewalVentaIds.length) {
+    return {
+      id_orden: orderId,
+      hasRenewalSnapshotRows: false,
+      snapshotRenewalVentaIds,
+      missingHistorialVentaIds: [],
+      missingVentasVentaIds: [],
+      stillSuspendedVentaIds: [],
+      consistent: true,
+    };
+  }
+
+  const { data: histRows, error: histErr } = await supabaseAdmin
+    .from("historial_ventas")
+    .select("id_venta")
+    .eq("id_orden", orderId)
+    .eq("renovacion", true)
+    .in("id_venta", snapshotRenewalVentaIds);
+  if (histErr) throw histErr;
+  const historialVentaIds = new Set(uniqPositiveIds((histRows || []).map((row) => row?.id_venta)));
+
+  const { data: ventasRows, error: ventasErr } = await supabaseAdmin
+    .from("ventas")
+    .select("id_venta, suspendido")
+    .in("id_venta", snapshotRenewalVentaIds);
+  if (ventasErr) throw ventasErr;
+  const ventasById = new Map();
+  (ventasRows || []).forEach((row) => {
+    const ventaId = toPositiveInt(row?.id_venta);
+    if (ventaId) ventasById.set(ventaId, row);
+  });
+
+  const missingHistorialVentaIds = snapshotRenewalVentaIds.filter(
+    (ventaId) => !historialVentaIds.has(ventaId),
+  );
+  const missingVentasVentaIds = snapshotRenewalVentaIds.filter((ventaId) => !ventasById.has(ventaId));
+  const stillSuspendedVentaIds = snapshotRenewalVentaIds.filter((ventaId) =>
+    isTrue(ventasById.get(ventaId)?.suspendido),
+  );
+
+  return {
+    id_orden: orderId,
+    hasRenewalSnapshotRows: true,
+    snapshotRenewalVentaIds,
+    missingHistorialVentaIds,
+    missingVentasVentaIds,
+    stillSuspendedVentaIds,
+    consistent:
+      missingHistorialVentaIds.length === 0 &&
+      missingVentasVentaIds.length === 0 &&
+      stillSuspendedVentaIds.length === 0,
+  };
+};
+
+const buildOrderRenewalConsistencyError = (consistency = {}) => {
+  const idOrden = toPositiveInt(consistency?.id_orden) || null;
+  const missingHistorialVentaIds = uniqPositiveIds(consistency?.missingHistorialVentaIds || []);
+  const missingVentasVentaIds = uniqPositiveIds(consistency?.missingVentasVentaIds || []);
+  const stillSuspendedVentaIds = uniqPositiveIds(consistency?.stillSuspendedVentaIds || []);
+  const snapshotRenewalVentaIds = uniqPositiveIds(consistency?.snapshotRenewalVentaIds || []);
+  const summary = [
+    missingHistorialVentaIds.length ? `sin_historial=${missingHistorialVentaIds.length}` : "",
+    missingVentasVentaIds.length ? `sin_venta=${missingVentasVentaIds.length}` : "",
+    stillSuspendedVentaIds.length ? `suspendidas=${stillSuspendedVentaIds.length}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const err = new Error(
+    `La orden tiene renovaciones inconsistentes (${summary || "estado inválido"}).`,
+  );
+  err.code = "ORDEN_RENOVACION_INCONSISTENTE";
+  err.httpStatus = 409;
+  err.details = {
+    id_orden: idOrden,
+    snapshot_renewal_venta_ids: snapshotRenewalVentaIds,
+    missing_historial_venta_ids: missingHistorialVentaIds,
+    missing_ventas_venta_ids: missingVentasVentaIds,
+    still_suspended_venta_ids: stillSuspendedVentaIds,
+  };
+  return err;
+};
+
 const resolveOrderIdByVentaId = async ({ idVenta = null, fallbackOrderId = null } = {}) => {
   const saleId = toPositiveInt(idVenta);
   const orderIdHint = toPositiveInt(fallbackOrderId);
@@ -7290,9 +7400,10 @@ const autoProcessMatchedOrder = async (
       }
     };
 
+    const renewalConsistencyBefore = await getOrderRenewalConsistency(idOrden);
     const alreadyProcessed = await hasHistorialVentasForOrder(idOrden);
 
-    if (alreadyProcessed) {
+    if (alreadyProcessed && renewalConsistencyBefore.consistent) {
       const ventasExist = await fetchVentasByOrder({
         idOrden,
         select: "id_venta, pendiente",
@@ -7379,8 +7490,14 @@ const autoProcessMatchedOrder = async (
         saldo_debitado_error: saldoReconciliacionError,
       };
     }
+    if (alreadyProcessed && !renewalConsistencyBefore.consistent) {
+      console.warn("[autoProcessMatchedOrder] orden con historial parcial detectada; se reintenta", {
+        id_orden: idOrden,
+        ...renewalConsistencyBefore,
+      });
+    }
 
-    if (isTrue(orden?.pago_verificado)) {
+    if (isTrue(orden?.pago_verificado) && renewalConsistencyBefore.consistent) {
       const pagoSync = await syncPagoMovilCredito();
       try {
         await cleanupClosedOrderCarrito({
@@ -7402,6 +7519,12 @@ const autoProcessMatchedOrder = async (
         pago_sync_ok: pagoSync.ok,
         pago_sync_error: pagoSync.error,
       };
+    }
+    if (isTrue(orden?.pago_verificado) && !renewalConsistencyBefore.consistent) {
+      console.warn("[autoProcessMatchedOrder] orden verificada inconsistente; se intentará reparar", {
+        id_orden: idOrden,
+        ...renewalConsistencyBefore,
+      });
     }
 
     const completeNoItemsOrder = async ({ montoAuto = 0, motivo = "sin_items" } = {}) => {
@@ -7446,29 +7569,35 @@ const autoProcessMatchedOrder = async (
       };
     };
 
-    if (!toPositiveInt(orden?.id_carrito)) {
-      return completeNoItemsOrder({
-        montoAuto: Number(orden?.total) || 0,
-        motivo: "orden_sin_carrito",
-      });
-    }
-
-    const context = await buildCheckoutContext({
-      idUsuarioVentas,
-      carritoId: orden.id_carrito,
-      totalCliente: orden.total,
+    const fallbackContext = toPositiveInt(orden?.id_carrito)
+      ? await buildCheckoutContext({
+          idUsuarioVentas,
+          carritoId: orden.id_carrito,
+          totalCliente: orden.total,
+        })
+      : null;
+    const processingSnapshot = await resolveOrderProcessingContextFromSnapshot({
+      ordenId: idOrden,
+      totalCliente: orden?.total ?? fallbackContext?.total ?? null,
+      fallbackContext,
     });
+    const context = processingSnapshot?.context || fallbackContext;
+    const processingItemAmountMap =
+      processingSnapshot?.itemAmountMapById instanceof Map &&
+      processingSnapshot.itemAmountMapById.size > 0
+        ? processingSnapshot.itemAmountMapById
+        : null;
     const orderTotalProcesado = parseOptionalCheckoutNumber(orden?.total);
     const montoBaseCobrado = Number.isFinite(orderTotalProcesado)
       ? roundCheckoutMoney(orderTotalProcesado)
       : await resolveMontoBaseCarrito({
           carritoId: orden.id_carrito,
-          fallbackTotal: context.total,
+          fallbackTotal: context?.total ?? 0,
         });
 
-    if (!context.items?.length) {
+    if (!context?.items?.length) {
       return completeNoItemsOrder({
-        montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
+        montoAuto: Number(montoBaseCobrado) || Number(context?.total) || 0,
         motivo: "carrito_sin_items",
       });
     }
@@ -7491,13 +7620,18 @@ const autoProcessMatchedOrder = async (
       archivos,
       id_metodo_de_pago: orden?.id_metodo_de_pago,
       carritoId: orden.id_carrito,
-      montoHistorialTotalOverride: montoBaseCobrado,
+      montoHistorialTotalOverride: processingItemAmountMap ? null : montoBaseCobrado,
+      itemAmountMapById: processingItemAmountMap,
       snapshotTotalUsd: orden?.total ?? context?.total ?? null,
       snapshotMontoBsTotal: orden?.monto_bs ?? null,
       snapshotTasaBs: orden?.tasa_bs ?? context?.tasaBs ?? null,
       saldoAplicadoExpectedUsd: await resolveSaldoAplicadoForOrderVerification({ orden }),
       allowSaldoInsuficiente: true,
     });
+    const renewalConsistencyAfter = await getOrderRenewalConsistency(idOrden);
+    if (!renewalConsistencyAfter.consistent) {
+      throw buildOrderRenewalConsistencyError(renewalConsistencyAfter);
+    }
 
     const { error: updOrdErr } = await supabaseAdmin
       .from("ordenes")
@@ -11358,6 +11492,7 @@ const autoAssignReportedPendingVentas = async ({
   includeUnreported = false,
 } = {}) => {
   const summary = { scanned: 0, resolved: 0, skipped: 0, errors: 0 };
+  const isoToday = todayInVenezuela();
   const platformFilter = uniqPositiveIds(plataformaIds);
 
   const { data: reemplazosRows, error: reemplazosErr } = await supabaseAdmin
@@ -11373,6 +11508,8 @@ const autoAssignReportedPendingVentas = async ({
         id_venta,
         id_usuario,
         id_precio,
+        meses_contratados,
+        fecha_corte,
         id_cuenta,
         id_cuenta_miembro,
         id_perfil,
@@ -11725,9 +11862,23 @@ const autoAssignReportedPendingVentas = async ({
         continue;
       }
 
+      const mesesContratadosRaw = Number(venta?.meses_contratados);
+      const mesesContratados =
+        Number.isFinite(mesesContratadosRaw) && mesesContratadosRaw > 0
+          ? Math.max(1, Math.round(mesesContratadosRaw))
+          : 1;
+      const fechaCorteRaw = String(venta?.fecha_corte || "").trim();
+      const fechaCorteActual = /^\d{4}-\d{2}-\d{2}$/.test(fechaCorteRaw)
+        ? fechaCorteRaw
+        : null;
+      const fechaCorteEntrega =
+        fechaCorteActual || addMonthsKeepDay(isoToday, mesesContratados) || isoToday;
+
       const updateVenta = {
         id_cuenta: nuevoCuentaId,
         id_perfil: nuevoPerfilId || null,
+        fecha_corte: fechaCorteEntrega,
+        meses_contratados: mesesContratados,
         pendiente: false,
         entrega_aviso: false,
       };
@@ -21465,6 +21616,10 @@ app.post("/api/checkout", async (req, res) => {
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
     });
+    const renewalConsistencyAfter = await getOrderRenewalConsistency(ordenId);
+    if (!renewalConsistencyAfter.consistent) {
+      throw buildOrderRenewalConsistencyError(renewalConsistencyAfter);
+    }
 
     await supabaseAdmin
       .from("ordenes")
@@ -21509,6 +21664,25 @@ app.post("/api/checkout", async (req, res) => {
     if (err?.code === "SALDO_INSUFICIENTE") {
       return res.status(Number(err?.httpStatus) || 409).json({
         error: err?.message || "Saldo insuficiente para completar el checkout.",
+      });
+    }
+    if (
+      err?.code === "ORDEN_SNAPSHOT_INVALID" ||
+      err?.code === "ORDEN_SNAPSHOT_PLATFORM_MISMATCH"
+    ) {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error:
+          err?.message ||
+          "No se pudo completar el checkout por conflicto con el snapshot de la orden.",
+        details: err?.details || null,
+      });
+    }
+    if (err?.code === "ORDEN_RENOVACION_INCONSISTENTE") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error:
+          err?.message ||
+          "No se pudo verificar la orden porque las renovaciones quedaron inconsistentes.",
+        details: err?.details || null,
       });
     }
     res.status(500).json({ error: err.message });
@@ -21897,7 +22071,8 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       return res.status(403).json({ error: "Orden no pertenece al usuario." });
     }
     const alreadyProcessed = await hasHistorialVentasForOrder(idOrden);
-    if (alreadyProcessed) {
+    const renewalConsistencyBefore = await getOrderRenewalConsistency(idOrden);
+    if (alreadyProcessed && renewalConsistencyBefore.consistent) {
       const ventasExist = await fetchVentasByOrder({
         idOrden,
         select: "id_venta",
@@ -22004,22 +22179,20 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         saldo_debitado_error: saldoReconciliacionError,
       });
     }
-    if (!orden?.id_carrito) {
-      console.log("[ordenes/procesar] orden sin carrito; se acredita saldo", {
+    if (alreadyProcessed && !renewalConsistencyBefore.consistent) {
+      console.warn("[ordenes/procesar] orden con historial parcial detectada; se reintenta", {
         id_orden: idOrden,
-        total: orden?.total,
-      });
-      return processNoItemsOrder({
-        montoAuto: Number(orden?.total) || 0,
-        motivo: "orden_sin_carrito",
+        details: renewalConsistencyBefore,
       });
     }
 
-    const fallbackContext = await buildCheckoutContext({
-      idUsuarioVentas,
-      carritoId: orden.id_carrito,
-      totalCliente: orden.total,
-    });
+    const fallbackContext = toPositiveInt(orden?.id_carrito)
+      ? await buildCheckoutContext({
+          idUsuarioVentas,
+          carritoId: orden.id_carrito,
+          totalCliente: orden.total,
+        })
+      : null;
     const processingSnapshot = await resolveOrderProcessingContextFromSnapshot({
       ordenId: idOrden,
       totalCliente: orden?.total ?? fallbackContext?.total ?? null,
@@ -22033,14 +22206,14 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         ? processingSnapshot.itemAmountMapById
         : null;
     const montoBaseCobradoFallback = await resolveMontoBaseCarrito({
-      carritoId: orden.id_carrito,
-      fallbackTotal: context.total,
+      carritoId: orden?.id_carrito,
+      fallbackTotal: context?.total ?? 0,
     });
     const orderTotalProcesado = parseOptionalCheckoutNumber(orden?.total);
     const montoBaseCobrado = Number.isFinite(orderTotalProcesado)
       ? roundCheckoutMoney(orderTotalProcesado)
       : montoBaseCobradoFallback;
-    if (!context.items?.length) {
+    if (!context?.items?.length) {
       console.log("[ordenes/procesar] carrito vacío; se acredita saldo", {
         id_orden: idOrden,
         carritoId: orden?.id_carrito,
@@ -22048,7 +22221,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         source: processingSource,
       });
       return processNoItemsOrder({
-        montoAuto: Number(montoBaseCobrado) || Number(context.total) || 0,
+        montoAuto: Number(montoBaseCobrado) || Number(context?.total) || 0,
         motivo: "carrito_sin_items",
       });
     }
@@ -22093,6 +22266,10 @@ app.post("/api/ordenes/procesar", async (req, res) => {
       ventas: result.ventasCount,
       pendientes: result.pendientesCount,
     });
+    const renewalConsistencyAfter = await getOrderRenewalConsistency(idOrden);
+    if (!renewalConsistencyAfter.consistent) {
+      throw buildOrderRenewalConsistencyError(renewalConsistencyAfter);
+    }
 
     let saldoAcreditadoInfo = { acreditado: false, monto: 0, saldoNuevo: null };
     saldoAcreditadoInfo = await acreditarSaldoManual(saldoAFavor);
@@ -22178,6 +22355,14 @@ app.post("/api/ordenes/procesar", async (req, res) => {
         error:
           err?.message ||
           "No se pudo procesar la orden por conflicto con el snapshot de checkout.",
+        details: err?.details || null,
+      });
+    }
+    if (err?.code === "ORDEN_RENOVACION_INCONSISTENTE") {
+      return res.status(Number(err?.httpStatus) || 409).json({
+        error:
+          err?.message ||
+          "No se pudo verificar la orden porque las renovaciones quedaron inconsistentes.",
         details: err?.details || null,
       });
     }

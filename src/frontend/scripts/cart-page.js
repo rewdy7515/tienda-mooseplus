@@ -636,6 +636,21 @@ const buildPrecioDetalle = (item, price, platform) => {
   return `${qty} ${baseUnit}${plural} $${price.precio_usd_detal || ""}`;
 };
 
+const buildServiceDetail = (price, platform) => {
+  const plan = String(price?.plan || "").trim();
+  const isCuentaCompleta = isTrue(price?.completa);
+  if (isCuentaCompleta) return "Cuenta completa";
+  if (isTrue(platform?.tarjeta_de_regalo)) {
+    return plan ? `Gift Card · ${plan}` : "Gift Card";
+  }
+  const base = isTrue(platform?.por_pantalla)
+    ? "Pantalla"
+    : isTrue(platform?.por_acceso)
+      ? "Acceso"
+      : "Cuenta";
+  return plan ? `${base} · ${plan}` : base;
+};
+
 const getPriceMaps = () => {
   const priceById = (precios || []).reduce((acc, p) => {
     acc[p.id_precio] = p;
@@ -842,9 +857,7 @@ const renderCart = () => {
       const isGiftCard = totals.isGiftCard;
       totalDescuento = round2(totalDescuento + totals.descuentoVal);
       total = round2(total + subtotal);
-      const detalle =
-        price.plan ||
-        (platform.tarjeta_de_regalo ? `Región: ${price.region || "-"}` : "");
+      const detalleServicio = buildServiceDetail(price, platform);
       const tipo = item.renovacion ? "Renovación" : "Nuevo";
       const correoRenovacion =
         item.renovacion === true ? (item.correo || "-") : "";
@@ -872,8 +885,8 @@ const renderCart = () => {
                   </div>
                   <div class="cart-product-text">
                     <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
-                    <p class="cart-detail">${detalle || ""}</p>
                     <p class="cart-detail">Tipo: ${tipo}</p>
+                    <p class="cart-detail cart-detail-mobile-only">Detalle: ${detalleServicio || "-"}</p>
                     ${
                       item.renovacion
                         ? `<p class="cart-detail cart-detail-email"><span class="cart-email-label">Correo:</span><span class="cart-email-value">${correoRenovacion}</span></p>`
@@ -885,6 +898,7 @@ const renderCart = () => {
               </div>
             </div>
           </td>
+          <td class="cart-cell-center">${detalleServicio || "-"}</td>
           <td class="cart-cell-center">$${round2(unit).toFixed(2)}</td>
           <td class="cart-cell-center">
             ${mesesControl}
@@ -941,8 +955,8 @@ const renderCart = () => {
               </div>
               <div class="cart-item-info">
                 <p class="cart-name">${platform.nombre || `Precio ${item.id_precio}`}</p>
-                <p class="cart-detail">${detalle || ""}</p>
                 <p class="cart-detail">Tipo: ${tipo}</p>
+                <p class="cart-detail cart-detail-mobile-only">Detalle: ${detalleServicio || "-"}</p>
                 ${
                   item.renovacion
                     ? `<p class="cart-detail cart-detail-email"><span class="cart-email-label">Correo:</span><span class="cart-email-value">${correoRenovacion}</span></p>`
@@ -1036,6 +1050,7 @@ const renderCart = () => {
               <thead>
                 <tr>
                   <th>Producto</th>
+                  <th>Detalle</th>
                   <th>Precio</th>
                   <th>Meses</th>
                   <th>Cantidad</th>

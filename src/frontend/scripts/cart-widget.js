@@ -207,6 +207,14 @@ if (!window.__cartWidgetInit) {
             const region = price.region || "-";
             return `Región: ${region} · Cantidad: ${qty}`;
           }
+          const isCuentaCompleta =
+            price?.completa === true ||
+            price?.completa === "true" ||
+            price?.completa === 1 ||
+            price?.completa === "1";
+          if (isCuentaCompleta) {
+            return `${qty} ${qty === 1 ? "cuenta completa" : "cuentas completas"} · ${mesesTxt}`;
+          }
           return `${qty} ${baseUnit}${plural} · ${mesesTxt}`;
         })();
         return {

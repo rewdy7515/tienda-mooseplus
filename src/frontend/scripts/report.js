@@ -85,8 +85,15 @@ const formatDateDDMMYYYY = (value) => {
   return `${normalized[3]}/${normalized[2]}/${normalized[1]}`;
 };
 
-const REEMPLAZO_NOTA_PREFIX = "Reemplazo automático por cuenta inactiva:";
+const REEMPLAZO_AUTO_INACTIVA_PREFIX = "reemplazo automatico por cuenta inactiva";
 const MEMBER_CREDENTIAL_PLATFORM_IDS = new Set([9, 12]);
+
+const normalizeReplacementText = (value = "") =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 
 const linkifyText = (value = "") => {
   const source = String(value || "");
@@ -116,18 +123,38 @@ const linkifyText = (value = "") => {
   return output;
 };
 
+const isReplacementSolutionNote = (notaRaw = "") => {
+  const normalized = normalizeReplacementText(notaRaw);
+  if (!normalized.includes("reemplaz")) return false;
+  if (normalized.startsWith("sin reemplazo")) return false;
+  if (normalized.startsWith("sin reemplaz")) return false;
+  return true;
+};
+
+const isAutoInactiveReplacementNote = (notaRaw = "") => {
+  const normalized = normalizeReplacementText(notaRaw);
+  return normalized.startsWith(REEMPLAZO_AUTO_INACTIVA_PREFIX);
+};
+
+const buildVerReemplazoButtonHtml = (row = null) => {
+  const ventaId = toPositiveId(row?.id_venta);
+  if (!ventaId) return "";
+  const inventarioUrl = buildInventarioVentaUrl(ventaId);
+  return `<a href="${escapeHtml(inventarioUrl)}" class="btn-outline btn-small reporte-sol-reemplazo-btn">Ver reemplazo</a>`;
+};
+
 const renderSolucionNota = (notaRaw = "", row = null) => {
   const nota = String(notaRaw || "").trim();
   if (!nota) return "";
-  if (nota.startsWith(REEMPLAZO_NOTA_PREFIX)) {
-    const ventaId = toPositiveId(row?.id_venta);
-    const inventarioUrl = buildInventarioVentaUrl(ventaId);
-    const botonHtml = ventaId
-      ? `<a href="${escapeHtml(inventarioUrl)}" class="btn-outline btn-small reporte-sol-reemplazo-btn">Ver nuevos datos</a>`
-      : "";
-    return `<div class="reporte-sol-reemplazo-msg">Se reemplazó automaticamente su servicio a una cuenta funcional.${botonHtml ? `<br>${botonHtml}` : ""}</div>`;
+  const botonHtml = isReplacementSolutionNote(nota)
+    ? buildVerReemplazoButtonHtml(row)
+    : "";
+  if (isAutoInactiveReplacementNote(nota)) {
+    return `<div class="reporte-sol-reemplazo-msg">Se reemplazó automáticamente su servicio a una cuenta funcional.${botonHtml ? `<br>${botonHtml}` : ""}</div>`;
   }
-  return linkifyText(nota);
+  const notaHtml = linkifyText(nota);
+  if (!botonHtml) return notaHtml;
+  return `<div class="reporte-sol-reemplazo-msg">${notaHtml}<br>${botonHtml}</div>`;
 };
 
 const toPositiveId = (value) => {
@@ -649,8 +676,7 @@ function openModalSol(row) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (parts.length) {
-      const isSingleAutoReplace =
-        parts.length === 1 && parts[0].startsWith(REEMPLAZO_NOTA_PREFIX);
+      const isSingleAutoReplace = parts.length === 1 && isAutoInactiveReplacementNote(parts[0]);
       if (isSingleAutoReplace) {
         modalSolNotas.innerHTML = renderSolucionNota(parts[0], row);
       } else {

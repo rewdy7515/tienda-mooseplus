@@ -1155,6 +1155,14 @@ export const initModal = (elements) => {
       }
       const qty = currentQty || 1;
       const meses = monthsToSend || 1;
+      const isCuentaCompleta =
+        selectedPrecio?.completa === true ||
+        selectedPrecio?.completa === "true" ||
+        selectedPrecio?.completa === 1 ||
+        selectedPrecio?.completa === "1";
+      if (isCuentaCompleta) {
+        return `${qty} ${qty === 1 ? "cuenta completa" : "cuentas completas"} · ${meses} mes${meses === 1 ? "" : "es"}`;
+      }
       const isPlat9 = Number(currentPlatform?.id_plataforma) === 9;
       const baseUnit = currentFlags.por_pantalla
         ? "pantalla"
