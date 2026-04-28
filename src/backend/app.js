@@ -12507,13 +12507,21 @@ const normalizeCheckoutCustomItemAmounts = (input = []) => {
   }, new Map());
 };
 
-const buildCheckoutContext = async ({ idUsuarioVentas, carritoId, totalCliente }) => {
+const buildCheckoutContext = async ({
+  idUsuarioVentas,
+  carritoId,
+  totalCliente,
+  tasaBsOverride = null,
+} = {}) => {
   const { accesoCliente, esMayorista, pickPrecio: pickPrecioBase } = await getPrecioPicker(
     idUsuarioVentas,
   );
   const isCliente = !esMayorista;
   const totalClienteParsed = parseOptionalCheckoutNumber(totalCliente);
-  const tasaBsParsed = await getStrictStoredTasaActual();
+  const tasaBsOverrideParsed = parseOptionalCheckoutNumber(tasaBsOverride);
+  const tasaBsParsed = Number.isFinite(tasaBsOverrideParsed) && tasaBsOverrideParsed > 0
+    ? tasaBsOverrideParsed
+    : await getStrictStoredTasaActual();
   const { data: items, error: itemErr } = await supabaseAdmin
     .from("carrito_items")
     .select(
@@ -13349,6 +13357,66 @@ const processOrderFromItems = async ({
   const horaPedidoCaracas = `${String(caracasHour).padStart(2, "0")}:${String(
     caracasMinute,
   ).padStart(2, "0")}:00`;
+  const isHoraPedidoDateSyntaxError = (err) => {
+    const msg = String(err?.message || err?.details || "").toLowerCase();
+    return (
+      msg.includes("invalid input syntax for type date") &&
+      msg.includes(String(horaPedidoCaracas || "").toLowerCase())
+    );
+  };
+  const dropHoraPedidoField = (payload = {}) => {
+    if (!payload || typeof payload !== "object") return payload;
+    const next = { ...payload };
+    delete next.hora_pedido;
+    return next;
+  };
+  const updateVentaByIdWithHoraFallback = async ({ ventaId, payload, logLabel = "" } = {}) => {
+    const { data, error } = await supabaseAdmin
+      .from("ventas")
+      .update(payload)
+      .eq("id_venta", ventaId)
+      .select("id_venta");
+    if (!error) return data || [];
+    if (!isHoraPedidoDateSyntaxError(error) || !Object.prototype.hasOwnProperty.call(payload, "hora_pedido")) {
+      throw error;
+    }
+    const retryPayload = dropHoraPedidoField(payload);
+    console.warn("[ordenes/procesar] ventas update fallback sin hora_pedido", {
+      id_orden: toPositiveInt(ordenId) || null,
+      id_venta: toPositiveInt(ventaId) || null,
+      label: logLabel || null,
+      hora_pedido: horaPedidoCaracas,
+      error: error?.message || null,
+    });
+    const { data: retryData, error: retryErr } = await supabaseAdmin
+      .from("ventas")
+      .update(retryPayload)
+      .eq("id_venta", ventaId)
+      .select("id_venta");
+    if (retryErr) throw retryErr;
+    return retryData || [];
+  };
+  const insertVentasWithHoraFallback = async (rows = []) => {
+    const { data, error } = await supabaseAdmin
+      .from("ventas")
+      .insert(rows)
+      .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
+    if (!error) return data || [];
+    if (!isHoraPedidoDateSyntaxError(error)) throw error;
+    const retryRows = rows.map((row) => dropHoraPedidoField(row));
+    console.warn("[ordenes/procesar] ventas insert fallback sin hora_pedido", {
+      id_orden: toPositiveInt(ordenId) || null,
+      rows: retryRows.length,
+      hora_pedido: horaPedidoCaracas,
+      error: error?.message || null,
+    });
+    const { data: retryData, error: retryErr } = await supabaseAdmin
+      .from("ventas")
+      .insert(retryRows)
+      .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
+    if (retryErr) throw retryErr;
+    return retryData || [];
+  };
   const historialRegistradoPorId =
     Number.isFinite(Number(historialRegistradoPor)) && Number(historialRegistradoPor) > 0
       ? Math.trunc(Number(historialRegistradoPor))
@@ -13531,12 +13599,11 @@ const processOrderFromItems = async ({
         updatePayload.cuenta_pagada_admin = false;
       }
     }
-    const { data: updatedRows, error: renovErr } = await supabaseAdmin
-      .from("ventas")
-      .update(updatePayload)
-      .eq("id_venta", it.id_venta)
-      .select("id_venta");
-    if (renovErr) throw renovErr;
+    const updatedRows = await updateVentaByIdWithHoraFallback({
+      ventaId: it.id_venta,
+      payload: updatePayload,
+      logLabel: "renovacion_explicita",
+    });
     if ((updatedRows || []).length > 0) {
       appliedRenovaciones.push(it);
       if (renewalVentaId) explicitRenewalAppliedVentaIds.add(renewalVentaId);
@@ -14192,12 +14259,7 @@ const processOrderFromItems = async ({
 
   let insertedVentas = [];
   if (ventasToInsert.length) {
-    const { data: ventasRes, error: ventaErr } = await supabaseAdmin
-      .from("ventas")
-      .insert(ventasToInsert)
-      .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
-    if (ventaErr) throw ventaErr;
-    insertedVentas = ventasRes || [];
+    insertedVentas = await insertVentasWithHoraFallback(ventasToInsert);
   }
   insertedVentas.forEach((venta, idx) => {
     const source = sourceRowsForInsertedVentas[idx] || {};
@@ -14294,12 +14356,11 @@ const processOrderFromItems = async ({
           updatePayload.cuenta_pagada_admin = false;
         }
       }
-      const { data: implicitUpdatedRows, error: implicitUpdErr } = await supabaseAdmin
-        .from("ventas")
-        .update(updatePayload)
-        .eq("id_venta", ventaId)
-        .select("id_venta");
-      if (implicitUpdErr) throw implicitUpdErr;
+      const implicitUpdatedRows = await updateVentaByIdWithHoraFallback({
+        ventaId,
+        payload: updatePayload,
+        logLabel: "renovacion_implicita",
+      });
       if ((implicitUpdatedRows || []).length === 0) {
         console.warn("[checkout] renovacion implicita omitida por idempotencia", {
           ordenId,
@@ -17596,11 +17657,15 @@ app.post("/api/checkout/draft", async (req, res) => {
       carritoId,
       idUsuario,
     });
+    const tasaBsContextOverride = parseOptionalCheckoutNumber(carritoRateState?.tasaBs);
 
     const context = await buildCheckoutContext({
       idUsuarioVentas: idUsuario,
       carritoId,
       totalCliente: null,
+      tasaBsOverride: Number.isFinite(tasaBsContextOverride) && tasaBsContextOverride > 0
+        ? tasaBsContextOverride
+        : null,
     });
     const {
       items,
@@ -17742,11 +17807,14 @@ app.post("/api/checkout/summary", async (req, res) => {
       carritoId,
       idUsuario: idUsuarioSesion,
     });
-
+    const tasaBsContextOverride = parseOptionalCheckoutNumber(carritoRateState?.tasaBs);
     const context = await buildCheckoutContext({
       idUsuarioVentas,
       carritoId,
       totalCliente: null,
+      tasaBsOverride: Number.isFinite(tasaBsContextOverride) && tasaBsContextOverride > 0
+        ? tasaBsContextOverride
+        : null,
     });
     const {
       items,
@@ -21401,10 +21469,20 @@ app.post("/api/checkout", async (req, res) => {
       carritoId,
     });
 
+    const { data: carritoRateSnapshot, error: carritoRateErr } = await supabaseAdmin
+      .from("carritos")
+      .select("tasa_bs")
+      .eq("id_carrito", carritoId)
+      .maybeSingle();
+    if (carritoRateErr) throw carritoRateErr;
+    const tasaBsCarritoSnapshot = parseOptionalCheckoutNumber(carritoRateSnapshot?.tasa_bs);
     const context = await buildCheckoutContext({
       idUsuarioVentas,
       carritoId,
       totalCliente: null,
+      tasaBsOverride: Number.isFinite(tasaBsCarritoSnapshot) && tasaBsCarritoSnapshot > 0
+        ? tasaBsCarritoSnapshot
+        : null,
     });
     const {
       items,

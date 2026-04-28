@@ -1192,14 +1192,16 @@ async function init() {
 
       const summaryResp = await fetchCheckoutSummary();
       if (!summaryResp?.error) {
+        const cartHasNetSaldo =
+          isTrue(cartData?.usa_saldo) && Number.isFinite(Number(cartData?.monto_final));
         const summaryTotalUsd = Number(summaryResp?.total_usd);
         const summaryMontoBs = Number(summaryResp?.monto_bs);
         const summaryTasaBs = Number(summaryResp?.tasa_bs);
-        if (Number.isFinite(summaryTotalUsd)) {
+        if (!cartHasNetSaldo && Number.isFinite(summaryTotalUsd)) {
           totalUsd = summaryTotalUsd;
           fixedMontoUsd = summaryTotalUsd;
         }
-        if (Number.isFinite(summaryMontoBs)) {
+        if (!cartHasNetSaldo && Number.isFinite(summaryMontoBs)) {
           fixedMontoBs = summaryMontoBs;
         }
         if (Number.isFinite(summaryTasaBs) && summaryTasaBs > 0) {
@@ -1363,14 +1365,16 @@ btnSendPayment?.addEventListener("click", async () => {
           fixedMontoBs = null;
         }
         if (!summaryResp?.error) {
+          const cartHasNetSaldo =
+            isTrue(cartData?.usa_saldo) && Number.isFinite(Number(cartData?.monto_final));
           const summaryTotalUsd = Number(summaryResp?.total_usd);
           const summaryMontoBs = Number(summaryResp?.monto_bs);
           const summaryTasaBs = Number(summaryResp?.tasa_bs);
-          if (Number.isFinite(summaryTotalUsd)) {
+          if (!cartHasNetSaldo && Number.isFinite(summaryTotalUsd)) {
             totalUsd = summaryTotalUsd;
             fixedMontoUsd = summaryTotalUsd;
           }
-          if (Number.isFinite(summaryMontoBs)) {
+          if (!cartHasNetSaldo && Number.isFinite(summaryMontoBs)) {
             fixedMontoBs = summaryMontoBs;
           }
           if (Number.isFinite(summaryTasaBs) && summaryTasaBs > 0) {
