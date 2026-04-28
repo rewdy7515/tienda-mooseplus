@@ -11585,7 +11585,7 @@ const autoAssignReportedPendingVentas = async ({
   const { data: plataformaRows, error: plataformaErr } = plataformaIdsEnVentas.length
     ? await supabaseAdmin
         .from("plataformas")
-        .select("id_plataforma, entrega_inmediata, por_pantalla, por_acceso, cuenta_madre")
+        .select("id_plataforma, entrega_inmediata, por_pantalla, por_acceso, cuenta_madre, reemplazo")
         .in("id_plataforma", plataformaIdsEnVentas)
     : { data: [], error: null };
   if (plataformaErr) throw plataformaErr;
@@ -11744,7 +11744,12 @@ const autoAssignReportedPendingVentas = async ({
         const plataforma = plataformaById[plataformaId] || null;
         const esReportada = isTrue(venta?.reportado);
         const isPlatform9 = Number(plataformaId) === 9;
+        const autoReemplazoHabilitado = isPlatform9 || isTrue(plataforma?.reemplazo);
         if (esReportada && isPlatform9) {
+          summary.skipped += 1;
+          continue;
+        }
+        if (esReportada && !autoReemplazoHabilitado) {
           summary.skipped += 1;
           continue;
         }

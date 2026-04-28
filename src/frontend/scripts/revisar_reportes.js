@@ -27,6 +27,15 @@ const toPositiveId = (value) => {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+const platformAllowsAutoReplacement = (row = {}) => {
+  const platId =
+    toPositiveId(row?.id_plataforma) ||
+    toPositiveId(row?.plataformas?.id_plataforma) ||
+    toPositiveId(row?.cuentas?.id_plataforma) ||
+    null;
+  if (platId === 9) return true;
+  return isTrue(row?.plataformas?.reemplazo);
+};
 const formatPlataformaReemplazo = ({
   plataforma = "",
   idPrecio = null,
@@ -1047,7 +1056,7 @@ const removeReporteRowFromUI = (reportIdRaw) => {
 
 async function loadReportes() {
   const baseSelect =
-    "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion";
+    "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina,reemplazo),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion";
   const selectWithDatosFlags = `${baseSelect},datos_incorrectos,datos_corregidos`;
   const isMissingDatosColumnError = (err) => {
     const msg = String(err?.message || "").toLowerCase();
@@ -2544,10 +2553,14 @@ async function reemplazarServicio(options = {}) {
 
 async function autoReplaceInactiveReportes(reportes = []) {
   if (!autoReemplazoCuentaInactivaEnabled) return false;
-  const targets = (reportes || []).filter((r) => isTrue(r?.cuenta_inactiva_resuelta));
+  const allTargets = (reportes || []).filter((r) => isTrue(r?.cuenta_inactiva_resuelta));
+  const targets = allTargets.filter((r) => platformAllowsAutoReplacement(r));
+  const skippedByPlatform = Math.max(0, allTargets.length - targets.length);
   console.log("[reemplazo][auto]", "scan_reportes", {
     total_reportes: (reportes || []).length,
-    total_targets: targets.length,
+    total_targets: allTargets.length,
+    total_targets_habilitados: targets.length,
+    total_targets_bloqueados_plataforma: skippedByPlatform,
   });
   if (!targets.length) return false;
 

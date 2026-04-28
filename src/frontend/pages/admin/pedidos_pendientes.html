@@ -1555,7 +1555,15 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
               };
             }
             const cuentaMiembro = v.cuentas_miembro || null;
-            const cuentaConCredenciales = cuentaMiembro || v.cuentas || null;
+            const isVentaTipoMiembro = grouped[platId].cuenta_madre && !isCompleta && !isPlat11;
+            // Para ventas tipo miembro no usar nunca la cuenta madre como fallback de credenciales.
+            const cuentaConCredenciales = isVentaTipoMiembro
+              ? cuentaMiembro
+              : cuentaMiembro || v.cuentas || null;
+            const correoMiembro = normalizeCredentialValue(v.correo_miembro || "");
+            const claveMiembro = normalizeCredentialValue(v.clave_miembro || "");
+            const correoFallback = normalizeCredentialValue(cuentaConCredenciales?.correo || "");
+            const claveFallback = normalizeCredentialValue(cuentaConCredenciales?.clave || "");
             grouped[platId].groups[motherId].rows.push({
               id_venta: v.id_venta,
               cliente,
@@ -1566,8 +1574,8 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
               servicio,
               valor_tarjeta_de_regalo: precio.valor_tarjeta_de_regalo ?? null,
               cuenta_nueva: v.cuenta_nueva,
-              correo: v.correo_miembro || cuentaConCredenciales?.correo || "-",
-              clave: v.clave_miembro || cuentaConCredenciales?.clave || "-",
+              correo: correoMiembro || correoFallback || "-",
+              clave: claveMiembro || claveFallback || "-",
               plataforma: platName,
               fecha_corte: v.fecha_corte || "",
               perfil: v.perfiles?.n_perfil ? `M${v.perfiles.n_perfil}` : "",
