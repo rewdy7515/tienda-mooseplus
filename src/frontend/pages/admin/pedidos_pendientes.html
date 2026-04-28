@@ -2354,19 +2354,44 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           }
           try {
             const row = wrap.closest("tr");
+            const entregarBtn = row?.querySelector(".btn-entregar");
+            const idPlataformaNum = Number(entregarBtn?.dataset?.idPlataforma || "");
+            const isPlat9 = Number.isFinite(idPlataformaNum) && idPlataformaNum === 9;
+            const isCompleta = isTrue(entregarBtn?.dataset?.completa);
+            const cuentaMadreFlow = isTrue(entregarBtn?.dataset?.cuentaMadre);
             const target = await resolveVentaCredentialTarget({ idVenta, rowEl: row });
+            const cuentaMiembroId = toPositiveId(target?.idCuentaMiembro);
+            const cuentaMadreId = toPositiveId(target?.idCuentaMadre);
+            const memberCredentialFlow =
+              (cuentaMiembroId && cuentaMiembroId !== cuentaMadreId) ||
+              (isPlat9 && cuentaMadreFlow && !isCompleta);
+            const targetCuentaClaveId = memberCredentialFlow
+              ? cuentaMiembroId && cuentaMiembroId !== cuentaMadreId
+                ? cuentaMiembroId
+                : null
+              : toPositiveId(target?.idCuenta);
             const updates = [
               supabase
                 .from("ventas")
                 .update({ clave_miembro: nextVal })
                 .eq("id_venta", idVenta),
             ];
-            if (toPositiveId(target?.idCuenta)) {
+            if (targetCuentaClaveId) {
               updates.push(
                 supabase
                   .from("cuentas")
                   .update({ clave: nextVal })
-                  .eq("id_cuenta", Number(target.idCuenta)),
+                  .eq("id_cuenta", Number(targetCuentaClaveId)),
+              );
+            } else if (memberCredentialFlow) {
+              console.warn(
+                "[pedidos_pendientes] se omite update de clave en cuenta madre para venta tipo miembro",
+                {
+                  id_venta: toPositiveId(idVenta) || null,
+                  id_cuenta_miembro: cuentaMiembroId || null,
+                  id_cuenta_madre: cuentaMadreId || null,
+                  id_plataforma: isPlat9 ? 9 : idPlataformaNum || null,
+                },
               );
             }
             const results = await Promise.all(updates);
@@ -2382,7 +2407,6 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
             wrap.dataset.clave = nextVal;
             input?.remove();
             saveClaveBtn.remove();
-            const entregarBtn = row?.querySelector(".btn-entregar");
             if (entregarBtn) entregarBtn.dataset.clave = nextVal;
           } catch (err) {
             console.error("guardar clave_miembro/cuenta error", err);

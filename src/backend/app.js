@@ -674,6 +674,24 @@ const stripHistorialGiftCardColumn = (rows = []) =>
     return nextRow;
   });
 
+const isMissingHistorialPerfilColumnError = (err) => {
+  const message = String(err?.message || err?.details || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("id_perfil") &&
+    message.includes("historial_ventas") &&
+    message.includes("schema cache")
+  );
+};
+
+const stripHistorialPerfilColumn = (rows = []) =>
+  (rows || []).map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const nextRow = { ...row };
+    delete nextRow.id_perfil;
+    return nextRow;
+  });
+
 const normalizeGiftCardFaceValue = (value) => {
   const raw = String(value ?? "")
     .trim()
@@ -13433,7 +13451,7 @@ const processOrderFromItems = async ({
     const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)"
+        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)"
       )
       .in("id_venta", idsVentasRenovar);
     if (ventErr) throw ventErr;
@@ -14204,7 +14222,7 @@ const processOrderFromItems = async ({
       const { data: implicitVentas, error: implicitVentasErr } = await supabaseAdmin
         .from("ventas")
         .select(
-          "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)",
+          "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)",
         )
         .in("id_venta", implicitVentaIds);
       if (implicitVentasErr) throw implicitVentasErr;
@@ -14290,6 +14308,7 @@ const processOrderFromItems = async ({
         id_orden: ordenId,
         id_plataforma: platId,
         id_cuenta: ventaAnt?.id_cuenta || null,
+        id_perfil: toPositiveInt(ventaAnt?.id_perfil) || null,
         registrado_por: historialRegistradoPorId,
         id_metodo_de_pago,
         referencia: referenciaNum,
@@ -14330,6 +14349,7 @@ const processOrderFromItems = async ({
   // Nuevas (insertadas recién)
   insertedVentas.forEach((v, idx) => {
     const src = ventasToInsert[idx] || {};
+    const srcPerfilId = toPositiveInt(src?.id_perfil) || null;
     const platId = priceMap[v.id_precio]?.id_plataforma || null;
     histRows.push({
       id_usuario_cliente: idUsuarioVentas,
@@ -14342,6 +14362,7 @@ const processOrderFromItems = async ({
       id_orden: ordenId,
       id_plataforma: platId,
       id_cuenta: v.id_cuenta,
+      id_perfil: srcPerfilId,
       registrado_por: historialRegistradoPorId,
       id_metodo_de_pago,
       referencia: referenciaNum,
@@ -14356,6 +14377,7 @@ const processOrderFromItems = async ({
     const platId = Number(it?.id_plataforma || price?.id_plataforma) || null;
     const ventaAnt = ventaMap[it.id_venta] || {};
     const cuentaAnt = ventaAnt.id_cuenta || null;
+    const perfilAnt = toPositiveInt(ventaAnt?.id_perfil) || null;
     const usuarioAnt = ventaAnt.id_usuario || idUsuarioVentas;
     const monto = roundCheckoutMoney(Number(it?.monto) || 0);
     histRows.push({
@@ -14369,6 +14391,7 @@ const processOrderFromItems = async ({
       id_orden: ordenId,
       id_plataforma: platId,
       id_cuenta: cuentaAnt,
+      id_perfil: perfilAnt,
       registrado_por: historialRegistradoPorId,
       id_metodo_de_pago,
       referencia: referenciaNum,
@@ -14384,6 +14407,7 @@ const processOrderFromItems = async ({
   }
   if (histRows.length) {
     let historialGiftCardLinkFallback = false;
+    let historialPerfilLinkFallback = false;
     const saldoConsumidoHist = (() => {
       const consumed = toFiniteMoney(saldoConsumption?.monto);
       if (Number.isFinite(consumed) && consumed > 0) return consumed;
@@ -14453,20 +14477,43 @@ const processOrderFromItems = async ({
     if (!histRowsToInsert.length) {
       histRows.length = 0;
     }
-    const { error: histErr } = histRowsToInsert.length
-      ? await supabaseAdmin.from("historial_ventas").insert(histRowsToInsert)
-      : { error: null };
-    if (histErr) {
-      if (!isMissingHistorialGiftCardColumnError(histErr)) throw histErr;
-      historialGiftCardLinkFallback = true;
-      const { error: histFallbackErr } = await supabaseAdmin
+    let historialInsertRows = [...histRowsToInsert];
+    while (historialInsertRows.length) {
+      const { error: histErr } = await supabaseAdmin
         .from("historial_ventas")
-        .insert(stripHistorialGiftCardColumn(histRowsToInsert));
-      if (histFallbackErr) throw histFallbackErr;
+        .insert(historialInsertRows);
+      if (!histErr) break;
+
+      const hasGiftCardColInRows = historialInsertRows.some(
+        (row) => row && typeof row === "object" && Object.prototype.hasOwnProperty.call(row, "id_tarjeta_de_regalo"),
+      );
+      const hasPerfilColInRows = historialInsertRows.some(
+        (row) => row && typeof row === "object" && Object.prototype.hasOwnProperty.call(row, "id_perfil"),
+      );
+
+      const shouldDropGiftCard =
+        hasGiftCardColInRows && isMissingHistorialGiftCardSchemaError(histErr);
+      const shouldDropPerfil = hasPerfilColInRows && isMissingHistorialPerfilColumnError(histErr);
+
+      if (!shouldDropGiftCard && !shouldDropPerfil) throw histErr;
+
+      if (shouldDropGiftCard) {
+        historialGiftCardLinkFallback = true;
+        historialInsertRows = stripHistorialGiftCardColumn(historialInsertRows);
+      }
+      if (shouldDropPerfil) {
+        historialPerfilLinkFallback = true;
+        historialInsertRows = stripHistorialPerfilColumn(historialInsertRows);
+      }
     }
 
     if (historialGiftCardLinkFallback) {
       console.warn("[checkout] historial gift card sin columna id_tarjeta_de_regalo", {
+        ordenId,
+      });
+    }
+    if (historialPerfilLinkFallback) {
+      console.warn("[checkout] historial_ventas sin columna id_perfil", {
         ordenId,
       });
     }
