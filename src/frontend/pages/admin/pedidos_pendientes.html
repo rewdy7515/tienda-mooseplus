@@ -693,6 +693,29 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
         return String(urls[0] || "").trim();
       };
       const getCaracasDateISO = () => toYMD(getVenezuelaToday());
+      const formatHoraPedido12h = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "-";
+        const match = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (!match) return raw;
+        const hourRaw = Number(match[1]);
+        const minuteRaw = Number(match[2]);
+        if (
+          !Number.isInteger(hourRaw) ||
+          !Number.isInteger(minuteRaw) ||
+          hourRaw < 0 ||
+          hourRaw > 23 ||
+          minuteRaw < 0 ||
+          minuteRaw > 59
+        ) {
+          return raw;
+        }
+        const suffix = hourRaw >= 12 ? "PM" : "AM";
+        const hour12 = hourRaw % 12 || 12;
+        const hh = String(hour12).padStart(2, "0");
+        const mm = String(minuteRaw).padStart(2, "0");
+        return `${hh}:${mm} ${suffix}`;
+      };
       const normalizeForCompare = (value) => String(value || "").trim().toLowerCase();
       const resolveVentaCredentialTarget = async ({ idVenta = null, rowEl = null } = {}) => {
         const ventaId = toPositiveId(idVenta);
@@ -1278,7 +1301,9 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
                            ${showClave ? claveCell : ""}`
                     }
                     ${isEntregaInmediata ? `<td>${r.servicio || "-"}</td>${tipoCell}${valorGiftCardCell}` : ""}
-                    <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"}</td>
+                    <td>${r.fecha_pago ? formatDDMMYYYY(r.fecha_pago) : "-"} · ${formatHoraPedido12h(
+                      r.reportado ? r.hora_reporte_abierto || r.hora_pedido : r.hora_pedido,
+                    )}</td>
                     <td class="pp-acciones-cell">
                       ${
                         r.asignado_a
@@ -1422,7 +1447,7 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
             const { data: ventas, error } = await supabase
               .from("ventas")
               .select(
-              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, fecha_corte, meses_contratados, pendiente, completa, reportado, reporte_admin, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, inactiva, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
+              "id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil, fecha_pago, hora_pedido, fecha_corte, meses_contratados, pendiente, completa, reportado, reporte_admin, cuenta_nueva, asignado_a, asignado:usuarios!ventas_asignado_a_fkey(nombre, apellido), correo_miembro, clave_miembro, precios:precios(id_plataforma, plan, valor_tarjeta_de_regalo), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma, correo, clave, inactiva, link_codigo, direccion, region), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, id_plataforma, correo, clave, link_codigo, direccion, region), perfiles:perfiles(n_perfil)"
               )
             .eq("pendiente", true)
             .order("id_venta", { ascending: false });
@@ -1431,6 +1456,24 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           if (!ventas?.length) {
             render({});
             return;
+          }
+
+          const ventaIds = [...new Set((ventas || []).map((v) => toPositiveId(v?.id_venta)).filter(Boolean))];
+          const horaReporteAbiertoByVentaId = {};
+          if (ventaIds.length) {
+            const { data: reportesAbiertos, error: reportesErr } = await supabase
+              .from("reportes")
+              .select("id_reporte, id_venta, hora_creacion")
+              .in("id_venta", ventaIds)
+              .eq("solucionado", false)
+              .order("id_reporte", { ascending: false });
+            if (reportesErr) throw reportesErr;
+            (reportesAbiertos || []).forEach((rep) => {
+              const ventaId = toPositiveId(rep?.id_venta);
+              if (!ventaId) return;
+              if (horaReporteAbiertoByVentaId[ventaId]) return;
+              horaReporteAbiertoByVentaId[ventaId] = String(rep?.hora_creacion || "").trim();
+            });
           }
 
           const precioIds = [...new Set(ventas.map((v) => v.id_precio).filter(Boolean))];
@@ -1571,6 +1614,8 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
               id_precio: v.id_precio || null,
               precio_completa: isTrue(precio?.completa),
               fecha_pago: v.fecha_pago || "-",
+              hora_pedido: v.hora_pedido || "",
+              hora_reporte_abierto: horaReporteAbiertoByVentaId[toPositiveId(v.id_venta)] || "",
               servicio,
               valor_tarjeta_de_regalo: precio.valor_tarjeta_de_regalo ?? null,
               cuenta_nueva: v.cuenta_nueva,

@@ -361,6 +361,11 @@
           ? "Cuenta completa"
           : raw || "";
       };
+      const normalizePlanLabel = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw || /sin\s*plan/i.test(raw)) return "";
+        return raw;
+      };
       const parseFechaMs = (val) => {
         if (!val) return null;
         const d = new Date(val);
@@ -405,7 +410,7 @@
             Object.keys(p || {})
           );
           (p.planes || []).forEach((planObj) => {
-            const planNombre = planObj.plan || "";
+            const planNombre = normalizePlanLabel(planObj.plan || "");
             (planObj.ventas || []).forEach((v) => {
               const rowCorreo = isTrue(p?.plat_correo_cliente)
                 ? v.correo_cliente || ""
@@ -527,6 +532,7 @@
             .map((it) => {
               const correoVal = getCorreoVal(it);
               const clienteVal = showClienteColumn ? (it.nombre_cliente || "") : "";
+              const planLabel = normalizePlanLabel(it.plan);
               const perfilVal = showPerfil
                 ? formatPerfilLabel(it.n_perfil ?? "")
                 : "";
@@ -549,7 +555,7 @@
               ${showPerfil ? `<td>${perfilVal}</td>` : ""}
               ${showPin ? `<td class="copyable" data-label="PIN">${it.pin || ""}</td>` : ""}
               <td>${formatDate(it.fecha_corte_venta)}</td>
-              <td>${it.plataforma || ""}${it.plan ? ` · ${it.plan}` : ""}</td>
+              <td>${it.plataforma || ""}${planLabel ? ` · ${planLabel}` : ""}</td>
               <td>
                 <div class="actions-inline">
                   <button class="btn-small btn-renovar" style="background-color:#22c55e;color:white;">🔄</button>
@@ -865,7 +871,7 @@
           (p.planes || []).forEach((planObj) => {
             const planWrapper = document.createElement("div");
             planWrapper.className = "inventario-plan";
-            const planName = (planObj.plan || "").trim();
+            const planName = normalizePlanLabel(planObj.plan || "");
             const planHeaderText = getPlanHeaderTitle(planObj);
             let planTitle = null;
             if (planHeaderText) {

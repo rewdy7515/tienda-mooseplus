@@ -13345,6 +13345,10 @@ const processOrderFromItems = async ({
     });
   }
   const isoHoy = todayInVenezuela();
+  const { hour: caracasHour, minute: caracasMinute } = getCaracasClock();
+  const horaPedidoCaracas = `${String(caracasHour).padStart(2, "0")}:${String(
+    caracasMinute,
+  ).padStart(2, "0")}:00`;
   const historialRegistradoPorId =
     Number.isFinite(Number(historialRegistradoPor)) && Number(historialRegistradoPor) > 0
       ? Math.trunc(Number(historialRegistradoPor))
@@ -13506,6 +13510,7 @@ const processOrderFromItems = async ({
     const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
     const updatePayload = {
       fecha_pago: isoHoy,
+      hora_pedido: horaPedidoCaracas,
       fecha_corte,
       monto,
       renovacion: true,
@@ -14171,6 +14176,7 @@ const processOrderFromItems = async ({
       meses_contratados: mesesVal,
       fecha_corte: fechaCorte,
       fecha_pago: isoHoy,
+      hora_pedido: horaPedidoCaracas,
       renovacion: false,
       recordatorio_enviado: false,
       recordatorio_corte_enviado: false,
@@ -14267,6 +14273,7 @@ const processOrderFromItems = async ({
       const fecha_corte = addMonthsKeepDay(fechaBaseSrc, mesesVal) || isoHoy;
       const updatePayload = {
         fecha_pago: isoHoy,
+        hora_pedido: horaPedidoCaracas,
         fecha_corte,
         monto,
         renovacion: true,
