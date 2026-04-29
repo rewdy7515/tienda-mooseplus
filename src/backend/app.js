@@ -9736,6 +9736,82 @@ app.get("/api/admin/precios-especiales/clientes", async (req, res) => {
   }
 });
 
+app.get("/api/admin/actividad-soporte", async (req, res) => {
+  try {
+    const year = Number.parseInt(String(req.query?.year || ""), 10) || new Date().getFullYear();
+    const month = Number.parseInt(String(req.query?.month || ""), 10) || new Date().getMonth() + 1;
+    const platformId = toPositiveInt(req.query?.platform_id) || 9;
+    if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: "year inválido" });
+    }
+    if (!Number.isFinite(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "month inválido" });
+    }
+    const mm = String(month).padStart(2, "0");
+    const startDate = `${year}-${mm}-01`;
+    const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+    const endDateExclusive = `${nextMonth.y}-${String(nextMonth.m).padStart(2, "0")}-01`;
+
+    const [
+      { data: reportRows, error: repErr },
+      { data: histRows, error: histErr },
+      { data: userRows, error: userErr },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("reportes")
+        .select("solucionado_por")
+        .eq("solucionado", true)
+        .not("solucionado_por", "is", null)
+        .gte("fecha_creacion", startDate)
+        .lt("fecha_creacion", endDateExclusive),
+      supabaseAdmin
+        .from("historial_ventas")
+        .select("entregado_por, id_plataforma")
+        .not("entregado_por", "is", null)
+        .gte("fecha_pago", startDate)
+        .lt("fecha_pago", endDateExclusive),
+      supabaseAdmin.from("usuarios").select("id_usuario, nombre, apellido"),
+    ]);
+    if (repErr) throw repErr;
+    if (histErr) throw histErr;
+    if (userErr) throw userErr;
+
+    const usersById = {};
+    (userRows || []).forEach((u) => {
+      const id = toPositiveInt(u?.id_usuario);
+      if (!id) return;
+      usersById[id] = `${String(u?.nombre || "").trim()} ${String(u?.apellido || "").trim()}`.trim() || `Usuario ${id}`;
+    });
+
+    const countByUser = (rows = [], userField, extraFilter = null) => {
+      const map = new Map();
+      (rows || []).forEach((row) => {
+        if (typeof extraFilter === "function" && !extraFilter(row)) return;
+        const id = toPositiveInt(row?.[userField]);
+        if (!id) return;
+        map.set(id, (map.get(id) || 0) + 1);
+      });
+      return Array.from(map.entries())
+        .map(([id_usuario, total]) => ({ id_usuario, nombre: usersById[id_usuario] || `Usuario ${id_usuario}`, total }))
+        .sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre, "es"));
+    };
+
+    return res.json({
+      period: { year, month, start_date: startDate, end_date_exclusive: endDateExclusive },
+      bars_reportes_cerrados: countByUser(reportRows, "solucionado_por"),
+      bars_entregas: countByUser(histRows, "entregado_por"),
+      pie_entregas_plataforma: countByUser(
+        histRows,
+        "entregado_por",
+        (row) => toPositiveInt(row?.id_plataforma) === platformId,
+      ),
+    });
+  } catch (err) {
+    console.error("[admin/actividad-soporte] error", err);
+    return res.status(500).json({ error: "No se pudo cargar actividad de soporte" });
+  }
+});
+
 app.get("/api/admin/precios-especiales", async (req, res) => {
   try {
     await requireSuperadminSession(req);
@@ -13418,6 +13494,12 @@ const processOrderFromItems = async ({
     delete next.hora_pedido;
     return next;
   };
+  const dropVentaIdOrdenField = (payload = {}) => {
+    if (!payload || typeof payload !== "object") return payload;
+    const next = { ...payload };
+    delete next.id_orden;
+    return next;
+  };
   const updateVentaByIdWithHoraFallback = async ({ ventaId, payload, logLabel = "" } = {}) => {
     const { data, error } = await supabaseAdmin
       .from("ventas")
@@ -13445,25 +13527,50 @@ const processOrderFromItems = async ({
     return retryData || [];
   };
   const insertVentasWithHoraFallback = async (rows = []) => {
-    const { data, error } = await supabaseAdmin
-      .from("ventas")
-      .insert(rows)
-      .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
-    if (!error) return data || [];
-    if (!isHoraPedidoDateSyntaxError(error)) throw error;
-    const retryRows = rows.map((row) => dropHoraPedidoField(row));
-    console.warn("[ordenes/procesar] ventas insert fallback sin hora_pedido", {
-      id_orden: toPositiveInt(ordenId) || null,
-      rows: retryRows.length,
-      hora_pedido: horaPedidoCaracas,
-      error: error?.message || null,
-    });
-    const { data: retryData, error: retryErr } = await supabaseAdmin
-      .from("ventas")
-      .insert(retryRows)
-      .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
-    if (retryErr) throw retryErr;
-    return retryData || [];
+    let currentRows = Array.isArray(rows) ? rows.map((row) => ({ ...(row || {}) })) : [];
+    let droppedHoraPedido = false;
+    let droppedIdOrden = false;
+    while (true) {
+      const { data, error } = await supabaseAdmin
+        .from("ventas")
+        .insert(currentRows)
+        .select("id_venta, id_cuenta, id_precio, id_tarjeta_de_regalo");
+      if (!error) return data || [];
+
+      const canDropHoraPedido =
+        !droppedHoraPedido &&
+        currentRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, "hora_pedido")) &&
+        isHoraPedidoDateSyntaxError(error);
+      const canDropIdOrden =
+        !droppedIdOrden &&
+        currentRows.some((row) => row && Object.prototype.hasOwnProperty.call(row, "id_orden")) &&
+        isMissingVentasIdOrdenColumnError(error);
+
+      if (!canDropHoraPedido && !canDropIdOrden) throw error;
+
+      if (canDropHoraPedido) {
+        currentRows = currentRows.map((row) => dropHoraPedidoField(row));
+        droppedHoraPedido = true;
+        console.warn("[ordenes/procesar] ventas insert fallback sin hora_pedido", {
+          id_orden: toPositiveInt(ordenId) || null,
+          rows: currentRows.length,
+          hora_pedido: horaPedidoCaracas,
+          error: error?.message || null,
+        });
+        continue;
+      }
+
+      if (canDropIdOrden) {
+        currentRows = currentRows.map((row) => dropVentaIdOrdenField(row));
+        droppedIdOrden = true;
+        console.warn("[ordenes/procesar] ventas insert fallback sin id_orden", {
+          id_orden: toPositiveInt(ordenId) || null,
+          rows: currentRows.length,
+          error: error?.message || null,
+        });
+        continue;
+      }
+    }
   };
   const historialRegistradoPorId =
     Number.isFinite(Number(historialRegistradoPor)) && Number(historialRegistradoPor) > 0
@@ -14161,6 +14268,16 @@ const processOrderFromItems = async ({
   const spotifyImplicitRenewals = [];
   const implicitRenewalItemIds = new Set();
   const normalizeComparableEmail = (value) => String(value || "").trim().toLowerCase();
+  const buildVentaInsertDedupeKey = (row = {}) => {
+    const priceId = toPositiveInt(row?.id_precio) || 0;
+    const cuentaId = toPositiveInt(row?.id_cuenta) || 0;
+    const perfilId = toPositiveInt(row?.id_perfil) || 0;
+    const giftId = toPositiveInt(row?.id_tarjeta_de_regalo) || 0;
+    const mesesVal = toPositiveInt(row?.meses_contratados) || 1;
+    const pendingVal = isTrue(row?.pendiente) ? 1 : 0;
+    const montoVal = roundCheckoutMoney(Number(row?.monto) || 0).toFixed(2);
+    return [priceId, cuentaId, perfilId, giftId, mesesVal, pendingVal, montoVal].join("|");
+  };
   const explicitRenewalVentaIdsSet = new Set(
     idsVentasRenovar.map((id) => toPositiveInt(id)).filter((id) => id > 0),
   );
@@ -14210,6 +14327,49 @@ const processOrderFromItems = async ({
     });
   }
   const usedImplicitRenewVentaIds = new Set();
+  const existingVentaReusePool = new Map();
+  if (toPositiveInt(ordenId)) {
+    const { data: existingHistRows, error: existingHistErr } = await supabaseAdmin
+      .from("historial_ventas")
+      .select("id_venta")
+      .eq("id_orden", ordenId)
+      .eq("renovacion", false)
+      .not("id_venta", "is", null);
+    if (existingHistErr) throw existingHistErr;
+
+    let existingVentaIds = uniqPositiveIds((existingHistRows || []).map((row) => row?.id_venta));
+    const { data: existingOrderVentasRows, error: existingOrderVentasErr } = await supabaseAdmin
+      .from("ventas")
+      .select("id_venta")
+      .eq("id_orden", toPositiveInt(ordenId))
+      .not("id_venta", "is", null);
+    if (existingOrderVentasErr) {
+      if (!isMissingVentasIdOrdenColumnError(existingOrderVentasErr)) throw existingOrderVentasErr;
+    } else {
+      existingVentaIds = uniqPositiveIds([
+        ...existingVentaIds,
+        ...(existingOrderVentasRows || []).map((row) => row?.id_venta),
+      ]);
+    }
+    if (existingVentaIds.length) {
+      const { data: existingVentasRows, error: existingVentasErr } = await supabaseAdmin
+        .from("ventas")
+        .select("id_venta, id_precio, id_cuenta, id_perfil, id_tarjeta_de_regalo, pendiente, meses_contratados, monto")
+        .in("id_venta", existingVentaIds)
+        .order("id_venta", { ascending: true });
+      if (existingVentasErr) throw existingVentasErr;
+
+      (existingVentasRows || []).forEach((ventaRow) => {
+        const ventaId = toPositiveInt(ventaRow?.id_venta);
+        if (!ventaId) return;
+        const dedupeKey = buildVentaInsertDedupeKey(ventaRow);
+        const bucket = existingVentaReusePool.get(dedupeKey) || [];
+        bucket.push(ventaId);
+        existingVentaReusePool.set(dedupeKey, bucket);
+      });
+    }
+  }
+  let reusedExistingVentasCount = 0;
   const ventasToInsert = [];
   for (const a of sourceRowsForVentas) {
     const sourceRowIdx =
@@ -14278,8 +14438,9 @@ const processOrderFromItems = async ({
       }
     }
 
-    ventasToInsert.push({
+    const ventaPayload = {
       id_usuario: idUsuarioVentas,
+      id_orden: toPositiveInt(ordenId) || null,
       id_precio: a.id_precio,
       id_tarjeta_de_regalo: toPositiveInt(a.id_tarjeta_de_regalo) || null,
       id_cuenta: a.id_cuenta,
@@ -14298,12 +14459,42 @@ const processOrderFromItems = async ({
       aviso_admin: false,
       completa: isCompleta ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? (isSpotifyCompletaCompra ? true : false) : null,
-    });
+    };
+    const dedupeKey = buildVentaInsertDedupeKey(ventaPayload);
+    const existingBucket = existingVentaReusePool.get(dedupeKey) || [];
+    const reusableVentaId = existingBucket.length ? toPositiveInt(existingBucket.shift()) : null;
+    if (existingBucket.length) {
+      existingVentaReusePool.set(dedupeKey, existingBucket);
+    } else if (existingVentaReusePool.has(dedupeKey)) {
+      existingVentaReusePool.delete(dedupeKey);
+    }
+    if (reusableVentaId) {
+      if (sourceRowIdx !== null) {
+        sourceRowsInsertedVentaByIdx.set(sourceRowIdx, reusableVentaId);
+      }
+      reusedExistingVentasCount += 1;
+      console.warn("[checkout] venta existente reutilizada por idempotencia", {
+        ordenId,
+        id_venta: reusableVentaId,
+        id_precio: toPositiveInt(ventaPayload?.id_precio) || null,
+        id_cuenta: toPositiveInt(ventaPayload?.id_cuenta) || null,
+        id_perfil: toPositiveInt(ventaPayload?.id_perfil) || null,
+      });
+      continue;
+    }
+
+    ventasToInsert.push(ventaPayload);
     sourceRowsForInsertedVentas.push(a);
   }
   console.log("[checkout] asignaciones", asignaciones);
   console.log("[checkout] pendientes", pendientes);
   console.log("[checkout] ventasToInsert", ventasToInsert);
+  if (reusedExistingVentasCount > 0) {
+    console.log("[checkout] ventas existentes reutilizadas", {
+      ordenId,
+      reused: reusedExistingVentasCount,
+    });
+  }
 
   let insertedVentas = [];
   if (ventasToInsert.length) {
@@ -14529,20 +14720,28 @@ const processOrderFromItems = async ({
   if (histRows.length) {
     let historialGiftCardLinkFallback = false;
     let historialPerfilLinkFallback = false;
-    const saldoConsumidoHist = (() => {
-      const consumed = toFiniteMoney(saldoConsumption?.monto);
-      if (Number.isFinite(consumed) && consumed > 0) return consumed;
-      const expected = toFiniteMoney(saldoAplicadoExpectedUsd);
-      if (Number.isFinite(expected) && expected > 0) return expected;
-      return 0;
-    })();
-    const extraHist = (() => {
-      const extra = toFiniteMoney(montoExtraHistorialUsd);
-      return Number.isFinite(extra) && extra > 0 ? extra : 0;
-    })();
-    const targetHistTotalNum = hasCustomItemAmounts
-      ? Number.NaN
-      : Number(toFiniteMoney(montoHistorialTotalOverride) || 0) + saldoConsumidoHist + extraHist;
+    const resolveTargetHistorialTotal = async () => {
+      if (hasCustomItemAmounts) return Number.NaN;
+      const orderId = toPositiveInt(ordenId);
+      if (orderId) {
+        const { data: orderRow, error: orderErr } = await supabaseAdmin
+          .from("ordenes")
+          .select("total")
+          .eq("id_orden", orderId)
+          .maybeSingle();
+        if (orderErr) throw orderErr;
+        const orderTotal = toFiniteMoney(orderRow?.total);
+        if (Number.isFinite(orderTotal) && orderTotal >= 0) return orderTotal;
+      }
+      const fallbackOverride = toFiniteMoney(montoHistorialTotalOverride);
+      if (Number.isFinite(fallbackOverride) && fallbackOverride >= 0) return fallbackOverride;
+      const fallbackSnapshotTotal = toFiniteMoney(snapshotTotalUsd);
+      if (Number.isFinite(fallbackSnapshotTotal) && fallbackSnapshotTotal >= 0) {
+        return fallbackSnapshotTotal;
+      }
+      return Number.NaN;
+    };
+    const targetHistTotalNum = await resolveTargetHistorialTotal();
     if (Number.isFinite(targetHistTotalNum) && targetHistTotalNum >= 0) {
       const targetHistTotal = Math.round(targetHistTotalNum * 100) / 100;
       const baseTotal = histRows.reduce((acc, row) => acc + (Number(row?.monto) || 0), 0);
@@ -16858,6 +17057,8 @@ app.post("/api/cart/item", async (req, res) => {
   const idCuenta = parsedCuentaId.value;
   const idPerfil = parsedPerfilId.value;
   const requestedIdPrecioEspecial = parsedPrecioEspecialId.value;
+  // Cualquier item ligado a una venta existente debe tratarse siempre como renovación.
+  const renewalRequested = renovacion === true || toPositiveInt(idVenta) > 0;
 
   try {
     const idUsuario = await getOrCreateUsuario(req);
@@ -16904,7 +17105,7 @@ app.post("/api/cart/item", async (req, res) => {
         )
         .eq("id_carrito", idCarrito)
         .eq("id_precio", idPrecio)
-        .eq("renovacion", renovacion === true);
+        .eq("renovacion", renewalRequested);
       if (mesesVal != null) {
         selQuery = selQuery.eq("meses", mesesVal);
       }
@@ -17007,6 +17208,7 @@ app.post("/api/cart/item", async (req, res) => {
 
     const existingQty = Number(matchExisting ? existing?.cantidad : 0) || 0;
     const newQty = existingQty + parsedDelta;
+    const effectiveRenewal = renewalRequested || existing?.renovacion === true || existingVentaId > 0;
 
     // Permite delta=0 para sincronizar solo meses (u otros campos) de un item existente.
     if (matchExisting && parsedDelta === 0) {
@@ -17014,7 +17216,7 @@ app.post("/api/cart/item", async (req, res) => {
         .from("carrito_items")
         .update({
           meses: mesesVal ?? existing.meses ?? null,
-          renovacion: renovacion === true,
+          renovacion: effectiveRenewal,
           id_venta: idVenta ?? existingVentaId ?? null,
           id_cuenta: idCuenta ?? existingCuentaId ?? null,
           id_perfil: idPerfil ?? existingPerfilId ?? null,
@@ -17036,7 +17238,7 @@ app.post("/api/cart/item", async (req, res) => {
         .update({
           cantidad: newQty,
           meses: mesesVal ?? existing.meses ?? null,
-          renovacion: renovacion === true,
+          renovacion: effectiveRenewal,
           id_venta: idVenta ?? existingVentaId ?? null,
           id_cuenta: idCuenta ?? existingCuentaId ?? null,
           id_perfil: idPerfil ?? existingPerfilId ?? null,
@@ -17052,7 +17254,7 @@ app.post("/api/cart/item", async (req, res) => {
           id_precio: idPrecio,
           cantidad: newQty,
           meses: mesesVal,
-          renovacion: renovacion === true,
+          renovacion: renewalRequested,
           id_venta: idVenta ?? null,
           id_cuenta: idCuenta ?? null,
           id_perfil: idPerfil ?? null,

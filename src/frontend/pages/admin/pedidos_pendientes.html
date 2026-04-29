@@ -534,6 +534,26 @@
         if (!Number.isFinite(parsed) || parsed <= 0) return null;
         return Math.trunc(parsed);
       };
+      const markLatestHistorialEntregadoPor = async (idVenta, idAdmin) => {
+        const ventaIdNum = toPositiveId(idVenta);
+        const adminIdNum = toPositiveId(idAdmin);
+        if (!ventaIdNum || !adminIdNum) return;
+        const { data: latestRow, error: latestErr } = await supabase
+          .from("historial_ventas")
+          .select("id_historial_ventas")
+          .eq("id_venta", ventaIdNum)
+          .order("id_historial_ventas", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (latestErr) throw latestErr;
+        const historialId = toPositiveId(latestRow?.id_historial_ventas);
+        if (!historialId) return;
+        const { error: updErr } = await supabase
+          .from("historial_ventas")
+          .update({ entregado_por: adminIdNum })
+          .eq("id_historial_ventas", historialId);
+        if (updErr) throw updErr;
+      };
       const getSelectedVentaIds = () => Array.from(selectedVentaIds.values());
       const syncSelectedVentaIdsWithDOM = () => {
         if (!tablasEl) return;
@@ -2052,6 +2072,17 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
             registrado_por: null,
           });
           if (histErr) throw histErr;
+        }
+        if (wasPendiente) {
+          try {
+            await markLatestHistorialEntregadoPor(idVenta, currentUser?.id_usuario);
+          } catch (entregaMarkErr) {
+            console.error("[pedidos_pendientes] marcar entregado_por error", {
+              id_venta: idVenta,
+              id_admin: toPositiveId(currentUser?.id_usuario) || null,
+              error: entregaMarkErr?.message || entregaMarkErr,
+            });
+          }
         }
         if (wasPendiente) {
           await notifyVentaDeliveredWhatsappBestEffort(idVenta);

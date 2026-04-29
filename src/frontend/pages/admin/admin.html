@@ -186,6 +186,7 @@
       <div class="admin-actions admin-group" data-loading="true">
         <div class="admin-loading status">Cargando...</div>
         <button class="btn-primary admin-action" id="btn-recordatorios">Recordatorios</button>
+        <button class="btn-primary admin-action" id="btn-actividad-soporte">Actividad soporte</button>
         <button class="btn-primary admin-action" id="btn-agregar-pines">Agregar pines</button>
         <button class="btn-primary admin-action" id="btn-sandbox-giftcards">Sandbox Gift Cards</button>
         <button class="btn-primary admin-action hidden" id="btn-precios-especiales">Precios especiales</button>
@@ -1001,6 +1002,9 @@
 
       document.getElementById("btn-recordatorios")?.addEventListener("click", () => {
         window.location.href = "recordatorios.html";
+      });
+      document.getElementById("btn-actividad-soporte")?.addEventListener("click", () => {
+        window.location.href = "actividad_soporte.html";
       });
 
       document.getElementById("btn-renovar")?.addEventListener("click", () => {
