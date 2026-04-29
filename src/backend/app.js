@@ -2823,7 +2823,7 @@ const fetchSpotifyProviderPendingSales = async ({ idOrden = null, saleIds = [] }
   const { data, error } = await supabaseAdmin
     .from("ventas")
     .select(
-      "id_venta, completa, mensaje_proveedor, correo_miembro, clave_miembro, precios:precios!ventas_id_precio_fkey(id_plataforma)",
+      "id_venta, id_cuenta_miembro, completa, mensaje_proveedor, correo_miembro, clave_miembro, precios:precios!ventas_id_precio_fkey(id_plataforma)",
     )
     .eq("completa", true)
     .eq("mensaje_proveedor", false)
@@ -2840,6 +2840,7 @@ const fetchSpotifyProviderPendingSales = async ({ idOrden = null, saleIds = [] }
     .map((row) => ({
       id_venta: toPositiveInt(row?.id_venta) || null,
       id_orden: resolvedOrderId || null,
+      id_cuenta_miembro: toPositiveInt(row?.id_cuenta_miembro) || null,
       id_plataforma: toPositiveInt(row?.precios?.id_plataforma) || null,
       mensaje_proveedor: row?.mensaje_proveedor === true,
       correo: String(row?.correo_miembro || "").trim(),
@@ -10739,6 +10740,53 @@ app.post("/api/whatsapp/send", async (req, res) => {
     }
     console.error("[whatsapp/send] error", err);
     return res.status(500).json({ error: err.message || "No se pudo enviar el mensaje" });
+  }
+});
+
+app.post("/api/whatsapp/spotify/proveedor-renovacion", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const providerId = toPositiveInt(req.body?.provider_id ?? req.body?.id_proveedor);
+    const source = String(req.body?.source || "admin_spotify_manual_renewal").trim() || "admin_spotify_manual_renewal";
+    const renewals = Array.isArray(req.body?.renewals)
+      ? req.body.renewals
+      : Array.isArray(req.body?.items)
+        ? req.body.items
+        : [];
+
+    if (!providerId) {
+      return res.status(400).json({ error: "provider_id inválido" });
+    }
+    if (!renewals.length) {
+      return res.status(400).json({ error: "renewals es requerido" });
+    }
+
+    const result = await sendSpotifyRenewalsToProviderWhatsapp({
+      renewals,
+      providerId,
+      source,
+      manageWhatsappLifecycle: true,
+    });
+
+    if (!result?.sent) {
+      const status = result?.skipped ? 200 : 409;
+      return res.status(status).json({
+        ok: false,
+        error: result?.error || result?.reason || "No se pudo enviar renovación al proveedor",
+        ...result,
+      });
+    }
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[whatsapp/spotify/proveedor-renovacion] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudo notificar al proveedor" });
   }
 });
 

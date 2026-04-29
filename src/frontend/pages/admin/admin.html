@@ -1034,32 +1034,11 @@
           })
           .filter(Boolean)
           .join("\n\n");
-      const buildSpotifyProviderWhatsappMessage = (items = []) => {
-        const rows = (Array.isArray(items) ? items : [])
-          .map((item) => ({
-            correo: String(item?.correo || "").trim(),
-            clave: String(item?.clave || "").trim(),
-          }))
-          .filter((item) => item.correo || item.clave);
-        if (!rows.length) return "";
-        const lines = ["`Renovación Spotify`"];
-        rows.forEach((row, idx) => {
-          lines.push("");
-          lines.push(`${idx + 1}.`);
-          lines.push(`correo: ${row.correo || "-"}`);
-          lines.push(`clave: ${row.clave || "-"}`);
-        });
-        return lines.join("\n");
-      };
-      const normalizeWhatsappPhone = (rawPhone) => {
-        const digits = String(rawPhone || "").replace(/\D/g, "");
-        if (!digits) return "";
-        if (digits.startsWith("58") && digits.length >= 11) return digits;
-        if (digits.length === 11 && digits.startsWith("0")) return `58${digits.slice(1)}`;
-        if (digits.length === 10 && digits.startsWith("4")) return `58${digits}`;
-        return digits.length >= 10 ? digits : "";
-      };
-      const sendSpotifyProviderRenewalWhatsapp = async (items = []) => {
+      const sendSpotifyProviderRenewalWhatsapp = async ({ providerId, items = [] } = {}) => {
+        const providerIdNum = toPositiveInt(providerId);
+        if (!providerIdNum) {
+          return { sent: false, skipped: true, reason: "invalid_provider_id" };
+        }
         const payloadItems = (Array.isArray(items) ? items : [])
           .map((item) => ({
             correo: String(item?.correo || "").trim(),
@@ -1069,25 +1048,15 @@
         if (!payloadItems.length) {
           return { sent: false, skipped: true, reason: "empty_payload" };
         }
-        const { data: proveedor, error: provErr } = await supabase
-          .from("proveedores")
-          .select("id_proveedor, whatsapp")
-          .eq("id_proveedor", 11)
-          .maybeSingle();
-        if (provErr) throw provErr;
-        const phone = normalizeWhatsappPhone(proveedor?.whatsapp);
-        if (!phone) {
-          return { sent: false, skipped: true, reason: "provider_phone_missing" };
-        }
-        const message = buildSpotifyProviderWhatsappMessage(payloadItems);
-        if (!message) {
-          return { sent: false, skipped: true, reason: "empty_message" };
-        }
-        const resp = await fetch("/api/whatsapp/send", {
+        const resp = await fetch("/api/whatsapp/spotify/proveedor-renovacion", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ phone, message }),
+          body: JSON.stringify({
+            provider_id: providerIdNum,
+            renewals: payloadItems,
+            source: "admin_html_spotify_renovacion_manual",
+          }),
         });
         let body = null;
         try {
@@ -1098,7 +1067,7 @@
         if (!resp.ok || body?.ok !== true) {
           throw new Error(body?.error || `HTTP ${resp.status}`);
         }
-        return { sent: true, skipped: false, total: payloadItems.length };
+        return { sent: true, skipped: false, total: payloadItems.length, providerId: providerIdNum };
       };
       spotifyTable?.addEventListener("click", handleCopyClick);
       netflixTable?.addEventListener("click", handleCopyClick);
@@ -1221,14 +1190,32 @@
 
           let whatsappWarn = "";
           try {
-            const spotifyProv11Items = updates
-              .filter((u) => Number(u.id_proveedor) === 11)
-              .map((u) => ({ correo: u.correo, clave: u.clave }));
-            const waResult = await sendSpotifyProviderRenewalWhatsapp(
-              spotifyProv11Items,
-            );
-            if (spotifyProv11Items.length > 0 && !waResult?.sent) {
-              whatsappWarn = " La renovación se registró, pero no se pudo enviar WhatsApp al proveedor.";
+            const itemsByProvider = updates.reduce((acc, u) => {
+              const providerId = toPositiveInt(u.id_proveedor);
+              if (!providerId) return acc;
+              if (!acc[providerId]) acc[providerId] = [];
+              acc[providerId].push({ correo: u.correo, clave: u.clave });
+              return acc;
+            }, {});
+            const providerIds = Object.keys(itemsByProvider)
+              .map((id) => toPositiveInt(id))
+              .filter(Boolean);
+            if (!providerIds.length) {
+              whatsappWarn = " La renovación se registró, pero no hay proveedor asociado para notificar por WhatsApp.";
+            } else {
+              const waResults = await Promise.all(
+                providerIds.map((providerId) =>
+                  sendSpotifyProviderRenewalWhatsapp({
+                    providerId,
+                    items: itemsByProvider[providerId] || [],
+                  }),
+                ),
+              );
+              const failed = waResults.filter((result) => !result?.sent);
+              if (failed.length > 0) {
+                whatsappWarn =
+                  " La renovación se registró, pero no se pudo enviar WhatsApp a uno o más proveedores.";
+              }
             }
           } catch (waErr) {
             console.error("renovar spotify whatsapp proveedor error", waErr);
