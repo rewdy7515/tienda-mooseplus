@@ -1833,7 +1833,6 @@
 
           const hoy = todayCaracas();
           const fechaPago = toIsoDate(hoy);
-          const horaPedido = getCaracasTimeHMS();
           const registradoPor = window.__RC_USER_ID__ || null;
           const metodoId = metodo ? Number(metodo) : null;
           const refValue = ref || null;
@@ -1913,7 +1912,6 @@
             const updatePayload = {
               fecha_corte: nuevaCorte,
               fecha_pago: fechaPago,
-              hora_pedido: horaPedido,
               meses_contratados: it.meses || 1,
               suspendido: false,
             };
@@ -2187,7 +2185,6 @@
         const baseForCalc = baseFecha || toIsoDate(todayCaracas());
         const nuevaFecha = addMonths(baseForCalc, meses) || baseForCalc;
         const fechaPago = toIsoDate(todayCaracas());
-        const horaPedido = getCaracasTimeHMS();
         const registradoPor = window.__RC_USER_ID__ || null;
         const platIdNum = modalRowContext.id_plataforma ? Number(modalRowContext.id_plataforma) : null;
         let ventaCompleta = false;
@@ -2223,7 +2220,6 @@
           const updatePayload = {
             fecha_corte: nuevaFecha,
             fecha_pago: fechaPago,
-            hora_pedido: horaPedido,
             meses_contratados: meses,
             suspendido: false,
           };

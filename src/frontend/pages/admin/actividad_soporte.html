@@ -6,54 +6,174 @@
     <title>Actividad soporte</title>
     <link rel="stylesheet" href="../../styles/styles.css" />
     <style>
-      :root { --bg:#f4f7fb; --card:#fff; --line:#dce5f0; --text:#132033; --muted:#5f6f85; --bar:#2a6fdb; --bar2:#1f8f5f; --pie:#0f5ea8; }
-      body { background: radial-gradient(circle at 92% -8%, #eaf2ff 0%, transparent 42%), var(--bg); }
-      .wrap { width:min(1200px,100%); margin:0 auto; padding:16px; display:grid; gap:14px; }
-      .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
-      .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
-      .toolbar label { font-size:12px; color:var(--muted); }
-      .toolbar input, .toolbar select { min-width:130px; }
-      .row { display:grid; grid-template-columns:1fr; gap:14px; }
-      .chart { min-height:280px; }
-      .status { color:var(--muted); font-size:13px; }
-      .title { margin:0 0 8px; }
-      .legend { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--muted); }
-      @media (min-width: 980px) { .row { grid-template-columns:1fr 1fr; } .row.single { grid-template-columns:1fr; } }
+      :root {
+        --bg: #eff4fb;
+        --card: #ffffff;
+        --line: #d6e2f1;
+        --text: #10233a;
+        --muted: #5f728d;
+        --brand: #1654b7;
+        --brand-soft: #eaf1ff;
+        --teal: #168d71;
+        --danger: #a53a3a;
+      }
+      body {
+        background:
+          radial-gradient(circle at 86% -12%, #d9e9ff 0%, transparent 40%),
+          radial-gradient(circle at -10% 110%, #d8f2ea 0%, transparent 34%),
+          var(--bg);
+        color: var(--text);
+      }
+      .wrap {
+        width: min(1260px, 100%);
+        margin: 0 auto;
+        padding: 14px clamp(10px, 2.6vw, 24px) 24px;
+        display: grid;
+        gap: 14px;
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: 0 12px 28px rgba(10, 29, 58, 0.08);
+      }
+      .hero {
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .hero h2 {
+        margin: 0;
+        letter-spacing: -0.01em;
+      }
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .toolbar {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: 10px;
+        align-items: end;
+      }
+      .field { display: grid; gap: 4px; }
+      .field label { font-size: 12px; color: var(--muted); font-weight: 700; }
+      .field input, .field select { min-height: 38px; }
+      .field.year { grid-column: span 2; }
+      .field.month { grid-column: span 3; }
+      .field.platform { grid-column: span 3; }
+      .actions { grid-column: span 4; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+      .status {
+        margin: 0;
+        font-size: 13px;
+        color: #37506f;
+        background: var(--brand-soft);
+        border: 1px solid #cdddf9;
+        border-radius: 10px;
+        padding: 8px 10px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+      .grid.two { grid-template-columns: 1fr; }
+      .card {
+        padding: 14px;
+      }
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .note {
+        margin: 0 0 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .chart {
+        min-height: 300px;
+        width: 100%;
+      }
+      .legend {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+        font-size: 12px;
+        color: #314963;
+      }
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .kpi {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: #fbfdff;
+      }
+      .kpi .label { margin: 0; font-size: 12px; color: var(--muted); }
+      .kpi .value { margin: 5px 0 0; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+      .kpi .value.brand { color: var(--brand); }
+      .kpi .value.teal { color: var(--teal); }
+      .kpi .value.danger { color: var(--danger); }
+
+      @media (min-width: 980px) {
+        .grid.two { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 900px) {
+        .field.year, .field.month, .field.platform, .actions { grid-column: span 12; }
+        .actions { justify-content: flex-start; }
+        .kpis { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
     <div id="app-header" data-header-root="../../" data-header-pages="../"></div>
     <script src="../../scripts/header-loader.js"></script>
     <main class="wrap">
-      <section class="card">
-        <h2 class="title">Actividad soporte</h2>
+      <section class="panel hero">
+        <div>
+          <h2>Actividad soporte</h2>
+          <p>Rendimiento mensual por admin en cierres de reportes y entregas manuales.</p>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><p class="label">Reportes cerrados</p><p id="kpi-reportes" class="value brand">0</p></div>
+          <div class="kpi"><p class="label">Entregas registradas</p><p id="kpi-entregas" class="value teal">0</p></div>
+          <div class="kpi"><p class="label">Admins activos (plataforma pie)</p><p id="kpi-admins" class="value danger">0</p></div>
+        </div>
         <div class="toolbar">
-          <div><label for="year">Año</label><input id="year" type="number" min="2020" max="2100" /></div>
-          <div><label for="month">Mes</label><input id="month" type="number" min="1" max="12" /></div>
-          <div><label for="platform">Plataforma (pie)</label><input id="platform" type="number" min="1" value="9" /></div>
-          <button class="btn-primary" id="btn-load">Cargar</button>
-          <button class="btn-outline" id="btn-back">Volver admin</button>
+          <div class="field year"><label for="year">Año</label><input id="year" type="number" min="2020" max="2100" /></div>
+          <div class="field month"><label for="month">Mes</label><select id="month"></select></div>
+          <div class="field platform"><label for="platform">Plataforma para pie chart</label><input id="platform" type="number" min="1" value="9" /></div>
+          <div class="actions">
+            <button class="btn-primary" id="btn-load">Actualizar</button>
+            <button class="btn-outline" id="btn-back">Volver admin</button>
+          </div>
         </div>
         <p id="status" class="status">Cargando...</p>
       </section>
 
-      <section class="row">
-        <article class="card">
-          <h3 class="title">Reportes cerrados por admin</h3>
+      <section class="grid two">
+        <article class="panel card">
+          <h3>Reportes cerrados por admin</h3>
+          <p class="note">Fuente: <code>reportes.solucionado_por</code></p>
           <svg id="chart-reportes" class="chart" viewBox="0 0 560 300" preserveAspectRatio="none"></svg>
         </article>
-        <article class="card">
-          <h3 class="title">Entregas por admin (historial_ventas)</h3>
+        <article class="panel card">
+          <h3>Entregas por admin</h3>
+          <p class="note">Fuente: <code>historial_ventas.entregado_por</code></p>
           <svg id="chart-entregas" class="chart" viewBox="0 0 560 300" preserveAspectRatio="none"></svg>
         </article>
       </section>
 
-      <section class="row single">
-        <article class="card">
-          <h3 class="title">Comparación admins por plataforma (pie)</h3>
-          <svg id="chart-pie" class="chart" viewBox="0 0 560 320" preserveAspectRatio="none"></svg>
-          <div id="pie-legend" class="legend"></div>
-        </article>
+      <section class="panel card">
+        <h3>Comparación entre admins por plataforma</h3>
+        <p class="note">Default: plataforma 9. Puedes cambiarla arriba.</p>
+        <svg id="chart-pie" class="chart" viewBox="0 0 560 320" preserveAspectRatio="none"></svg>
+        <div id="pie-legend" class="legend"></div>
       </section>
     </main>
 
@@ -62,56 +182,77 @@
       import { API_BASE } from "../../scripts/api.js";
       requireSession();
 
-      const statusEl = document.querySelector('#status');
-      const yearEl = document.querySelector('#year');
-      const monthEl = document.querySelector('#month');
-      const platformEl = document.querySelector('#platform');
-      const btnLoad = document.querySelector('#btn-load');
-      const btnBack = document.querySelector('#btn-back');
+      const MONTH_NAMES = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+      ];
 
-      const chartReportes = document.querySelector('#chart-reportes');
-      const chartEntregas = document.querySelector('#chart-entregas');
-      const chartPie = document.querySelector('#chart-pie');
-      const pieLegend = document.querySelector('#pie-legend');
+      const statusEl = document.querySelector("#status");
+      const yearEl = document.querySelector("#year");
+      const monthEl = document.querySelector("#month");
+      const platformEl = document.querySelector("#platform");
+      const btnLoad = document.querySelector("#btn-load");
+      const btnBack = document.querySelector("#btn-back");
+      const kpiReportes = document.querySelector("#kpi-reportes");
+      const kpiEntregas = document.querySelector("#kpi-entregas");
+      const kpiAdmins = document.querySelector("#kpi-admins");
+
+      const chartReportes = document.querySelector("#chart-reportes");
+      const chartEntregas = document.querySelector("#chart-entregas");
+      const chartPie = document.querySelector("#chart-pie");
+      const pieLegend = document.querySelector("#pie-legend");
 
       const now = new Date();
       yearEl.value = String(now.getFullYear());
+      monthEl.innerHTML = MONTH_NAMES.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join("");
       monthEl.value = String(now.getMonth() + 1);
 
-      const esc = (v) => String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+      const esc = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+      const sumTotals = (rows = []) => (Array.isArray(rows) ? rows.reduce((acc, r) => acc + (Number(r?.total) || 0), 0) : 0);
 
       const renderBars = (svg, rows, color) => {
-        const w = 560, h = 300, left = 40, right = 8, top = 10, bottom = 84;
+        const w = 560, h = 300, left = 44, right = 8, top = 10, bottom = 90;
         const plotW = w - left - right, plotH = h - top - bottom;
         const data = Array.isArray(rows) ? rows.slice(0, 12) : [];
-        if (!data.length) { svg.innerHTML = `<text x="20" y="40" fill="#5f6f85">Sin datos</text>`; return; }
+        if (!data.length) {
+          svg.innerHTML = `<text x="20" y="40" fill="#5f6f85">Sin datos para este mes.</text>`;
+          return;
+        }
         const max = Math.max(...data.map((r) => Number(r.total) || 0), 1);
         const bw = plotW / data.length;
-        const bars = data.map((r, i) => {
-          const v = Number(r.total) || 0;
-          const bh = Math.max(1, (v / max) * (plotH - 12));
-          const x = left + i * bw + 8;
-          const y = top + (plotH - bh);
-          const lbl = esc(r.nombre || `Usuario ${r.id_usuario}`);
-          return `
-            <rect x="${x}" y="${y}" width="${Math.max(10, bw - 16)}" height="${bh}" rx="6" fill="${color}" />
-            <text x="${x + (Math.max(10, bw - 16) / 2)}" y="${y - 4}" text-anchor="middle" font-size="11" fill="#25364d">${v}</text>
-            <text x="${x + (Math.max(10, bw - 16) / 2)}" y="${h - 44}" text-anchor="end" transform="rotate(-35 ${x + (Math.max(10, bw - 16) / 2)} ${h - 44})" font-size="10" fill="#42546f">${lbl}</text>`;
-        }).join('');
-        svg.innerHTML = `<line x1="${left}" y1="${top + plotH}" x2="${w-right}" y2="${top + plotH}" stroke="#d0dcea"/>${bars}`;
+        const bars = data
+          .map((r, i) => {
+            const v = Number(r.total) || 0;
+            const bh = Math.max(1, (v / max) * (plotH - 12));
+            const x = left + i * bw + 8;
+            const y = top + (plotH - bh);
+            const lbl = esc(r.nombre || `Usuario ${r.id_usuario}`);
+            const barW = Math.max(10, bw - 16);
+            return `
+              <rect x="${x}" y="${y}" width="${barW}" height="${bh}" rx="6" fill="${color}" />
+              <text x="${x + barW / 2}" y="${y - 4}" text-anchor="middle" font-size="11" fill="#223a57">${v}</text>
+              <text x="${x + barW / 2}" y="${h - 44}" text-anchor="end" transform="rotate(-35 ${x + barW / 2} ${h - 44})" font-size="10" fill="#465e7b">${lbl}</text>`;
+          })
+          .join("");
+        svg.innerHTML = `<line x1="${left}" y1="${top + plotH}" x2="${w - right}" y2="${top + plotH}" stroke="#d0dcea"/>${bars}`;
       };
 
       const piePath = (cx, cy, r, a0, a1) => {
         const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
         const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
-        const large = (a1 - a0) > Math.PI ? 1 : 0;
+        const large = a1 - a0 > Math.PI ? 1 : 0;
         return `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z`;
       };
 
       const renderPie = (rows) => {
         const data = Array.isArray(rows) ? rows.filter((r) => (Number(r.total) || 0) > 0) : [];
-        if (!data.length) { chartPie.innerHTML = `<text x="20" y="40" fill="#5f6f85">Sin datos</text>`; pieLegend.innerHTML = ''; return; }
-        const colors = ['#0f5ea8','#248277','#8f6ad8','#d66b2d','#e04d6f','#2a9fd6','#b78d1d'];
+        if (!data.length) {
+          chartPie.innerHTML = `<text x="20" y="40" fill="#5f6f85">Sin datos para esta plataforma en el mes.</text>`;
+          pieLegend.innerHTML = "";
+          return;
+        }
+        const colors = ["#1654b7", "#168d71", "#7349cc", "#d67729", "#dd496a", "#2c9ac8", "#9b7d19"];
         const total = data.reduce((a, r) => a + (Number(r.total) || 0), 0) || 1;
         let acc = -Math.PI / 2;
         const slices = data.map((r, i) => {
@@ -122,34 +263,52 @@
           acc += ang;
           return { d, color, label: r.nombre, val, pct: ((val / total) * 100).toFixed(1) };
         });
-        chartPie.innerHTML = `${slices.map((s) => `<path d="${s.d}" fill="${s.color}" stroke="#fff" stroke-width="1.2"/>`).join('')}`;
-        pieLegend.innerHTML = slices.map((s) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:99px;background:${s.color};margin-right:6px"></span>${esc(s.label)}: ${s.val} (${s.pct}%)</span>`).join('');
+        chartPie.innerHTML = `${slices.map((s) => `<path d="${s.d}" fill="${s.color}" stroke="#fff" stroke-width="1.2"/>`).join("")}`;
+        pieLegend.innerHTML = slices
+          .map(
+            (s) =>
+              `<span><span style="display:inline-block;width:10px;height:10px;border-radius:99px;background:${s.color};margin-right:6px"></span>${esc(s.label)}: ${s.val} (${s.pct}%)</span>`,
+          )
+          .join("");
       };
 
       const load = async () => {
         const y = Number(yearEl.value);
         const m = Number(monthEl.value);
         const p = Number(platformEl.value) || 9;
-        statusEl.textContent = 'Cargando...';
+        statusEl.textContent = "Cargando...";
         try {
           const url = new URL(`${API_BASE}/api/admin/actividad-soporte`);
-          url.searchParams.set('year', String(y));
-          url.searchParams.set('month', String(m));
-          url.searchParams.set('platform_id', String(p));
-          const res = await fetch(url.toString(), { credentials: 'include' });
+          url.searchParams.set("year", String(y));
+          url.searchParams.set("month", String(m));
+          url.searchParams.set("platform_id", String(p));
+          const res = await fetch(url.toString(), { credentials: "include" });
           const json = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(json?.error || 'No se pudo cargar');
-          renderBars(chartReportes, json?.bars_reportes_cerrados || [], '#2a6fdb');
-          renderBars(chartEntregas, json?.bars_entregas || [], '#1f8f5f');
-          renderPie(json?.pie_entregas_plataforma || []);
-          statusEl.textContent = `Periodo ${json?.period?.year || y}-${String(json?.period?.month || m).padStart(2, '0')}`;
+          if (!res.ok) throw new Error(json?.error || "No se pudo cargar");
+
+          const reportRows = json?.bars_reportes_cerrados || [];
+          const entregaRows = json?.bars_entregas || [];
+          const pieRows = json?.pie_entregas_plataforma || [];
+
+          renderBars(chartReportes, reportRows, "#1654b7");
+          renderBars(chartEntregas, entregaRows, "#168d71");
+          renderPie(pieRows);
+
+          kpiReportes.textContent = String(sumTotals(reportRows));
+          kpiEntregas.textContent = String(sumTotals(entregaRows));
+          kpiAdmins.textContent = String((Array.isArray(pieRows) ? pieRows : []).length);
+
+          const monthName = MONTH_NAMES[(Number(json?.period?.month || m) || 1) - 1] || MONTH_NAMES[m - 1] || "Mes";
+          statusEl.textContent = `Periodo: ${monthName} ${json?.period?.year || y}`;
         } catch (err) {
-          statusEl.textContent = err?.message || 'Error cargando actividad';
+          statusEl.textContent = err?.message || "Error cargando actividad";
         }
       };
 
-      btnLoad?.addEventListener('click', load);
-      btnBack?.addEventListener('click', () => { window.location.href = 'admin.html'; });
+      btnLoad?.addEventListener("click", load);
+      btnBack?.addEventListener("click", () => {
+        window.location.href = "admin.html";
+      });
       load();
     </script>
   </body>
