@@ -75,6 +75,23 @@ const formatBs = (value) => {
   return `Bs. ${n.toFixed(2)}`;
 };
 
+const formatDuration = (months) => {
+  const n = Math.max(1, Math.round(Number(months) || 1));
+  return `${n} mes${n === 1 ? "" : "es"}`;
+};
+
+const parseQtyMonthsFromDetalle = (detalle = "") => {
+  const text = String(detalle || "");
+  const qtyMatch = text.match(
+    /(?:^|\|)\s*(\d+)\s+(?:pantalla|pantallas|acceso|accesos|item|items|tarjeta|tarjetas)\b/i,
+  );
+  const monthsMatch = text.match(/(?:^|\|)\s*(\d+)\s+mes(?:es)?\b/i);
+  return {
+    cantidad: Math.max(1, Math.round(Number(qtyMatch?.[1]) || 1)),
+    meses: Math.max(1, Math.round(Number(monthsMatch?.[1]) || 1)),
+  };
+};
+
 const formatHora12 = (hora) => {
   if (!hora) return "-";
   const raw = String(hora).trim();
@@ -518,18 +535,13 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null, { idOrden
             </div>
           </td>
           <td class="cart-cell-center">
-            <div class="cart-qty-inline"><span class="cart-meses-value">${totals.mesesVal}</span></div>
-          </td>
-          <td class="cart-cell-center">${formatMoney(totals.unit)}</td>
-          <td class="cart-cell-center">
             <div class="cart-qty-inline"><span class="cart-cantidad-value">${totals.qtyVal}</span></div>
           </td>
+          <td class="cart-cell-center">${isGiftCard ? "-" : formatDuration(totals.mesesVal)}</td>
           <td class="cart-cell-center">
             <span class="cart-subtotal-value">${formatMoney(totalVenta)}</span>
           </td>
-          <td class="cart-cell-center">
-            <span class="status-chip">${estadoVenta}</span>
-          </td>
+          <td class="cart-cell-center">${formatBs(item?.monto_bs)}</td>
         </tr>
       `;
     })
@@ -543,11 +555,10 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null, { idOrden
             <thead>
               <tr>
                 <th>Producto</th>
-                <th>Meses</th>
-                <th>Precio</th>
                 <th>Cantidad</th>
-                <th>Total</th>
-                <th>Estado</th>
+                <th>Duración</th>
+                <th>Monto USD</th>
+                <th>Monto Bs</th>
               </tr>
             </thead>
             <tbody>
@@ -569,7 +580,30 @@ const renderOrdenesItems = (items, giftCardLookups = null, { idOrden = null } = 
   }
   itemsTitleEl?.classList.remove("hidden");
 
-  const rows = items
+  const consolidatedItems = [];
+  const byKey = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const parsed = parseQtyMonthsFromDetalle(item?.detalle || "");
+    const key = [
+      isTrue(item?.renovacion) ? "renewal" : "item",
+      item?.id_venta || "",
+      item?.id_plataforma || "",
+      String(item?.detalle || "").replace(/\|\s*\d+\s+mes(?:es)?\b/i, "| meses").trim(),
+    ].join(":");
+    const existing = byKey.get(key);
+    if (existing && isTrue(item?.renovacion) && item?.id_venta) {
+      existing.__cantidad = Math.max(Number(existing.__cantidad) || 1, parsed.cantidad);
+      existing.__meses = (Number(existing.__meses) || 1) + parsed.meses;
+      existing.monto_usd = round2((Number(existing.monto_usd) || 0) + (Number(item?.monto_usd) || 0));
+      existing.monto_bs = round2((Number(existing.monto_bs) || 0) + (Number(item?.monto_bs) || 0));
+      return;
+    }
+    const next = { ...item, __cantidad: parsed.cantidad, __meses: parsed.meses };
+    byKey.set(key, next);
+    consolidatedItems.push(next);
+  });
+
+  const rows = consolidatedItems
     .map((item, idx) => {
       const platformName = item?.plataformas?.nombre || `Plataforma ${item?.id_plataforma || "-"}`;
       const image = String(item?.plataformas?.imagen || "").trim();
@@ -611,6 +645,8 @@ const renderOrdenesItems = (items, giftCardLookups = null, { idOrden = null } = 
               </div>
             </div>
           </td>
+          <td class="cart-cell-center">${Number(item?.__cantidad) || 1}</td>
+          <td class="cart-cell-center">${isGiftCard ? "-" : formatDuration(item?.__meses)}</td>
           <td class="cart-cell-center">${formatMoney(item?.monto_usd)}</td>
           <td class="cart-cell-center">${formatBs(item?.monto_bs)}</td>
         </tr>
@@ -626,6 +662,8 @@ const renderOrdenesItems = (items, giftCardLookups = null, { idOrden = null } = 
             <thead>
               <tr>
                 <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Duración</th>
                 <th>Monto USD</th>
                 <th>Monto Bs</th>
               </tr>

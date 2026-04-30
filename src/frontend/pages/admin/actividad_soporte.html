@@ -17,6 +17,17 @@
         --teal: #168d71;
         --danger: #a53a3a;
       }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
       body {
         background:
           radial-gradient(circle at 86% -12%, #d9e9ff 0%, transparent 40%),
@@ -25,26 +36,31 @@
         color: var(--text);
       }
       .wrap {
-        width: min(1260px, 100%);
+        width: 100%;
+        max-width: 1260px;
         margin: 0 auto;
         padding: 14px clamp(10px, 2.6vw, 24px) 24px;
         display: grid;
         gap: 14px;
+        min-width: 0;
       }
       .panel {
         background: var(--card);
         border: 1px solid var(--line);
-        border-radius: 16px;
+        border-radius: 8px;
         box-shadow: 0 12px 28px rgba(10, 29, 58, 0.08);
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
       }
       .hero {
         padding: 16px;
         display: grid;
         gap: 12px;
+        min-width: 0;
       }
       .hero h2 {
         margin: 0;
-        letter-spacing: -0.01em;
       }
       .hero p {
         margin: 0;
@@ -56,31 +72,52 @@
         grid-template-columns: repeat(12, minmax(0, 1fr));
         gap: 10px;
         align-items: end;
+        min-width: 0;
       }
-      .field { display: grid; gap: 4px; }
+      .field { display: grid; gap: 4px; min-width: 0; }
       .field label { font-size: 12px; color: var(--muted); font-weight: 700; }
-      .field input, .field select { min-height: 38px; }
+      .field input,
+      .field select {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        min-height: 38px;
+      }
       .field.year { grid-column: span 2; }
       .field.month { grid-column: span 3; }
       .field.platform { grid-column: span 3; }
-      .actions { grid-column: span 4; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+      .actions {
+        grid-column: span 4;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        min-width: 0;
+      }
+      .actions button {
+        min-width: 128px;
+        max-width: 100%;
+      }
       .status {
         margin: 0;
         font-size: 13px;
         color: #37506f;
         background: var(--brand-soft);
         border: 1px solid #cdddf9;
-        border-radius: 10px;
+        border-radius: 8px;
         padding: 8px 10px;
+        overflow-wrap: anywhere;
       }
       .grid {
         display: grid;
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 14px;
+        min-width: 0;
       }
-      .grid.two { grid-template-columns: 1fr; }
+      .grid.two { grid-template-columns: minmax(0, 1fr); }
       .card {
         padding: 14px;
+        min-width: 0;
       }
       .card h3 {
         margin: 0 0 8px;
@@ -92,8 +129,12 @@
         color: var(--muted);
       }
       .chart {
-        min-height: 300px;
+        display: block;
         width: 100%;
+        max-width: 100%;
+        height: 300px;
+        min-height: 0;
+        overflow: hidden;
       }
       .legend {
         display: flex;
@@ -102,31 +143,65 @@
         margin-top: 8px;
         font-size: 12px;
         color: #314963;
+        min-width: 0;
+      }
+      .legend span {
+        max-width: 100%;
+        overflow-wrap: anywhere;
       }
       .kpis {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px;
+        min-width: 0;
       }
       .kpi {
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: 8px;
         padding: 10px;
         background: #fbfdff;
+        min-width: 0;
       }
       .kpi .label { margin: 0; font-size: 12px; color: var(--muted); }
-      .kpi .value { margin: 5px 0 0; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+      .kpi .value { margin: 5px 0 0; font-size: 24px; font-weight: 800; }
       .kpi .value.brand { color: var(--brand); }
       .kpi .value.teal { color: var(--teal); }
       .kpi .value.danger { color: var(--danger); }
 
       @media (min-width: 980px) {
-        .grid.two { grid-template-columns: 1fr 1fr; }
+        .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
       @media (max-width: 900px) {
         .field.year, .field.month, .field.platform, .actions { grid-column: span 12; }
         .actions { justify-content: flex-start; }
         .kpis { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 640px) {
+        .wrap {
+          padding: 10px 8px 18px;
+          gap: 10px;
+        }
+        .hero,
+        .card {
+          padding: 10px;
+        }
+        .toolbar {
+          gap: 8px;
+        }
+        .actions {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .actions button {
+          width: 100%;
+          min-width: 0;
+        }
+        .chart {
+          height: 255px;
+        }
+        #chart-pie {
+          height: 275px;
+        }
       }
     </style>
   </head>

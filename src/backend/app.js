@@ -12850,7 +12850,7 @@ const resolveOrderProcessingContextFromSnapshot = async ({
   const parseErrors = [];
   const snapshotItemAmountMap = new Map();
   const fallbackItems = Array.isArray(fallbackContext?.items) ? fallbackContext.items : [];
-  const snapshotItems = snapshotRows.map((row, index) => {
+  let snapshotItems = snapshotRows.map((row, index) => {
     const itemId = toPositiveInt(row?.id_item_orden) || index + 1;
     const ventaId = toPositiveInt(row?.id_venta) || null;
     const renew = isTrue(row?.renovacion);
@@ -12907,6 +12907,50 @@ const resolveOrderProcessingContextFromSnapshot = async ({
     };
     throw err;
   }
+
+  const consolidatedSnapshotItems = [];
+  const consolidatedAmountMap = new Map();
+  const renewalSnapshotGroupByKey = new Map();
+  snapshotItems.forEach((item) => {
+    const itemId = toPositiveInt(item?.id_item) || null;
+    const ventaId = toPositiveInt(item?.id_venta) || null;
+    const isRenewalWithSale = isTrue(item?.renovacion) && ventaId;
+    const amount = itemId && snapshotItemAmountMap.has(itemId)
+      ? parseOptionalCheckoutNumber(snapshotItemAmountMap.get(itemId))
+      : null;
+    if (!isRenewalWithSale) {
+      consolidatedSnapshotItems.push(item);
+      if (itemId && Number.isFinite(amount)) consolidatedAmountMap.set(itemId, roundCheckoutMoney(amount));
+      return;
+    }
+    const key = [
+      "renewal",
+      ventaId,
+      toPositiveInt(item?.id_precio) || "",
+      toPositiveInt(item?.id_cuenta) || "",
+      toPositiveInt(item?.id_perfil) || "",
+    ].join(":");
+    const existing = renewalSnapshotGroupByKey.get(key);
+    if (existing) {
+      existing.item.cantidad = 1;
+      existing.item.meses = Math.max(1, Number(existing.item.meses || 0) + Number(item?.cantidad || 1) * Number(item?.meses || 1));
+      if (Number.isFinite(amount)) {
+        existing.amount = roundCheckoutMoney((Number(existing.amount) || 0) + amount);
+        consolidatedAmountMap.set(existing.item.id_item, existing.amount);
+      }
+      return;
+    }
+    item.cantidad = 1;
+    item.meses = Math.max(1, Number(item?.cantidad || 1) * Number(item?.meses || 1));
+    consolidatedSnapshotItems.push(item);
+    renewalSnapshotGroupByKey.set(key, { item, amount: Number.isFinite(amount) ? roundCheckoutMoney(amount) : null });
+    if (itemId && Number.isFinite(amount)) consolidatedAmountMap.set(itemId, roundCheckoutMoney(amount));
+  });
+  snapshotItems = consolidatedSnapshotItems;
+  snapshotItemAmountMap.clear();
+  consolidatedAmountMap.forEach((amount, itemId) => {
+    snapshotItemAmountMap.set(itemId, amount);
+  });
 
   const snapshotPriceIds = uniqPositiveIds(snapshotItems.map((item) => item?.id_precio).filter(Boolean));
   const fallbackPriceMap = fallbackContext?.priceMap || {};
@@ -13312,8 +13356,73 @@ const syncOrdenItemsSnapshot = async ({
 }) => {
   const orderIdNum = Number(ordenId);
   if (!Number.isFinite(orderIdNum) || orderIdNum <= 0) return;
+  const normalizedItems = [];
+  const normalizedAmountMap = customItemAmountMap instanceof Map ? new Map() : null;
+  const renewalGroupByKey = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const itemId = toPositiveInt(item?.id_item) || null;
+    const ventaId = toPositiveInt(item?.id_venta) || null;
+    const priceId = toPositiveInt(item?.id_precio) || null;
+    const isRenewalWithSale = isTrue(item?.renovacion) && ventaId;
+    const qty = Math.max(1, Math.round(Number(item?.cantidad) || 1));
+    const months = Math.max(1, Math.round(Number(item?.meses) || 1));
+    const amount =
+      normalizedAmountMap && itemId && customItemAmountMap.has(itemId)
+        ? parseOptionalCheckoutNumber(customItemAmountMap.get(itemId))
+        : null;
+
+    if (!isRenewalWithSale) {
+      const nextItem = { ...item };
+      normalizedItems.push(nextItem);
+      if (normalizedAmountMap && itemId && Number.isFinite(amount)) {
+        normalizedAmountMap.set(toPositiveInt(nextItem?.id_item) || normalizedItems.length, roundCheckoutMoney(amount));
+      }
+      return;
+    }
+
+    const key = [
+      "renewal",
+      ventaId,
+      priceId || "",
+      toPositiveInt(item?.id_cuenta) || "",
+      toPositiveInt(item?.id_perfil) || "",
+    ].join(":");
+    const existing = renewalGroupByKey.get(key);
+    if (existing) {
+      existing.item.meses = Math.max(1, Number(existing.item.meses || 0) + qty * months);
+      existing.item.cantidad = 1;
+      if (Number.isFinite(amount)) {
+        existing.amount = roundCheckoutMoney((Number(existing.amount) || 0) + amount);
+      }
+      return;
+    }
+
+    const nextItem = {
+      ...item,
+      cantidad: 1,
+      meses: qty * months,
+    };
+    normalizedItems.push(nextItem);
+    const normalizedId = toPositiveInt(nextItem?.id_item) || normalizedItems.length;
+    const group = {
+      item: nextItem,
+      amount: Number.isFinite(amount) ? roundCheckoutMoney(amount) : null,
+      normalizedId,
+    };
+    renewalGroupByKey.set(key, group);
+    if (normalizedAmountMap && Number.isFinite(group.amount)) {
+      normalizedAmountMap.set(normalizedId, group.amount);
+    }
+  });
+  if (normalizedAmountMap) {
+    renewalGroupByKey.forEach((group) => {
+      if (Number.isFinite(group?.amount)) {
+        normalizedAmountMap.set(group.normalizedId, roundCheckoutMoney(group.amount));
+      }
+    });
+  }
   const { rows } = await buildCheckoutItemSummaryRows({
-    items,
+    items: normalizedItems,
     priceMap,
     platInfoById,
     platNameById,
@@ -13325,7 +13434,7 @@ const syncOrdenItemsSnapshot = async ({
     totalUsd,
     montoBsTotal,
     tasaBs,
-    customItemAmountMap,
+    customItemAmountMap: normalizedAmountMap || customItemAmountMap,
   });
 
   const { error: delErr } = await supabaseAdmin

@@ -131,6 +131,32 @@
       .proveedor-renov-sugs button:hover {
         background: #f7f7f7;
       }
+      .sel-clave-cell {
+        min-width: 190px;
+      }
+      .sel-clave-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sel-clave-input {
+        width: 100%;
+        min-width: 120px;
+      }
+      .sel-clave-input[readonly] {
+        background: #f8fafc;
+        color: #334155;
+      }
+      .sel-clave-edit {
+        width: 34px;
+        min-width: 34px;
+        height: 34px;
+        padding: 0;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
     </style>
   </head>
   <body>
@@ -187,6 +213,12 @@
       const usernameEl = document.querySelector(".username");
       const adminLink = document.querySelector(".admin-link");
       const isTrue = (v) => v === true || v === 1 || v === "1" || v === "true" || v === "t";
+      const escapeAttr = (value) =>
+        String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
       const resolveEntregaInmediata = (v) => {
         if (v === undefined || v === null || v === "") return true;
         return isTrue(v);
@@ -582,8 +614,8 @@
 	                          type="checkbox"
 	                          data-venta="${it.id_venta ?? ""}"
 	                          data-id-precio="${it.id_precio ?? ""}"
-	                          data-correo="${it.correo || ""}"
-	                          data-clave="${it.clave || ""}"
+	                          data-correo="${escapeAttr(it.correo || "")}"
+	                          data-clave="${escapeAttr(it.clave || "")}"
 	                          data-nperfil="${it.n_perfil || ""}"
                           data-pin="${it.pin || ""}"
                           data-plataforma="${plat}"
@@ -596,6 +628,7 @@
                           data-por-acceso="${it.por_acceso ? "true" : "false"}"
                           data-suspendido="${it.suspendido ? "true" : "false"}"
                           data-hogar="${it.hogar_actualizado ? "true" : "false"}"
+                          data-completa="${it.completa ? "true" : "false"}"
                           data-color-1="${it.color_1 || ""}"
                         />
                       </label>
@@ -685,8 +718,8 @@
                       data-id-plataforma="${r.id_plataforma || ""}"
                       data-id-cuenta="${r.id_cuenta || ""}"
                       data-id-usuario="${r.id_usuario_cliente || ""}"
-                      data-correo="${r.correo || ""}"
-                      data-clave="${r.clave || ""}"
+                      data-correo="${escapeAttr(r.correo || "")}"
+                      data-clave="${escapeAttr(r.clave || "")}"
                       data-n-perfil="${r.n_perfil || ""}"
                       data-pin="${r.pin || ""}"
                       data-id-precio="${r.id_precio || ""}"
@@ -696,6 +729,7 @@
                       data-por-acceso="${r.por_acceso ? "true" : "false"}"
                       data-suspendido="${r.suspendido ? "true" : "false"}"
                       data-hogar="${r.hogar_actualizado ? "true" : "false"}"
+                      data-completa="${r.completa ? "true" : "false"}"
                     >
                       Renovar
                     </button>
@@ -787,7 +821,7 @@
             const { data: ventas, error: ventErr } = await supabase
               .from("ventas")
               .select(
-                "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, suspendido, id_precio, correo_miembro",
+                "id_venta, id_usuario, id_cuenta, id_cuenta_miembro, id_perfil, fecha_corte, suspendido, id_precio, correo_miembro, clave_miembro, completa",
               )
               .in("id_usuario", ids)
               .limit(50);
@@ -968,7 +1002,8 @@
                 id_cuenta: cuentaIdRow,
                 id_usuario_cliente: v.id_usuario || null,
                 correo: useCorreoCliente ? correoVenta || correoCuenta : correoCuenta || correoVenta,
-                clave: claveCuenta,
+                clave: isTrue(v.completa) ? String(v?.clave_miembro || "").trim() || claveCuenta : claveCuenta,
+                completa: isTrue(v.completa),
                 pin: pinServicio,
                 nombreCompleto: user.nombreCompleto,
                 id_perfil: v.id_perfil,
@@ -1043,7 +1078,7 @@
               supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro",
+                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro, clave_miembro, completa",
                 )
                 .in("id_cuenta", cuentaIds)
             );
@@ -1055,7 +1090,7 @@
               supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro",
+                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro, clave_miembro, completa",
                 )
                 .in("id_cuenta_miembro", cuentaIds)
             );
@@ -1067,7 +1102,7 @@
               supabase
                 .from("ventas")
                 .select(
-                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro",
+                  "id_venta, id_usuario, id_perfil, id_cuenta, id_cuenta_miembro, fecha_corte, suspendido, id_precio, correo_miembro, clave_miembro, completa",
                 )
                 .in("id_perfil", dominioPerfilIds)
             );
@@ -1237,7 +1272,8 @@
               id_cuenta: cuentaIdRow,
               id_usuario_cliente: v.id_usuario || null,
               correo: useCorreoCliente ? correoVenta || correoCuenta : correoCuenta || correoVenta,
-              clave: claveCuenta,
+              clave: isTrue(v.completa) ? String(v?.clave_miembro || "").trim() || claveCuenta : claveCuenta,
+              completa: isTrue(v.completa),
               id_perfil: v.id_perfil || null,
               n_perfil: perf?.n_perfil || null,
               pin: pinServicio,
@@ -1402,11 +1438,42 @@
             const sortedRows = sortRowsByPerfilIfAny(rows);
             const groupColor = sortedRows.find((r) => normalizeHeaderColor(r.color_1))?.color_1 || "";
             const styleAttr = tableHeaderStyleAttr(groupColor);
+            const showClaveCol = sortedRows.some(
+              (it) => Number(it.id_plataforma) === 9 && isTrue(it.completa),
+            );
             const rowsHtml = sortedRows
-              .map(
-                (it) => `
+              .map((it) => {
+                const canEditClave = Number(it.id_plataforma) === 9 && isTrue(it.completa);
+                const claveValue = escapeAttr(it.clave || "");
+                return `
                   <tr>
                     <td>${it.correo || ""}</td>
+                    ${
+                      showClaveCol
+                        ? `<td class="sel-clave-cell">
+                            ${
+                              canEditClave
+                                ? `<div class="sel-clave-wrap">
+                                    <input
+                                      type="text"
+                                      class="input-text sel-clave-input"
+                                      data-index="${it.uid}"
+                                      value="${claveValue}"
+                                      ${it.clave_editando ? "" : "readonly"}
+                                    />
+                                    <button
+                                      type="button"
+                                      class="btn-outline sel-clave-edit"
+                                      data-index="${it.uid}"
+                                      title="Modificar contraseña"
+                                      aria-label="Modificar contraseña"
+                                    >✎</button>
+                                  </div>`
+                                : "-"
+                            }
+                          </td>`
+                        : ""
+                    }
                     <td>
                       <div class="modal-qty">
                         <button type="button" class="sel-menos" data-index="${it.uid}" aria-label="menos">-</button>
@@ -1435,8 +1502,8 @@
                       }
                     </td>
                   </tr>
-                `
-              )
+                `;
+              })
               .join("");
             return `
               <div class="proximas-bloque">
@@ -1446,6 +1513,7 @@
                     <thead>
                       <tr>
                         <th>Correo</th>
+                        ${showClaveCol ? "<th>Clave</th>" : ""}
                         <th>Duración</th>
                         <th>Monto</th>
                       </tr>
@@ -1501,6 +1569,8 @@
           id_precio: chk.dataset.idPrecio || null,
           correo: chk.dataset.correo || "",
           clave: chk.dataset.clave || "",
+          clave_original: chk.dataset.clave || "",
+          clave_editando: false,
           n_perfil: chk.dataset.nperfil || "",
           pin: chk.dataset.pin || "",
           plataforma: chk.dataset.plataforma || "",
@@ -1515,6 +1585,7 @@
           por_acceso: chk.dataset.porAcceso === "true",
           suspendido: chk.dataset.suspendido || "",
           hogar_actualizado: chk.dataset.hogar === "true",
+          completa: chk.dataset.completa === "true",
           monto_base: null,
           monto_loading: true,
           monto_manual_total: null,
@@ -1580,6 +1651,8 @@
 
       const isCostoRenovacionElegible = ({ platId = null, ventaCompleta = false } = {}) =>
         Number(platId) === 9 && isTrue(ventaCompleta);
+      const isSpotifyCompletaRenovacion = (item = {}) =>
+        Number(item?.id_plataforma) === 9 && isTrue(item?.completa);
 
       const fetchMontoBaseForRow = async (ctx) => {
         if (!ctx) return null;
@@ -1696,10 +1769,19 @@
       modalRenovarSelBody?.addEventListener("click", (e) => {
         const btnMas = e.target.closest(".sel-mas");
         const btnMenos = e.target.closest(".sel-menos");
-        if (!btnMas && !btnMenos) return;
-        const uid = (btnMas || btnMenos).dataset.index;
+        const btnClave = e.target.closest(".sel-clave-edit");
+        if (!btnMas && !btnMenos && !btnClave) return;
+        const uid = (btnMas || btnMenos || btnClave).dataset.index;
         const item = seleccionActual.find((it) => String(it.uid) === String(uid));
         if (!item) return;
+        if (btnClave) {
+          item.clave_editando = true;
+          renderModalSeleccion();
+          modalRenovarSelBody
+            ?.querySelector(`.sel-clave-input[data-index="${String(uid)}"]`)
+            ?.focus();
+          return;
+        }
         const delta = btnMas ? 1 : -1;
         const next = Math.max(1, (item.meses || 1) + delta);
         item.meses = next;
@@ -1710,10 +1792,15 @@
       });
       modalRenovarSelBody?.addEventListener("input", (e) => {
         const montoInput = e.target.closest(".sel-monto-input");
-        if (!montoInput) return;
-        const uid = montoInput.dataset.index;
+        const claveInput = e.target.closest(".sel-clave-input");
+        if (!montoInput && !claveInput) return;
+        const uid = (montoInput || claveInput).dataset.index;
         const item = seleccionActual.find((it) => String(it.uid) === String(uid));
         if (!item) return;
+        if (claveInput) {
+          item.clave = claveInput.value || "";
+          return;
+        }
         const parsed = parseMontoInput(montoInput.value);
         item.monto_manual_touched = true;
         item.monto_manual_total = parsed;
@@ -1758,6 +1845,13 @@
         }
         if (!ref) {
           alert("Ingresa la referencia.");
+          return;
+        }
+        const invalidClaveItem = seleccionActual.find(
+          (it) => isSpotifyCompletaRenovacion(it) && !String(it.clave || "").trim(),
+        );
+        if (invalidClaveItem) {
+          alert("La clave no puede estar vacía para renovaciones completas de Spotify.");
           return;
         }
 
@@ -1915,6 +2009,11 @@
               meses_contratados: it.meses || 1,
               suspendido: false,
             };
+            const nuevaClaveCuenta = String(it.clave || "").trim();
+            const claveFueModificada = nuevaClaveCuenta !== String(it.clave_original || "").trim();
+            if (isSpotifyCompletaRenovacion(it)) {
+              updatePayload.clave_miembro = nuevaClaveCuenta;
+            }
             if (Number.isFinite(platIdNum) && Number(platIdNum) !== 12 && ventaCompletaItem) {
               updatePayload.cuenta_pagada_admin = false;
             }
@@ -1924,6 +2023,13 @@
               .update(updatePayload)
               .eq("id_venta", it.id_venta);
             if (error) throw error;
+            if (isSpotifyCompletaRenovacion(it) && claveFueModificada && it.id_cuenta) {
+              const { error: cuentaClaveErr } = await supabase
+                .from("cuentas")
+                .update({ clave: nuevaClaveCuenta })
+                .eq("id_cuenta", Number(it.id_cuenta));
+              if (cuentaClaveErr) throw cuentaClaveErr;
+            }
 
             const montoCalculado = resolveMonto(platIdNum, cuentaInfo, accesoCliente) * (it.meses || 1);
             const montoManual = parseMontoInput(it.monto_manual_total);
