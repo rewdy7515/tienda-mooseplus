@@ -126,6 +126,31 @@ let currentImageDownloadName = "";
 let autoReemplazoCuentaInactivaEnabled = false;
 const reportesById = new Map();
 const AUTO_REEMPLAZO_CFG_KEY = "auto_reemplazo_cuenta_inactiva";
+const getCaracasTimestampIso = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type, fallback = "00") =>
+    parts.find((part) => part.type === type)?.value || fallback;
+  return `${get("year", "0000")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}-04:00`;
+};
+const hasSevenDaysPassed = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return true;
+  const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(raw)
+    ? raw.replace(" ", "T")
+    : raw;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.valueOf())) return true;
+  return Date.now() - parsed.getTime() >= 7 * 24 * 60 * 60 * 1000;
+};
 
 const formatDate = (iso) => formatDDMMYYYY(iso) || "-";
 const normalizeIsoDateOnly = (value) => {
@@ -1056,7 +1081,7 @@ const removeReporteRowFromUI = (reportIdRaw) => {
 
 async function loadReportes() {
   const baseSelect =
-    "id_reporte,id_venta,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina,reemplazo),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion";
+    "id_reporte,id_venta,id_tipo_reporte,id_plataforma,plataformas(id_plataforma,nombre,color_1,color_2,link_pagina,reemplazo),id_usuario,usuarios:usuarios!reportes_id_usuario_fkey(nombre,apellido),id_cuenta,cuentas(id_cuenta,correo,clave,fecha_corte,id_plataforma,venta_perfil,venta_miembro,inactiva,id_cuenta_madre,cuenta_madre),id_perfil,perfiles(id_perfil,n_perfil,pin,perfil_hogar,id_cuenta),descripcion,imagen,en_revision,solucionado,fecha_creacion,hora_creacion";
   const selectWithDatosFlags = `${baseSelect},datos_incorrectos,datos_corregidos`;
   const isMissingDatosColumnError = (err) => {
     const msg = String(err?.message || "").toLowerCase();
@@ -2566,10 +2591,34 @@ async function autoReplaceInactiveReportes(reportes = []) {
 
   for (const row of targets) {
     try {
+      const reporteTipoId = toPositiveId(row?.id_tipo_reporte);
+      const ventaId = toPositiveId(row?.id_venta);
+      if (reporteTipoId === 4 && ventaId) {
+        const { data: ventaHogar, error: ventaHogarErr } = await supabase
+          .from("ventas")
+          .select("hora_reporte_hogar")
+          .eq("id_venta", ventaId)
+          .maybeSingle();
+        if (ventaHogarErr) throw ventaHogarErr;
+        if (!hasSevenDaysPassed(ventaHogar?.hora_reporte_hogar)) {
+          console.log("[reemplazo][auto]", "skip_tipo_4_antes_7_dias", {
+            id_reporte: toPositiveId(row?.id_reporte) || null,
+            id_venta: ventaId,
+          });
+          continue;
+        }
+      }
       const result = await reemplazarServicio({ row, silent: true, closeModal: false });
+      if (result?.ok === true && reporteTipoId === 4 && ventaId) {
+        const { error: horaErr } = await supabase
+          .from("ventas")
+          .update({ hora_reporte_hogar: getCaracasTimestampIso() })
+          .eq("id_venta", ventaId);
+        if (horaErr) console.error("actualizar hora_reporte_hogar error", horaErr);
+      }
       console.log("[reemplazo][auto]", "resultado", {
         id_reporte: toPositiveId(row?.id_reporte) || null,
-        id_venta: toPositiveId(row?.id_venta) || null,
+        id_venta: ventaId || null,
         ok: result?.ok === true,
         reason: result?.reason || null,
       });

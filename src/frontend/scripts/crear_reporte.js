@@ -40,6 +40,20 @@ const getCaracasDateTime = () => {
     hora: `${hour}:${minute}:${second}`,
   };
 };
+const getCaracasTimestampIso = () => {
+  const { fecha, hora } = getCaracasDateTime();
+  return `${fecha}T${hora}-04:00`;
+};
+const hasSevenDaysPassed = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return true;
+  const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(raw)
+    ? raw.replace(" ", "T")
+    : raw;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.valueOf())) return true;
+  return Date.now() - parsed.getTime() >= 7 * 24 * 60 * 60 * 1000;
+};
 const selectPlataforma = document.querySelector("#select-plataforma");
 const selectMotivo = document.querySelector("#select-motivo");
 const selectPerfil = document.querySelector("#select-perfil");
@@ -219,7 +233,7 @@ async function findVentaAsociadaParaReporte({ idUsuario, idCuenta, idPerfil }) {
 
   let query = supabase
     .from("ventas")
-    .select("id_venta, reportado, id_perfil")
+    .select("id_venta, reportado, id_perfil, hora_reporte_hogar")
     .eq("id_usuario", userIdNum)
     .or(`id_cuenta.eq.${cuentaIdNum},id_cuenta_miembro.eq.${cuentaIdNum}`)
     .order("id_venta", { ascending: false })
@@ -238,7 +252,7 @@ async function findVentaAsociadaParaReporte({ idUsuario, idCuenta, idPerfil }) {
   if (Number.isFinite(idPerfilNum) && idPerfilNum > 0) {
     const { data: fallbackData, error: fallbackErr } = await supabase
       .from("ventas")
-      .select("id_venta, reportado, id_perfil")
+      .select("id_venta, reportado, id_perfil, hora_reporte_hogar")
       .eq("id_usuario", userIdNum)
       .or(`id_cuenta.eq.${cuentaIdNum},id_cuenta_miembro.eq.${cuentaIdNum}`)
       .order("id_venta", { ascending: false })
@@ -1441,8 +1455,13 @@ async function handleSubmit(e) {
     } else {
       descripcion = motivoLabel;
     }
+    const isReporteHogarTipo4 = Number(motivoTipoId) === 4;
+    const puedeAutoReemplazarReporteHogar =
+      !isReporteHogarTipo4 || hasSevenDaysPassed(ventaAsociada?.hora_reporte_hogar);
     const forzarAutoNetflixPlan1Hogar =
-      Number(id_plataforma) === 1 && isMotivoNetflixTvNoHogar(motivoLabel || descripcion);
+      Number(id_plataforma) === 1 &&
+      (isReporteHogarTipo4 || isMotivoNetflixTvNoHogar(motivoLabel || descripcion)) &&
+      puedeAutoReemplazarReporteHogar;
 
     const file = (inputFiles?.files && inputFiles.files[0]) || null;
     let imagenPath = null;
@@ -1512,10 +1531,11 @@ async function handleSubmit(e) {
         return;
       }
       if (ventaAsociadaId) {
-        await supabase
-          .from("ventas")
-          .update({ reportado: false, aviso_admin: true })
-          .eq("id_venta", ventaAsociadaId);
+        const ventaAutoUpdate = { reportado: false, aviso_admin: true };
+        if (isReporteHogarTipo4) {
+          ventaAutoUpdate.hora_reporte_hogar = getCaracasTimestampIso();
+        }
+        await supabase.from("ventas").update(ventaAutoUpdate).eq("id_venta", ventaAsociadaId);
       }
       try {
         await markVentaPendienteByReporteRule({

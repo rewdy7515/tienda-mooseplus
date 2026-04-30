@@ -11190,6 +11190,16 @@ const todayInVenezuela = () => {
   });
   return fmt.format(new Date());
 };
+const hasSevenDaysPassed = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return true;
+  const normalized = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(raw)
+    ? raw.replace(" ", "T")
+    : raw;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.valueOf())) return true;
+  return Date.now() - parsed.getTime() >= 7 * 24 * 60 * 60 * 1000;
+};
 
 // Suma meses manteniendo el día (sin desfase de zona horaria); si el mes destino no tiene ese día, usa el último día del mes.
 function addMonthsKeepDay(baseDate, months) {
@@ -11655,6 +11665,7 @@ const autoAssignReportedPendingVentas = async ({
         id_cuenta,
         id_cuenta_miembro,
         id_perfil,
+        hora_reporte_hogar,
         pendiente,
         reportado,
         precios:precios(id_plataforma, completa, sub_cuenta),
@@ -11838,7 +11849,7 @@ const autoAssignReportedPendingVentas = async ({
 
     let query = supabaseAdmin
       .from("reportes")
-      .select("id_reporte")
+      .select("id_reporte, id_tipo_reporte")
       .eq("id_usuario", userId)
       .eq("id_cuenta", cuentaId)
       .eq("solucionado", false)
@@ -11874,6 +11885,12 @@ const autoAssignReportedPendingVentas = async ({
           continue;
         }
         if (esReportada && !autoReemplazoHabilitado) {
+          summary.skipped += 1;
+          continue;
+        }
+        const reporteAbiertoParaVenta = esReportada ? await findOpenReporte(venta) : null;
+        const isReporteHogarTipo4 = toPositiveInt(reporteAbiertoParaVenta?.id_tipo_reporte) === 4;
+        if (esReportada && isReporteHogarTipo4 && !hasSevenDaysPassed(venta?.hora_reporte_hogar)) {
           summary.skipped += 1;
           continue;
         }
@@ -12032,6 +12049,9 @@ const autoAssignReportedPendingVentas = async ({
       if (esReportada) {
         updateVenta.reportado = false;
         updateVenta.aviso_admin = true;
+        if (isReporteHogarTipo4) {
+          updateVenta.hora_reporte_hogar = new Date().toISOString();
+        }
       }
       if (oldCuentaMiembroId) {
         updateVenta.id_cuenta_miembro = null;
@@ -12096,7 +12116,7 @@ const autoAssignReportedPendingVentas = async ({
       }
 
       if (esReportada && !isPlatform9) {
-        const reporteAbierto = await findOpenReporte(venta);
+        const reporteAbierto = reporteAbiertoParaVenta;
         if (reporteAbierto?.id_reporte) {
           const { error: repErr } = await supabaseAdmin
             .from("reportes")
@@ -13859,6 +13879,7 @@ const processOrderFromItems = async ({
     if (isCuentaCompletaRenov || isVentaCompletaRenov) {
       if (platId === 9) {
         updatePayload.cuenta_pagada_admin = true;
+        updatePayload.mensaje_proveedor = false;
       } else {
         updatePayload.cuenta_pagada_admin = false;
       }
@@ -14568,6 +14589,7 @@ const processOrderFromItems = async ({
       aviso_admin: false,
       completa: isCompleta ? true : null,
       cuenta_pagada_admin: isCuentaCompletaVenta ? (isSpotifyCompletaCompra ? true : false) : null,
+      mensaje_proveedor: isSpotifyCompletaCompra ? false : null,
     };
     const dedupeKey = buildVentaInsertDedupeKey(ventaPayload);
     const existingBucket = existingVentaReusePool.get(dedupeKey) || [];
@@ -14700,6 +14722,7 @@ const processOrderFromItems = async ({
       if (isCuentaCompletaRenov || isVentaCompletaRenov) {
         if (platId === 9) {
           updatePayload.cuenta_pagada_admin = true;
+          updatePayload.mensaje_proveedor = false;
         } else {
           updatePayload.cuenta_pagada_admin = false;
         }

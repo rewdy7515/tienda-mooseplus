@@ -2013,6 +2013,7 @@
             const claveFueModificada = nuevaClaveCuenta !== String(it.clave_original || "").trim();
             if (isSpotifyCompletaRenovacion(it)) {
               updatePayload.clave_miembro = nuevaClaveCuenta;
+              updatePayload.mensaje_proveedor = false;
             }
             if (Number.isFinite(platIdNum) && Number(platIdNum) !== 12 && ventaCompletaItem) {
               updatePayload.cuenta_pagada_admin = false;
@@ -2331,6 +2332,9 @@
           };
           if (Number.isFinite(platIdNum) && Number(platIdNum) !== 12 && ventaCompleta) {
             updatePayload.cuenta_pagada_admin = false;
+          }
+          if (Number(platIdNum) === 9 && ventaCompleta) {
+            updatePayload.mensaje_proveedor = false;
           }
           updatePayload.pendiente = false;
           const { error: updErr } = await supabase

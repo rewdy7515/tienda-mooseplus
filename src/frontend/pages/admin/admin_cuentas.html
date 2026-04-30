@@ -4406,7 +4406,20 @@
             const hasVenta = !!p.id_venta;
             const clienteCell = hasVenta ? (ocupadoRaw || "-") : ocupadoCell;
             const actionButtons = hasVenta
-              ? `<button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
+              ? `<button
+                    type="button"
+                    class="btn-primary btn-reemplazar-row"
+                    data-cuenta="${info.id_cuenta || currentCuentaId || ""}"
+                    data-idventa="${p.id_venta || ""}"
+                    data-correo="${info.correo || ""}"
+                    data-clave="${info.clave || ""}"
+                    data-fecha="${p.fecha_corte || info.fecha_corte_display || info.fecha_corte || ""}"
+                    data-suspendido="${p.suspendido ? "true" : "false"}"
+                    data-venta-perfil="false"
+                    data-venta-miembro="false"
+                    data-cliente="${encodeURIComponent(clienteCell || "")}"
+                  >Reemplazar</button>
+                  <button type="button" class="btn-outline btn-copy-row" data-copy="${encodeURIComponent(copyText)}">Copiar</button>`
               : isSuperadmin
                 ? `<button type="button" class="btn-primary btn-registrar-servicio btn-disabled" disabled
                     data-cuenta="${info.id_cuenta || ""}"
@@ -4487,6 +4500,14 @@
               <td>${renderFechaEditCell(r.fecha_corte, r.id_venta)}</td>
               <td class="estado-cell ${r.estadoClass || ""}">${r.estado || "-"}</td>
               <td class="action-cell">
+                <button
+                  type="button"
+                  class="btn-primary btn-reemplazar-cuenta"
+                  data-cuenta="${info.id_cuenta || currentCuentaId || ""}"
+                  data-correo="${r.correo || info.correo || ""}"
+                  data-clave="${r.clave || info.clave || ""}"
+                  data-fecha="${r.fecha_corte || info.fecha_corte_display || info.fecha_corte || ""}"
+                >Reemplazar</button>
                 ${buildReportarVentaButton({
                   idVenta: r.id_venta,
                   idUsuario: r.id_usuario,
