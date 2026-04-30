@@ -3000,7 +3000,29 @@ const buildWhatsappVentaEntregadaMessage = ({
   detalleEntregaUrl = "",
   clienteRegistrado = true,
   signupRegistroUrl = "",
+  idPlataforma = null,
 } = {}) => {
+  if (toPositiveInt(idPlataforma) === 12) {
+    return `\`✅ Se ha enviado una invitación a su correo, por favor aceptela para disfrutar de Canva Pro.\`
+
+*INDICACIONES PARA MEMBRESÍA CANVA PRO*
+
+Al acercarse la fecha de pago de tu membresía, asegúrate de notificar si deseas continuar con Canva Pro para mantener el acceso al equipo.
+
+Si decides no continuar con la membresía, copia todos tus diseños a tu cuenta principal para no perder tu trabajo.
+
+Tendrás un día extra para transferir tus diseños. Después de ese plazo, perderás el acceso al equipo y los diseños se borrarán automáticamente.
+
+*Para copiar un diseño o carpeta a otro equipo debes:*
+
+1. Seleccionar el diseño o carpeta deseada y pulsar los 3 puntos.
+2. Seleccionar “Copiar a otro equipo”.
+3. Eligir tu cuenta (por ejemplo: “Equipo de Andrés Villarreal”).
+4. Pulsar “Copiar”.
+
+Recomendación: Organiza tus diseños en una carpeta para facilitar la transferencia a otro equipo. Así podrás mover varios diseños a la vez. 🎨✨`;
+  }
+
   const ventaId = toPositiveInt(idVenta) || idVenta || "-";
   const ordenId = toPositiveInt(idOrden);
   const detalleUrl =
@@ -4015,7 +4037,9 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
   } else {
     const { data, error } = await supabaseAdmin
       .from("ventas")
-      .select("id_venta, id_usuario, pendiente, reportado")
+      .select(
+        "id_venta, id_usuario, id_orden, pendiente, reportado, precios:precios!ventas_id_precio_fkey(id_plataforma), cuentas:cuentas!ventas_id_cuenta_fkey(id_plataforma), cuentas_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_plataforma)",
+      )
       .eq("id_venta", ventaId)
       .maybeSingle();
     if (error) throw error;
@@ -4032,6 +4056,11 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
   }
 
   const targetUserId = toPositiveInt(ventaRow?.id_usuario);
+  const ventaPlataformaId =
+    toPositiveInt(ventaRow?.precios?.id_plataforma) ||
+    toPositiveInt(ventaRow?.cuentas?.id_plataforma) ||
+    toPositiveInt(ventaRow?.cuentas_miembro?.id_plataforma) ||
+    null;
   const ordenId = await resolveOrderIdByVentaId({
     idVenta: ventaId,
     fallbackOrderId: ventaRow?.id_orden,
@@ -4100,6 +4129,7 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     detalleEntregaUrl,
     clienteRegistrado,
     signupRegistroUrl,
+    idPlataforma: ventaPlataformaId,
   });
 
   const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
