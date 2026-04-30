@@ -649,7 +649,8 @@
             supabase
               .from("ventas")
               .select("id_venta", { count: "exact", head: true })
-              .eq("pendiente", true),
+              .eq("pendiente", true)
+              .or("reporte_admin.is.null,reporte_admin.eq.false"),
             supabase
               .from("tareas_asignadas")
               .select("id_tarea_asignada", { count: "exact", head: true }),
