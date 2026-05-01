@@ -267,11 +267,14 @@ const getCaracasNow = () => {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   }).formatToParts(new Date());
   const get = (type) => parts.find((p) => p.type === type)?.value || "";
+  const rawHour = Number(get("hour"));
+  const hour = rawHour === 24 ? 0 : rawHour;
   return {
     fecha: `${get("year")}-${get("month")}-${get("day")}`,
-    hora: `${get("hour")}:${get("minute")}:${get("second")}`,
+    hora: `${String(hour).padStart(2, "0")}:${get("minute")}:${get("second")}`,
   };
 };
 

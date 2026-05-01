@@ -28,11 +28,13 @@ const getCaracasDateTime = () => {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   }).formatToParts(new Date());
   const year = parts.find((part) => part.type === "year")?.value || "0000";
   const month = parts.find((part) => part.type === "month")?.value || "00";
   const day = parts.find((part) => part.type === "day")?.value || "00";
-  const hour = parts.find((part) => part.type === "hour")?.value || "00";
+  const rawHour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const hour = String(rawHour === 24 ? 0 : rawHour).padStart(2, "0");
   const minute = parts.find((part) => part.type === "minute")?.value || "00";
   const second = parts.find((part) => part.type === "second")?.value || "00";
   return {

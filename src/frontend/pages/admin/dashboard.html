@@ -1193,9 +1193,23 @@
           year: "numeric",
           month: "2-digit",
           day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+          hourCycle: "h23",
         }).formatToParts(now);
-        const pick = (type) => parts.find((p) => p.type === type)?.value || "";
-        return { year: pick("year"), month: pick("month"), day: pick("day") };
+        const pick = (type, fallback = "") => parts.find((p) => p.type === type)?.value || fallback;
+        const rawHour = Number(pick("hour", "0"));
+        const hour = rawHour === 24 ? 0 : rawHour;
+        return {
+          year: pick("year"),
+          month: pick("month"),
+          day: pick("day"),
+          hour,
+          minute: Number(pick("minute", "0")) || 0,
+          second: Number(pick("second", "0")) || 0,
+        };
       };
 
       const getDefaultMonth = () => {
@@ -1419,6 +1433,11 @@
         const currentCaracas = getCaracasDateParts();
         const currentMonthKey = `${currentCaracas.year}-${currentCaracas.month}`;
         const currentDay = Number(currentCaracas.day) || 1;
+        const currentMonthRange = monthRange(currentMonthKey);
+        const currentLastDay = isoDay(currentMonthRange?.end);
+        const isCurrentMonthClosed =
+          currentDay > currentLastDay ||
+          (currentDay === currentLastDay && Number(currentCaracas.hour) >= 22);
         const prevMonthVal = previousMonthKey(monthVal);
         const currentRange = monthRange(monthVal);
         const prevRange = monthRange(prevMonthVal);
@@ -1438,7 +1457,7 @@
             isProgressCut: false,
           };
         }
-        if (monthVal === currentMonthKey) {
+        if (monthVal === currentMonthKey && !isCurrentMonthClosed) {
           const rangeCut = monthRangeUntilDay(monthVal, currentDay) || currentRange;
           const prevRangeCut = monthRangeUntilDay(prevMonthVal, currentDay) || prevRange;
           const dayTxt = String(currentDay).padStart(2, "0");
@@ -1447,6 +1466,7 @@
             prevRange: prevRangeCut,
             compareSuffix: `vs mes anterior al día ${dayTxt}`,
             isProgressCut: true,
+            isMonthClosed: false,
           };
         }
         return {
@@ -1454,6 +1474,7 @@
           prevRange,
           compareSuffix: "vs mes anterior",
           isProgressCut: false,
+          isMonthClosed: true,
         };
       };
 
@@ -1790,6 +1811,10 @@
         if (cmpNetoEstimado) {
           if (projection?.isProjectionActive) {
             setCompare(cmpNetoEstimado, "money", projectedNeto, netoActual, "vs neto actual");
+          } else if (projection?.isMonthClosed === false) {
+            cmpNetoEstimado.classList.remove("up", "down");
+            cmpNetoEstimado.classList.add("same");
+            cmpNetoEstimado.textContent = "= Mes en curso hasta 10pm Caracas";
           } else {
             cmpNetoEstimado.classList.remove("up", "down");
             cmpNetoEstimado.classList.add("same");
@@ -3914,6 +3939,7 @@
             {
               netoEstimadoFinMes,
               isProjectionActive: compareCtx.isProgressCut && totalMonthDays > elapsedDays,
+              isMonthClosed: compareCtx.isMonthClosed,
             },
           );
           const loadedLabel = formatMonthLabel(monthVal);

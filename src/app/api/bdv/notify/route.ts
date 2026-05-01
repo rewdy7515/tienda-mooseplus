@@ -15,6 +15,27 @@ const isNonEmptyString = (value: unknown) =>
 const normalizeReferenceDigits = (value: unknown) =>
   String(value || "").replace(/\D/g, "");
 
+const getCaracasDateTimeNow = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const pick = (type: string, fallback = "00") =>
+    parts.find((part) => part.type === type)?.value || fallback;
+  const rawHour = Number(pick("hour", "0"));
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const fecha = `${pick("year", "0000")}-${pick("month")}-${pick("day")}`;
+  const hora = `${String(hour).padStart(2, "0")}:${pick("minute")}:${pick("second")}`;
+  return { fecha, hora, iso: `${fecha}T${hora}-04:00` };
+};
+
 const getRefExtractionSources = (text: unknown) => {
   const base = String(text || "").trim();
   const sources: string[] = [];
@@ -126,7 +147,8 @@ export async function POST(req: Request) {
     const app = "BDV";
     const titulo = "BDV";
     const texto = rawText;
-    const fecha = new Date().toISOString();
+    const caracasReceivedAt = getCaracasDateTimeNow();
+    const fecha = caracasReceivedAt.iso;
     const dispositivo = "unknown";
 
     if (!supabaseUrl || !supabaseServiceRoleKey) {
@@ -159,6 +181,7 @@ export async function POST(req: Request) {
       dispositivo,
       monto_bs: monto,
       referencia: referencia || null,
+      hora_recibido: caracasReceivedAt.hora,
     });
     if (error) {
       console.error("BDV notify insert error", error);

@@ -1590,6 +1590,27 @@ const getCaracasClock = () => {
   return { dateStr: `${year}-${month}-${day}`, hour, minute, weekday };
 };
 
+const getCaracasTimestampIso = () => {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (type, fallback = "00") => parts.find((part) => part.type === type)?.value || fallback;
+  const rawHour = Number(get("hour", "0"));
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const dateStr = `${get("year", "0000")}-${get("month")}-${get("day")}`;
+  const timeStr = `${String(hour).padStart(2, "0")}:${get("minute")}:${get("second")}`;
+  return { dateStr, timeStr, iso: `${dateStr}T${timeStr}-04:00` };
+};
+
 const getWhatsappAutoRecordatoriosHour = ({ weekday } = {}) => {
   const weekdayValue = String(weekday || "").trim().toLowerCase();
   return weekdayValue === "sat" || weekdayValue === "sun"
@@ -8617,6 +8638,7 @@ const toCaracasTimeString = (isoDate) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "America/Caracas",
     hour12: false,
+    hourCycle: "h23",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -8626,6 +8648,7 @@ const toCaracasTimeString = (isoDate) => {
     return acc;
   }, {});
   if (!map.hour || !map.minute || !map.second) return null;
+  if (map.hour === "24") map.hour = "00";
   return `${map.hour}:${map.minute}:${map.second}`;
 };
 
@@ -9181,7 +9204,8 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
     const titulo = "BDV";
     const texto = rawText;
     const textoForParsing = normalizeNotificationTextForParsing(rawText);
-    const fecha = new Date().toISOString();
+    const caracasReceivedAt = getCaracasTimestampIso();
+    const fecha = caracasReceivedAt.iso;
     const dispositivo = "unknown";
 
     const hash = crypto
@@ -9245,6 +9269,7 @@ app.post("/api/bdv/notify", express.text({ type: "*/*", limit: "200kb" }), async
       hash,
       monto_bs: monto,
       referencia: referenciaValor,
+      hora_recibido: caracasReceivedAt.timeStr,
     };
     const { data: insertedPagoMovil, error: insErr } = await supabaseAdmin
       .from("pagomoviles")
@@ -15932,7 +15957,7 @@ const createCarritoForUser = async (idUsuario) => {
         .from("carritos")
         .insert({
           id_usuario: userId,
-          fecha_creacion: new Date().toISOString(),
+          fecha_creacion: getCaracasDateStr(0),
           usa_saldo: false,
           saldo_usado: 0,
         })
@@ -22357,11 +22382,9 @@ app.post("/api/checkout", async (req, res) => {
       Number(ordenSaldoUsage.saldoAplicadoUsd) > 0 &&
       Number(checkoutTotal) <= 0;
 
-    const caracasNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
-    const pad2 = (val) => String(val).padStart(2, "0");
-    const hora_orden = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
-      caracasNow.getSeconds()
-    )}`;
+    const caracasNow = getCaracasDateTimeNow();
+    const fecha_orden = caracasNow.fecha;
+    const hora_orden = caracasNow.hora;
     const { data: metodoPagoRow, error: metodoPagoErr } = await supabaseAdmin
       .from("metodos_de_pago")
       .select("id_metodo_de_pago, nombre, verificacion_automatica, bolivares")
@@ -22515,6 +22538,7 @@ app.post("/api/checkout", async (req, res) => {
       referencia,
       comprobante: archivos,
       en_espera,
+      fecha: fecha_orden,
       hora_orden,
       id_carrito: carritoId,
       pago_verificado: autoVerificarOrden,

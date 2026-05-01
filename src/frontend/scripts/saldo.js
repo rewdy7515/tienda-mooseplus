@@ -8,16 +8,22 @@ const saldoInput = document.querySelector("#saldo-input");
 const saldoCheckoutBtn = document.querySelector("#saldo-checkout");
 
 const getCaracasParts = () => {
-  const caracasNow = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Caracas" })
-  );
-  const pad2 = (val) => String(val).padStart(2, "0");
-  const fecha = `${caracasNow.getFullYear()}-${pad2(caracasNow.getMonth() + 1)}-${pad2(
-    caracasNow.getDate()
-  )}`;
-  const hora = `${pad2(caracasNow.getHours())}:${pad2(caracasNow.getMinutes())}:${pad2(
-    caracasNow.getSeconds()
-  )}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Caracas",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const pick = (type, fallback = "00") => parts.find((part) => part.type === type)?.value || fallback;
+  const rawHour = Number(pick("hour", "0"));
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const fecha = `${pick("year", "0000")}-${pick("month")}-${pick("day")}`;
+  const hora = `${String(hour).padStart(2, "0")}:${pick("minute")}:${pick("second")}`;
   return { fecha, hora };
 };
 

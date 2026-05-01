@@ -136,10 +136,13 @@ const getCaracasTimestampIso = () => {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   }).formatToParts(new Date());
   const get = (type, fallback = "00") =>
     parts.find((part) => part.type === type)?.value || fallback;
-  return `${get("year", "0000")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}-04:00`;
+  const rawHour = Number(get("hour", "0"));
+  const hour = rawHour === 24 ? 0 : rawHour;
+  return `${get("year", "0000")}-${get("month")}-${get("day")}T${String(hour).padStart(2, "0")}:${get("minute")}:${get("second")}-04:00`;
 };
 const hasSevenDaysPassed = (value) => {
   const raw = String(value || "").trim();
