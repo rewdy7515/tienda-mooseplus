@@ -538,16 +538,29 @@
         const ventaIdNum = toPositiveId(idVenta);
         const adminIdNum = toPositiveId(idAdmin);
         if (!ventaIdNum || !adminIdNum) return;
-        const { data: latestRow, error: latestErr } = await supabase
+        const { data: latestRows, error: latestErr } = await supabase
           .from("historial_ventas")
-          .select("id_historial_ventas")
+          .select("id_historial_ventas, venta_cliente, id_usuario_cliente, id_proveedor")
           .eq("id_venta", ventaIdNum)
           .order("id_historial_ventas", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(10);
         if (latestErr) throw latestErr;
+        const rows = Array.isArray(latestRows) ? latestRows : [];
+        const latestRow =
+          rows.find((row) => isTrue(row?.venta_cliente)) ||
+          rows.find(
+            (row) =>
+              row?.venta_cliente == null &&
+              !!toPositiveId(row?.id_usuario_cliente) &&
+              !toPositiveId(row?.id_proveedor),
+          );
         const historialId = toPositiveId(latestRow?.id_historial_ventas);
-        if (!historialId) return;
+        if (!historialId) {
+          console.warn("[pedidos_pendientes] historial cliente no encontrado para marcar entregado_por", {
+            id_venta: ventaIdNum,
+          });
+          return;
+        }
         const { error: updErr } = await supabase
           .from("historial_ventas")
           .update({ entregado_por: adminIdNum })
