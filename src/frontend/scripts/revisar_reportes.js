@@ -2581,7 +2581,9 @@ async function reemplazarServicio(options = {}) {
 
 async function autoReplaceInactiveReportes(reportes = []) {
   if (!autoReemplazoCuentaInactivaEnabled) return false;
-  const allTargets = (reportes || []).filter((r) => isTrue(r?.cuenta_inactiva_resuelta));
+  const allTargets = (reportes || []).filter(
+    (r) => isTrue(r?.cuenta_inactiva_resuelta) || toPositiveId(r?.id_tipo_reporte) === 4,
+  );
   const targets = allTargets.filter((r) => platformAllowsAutoReplacement(r));
   const skippedByPlatform = Math.max(0, allTargets.length - targets.length);
   console.log("[reemplazo][auto]", "scan_reportes", {
@@ -2603,7 +2605,8 @@ async function autoReplaceInactiveReportes(reportes = []) {
           .eq("id_venta", ventaId)
           .maybeSingle();
         if (ventaHogarErr) throw ventaHogarErr;
-        if (!hasSevenDaysPassed(ventaHogar?.hora_reporte_hogar)) {
+        const horaReporteHogarRaw = String(ventaHogar?.hora_reporte_hogar || "").trim();
+        if (horaReporteHogarRaw && !hasSevenDaysPassed(horaReporteHogarRaw)) {
           console.log("[reemplazo][auto]", "skip_tipo_4_antes_7_dias", {
             id_reporte: toPositiveId(row?.id_reporte) || null,
             id_venta: ventaId,

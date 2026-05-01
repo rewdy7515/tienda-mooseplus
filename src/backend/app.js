@@ -12162,7 +12162,8 @@ const autoAssignReportedPendingVentas = async ({
         }
         const reporteAbiertoParaVenta = esReportada ? await findOpenReporte(venta) : null;
         const isReporteHogarTipo4 = toPositiveInt(reporteAbiertoParaVenta?.id_tipo_reporte) === 4;
-        if (esReportada && isReporteHogarTipo4 && !hasSevenDaysPassed(venta?.hora_reporte_hogar)) {
+        const horaReporteHogarRaw = String(venta?.hora_reporte_hogar || "").trim();
+        if (esReportada && isReporteHogarTipo4 && horaReporteHogarRaw && !hasSevenDaysPassed(horaReporteHogarRaw)) {
           summary.skipped += 1;
           continue;
         }

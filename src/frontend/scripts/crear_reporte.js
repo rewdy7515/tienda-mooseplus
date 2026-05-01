@@ -560,6 +560,7 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
   idPerfil,
   idPlataforma,
   forceNetflixPlan1Hogar = false,
+  forceReporteHogarTipo4 = false,
 }) {
   if (!idUsuario || !idCuenta) {
     return { reemplazado: false, aplica: false, sinStock: false };
@@ -632,9 +633,10 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
   const isPlanMiembroEquivalente = (ventaMiembro && !ventaPerfil) || perfilHogar;
   const forceByNetflixMotivo =
     forceNetflixPlan1Hogar === true && Number(plataformaId) === 1;
+  const forceByReporteHogarTipo4 = forceReporteHogarTipo4 === true;
   const forceEligiblePlan1 =
     forceByNetflixMotivo && !!toPositiveId(idPerfil) && !isPlanMiembroEquivalente;
-  if (forceByNetflixMotivo && !forceEligiblePlan1) {
+  if (forceByNetflixMotivo && !forceEligiblePlan1 && !forceByReporteHogarTipo4) {
     return {
       reemplazado: false,
       aplica: false,
@@ -642,11 +644,16 @@ async function intentarReemplazoAutomaticoCuentaInactiva({
       mode: "netflix_plan2_keep_reported",
     };
   }
-  const puedeAutoReemplazar = forceEligiblePlan1 || cuentaActual.inactiva === true;
+  const puedeAutoReemplazar =
+    forceByReporteHogarTipo4 || forceEligiblePlan1 || cuentaActual.inactiva === true;
   if (!puedeAutoReemplazar) {
     return { reemplazado: false, aplica: false, sinStock: false };
   }
-  const replaceMode = forceEligiblePlan1 ? "netflix_plan1_hogar" : "cuenta_inactiva";
+  const replaceMode = forceByReporteHogarTipo4
+    ? "reporte_hogar_tipo_4"
+    : forceEligiblePlan1
+      ? "netflix_plan1_hogar"
+      : "cuenta_inactiva";
 
   let nuevoCuenta = null;
   let nuevoPerfil = null;
@@ -1458,12 +1465,14 @@ async function handleSubmit(e) {
       descripcion = motivoLabel;
     }
     const isReporteHogarTipo4 = Number(motivoTipoId) === 4;
+    const horaReporteHogarRaw = String(ventaAsociada?.hora_reporte_hogar || "").trim();
     const puedeAutoReemplazarReporteHogar =
-      !isReporteHogarTipo4 || hasSevenDaysPassed(ventaAsociada?.hora_reporte_hogar);
+      !isReporteHogarTipo4 || !horaReporteHogarRaw || hasSevenDaysPassed(horaReporteHogarRaw);
     const forzarAutoNetflixPlan1Hogar =
       Number(id_plataforma) === 1 &&
       (isReporteHogarTipo4 || isMotivoNetflixTvNoHogar(motivoLabel || descripcion)) &&
       puedeAutoReemplazarReporteHogar;
+    const forzarAutoReporteHogarTipo4 = isReporteHogarTipo4 && puedeAutoReemplazarReporteHogar;
 
     const file = (inputFiles?.files && inputFiles.files[0]) || null;
     let imagenPath = null;
@@ -1494,6 +1503,7 @@ async function handleSubmit(e) {
           idPerfil: idPerfilReporte,
           idPlataforma: id_plataforma,
           forceNetflixPlan1Hogar: forzarAutoNetflixPlan1Hogar,
+          forceReporteHogarTipo4: forzarAutoReporteHogarTipo4,
         })
       : { reemplazado: false, aplica: false, sinStock: false };
     if (autoReplaceResult?.reemplazado) {
@@ -1503,6 +1513,8 @@ async function handleSubmit(e) {
       const descripcionSolucionBase =
         autoReplaceResult?.mode === "netflix_plan1_hogar"
           ? "Reemplazo automático por motivo hogar Netflix (plan 1)"
+          : autoReplaceResult?.mode === "reporte_hogar_tipo_4"
+            ? "Reemplazo automático por reporte de hogar"
           : "Reemplazo automático por cuenta inactiva";
       const descripcionSolucionAuto = correoNuevoAuto
         ? `${descripcionSolucionBase}: ${correoNuevoAuto}`
