@@ -544,15 +544,25 @@
         const pick = (type) => parts.find((part) => part.type === type)?.value || "";
         return `${pick("year")}-${pick("month")}-${pick("day")}`;
       };
+      const addMonthsToIsoDate = (isoDate, months = 1) => {
+        const match = String(isoDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return "";
+        const year = Number(match[1]);
+        const monthIndex = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        const monthsVal = Number.isFinite(months) && months > 0 ? Math.round(months) : 1;
+        const targetMonthIndex = monthIndex + monthsVal;
+        const targetYear = year + Math.floor(targetMonthIndex / 12);
+        const normalizedMonthIndex = ((targetMonthIndex % 12) + 12) % 12;
+        const daysInTarget = new Date(Date.UTC(targetYear, normalizedMonthIndex + 1, 0)).getUTCDate();
+        const targetDay = Math.min(day, daysInTarget);
+        const target = new Date(Date.UTC(targetYear, normalizedMonthIndex, targetDay));
+        return target.toISOString().slice(0, 10);
+      };
 
       const setFechaCorteDefault = (meses) => {
         const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
-        const base = new Date();
-        base.setHours(12, 0, 0, 0);
-        const target = new Date(base);
-        target.setMonth(target.getMonth() + monthsVal);
-        const pad = (n) => String(n).padStart(2, "0");
-        const iso = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
+        const iso = addMonthsToIsoDate(getCaracasTodayIso(), monthsVal);
         if (fechaCorteInput) fechaCorteInput.value = iso;
       };
 
@@ -698,16 +708,11 @@
 
         setStatus("Agregando cuenta...");
         try {
-        const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
-        const today = new Date();
-        const fechaPagada = getCaracasTodayIso();
-        const fechaCorte =
-          fechaCorteInput?.value?.trim() ||
-          (() => {
-            const fechaCorteDate = new Date(today);
-            fechaCorteDate.setMonth(fechaCorteDate.getMonth() + monthsVal);
-            return fechaCorteDate.toISOString().slice(0, 10);
-          })();
+          const monthsVal = Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
+          const fechaPagada = getCaracasTodayIso();
+          const fechaCorte =
+            fechaCorteInput?.value?.trim() ||
+            addMonthsToIsoDate(fechaPagada, monthsVal);
 
           let venta_perfil = false;
           let venta_miembro = false;

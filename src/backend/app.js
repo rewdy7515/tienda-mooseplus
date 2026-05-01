@@ -12330,7 +12330,7 @@ const autoAssignReportedPendingVentas = async ({
         updateVenta.reportado = false;
         updateVenta.aviso_admin = true;
         if (isReporteHogarTipo4) {
-          updateVenta.hora_reporte_hogar = new Date().toISOString();
+          updateVenta.hora_reporte_hogar = getCaracasTimestampIso().iso;
         }
       }
       if (oldCuentaMiembroId) {

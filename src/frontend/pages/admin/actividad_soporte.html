@@ -277,10 +277,19 @@
       const chartPie = document.querySelector("#chart-pie");
       const pieLegend = document.querySelector("#pie-legend");
 
-      const now = new Date();
-      yearEl.value = String(now.getFullYear());
+      const getCaracasMonthParts = () => {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Caracas",
+          year: "numeric",
+          month: "2-digit",
+        }).formatToParts(new Date());
+        const pick = (type) => parts.find((part) => part.type === type)?.value || "";
+        return { year: pick("year"), month: pick("month") };
+      };
+      const caracasNow = getCaracasMonthParts();
+      yearEl.value = caracasNow.year || String(new Date().getFullYear());
       monthEl.innerHTML = MONTH_NAMES.map((name, idx) => `<option value="${idx + 1}">${name}</option>`).join("");
-      monthEl.value = String(now.getMonth() + 1);
+      monthEl.value = String(Number(caracasNow.month) || new Date().getMonth() + 1);
 
       const esc = (v) => String(v ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
