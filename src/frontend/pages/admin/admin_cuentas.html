@@ -3449,6 +3449,7 @@
         const cuentaIdNum = toPositiveId(cuentaId);
         const cuentaMiembroIdNum = toPositiveId(cuentaMiembroId);
         const plataformaIdNum = toPositiveId(plataformaId);
+        const preferSubCuenta = ventaPerfil || ventaMiembro || !!perfilIdNum || !!cuentaMiembroIdNum;
 
         const fetchVentaPrecioBy = async (field, value) => {
           const id = toPositiveId(value);
@@ -3465,6 +3466,17 @@
           if (error) throw error;
           return toPositiveId(data?.id_precio);
         };
+        const isPrecioCuentaCompleta = async (idPrecio) => {
+          const id = toPositiveId(idPrecio);
+          if (!id) return false;
+          const { data, error } = await supabase
+            .from("precios")
+            .select("completa, sub_cuenta")
+            .eq("id_precio", id)
+            .maybeSingle();
+          if (error) throw error;
+          return isTrue(data?.completa) && !isTrue(data?.sub_cuenta);
+        };
 
         // Para cuentas dominio no se recicla el id_precio de ventas previas:
         // se fuerza a resolver desde la grilla de precios de la plataforma.
@@ -3477,7 +3489,10 @@
           ];
           for (const [field, value] of directChecks) {
             const match = await fetchVentaPrecioBy(field, value);
-            if (match) return match;
+            if (match) {
+              if (preferSubCuenta && (await isPrecioCuentaCompleta(match))) continue;
+              return match;
+            }
           }
         }
 
@@ -3491,7 +3506,6 @@
         const rows = Array.isArray(precios) ? precios : [];
         if (!rows.length) return null;
 
-        const preferSubCuenta = ventaPerfil || ventaMiembro;
         const preferred = ventaDominio
           ? rows.find((p) => !isTrue(p?.completa) && !isTrue(p?.sub_cuenta))
           : preferSubCuenta
@@ -4917,7 +4931,7 @@
           const { data: cuenta, error } = await supabase
             .from("cuentas")
             .select(
-              "id_cuenta, correo, clave, pin, fecha_corte, id_plataforma, id_proveedor, region, direccion, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_madre, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre",
+              "id_cuenta, correo, clave, pin, fecha_corte, id_plataforma, id_proveedor, region, direccion, venta_perfil, venta_miembro, venta_dominio, dominio_de, id_cuenta_madre, instaddr, link_codigo, correo_codigo, pin_codigo, inactiva, ocupado, cuenta_madre, completa",
             )
             .eq("id_cuenta", idCuenta)
             .maybeSingle();
@@ -5353,6 +5367,7 @@
             venta_perfil: cuenta.venta_perfil,
             venta_miembro: cuenta.venta_miembro,
             cuenta_madre: cuenta.cuenta_madre === true,
+            completa: cuenta.completa === true,
             hasVentasCuenta,
         ultimosCorreosPlat1,
             por_acceso: plat?.por_acceso || false,
@@ -6278,8 +6293,19 @@
                 }
               }
               const isSpotify = plataformaIdNum === 9;
+              const isSpotifyMemberSale =
+                isSpotify &&
+                (currentCuentaDetalle?.cuenta_madre === true ||
+                  currentCuentaDetalle?.venta_miembro === true ||
+                  !!perfilId);
+              const isSpotifyCuentaCompletaRegistro =
+                isSpotify &&
+                !isSpotifyMemberSale &&
+                currentCuentaDetalle?.venta_perfil === false &&
+                currentCuentaDetalle?.venta_miembro === false &&
+                currentCuentaDetalle?.cuenta_madre !== true;
               let memberCuentaId = null;
-              if (isSpotify) {
+              if (isSpotifyMemberSale) {
                 if (!finalUserId) {
                   alert("Selecciona un cliente válido.");
                   return;
@@ -6287,7 +6313,7 @@
                 const { data: cuentaExist, error: cErr } = await supabase
                   .from("cuentas")
                   .select(
-                    "id_cuenta, id_cuenta_madre, dominio_de, venta_dominio, venta_miembro, venta_perfil, cuenta_madre",
+                    "id_cuenta, id_cuenta_madre, dominio_de, venta_dominio, venta_miembro, venta_perfil, cuenta_madre, completa",
                   )
                   .eq("id_plataforma", 9)
                   .eq("correo", correoVal)
@@ -6306,6 +6332,7 @@
                     venta_perfil: false,
                     venta_miembro: false,
                     cuenta_madre: false,
+                    completa: false,
                     id_proveedor: currentCuentaDetalle?.proveedorId || null,
                   };
                   const { data: newCuenta, error: insErr } = await supabase
@@ -6318,6 +6345,10 @@
                 } else {
                   if (cuentaExist.cuenta_madre === true) {
                     alert("El correo corresponde a una cuenta madre. Usa el correo del cliente.");
+                    return;
+                  }
+                  if (cuentaExist.completa === true) {
+                    alert("El correo corresponde a una cuenta completa. No se puede vincular a una cuenta madre.");
                     return;
                   }
                   memberCuentaId = cuentaExist.id_cuenta;
@@ -6339,6 +6370,7 @@
                   if (cuentaExist.venta_miembro !== false) updates.venta_miembro = false;
                   if (cuentaExist.venta_perfil !== false) updates.venta_perfil = false;
                   if (cuentaExist.cuenta_madre === true) updates.cuenta_madre = false;
+                  if (cuentaExist.completa !== false) updates.completa = false;
                   if (Object.keys(updates).length) {
                     const { error: updErr } = await supabase
                       .from("cuentas")
@@ -6355,6 +6387,19 @@
                   if (perfErr) throw perfErr;
                 }
               }
+              if (isSpotifyCuentaCompletaRegistro) {
+                const { error: cuentaCompletaErr } = await supabase
+                  .from("cuentas")
+                  .update({
+                    completa: true,
+                    id_cuenta_madre: null,
+                    venta_perfil: false,
+                    venta_miembro: false,
+                    cuenta_madre: false,
+                  })
+                  .eq("id_cuenta", cuentaId);
+                if (cuentaCompletaErr) throw cuentaCompletaErr;
+              }
               if (!isSpotify && usaCredencialesCliente) {
                 await markCuentaAsDominio({
                   cuentaId,
@@ -6364,7 +6409,7 @@
               resolvedIdPrecio = await resolveRegistroServicioIdPrecio({
                 perfilId,
                 cuentaId,
-                cuentaMiembroId: isSpotify ? memberCuentaId : null,
+                cuentaMiembroId: isSpotifyMemberSale ? memberCuentaId : null,
                 plataformaId: plataformaIdNum,
                 ventaPerfil: currentCuentaDetalle?.venta_perfil === true,
                 ventaMiembro: currentCuentaDetalle?.venta_miembro === true,
@@ -6376,7 +6421,7 @@
               const ventaPayload = {
                 id_usuario: finalUserId,
                 id_cuenta: Number(cuentaId),
-                id_cuenta_miembro: isSpotify ? memberCuentaId : null,
+                id_cuenta_miembro: isSpotifyMemberSale ? memberCuentaId : null,
                 id_perfil: perfilId ? Number(perfilId) : null,
                 id_precio: resolvedIdPrecio,
                 fecha_corte: fechaVal,
@@ -6387,6 +6432,11 @@
                 recordatorio_corte_enviado: false,
                 aviso_admin: false,
               };
+              if (isSpotifyCuentaCompletaRegistro) {
+                ventaPayload.completa = true;
+              } else if (isSpotifyMemberSale) {
+                ventaPayload.completa = false;
+              }
               if (usaCorreoCliente || correoVal) {
                 ventaPayload.correo_miembro = correoVal;
               }
@@ -6435,6 +6485,24 @@
                 alert("Ingresa una fecha de corte.");
                 return;
               }
+              const isCuentaCompletaRegistro =
+                currentCuentaDetalle?.venta_perfil === false &&
+                currentCuentaDetalle?.venta_miembro === false &&
+                currentCuentaDetalle?.cuenta_madre !== true &&
+                !perfilId;
+              if (isCuentaCompletaRegistro) {
+                const { error: cuentaCompletaErr } = await supabase
+                  .from("cuentas")
+                  .update({
+                    completa: true,
+                    id_cuenta_madre: null,
+                    venta_perfil: false,
+                    venta_miembro: false,
+                    cuenta_madre: false,
+                  })
+                  .eq("id_cuenta", cuentaId);
+                if (cuentaCompletaErr) throw cuentaCompletaErr;
+              }
               resolvedIdPrecio = await resolveRegistroServicioIdPrecio({
                 perfilId,
                 cuentaId,
@@ -6460,6 +6528,7 @@
                   recordatorio_enviado: false,
                   recordatorio_corte_enviado: false,
                   aviso_admin: false,
+                  completa: isCuentaCompletaRegistro ? true : null,
                 })
                 .select("id_venta")
                 .single();
@@ -7231,6 +7300,8 @@
             venta_miembro: true,
             venta_perfil: false,
             id_cuenta_madre: currentCuentaId,
+            completa: false,
+            cuenta_madre: false,
           };
           if (claveVal) payload.clave = claveVal;
           const { error: updErr } = await supabase
@@ -7274,6 +7345,8 @@
             venta_miembro: true,
             venta_perfil: false,
             id_cuenta_madre: idCuentaMiembro,
+            completa: false,
+            cuenta_madre: false,
             id_proveedor: currentCuentaDetalle?.proveedorId || null,
             ocupado: ocupado === false ? false : null,
           };
@@ -7651,6 +7724,10 @@
             id_sub_cuenta: null,
             id_precio: ventaInfo?.id_precio ?? null,
           };
+          if (!nuevoPerfil && !ventaMiembro && !ventaPerfil) {
+            updates.id_cuenta_miembro = null;
+            updates.completa = true;
+          }
           const { error: updVentaErr } = await supabase
             .from("ventas")
             .update(updates)
@@ -7700,9 +7777,20 @@
               console.error("[reemplazo] marcar perfil nuevo error", occErr);
           }
           if (nuevoCuenta) {
+            const updateCuentaDestino =
+              !nuevoPerfil && !ventaMiembro && !ventaPerfil
+                ? {
+                    ocupado: true,
+                    completa: true,
+                    id_cuenta_madre: null,
+                    venta_perfil: false,
+                    venta_miembro: false,
+                    cuenta_madre: false,
+                  }
+                : { ocupado: true };
             const { error: occCuentaErr } = await supabase
               .from("cuentas")
-              .update({ ocupado: true })
+              .update(updateCuentaDestino)
               .eq("id_cuenta", nuevoCuenta);
             if (occCuentaErr)
               console.error("[reemplazo] marcar cuenta nueva error", occCuentaErr);
@@ -8087,7 +8175,13 @@
 
         const { error: updMadreErr } = await supabase
           .from("cuentas")
-          .update({ id_cuenta_madre: newId })
+          .update({
+            id_cuenta_madre: newId,
+            completa: false,
+            venta_perfil: false,
+            venta_miembro: false,
+            cuenta_madre: false,
+          })
           .eq("id_cuenta_madre", oldId);
         if (updMadreErr) throw updMadreErr;
 
@@ -8188,7 +8282,13 @@
             if (delErr) throw delErr;
             const { error: updErr } = await supabase
               .from("cuentas")
-              .update({ venta_perfil: false, venta_miembro: false })
+              .update({
+                venta_perfil: false,
+                venta_miembro: false,
+                cuenta_madre: false,
+                id_cuenta_madre: null,
+                completa: true,
+              })
               .eq("id_cuenta", cuentaId);
             if (updErr) throw updErr;
             loadCuentaDetalle(cuentaId);
@@ -9320,10 +9420,12 @@
         const excludeCuentaId = toPositiveId(excludeCuenta);
         let query = supabase
           .from("cuentas")
-          .select("id_cuenta, correo, clave, inactiva")
+          .select("id_cuenta, correo, clave, inactiva, id_cuenta_madre, cuenta_madre, completa")
           .eq("id_plataforma", plataformaId)
           .eq("venta_perfil", false)
           .eq("venta_miembro", false)
+          .is("id_cuenta_madre", null)
+          .or("cuenta_madre.is.null,cuenta_madre.eq.false")
           .eq("inactiva", false)
           .or("ocupado.is.null,ocupado.eq.false")
           .order("id_cuenta", { ascending: true });
@@ -9332,7 +9434,12 @@
         if (error) return { error };
         const candidatos = (data || []).filter((cuenta) => {
           const cuentaId = toPositiveId(cuenta?.id_cuenta);
-          return !!cuentaId && (!excludeCuentaId || cuentaId !== excludeCuentaId);
+          return (
+            !!cuentaId &&
+            !toPositiveId(cuenta?.id_cuenta_madre) &&
+            !isTrue(cuenta?.cuenta_madre) &&
+            (!excludeCuentaId || cuentaId !== excludeCuentaId)
+          );
         });
         const libre = candidatos.find((cuenta) => {
           const cuentaId = toPositiveId(cuenta?.id_cuenta);
@@ -9426,7 +9533,13 @@
           if (ventaInfo?.id_cuenta_miembro) {
             await supabase
               .from("cuentas")
-              .update({ id_cuenta_madre: nuevoCuenta })
+              .update({
+                id_cuenta_madre: nuevoCuenta,
+                completa: false,
+                venta_perfil: false,
+                venta_miembro: false,
+                cuenta_madre: false,
+              })
               .eq("id_cuenta", ventaInfo.id_cuenta_miembro);
           }
           const perfilPrev = ventaInfo?.id_perfil || oldPerfilId;

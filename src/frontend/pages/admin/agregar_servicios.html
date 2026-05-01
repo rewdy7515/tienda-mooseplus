@@ -746,6 +746,8 @@
             ocupado,
             inactiva: false,
             cuenta_madre,
+            id_cuenta_madre: null,
+            completa: tipo === "cuenta_completa",
           };
 
           let cuentaInserted = null;
@@ -819,19 +821,15 @@
           });
           if (histErr) throw histErr;
 
-          // Crear tareas automáticas al agregar cuentas por pantalla.
-          const omitirTareasAutomaticas =
-            tipo === "cuenta_completa" ||
-            (venta_perfil === true && venta_miembro === false);
-          if (porPantalla && cuentaInserted?.id_cuenta && !omitirTareasAutomaticas) {
-            const tareasRows = [
-              { id_tarea: 2, cuenta: cuentaInserted.id_cuenta },
-            ];
-            if (usaPines) {
-              tareasRows.push({ id_tarea: 3, cuenta: cuentaInserted.id_cuenta });
+          // Crear tareas automáticas según las banderas de la plataforma.
+          if (cuentaInserted?.id_cuenta) {
+            const tareasRows = [];
+            if (porPantalla) tareasRows.push({ id_tarea: 2, cuenta: cuentaInserted.id_cuenta });
+            if (usaPines) tareasRows.push({ id_tarea: 3, cuenta: cuentaInserted.id_cuenta });
+            if (tareasRows.length) {
+              const { error: tareasErr } = await supabase.from("tareas_asignadas").insert(tareasRows);
+              if (tareasErr) throw tareasErr;
             }
-            const { error: tareasErr } = await supabase.from("tareas_asignadas").insert(tareasRows);
-            if (tareasErr) throw tareasErr;
           }
 
           // Marcar pin de recarga como usado si aplica

@@ -11705,7 +11705,8 @@ const autoAssignReportedPendingVentas = async ({
           inactiva,
           venta_perfil,
           venta_miembro,
-          cuenta_madre
+          cuenta_madre,
+          id_cuenta_madre
         ),
         cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(
           id_cuenta,
@@ -11764,10 +11765,12 @@ const autoAssignReportedPendingVentas = async ({
     const excludeIds = new Set(uniqPositiveIds(excludeCuentaIds));
     const { data, error } = await supabaseAdmin
       .from("cuentas")
-      .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro")
+      .select("id_cuenta, correo, clave, inactiva, ocupado, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, completa")
       .eq("id_plataforma", plataformaId)
       .eq("venta_perfil", false)
       .eq("venta_miembro", false)
+      .is("id_cuenta_madre", null)
+      .or("cuenta_madre.is.null,cuenta_madre.eq.false")
       .or("ocupado.is.null,ocupado.eq.false")
       .or("inactiva.is.null,inactiva.eq.false")
       .order("id_cuenta", { ascending: true })
@@ -11778,6 +11781,8 @@ const autoAssignReportedPendingVentas = async ({
       return (
         !!cuentaId &&
         !excludeIds.has(cuentaId) &&
+        !toPositiveInt(cuenta?.id_cuenta_madre) &&
+        !isTrue(cuenta?.cuenta_madre) &&
         !isInactive(cuenta?.inactiva) &&
         !isTrue(cuenta?.ocupado) &&
         !reemplazosBloqueados.cuentas.has(cuentaId)
@@ -11953,7 +11958,10 @@ const autoAssignReportedPendingVentas = async ({
           !ventaPerfil &&
           !ventaMiembro &&
           (isTrue(venta?.precios?.completa) ||
-            (!isTrue(currentCuenta?.venta_perfil) && !isTrue(currentCuenta?.venta_miembro)));
+            (!isTrue(currentCuenta?.venta_perfil) &&
+              !isTrue(currentCuenta?.venta_miembro) &&
+              !toPositiveInt(currentCuenta?.id_cuenta_madre) &&
+              !isTrue(currentCuenta?.cuenta_madre)));
         let useNetflixPlan2Flow = isNetflixPlan2 && !ventaCompleta;
 
         if (!esReportada && !tieneRecursoAsignado) {
@@ -12076,6 +12084,11 @@ const autoAssignReportedPendingVentas = async ({
         pendiente: false,
         entrega_aviso: false,
       };
+      if (ventaCompleta) {
+        updateVenta.id_cuenta_miembro = null;
+        updateVenta.id_perfil = null;
+        updateVenta.completa = true;
+      }
       if (esReportada) {
         updateVenta.reportado = false;
         updateVenta.aviso_admin = true;
@@ -12116,7 +12129,18 @@ const autoAssignReportedPendingVentas = async ({
       }
       const { error: occCuentaErr } = await supabaseAdmin
         .from("cuentas")
-        .update({ ocupado: true })
+        .update(
+          ventaCompleta
+            ? {
+                ocupado: true,
+                completa: true,
+                id_cuenta_madre: null,
+                venta_perfil: false,
+                venta_miembro: false,
+                cuenta_madre: false,
+              }
+            : { ocupado: true },
+        )
         .eq("id_cuenta", nuevoCuentaId);
       if (occCuentaErr) throw occCuentaErr;
 
@@ -13739,7 +13763,11 @@ const processOrderFromItems = async ({
   const archivosArr = Array.isArray(archivos) ? archivos : [];
   const comprobanteHist = archivosArr?.[0] || null;
   const isCuentaCompletaByFlags = (cuentaRow) =>
-    !!cuentaRow && !isTrue(cuentaRow?.venta_perfil) && !isTrue(cuentaRow?.venta_miembro);
+    !!cuentaRow &&
+    !isTrue(cuentaRow?.venta_perfil) &&
+    !isTrue(cuentaRow?.venta_miembro) &&
+    !toPositiveInt(cuentaRow?.id_cuenta_madre) &&
+    !isTrue(cuentaRow?.cuenta_madre);
   const cuentaFlagsById = {};
   const hasCustomItemAmounts = itemAmountMapById instanceof Map && itemAmountMapById.size > 0;
   const getLineAmountForItem = (item, fallbackAmount = 0) => {
@@ -13842,7 +13870,7 @@ const processOrderFromItems = async ({
     const { data: ventasExistentes, error: ventErr } = await supabaseAdmin
       .from("ventas")
       .select(
-        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)"
+        "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave)"
       )
       .in("id_venta", idsVentasRenovar);
     if (ventErr) throw ventErr;
@@ -14080,10 +14108,12 @@ const processOrderFromItems = async ({
     } else if (price.completa) {
       let cuentasQuery = supabaseAdmin
         .from("cuentas")
-        .select("id_cuenta, id_plataforma, ocupado, inactiva")
+        .select("id_cuenta, id_plataforma, ocupado, inactiva, id_cuenta_madre, cuenta_madre, completa")
         .eq("id_plataforma", platId)
         .eq("venta_perfil", false)
         .eq("venta_miembro", false)
+        .is("id_cuenta_madre", null)
+        .or("cuenta_madre.is.null,cuenta_madre.eq.false")
         .eq("ocupado", false)
         .or("inactiva.is.null,inactiva.eq.false");
       if (entregaInmediata) {
@@ -14098,6 +14128,8 @@ const processOrderFromItems = async ({
         return (
           !isInactive(c?.inactiva) &&
           !!cuentaId &&
+          !toPositiveInt(c?.id_cuenta_madre) &&
+          !isTrue(c?.cuenta_madre) &&
           !reemplazosBloqueados.cuentas.has(cuentaId)
         );
       });
@@ -14352,7 +14384,7 @@ const processOrderFromItems = async ({
   if (assignedCuentaIds.length) {
     const { data: cuentasAsignadas, error: ctaValErr } = await supabaseAdmin
       .from("cuentas")
-      .select("id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro, correo, clave")
+      .select("id_cuenta, id_plataforma, inactiva, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave")
       .in("id_cuenta", assignedCuentaIds);
     if (ctaValErr) throw ctaValErr;
     const bad = (cuentasAsignadas || []).find((c) => isInactive(c.inactiva));
@@ -14464,7 +14496,7 @@ const processOrderFromItems = async ({
         supabaseAdmin
           .from("ventas")
           .select(
-            "id_venta, id_usuario, id_precio, fecha_corte, id_cuenta, id_cuenta_miembro, suspendido, pendiente, pago_rechazado, completa, correo_miembro, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), precios:precios!ventas_id_precio_fkey(id_plataforma)",
+            "id_venta, id_usuario, id_precio, fecha_corte, id_cuenta, id_cuenta_miembro, suspendido, pendiente, pago_rechazado, completa, correo_miembro, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave), precios:precios!ventas_id_precio_fkey(id_plataforma)",
           )
           .eq("id_usuario", toPositiveInt(idUsuarioVentas))
           .not("correo_miembro", "is", null)
@@ -14695,7 +14727,7 @@ const processOrderFromItems = async ({
       const { data: implicitVentas, error: implicitVentasErr } = await supabaseAdmin
         .from("ventas")
         .select(
-          "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, correo, clave)",
+          "id_venta, fecha_corte, id_cuenta, id_cuenta_miembro, id_perfil, id_usuario, suspendido, completa, cuenta_principal:cuentas!ventas_id_cuenta_fkey(id_cuenta, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave), cuenta_miembro:cuentas!ventas_id_cuenta_miembro_fkey(id_cuenta, venta_perfil, venta_miembro, id_cuenta_madre, cuenta_madre, correo, clave)",
         )
         .in("id_venta", implicitVentaIds);
       if (implicitVentasErr) throw implicitVentasErr;
@@ -15146,7 +15178,14 @@ const processOrderFromItems = async ({
   if (cuentasCompletasIds.length) {
     const { error: updCompletaErr } = await supabaseAdmin
       .from("cuentas")
-      .update({ completa: true })
+      .update({
+        ocupado: true,
+        completa: true,
+        id_cuenta_madre: null,
+        venta_perfil: false,
+        venta_miembro: false,
+        cuenta_madre: false,
+      })
       .in("id_cuenta", cuentasCompletasIds);
     if (updCompletaErr) throw updCompletaErr;
   }
@@ -17484,8 +17523,8 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
       });
     }
 
-    const ventaIds = uniqPositiveIds(payload.ventaIds || []).sort((a, b) => a - b);
-    if (!ventaIds.length) {
+    const tokenVentaIds = uniqPositiveIds(payload.ventaIds || []).sort((a, b) => a - b);
+    if (!tokenVentaIds.length) {
       return res.status(400).json({ error: "Link sin ventas para procesar." });
     }
 
@@ -17493,10 +17532,11 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
       .from("ventas")
       .select("id_venta, id_usuario, id_precio, id_cuenta, id_cuenta_miembro, id_perfil")
       .eq("id_usuario", payload.uid)
-      .in("id_venta", ventaIds);
+      .in("id_venta", tokenVentaIds);
     if (ventasErr) throw ventasErr;
 
     const ventas = Array.isArray(ventasRows) ? ventasRows : [];
+    const ventaIds = tokenVentaIds;
     const renewalPriceIds = uniqPositiveIds((ventas || []).map((venta) => venta?.id_precio));
     const renewalSpecialRows = renewalPriceIds.length
       ? await listUserSpecialPrices({
@@ -17527,7 +17567,6 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
             "id_item, id_venta, id_precio, id_precio_especial, cantidad, meses, renovacion, id_cuenta, id_perfil",
           )
           .eq("id_carrito", carritoId)
-          .eq("renovacion", true)
           .in("id_venta", existingVentaIds)
       : { data: [], error: null };
     if (existingRows.error) throw existingRows.error;
@@ -17552,21 +17591,30 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
       if (!primaryRow) continue;
       if (duplicateRows.length) {
         const primaryItemId = toPositiveInt(primaryRow?.id_item);
-        const mergedCantidad = Math.max(
-          0,
-          Math.round(
-            sortedRows.reduce((acc, row) => {
-              const qty = Number(row?.cantidad);
-              return acc + (Number.isFinite(qty) ? qty : 0);
-            }, 0),
-          ),
+        const mergedMeses = Math.max(
+          1,
+          ...sortedRows.map((row) => {
+            const meses = Number(row?.meses);
+            return Number.isFinite(meses) && meses > 0 ? Math.round(meses) : 1;
+          }),
         );
         if (primaryItemId) {
           const primaryQty = Number(primaryRow?.cantidad);
-          if (!Number.isFinite(primaryQty) || Math.round(primaryQty) !== mergedCantidad) {
+          const primaryMeses = Number(primaryRow?.meses);
+          const primaryPatch = {};
+          if (!Number.isFinite(primaryQty) || Math.round(primaryQty) !== 1) {
+            primaryPatch.cantidad = 1;
+          }
+          if (!Number.isFinite(primaryMeses) || Math.round(primaryMeses) !== mergedMeses) {
+            primaryPatch.meses = mergedMeses;
+          }
+          if (primaryRow?.renovacion !== true) {
+            primaryPatch.renovacion = true;
+          }
+          if (Object.keys(primaryPatch).length) {
             const { error: mergeUpdErr } = await supabaseAdmin
               .from("carrito_items")
-              .update({ cantidad: mergedCantidad })
+              .update(primaryPatch)
               .eq("id_item", primaryItemId);
             if (mergeUpdErr) throw mergeUpdErr;
           }
@@ -17581,16 +17629,34 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
         }
         existingByVenta[ventaIdNum] = {
           ...primaryRow,
-          cantidad: mergedCantidad,
+          cantidad: 1,
+          meses: mergedMeses,
+          renovacion: true,
         };
         console.warn("[cart/renewal-link/apply] consolidando duplicados de renovacion", {
           id_carrito: carritoId,
           id_venta: ventaIdNum,
           duplicates_removed: duplicateRows.length,
-          merged_qty: mergedCantidad,
+          merged_meses: mergedMeses,
         });
       } else {
-        existingByVenta[ventaIdNum] = primaryRow;
+        if (primaryRow?.renovacion !== true) {
+          const primaryItemId = toPositiveInt(primaryRow?.id_item);
+          if (primaryItemId) {
+            const { error: fixRenewErr } = await supabaseAdmin
+              .from("carrito_items")
+              .update({ renovacion: true, cantidad: 1 })
+              .eq("id_item", primaryItemId);
+            if (fixRenewErr) throw fixRenewErr;
+          }
+          existingByVenta[ventaIdNum] = {
+            ...primaryRow,
+            cantidad: 1,
+            renovacion: true,
+          };
+        } else {
+          existingByVenta[ventaIdNum] = primaryRow;
+        }
       }
     }
 
@@ -17623,7 +17689,7 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
         const patch = {};
         const existingCantidad = Number(existing?.cantidad);
         const existingMeses = Number(existing?.meses);
-        if (!Number.isFinite(existingCantidad) || existingCantidad <= 0) patch.cantidad = 1;
+        if (!Number.isFinite(existingCantidad) || Math.round(existingCantidad) !== 1) patch.cantidad = 1;
         if (!Number.isFinite(existingMeses) || existingMeses <= 0) patch.meses = 1;
         if (existing?.renovacion !== true) patch.renovacion = true;
         if (toPositiveInt(existing?.id_precio) !== precioId) patch.id_precio = precioId;
@@ -17670,7 +17736,7 @@ app.post("/api/cart/renewal-link/apply", async (req, res) => {
     return res.json({
       ok: true,
       id_carrito: carritoId,
-      total_requested: ventaIds.length,
+      total_requested: tokenVentaIds.length,
       total_found: ventas.length,
       added,
       already_in_cart: alreadyInCart,

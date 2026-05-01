@@ -1328,15 +1328,15 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
                       ${
                         r.asignado_a
                           ? `<span class="pedido-asignado">Asignado a: ${escapeHtml(getPedidoAsignadoLabel(r))}</span>`
-                          : `<button class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
+                          : `<button type="button" class="btn-primary btn-tomar-pedido" title="Tomar pedido" aria-label="Tomar pedido" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}">Tomar pedido</button>`
                       }
                       <span class="pp-select-wrap" title="Seleccionar venta">
                         <input type="checkbox" class="pp-sale-select" aria-label="Seleccionar venta #${r.id_venta}" data-venta="${r.id_venta}" ${
                           selectedVentaIds.has(toPositiveId(r.id_venta)) ? "checked" : ""
                         } />
                       </span>
-                      <button class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-pendiente="${r.pendiente ? "true" : "false"}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
-                      <button class="btn-outline btn-alert" title="${datosIncorrectosBloqueado ? "Ya reportado" : "Reporte admin"}" aria-label="${datosIncorrectosBloqueado ? "Reporte admin bloqueado" : "Reporte admin"}" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}" ${datosIncorrectosBloqueado ? "disabled" : ""}>Reporte admin</button>
+                      <button type="button" class="btn-primary btn-entregar" title="Entregar servicio" aria-label="Entregar servicio" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-plataforma="${r.plataforma || ""}" data-id-plataforma="${r.id_plataforma || ""}" data-id-precio="${r.id_precio || ""}" data-precio-completa="${r.precio_completa ? "true" : "false"}" data-correo="${r.correo || ""}" data-clave="${r.clave || ""}" data-fecha="${r.fecha_corte || ""}" data-perfil="${r.perfil || ""}" data-nperfil="${r.n_perfil || ""}" data-poracceso="${r.por_acceso ? "true" : "false"}" data-porpantalla="${r.por_pantalla ? "true" : "false"}" data-usapines="${r.usa_pines ? "true" : "false"}" data-tarjeta-regalo="${r.tarjeta_de_regalo ? "true" : "false"}" data-cuenta-madre="${r.cuenta_madre ? "true" : "false"}" data-completa="${r.completa ? "true" : "false"}" data-meses="${r.meses_contratados || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}" data-pendiente="${r.pendiente ? "true" : "false"}" data-reportado="${r.reportado ? "true" : "false"}" data-correo-cliente="${payload.correo_cliente ? "true" : "false"}">📤</button>
+                      <button type="button" class="btn-outline btn-alert" title="${datosIncorrectosBloqueado ? "Ya reportado" : "Reporte admin"}" aria-label="${datosIncorrectosBloqueado ? "Reporte admin bloqueado" : "Reporte admin"}" data-venta="${r.id_venta}" data-usuario="${r.id_usuario || ""}" data-id-plataforma="${r.id_plataforma || ""}" ${datosIncorrectosBloqueado ? "disabled" : ""}>Reporte admin</button>
                       ${
                         r.cuenta_madre
                           ? `<span class="madre-switch-wrap" data-venta="${r.id_venta}" data-id-plataforma="${r.id_plataforma || ""}" data-id-cuenta="${r.id_cuenta || ""}" data-id-perfil="${r.id_perfil || ""}" data-id-cuenta-miembro="${r.id_cuenta_miembro || ""}">
@@ -1744,7 +1744,7 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           if (!exactCorreo) return null;
           const { data: exactRows, error: exactErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, clave, correo")
+            .select("id_cuenta, clave, correo, completa, id_cuenta_madre, cuenta_madre, venta_perfil, venta_miembro")
             .eq("correo", exactCorreo)
             .order("id_cuenta", { ascending: true })
             .limit(1);
@@ -1752,7 +1752,7 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           if (exactRows?.[0]?.id_cuenta) return exactRows[0];
           const { data: ilikeRows, error: ilikeErr } = await supabase
             .from("cuentas")
-            .select("id_cuenta, clave, correo")
+            .select("id_cuenta, clave, correo, completa, id_cuenta_madre, cuenta_madre, venta_perfil, venta_miembro")
             .ilike("correo", exactCorreo)
             .order("id_cuenta", { ascending: true })
             .limit(20);
@@ -1776,6 +1776,8 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
             updateCuenta.id_cuenta_madre = null;
             updateCuenta.venta_perfil = false;
             updateCuenta.venta_miembro = false;
+            updateCuenta.cuenta_madre = false;
+            updateCuenta.completa = true;
           }
           if (Number.isFinite(proveedorId) && proveedorId > 0) {
             updateCuenta.id_proveedor = proveedorId;
@@ -1817,12 +1819,16 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
         if (!cuentaExist && !correoCuentaNorm && hasIdPlataforma) {
           let stockQuery = supabase
             .from("cuentas")
-            .select("id_cuenta, correo, clave, venta_miembro, venta_perfil")
+            .select("id_cuenta, correo, clave, venta_miembro, venta_perfil, id_cuenta_madre, cuenta_madre, completa")
             .eq("id_plataforma", idPlataformaNum)
             .eq("ocupado", false)
             .or("inactiva.is.null,inactiva.eq.false");
           stockQuery = forceCuentaCompleta
-            ? stockQuery.eq("venta_perfil", false).eq("venta_miembro", false)
+            ? stockQuery
+                .eq("venta_perfil", false)
+                .eq("venta_miembro", false)
+                .is("id_cuenta_madre", null)
+                .or("cuenta_madre.is.null,cuenta_madre.eq.false")
             : stockQuery.eq("venta_perfil", false).eq("venta_miembro", true);
           const { data: cuentasDisponibles, error: cuentasDisponiblesErr } = await stockQuery
             .order("id_cuenta", { ascending: true })
@@ -1831,10 +1837,17 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
           cuentaExist = (cuentasDisponibles || []).find((row) => {
             const cuentaId = toPositiveId(row?.id_cuenta);
             const cuentaCorreo = normalizeCredentialValue(row?.correo || "");
-            return !!cuentaId && !!cuentaCorreo && !reemplazosBloqueados.cuentas.has(cuentaId);
+            if (!cuentaId || !cuentaCorreo || reemplazosBloqueados.cuentas.has(cuentaId)) return false;
+            if (forceCuentaCompleta) {
+              return !toPositiveId(row?.id_cuenta_madre) && !isTrue(row?.cuenta_madre);
+            }
+            return true;
           }) || null;
         }
         if (cuentaExist?.id_cuenta) {
+          if (!forceCuentaCompleta && isTrue(cuentaExist?.completa)) {
+            throw new Error("El correo pertenece a una cuenta completa y no se puede vincular a una cuenta madre.");
+          }
           await updateCuentaForEntrega({
             idCuenta: cuentaExist.id_cuenta,
             claveActual: cuentaExist?.clave || null,
@@ -1909,6 +1922,8 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
               insertCuenta.id_cuenta_madre = null;
               insertCuenta.venta_perfil = false;
               insertCuenta.venta_miembro = false;
+              insertCuenta.cuenta_madre = false;
+              insertCuenta.completa = true;
             }
             const { data: cuentaNueva, error: cuentaErr } = await supabase
               .from("cuentas")
@@ -2006,7 +2021,13 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
         if (cuentaMadreId) {
           const { error: linkErr } = await supabase
             .from("cuentas")
-            .update({ id_cuenta_madre: cuentaMadreId })
+            .update({
+              id_cuenta_madre: cuentaMadreId,
+              completa: false,
+              venta_perfil: false,
+              venta_miembro: false,
+              cuenta_madre: false,
+            })
             .eq("id_cuenta", nuevaCuentaId);
           if (linkErr) throw linkErr;
         }
@@ -2502,6 +2523,10 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
         if (tomarPedidoBtn) {
           const idVenta = Number(tomarPedidoBtn.dataset.venta || "");
           if (!Number.isFinite(idVenta) || idVenta <= 0) return;
+          if (e.isTrusted === false) {
+            console.warn("[pedidos_pendientes] tomar pedido ignorado por evento no manual", { id_venta: idVenta });
+            return;
+          }
           if (!currentUser?.id_usuario) {
             alert("No se pudo identificar el admin actual.");
             return;
@@ -2806,7 +2831,13 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
         if (cuentaMiembroIdNum) {
           const { error: linkErr } = await supabase
             .from("cuentas")
-            .update({ id_cuenta_madre: nextMadreId })
+            .update({
+              id_cuenta_madre: nextMadreId,
+              completa: false,
+              venta_perfil: false,
+              venta_miembro: false,
+              cuenta_madre: false,
+            })
             .eq("id_cuenta", cuentaMiembroIdNum);
           if (linkErr) throw linkErr;
         }
