@@ -1257,8 +1257,13 @@ const deliverPendingGiftCardVenta = async ({
     ok: true,
     id_venta: ventaId,
     id_orden: idOrden || null,
+    id_usuario: idUsuarioVenta,
+    id_plataforma: idPlataforma,
     id_tarjeta_de_regalo: selectedCardId,
     plataforma: plataformaNombre,
+    region: giftRegion || null,
+    valor_tarjeta: giftValue || null,
+    moneda: giftCurrency || null,
     pin: pinGiftCard || "Pendiente",
     copy_text: copyText,
     source,
@@ -1310,6 +1315,7 @@ const processAutoGiftCardPendingDeliveries = async () => {
     }
 
     const priceIdsByKey = new Map();
+    const deliveredGiftCards = [];
     let maxSeenId = cursorBase;
     const summary = {
       scanned: rows.length,
@@ -1317,6 +1323,9 @@ const processAutoGiftCardPendingDeliveries = async () => {
       matched: 0,
       skippedNoMatch: 0,
       failed: 0,
+      whatsappSent: 0,
+      whatsappFailed: 0,
+      whatsappSkipped: 0,
     };
 
     for (const stockRow of rows) {
@@ -1359,12 +1368,13 @@ const processAutoGiftCardPendingDeliveries = async () => {
       summary.matched += 1;
 
       try {
-        await deliverPendingGiftCardVenta({
+        const deliveryResult = await deliverPendingGiftCardVenta({
           idVenta: pendingVentaId,
           idTarjetaDeRegalo: stockId,
           adminInvolucradoId: null,
           source: "auto_stock_insert",
         });
+        deliveredGiftCards.push(deliveryResult);
         summary.delivered += 1;
       } catch (itemErr) {
         summary.failed += 1;
@@ -1377,10 +1387,29 @@ const processAutoGiftCardPendingDeliveries = async () => {
       }
     }
 
+    if (deliveredGiftCards.length) {
+      try {
+        const whatsappResult = await notifyGiftCardDeliveriesWhatsappGrouped({
+          deliveries: deliveredGiftCards,
+          manageWhatsappLifecycle: true,
+          source: "auto_stock_insert",
+        });
+        summary.whatsappSent = whatsappResult?.sent || 0;
+        summary.whatsappFailed = whatsappResult?.failed || 0;
+        summary.whatsappSkipped = whatsappResult?.skipped || 0;
+      } catch (waErr) {
+        summary.whatsappFailed += deliveredGiftCards.length;
+        console.error("[GiftCards] WhatsApp auto-entrega agrupado error", {
+          delivered: deliveredGiftCards.length,
+          error: waErr?.message || waErr,
+        });
+      }
+    }
+
     autoGiftCardPendingDeliveryCursor = Math.max(cursorBase, maxSeenId);
     if (summary.delivered > 0 || summary.failed > 0 || summary.matched > 0) {
       console.log(
-        `[GiftCards] Auto-entrega por inserciones: scanned=${summary.scanned}, matched=${summary.matched}, delivered=${summary.delivered}, failed=${summary.failed}, skipped=${summary.skippedNoMatch}, cursor=${autoGiftCardPendingDeliveryCursor}`,
+        `[GiftCards] Auto-entrega por inserciones: scanned=${summary.scanned}, matched=${summary.matched}, delivered=${summary.delivered}, failed=${summary.failed}, skipped=${summary.skippedNoMatch}, whatsapp_sent=${summary.whatsappSent}, whatsapp_failed=${summary.whatsappFailed}, whatsapp_skipped=${summary.whatsappSkipped}, cursor=${autoGiftCardPendingDeliveryCursor}`,
       );
     }
     return {
@@ -3041,6 +3070,44 @@ ${actionText}
 ${targetUrl}`;
 };
 
+const buildWhatsappGiftCardDeliveriesEntregadasMessage = ({
+  idOrden = null,
+  items = [],
+  detalleOrdenUrl = "",
+  clienteRegistrado = true,
+  signupRegistroUrl = "",
+} = {}) => {
+  const ordenId = toPositiveInt(idOrden) || idOrden || "-";
+  const rows = Array.isArray(items) ? items : [];
+  const detalleUrl = String(detalleOrdenUrl || "").trim() || buildWhatsappOrderDetailUrl(idOrden);
+  const isRegisteredClient = clienteRegistrado !== false;
+  const signupUrl = String(signupRegistroUrl || "").trim();
+  const targetUrl = isRegisteredClient ? detalleUrl : signupUrl || detalleUrl;
+  const actionText = isRegisteredClient
+    ? "Puedes revisar tus servicios por:"
+    : "Registrate y revisa tus servicios por:";
+  const title = rows.length === 1 ? "servicio entregado" : "servicios entregados";
+  const itemLines = rows
+    .map((item) => {
+      const ventaId = toPositiveInt(item?.id_venta) || "-";
+      const plataforma = String(item?.plataforma || "Gift Card").trim();
+      const valueParts = [String(item?.valor_tarjeta || "").trim(), String(item?.moneda || "").trim()].filter(Boolean);
+      const valueTxt = valueParts.length ? ` - ${valueParts.join(" ")}` : "";
+      const regionTxt = String(item?.region || "").trim();
+      const regionSuffix = regionTxt ? ` (${regionTxt})` : "";
+      return `- Venta #${ventaId}: ${plataforma}${valueTxt}${regionSuffix}`;
+    })
+    .join("\n");
+
+  return `\`Orden #${ordenId}\`
+*estado:* ${title} ✅
+
+${itemLines || "- Servicios entregados"}
+
+${actionText}
+${targetUrl}`;
+};
+
 const fetchReporteWhatsappContextById = async (idReporte) => {
   const reportId = toPositiveInt(idReporte);
   if (!reportId) return null;
@@ -4210,6 +4277,151 @@ const sendVentaServicioEntregadaToWhatsappOwner = async ({
     phone: targetPhone,
     cliente_registrado: clienteRegistrado,
   };
+};
+
+const notifyGiftCardDeliveriesWhatsappGrouped = async ({
+  deliveries = [],
+  manageWhatsappLifecycle = true,
+  source = "giftcard_delivery",
+} = {}) => {
+  const rows = (Array.isArray(deliveries) ? deliveries : []).filter(
+    (row) => toPositiveInt(row?.id_usuario) && (toPositiveInt(row?.id_orden) || toPositiveInt(row?.id_venta)),
+  );
+  const summary = {
+    source,
+    groups: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    skippedNoPhone: 0,
+    errors: [],
+  };
+  if (!rows.length) {
+    return { ...summary, skipped: 1, reason: "no_deliveries" };
+  }
+
+  const groupsMap = new Map();
+  rows.forEach((row) => {
+    const userId = toPositiveInt(row?.id_usuario);
+    const orderId = toPositiveInt(row?.id_orden);
+    const ventaId = toPositiveInt(row?.id_venta);
+    const key = `${userId}:${orderId || `venta-${ventaId}`}`;
+    if (!groupsMap.has(key)) {
+      groupsMap.set(key, {
+        id_usuario: userId,
+        id_orden: orderId || null,
+        items: [],
+      });
+    }
+    groupsMap.get(key).items.push(row);
+  });
+
+  const groups = Array.from(groupsMap.values());
+  summary.groups = groups.length;
+  const userIds = uniqPositiveIds(groups.map((group) => group.id_usuario));
+  const { data: userRows, error: userErr } = userIds.length
+    ? await supabaseAdmin
+        .from("usuarios")
+        .select("id_usuario, telefono, fecha_registro, id_auth")
+        .in("id_usuario", userIds)
+    : { data: [], error: null };
+  if (userErr) throw userErr;
+  const usersById = new Map((userRows || []).map((row) => [toPositiveInt(row?.id_usuario), row]));
+
+  const sendQueue = [];
+  for (const group of groups) {
+    const userRow = usersById.get(toPositiveInt(group.id_usuario)) || null;
+    const phone = normalizeWhatsappPhone(userRow?.telefono);
+    if (!phone) {
+      summary.skipped += 1;
+      summary.skippedNoPhone += 1;
+      continue;
+    }
+    const detalleOrdenUrl = group.id_orden ? buildWhatsappOrderDetailUrl(group.id_orden) : buildPublicSiteUrl();
+    const clienteRegistrado = isUsuarioWebRegistrado(userRow);
+    let signupRegistroUrl = "";
+    if (!clienteRegistrado) {
+      try {
+        signupRegistroUrl = buildSignupRegistrationUrl(group.id_usuario, {
+          redirectUrl: detalleOrdenUrl,
+        });
+      } catch (signupErr) {
+        console.error("[GiftCards] signup url para entrega error", {
+          id_usuario: group.id_usuario,
+          id_orden: group.id_orden || null,
+          error: signupErr?.message || signupErr,
+        });
+      }
+    }
+    sendQueue.push({
+      phone,
+      group,
+      message: buildWhatsappGiftCardDeliveriesEntregadasMessage({
+        idOrden: group.id_orden,
+        items: group.items,
+        detalleOrdenUrl,
+        clienteRegistrado,
+        signupRegistroUrl,
+      }),
+    });
+  }
+
+  if (!sendQueue.length) {
+    return summary;
+  }
+
+  const shouldManageWhatsappLifecycle = manageWhatsappLifecycle !== false;
+  if (shouldManageWhatsappLifecycle || !isWhatsappReady()) {
+    await ensureWhatsappClientReady({
+      reason: shouldManageWhatsappLifecycle
+        ? "giftcard_delivery_user_alert"
+        : "giftcard_delivery_user_alert_batch",
+      allowWhenDisabled: true,
+    });
+  }
+
+  try {
+    const client = getWhatsappClient();
+    for (const item of sendQueue) {
+      try {
+        await withTimeout(
+          client.sendMessage(`${item.phone}@c.us`, item.message, {
+            linkPreview: false,
+            waitUntilMsgSent: true,
+          }),
+          WHATSAPP_SEND_TIMEOUT_MS,
+          "Timeout enviando alerta de gift cards entregadas",
+        );
+        summary.sent += 1;
+      } catch (sendErr) {
+        summary.failed += 1;
+        summary.errors.push({
+          id_usuario: item.group.id_usuario,
+          id_orden: item.group.id_orden || null,
+          error: sendErr?.message || String(sendErr),
+        });
+        console.error("[GiftCards] WhatsApp entrega error", {
+          id_usuario: item.group.id_usuario,
+          id_orden: item.group.id_orden || null,
+          ventas: uniqPositiveIds(item.group.items.map((row) => row?.id_venta)),
+          error: sendErr?.message || sendErr,
+        });
+      }
+    }
+  } finally {
+    if (shouldManageWhatsappLifecycle) {
+      try {
+        await shutdownWhatsappClient({
+          reason: "giftcard_delivery_user_alert_completed",
+          allowWhenDisabled: true,
+        });
+      } catch (shutdownErr) {
+        console.error("[GiftCards] WhatsApp entrega shutdown error", shutdownErr);
+      }
+    }
+  }
+
+  return summary;
 };
 
 const notifyVentaEntregadaAfterOrderVerified = async ({
@@ -20700,7 +20912,26 @@ app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
       adminInvolucradoId: adminId,
       source: "manual_admin",
     });
-    return res.json(result);
+    let whatsapp = null;
+    try {
+      whatsapp = await notifyGiftCardDeliveriesWhatsappGrouped({
+        deliveries: [result],
+        manageWhatsappLifecycle: true,
+        source: "manual_admin",
+      });
+    } catch (waErr) {
+      whatsapp = {
+        sent: 0,
+        failed: 1,
+        skipped: 0,
+        error: waErr?.message || String(waErr),
+      };
+      console.error("[admin/ventas/entregar-giftcard] whatsapp entrega error", {
+        id_venta: idVenta,
+        error: waErr?.message || waErr,
+      });
+    }
+    return res.json({ ...result, whatsapp });
   } catch (err) {
     console.error("[admin/ventas/entregar-giftcard] error", err);
     if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
@@ -20732,6 +20963,79 @@ app.post("/api/admin/ventas/entregar-giftcard", async (req, res) => {
       err?.code === "GIFT_CARD_SALE_INVALID_CONTEXT"
     ) {
       return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/admin/ordenes/:id_orden/giftcards/notificar-entrega", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    const idOrden = toPositiveInt(req.params?.id_orden || req.body?.id_orden);
+    if (!idOrden) {
+      return res.status(400).json({ error: "id_orden inválido" });
+    }
+
+    const { data: ordenRow, error: ordenErr } = await supabaseAdmin
+      .from("ordenes")
+      .select("id_orden, id_usuario")
+      .eq("id_orden", idOrden)
+      .maybeSingle();
+    if (ordenErr) throw ordenErr;
+    if (!ordenRow?.id_orden) {
+      return res.status(404).json({ error: "Orden no encontrada." });
+    }
+
+    const idUsuario = toPositiveInt(req.body?.id_usuario) || toPositiveInt(ordenRow?.id_usuario);
+    if (!idUsuario) {
+      return res.status(409).json({ error: "La orden no tiene usuario asociado." });
+    }
+
+    const histRows = await fetchHistorialGiftCardRowsByOrder(idOrden, idUsuario);
+    const deliveries = (histRows || [])
+      .map((row) => {
+        const giftValue = row?.precio_tarjeta_de_regalo?.valor_tarjeta_de_regalo ?? row?.tarjetas_de_regalo?.monto ?? null;
+        return {
+          id_venta: toPositiveInt(row?.id_venta) || null,
+          id_orden: idOrden,
+          id_usuario: idUsuario,
+          id_plataforma: toPositiveInt(row?.id_plataforma) || null,
+          id_tarjeta_de_regalo: toPositiveInt(row?.id_tarjeta_de_regalo) || null,
+          plataforma: String(row?.plataformas?.nombre || "").trim() || `Plataforma ${row?.id_plataforma || ""}`.trim(),
+          region: String(row?.precio_tarjeta_de_regalo?.region || "").trim() || null,
+          valor_tarjeta: giftValue == null ? null : String(giftValue).trim(),
+          moneda: String(row?.precio_tarjeta_de_regalo?.moneda || "").trim() || null,
+          pin: String(row?.tarjetas_de_regalo?.pin || "").trim() || null,
+          source: "manual_resend_order_giftcards",
+        };
+      })
+      .filter((row) => row.id_tarjeta_de_regalo || row.id_venta);
+
+    if (!deliveries.length) {
+      return res.status(404).json({ error: "No hay gift cards entregadas para notificar en esta orden." });
+    }
+
+    const whatsapp = await notifyGiftCardDeliveriesWhatsappGrouped({
+      deliveries,
+      manageWhatsappLifecycle: true,
+      source: "manual_resend_order_giftcards",
+    });
+
+    return res.json({
+      ok: true,
+      id_orden: idOrden,
+      id_usuario: idUsuario,
+      ventas: uniqPositiveIds(deliveries.map((row) => row.id_venta)),
+      total_items: deliveries.length,
+      whatsapp,
+    });
+  } catch (err) {
+    console.error("[admin/ordenes/giftcards/notificar-entrega] error", err);
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
     }
     return res.status(500).json({ error: err.message });
   }
@@ -21115,7 +21419,7 @@ app.get("/api/ordenes/detalle", async (req, res) => {
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, id_usuario, id_admin, id_carrito, fecha, hora_orden, referencia, total, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada, id_metodo_de_pago, comprobante"
+        "id_orden, id_usuario, id_admin, id_carrito, fecha, hora_orden, referencia, total, tasa_bs, monto_bs, pago_verificado, en_espera, orden_cancelada, id_metodo_de_pago, comprobante, recargar_saldo"
       )
       .eq("id_orden", idOrden)
       .maybeSingle();

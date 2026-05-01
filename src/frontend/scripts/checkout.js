@@ -1474,6 +1474,7 @@ btnSendPayment?.addEventListener("click", async () => {
           marcado_pago: true,
           en_espera: true,
           id_carrito: null,
+          recargar_saldo: true,
           pago_verificado: false,
           monto_completo: null,
           orden_cancelada: null,

@@ -220,11 +220,13 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null, { isSuperadmi
   const fecha = formatDDMMYYYY(orden?.fecha) || orden?.fecha || "-";
   const hora = formatHora12(orden?.hora_orden);
   const estado = buildEstadoMeta(orden);
+  const isSaldoRecharge = isTrue(orden?.recargar_saldo);
   const idOrdenNum = Number(orden?.id_orden);
-  const canOpenServicios = Number.isFinite(idOrdenNum) && idOrdenNum > 0;
+  const canOpenServicios = Number.isFinite(idOrdenNum) && idOrdenNum > 0 && !isSaldoRecharge;
   const rows = [
     { label: "N. orden", value: orden?.id_orden ?? "-" },
     ...(isSuperadmin ? [{ label: "Cliente", value: clienteNombre || "-" }] : []),
+    { label: "Tipo", value: isSaldoRecharge ? "Recarga de saldo" : "Servicios" },
     { label: "Fecha", value: fecha },
     { label: "Hora", value: hora },
     { label: "Total", value: formatMoney(orden?.total), breakBefore: true },
@@ -245,10 +247,62 @@ const renderInfo = (orden, clienteNombre = "-", metodoPago = null, { isSuperadmi
       .join("")}
     <div class="orden-servicios-row">
       ${
-        canOpenServicios
+        isSaldoRecharge
+          ? '<div class="orden-saldo-note">Esta orden fue creada únicamente para recargar saldo.</div>'
+          : canOpenServicios
           ? `<button type="button" class="btn-ver-servicios-orden" data-id-orden="${idOrdenNum}">Ver servicios</button>`
           : "-"
       }
+    </div>
+  `;
+};
+
+const renderSaldoRecharge = (orden) => {
+  if (!itemsEl) return;
+  itemsTitleEl?.classList.remove("hidden");
+  if (itemsTitleEl) itemsTitleEl.textContent = "Detalle de recarga";
+  itemsEl.innerHTML = `
+    <div class="cart-layout">
+      <div class="orden-items-panel">
+        <div class="cart-table-scroll">
+          <table class="table-base cart-page-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Cantidad</th>
+                <th>Duración</th>
+                <th>Monto USD</th>
+                <th>Monto Bs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="cart-info tight">
+                    <div class="cart-product">
+                      <div class="cart-thumb-sm">
+                        <span class="orden-saldo-thumb">$</span>
+                      </div>
+                      <div class="cart-product-text">
+                        <div class="orden-item-head">
+                          <div class="orden-item-main">
+                            <p class="cart-name">Recarga de saldo</p>
+                            <p class="orden-item-meta">El monto de esta orden corresponde a saldo para compras futuras.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td class="cart-cell-center">1</td>
+                <td class="cart-cell-center">-</td>
+                <td class="cart-cell-center">${formatMoney(orden?.total)}</td>
+                <td class="cart-cell-center">${formatBs(orden?.monto_bs)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   `;
 };
@@ -443,6 +497,7 @@ const renderItems = (items, catalog, useMayor, giftCardLookups = null, { idOrden
     return;
   }
   itemsTitleEl?.classList.remove("hidden");
+  if (itemsTitleEl) itemsTitleEl.textContent = "Items";
 
   const descuentos = catalog?.descuentos || [];
   const discountColumns = getDiscountColumnsFromRows(descuentos);
@@ -579,6 +634,7 @@ const renderOrdenesItems = (items, giftCardLookups = null, { idOrden = null } = 
     return;
   }
   itemsTitleEl?.classList.remove("hidden");
+  if (itemsTitleEl) itemsTitleEl.textContent = "Items";
 
   const consolidatedItems = [];
   const byKey = new Map();
@@ -817,6 +873,11 @@ const init = async () => {
     setStatus("Cargando items...");
     const snapshotItems = Array.isArray(detalleResp?.items) ? detalleResp.items : [];
     const itemsSource = String(detalleResp?.items_source || "").trim();
+    if (isTrue(orden?.recargar_saldo) && !snapshotItems.length && !orden?.id_carrito) {
+      renderSaldoRecharge(orden);
+      setStatus("");
+      return;
+    }
     if (itemsSource === "ordenes_items" && snapshotItems.length) {
       renderOrdenesItems(snapshotItems, giftCardLookups, { idOrden });
       setStatus("");
