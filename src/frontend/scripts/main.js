@@ -1,7 +1,6 @@
 import {
   API_BASE,
   loadCatalog,
-  fetchCart,
   clearServerSession,
   loadCurrentUser,
   supabase,
@@ -2539,45 +2538,34 @@ const loadPendingReminderNoPhoneClients = async ({ isSuperadmin = false } = {}) 
 async function init() {
   setEstado("Cargando categorias y plataformas...");
   initModal(modalEls);
+  let shellRevealed = false;
   const revealAppShell = () => {
+    if (shellRevealed) return;
+    shellRevealed = true;
     const loader = document.getElementById("page-loader");
     const shell = document.getElementById("app-shell");
     if (shell) shell.classList.remove("hidden");
     if (loader) loader.classList.add("hidden");
     window.dispatchEvent(new CustomEvent("moose:page-loader-hidden"));
   };
-  const withTimeout = async (promise, ms = 7000) => {
-    let timeoutId = null;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = window.setTimeout(() => {
-        reject(new Error("Tiempo de espera excedido"));
-      }, ms);
-    });
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } finally {
-      if (timeoutId) window.clearTimeout(timeoutId);
-    }
+  const runAfterReveal = (label, task) => {
+    window.setTimeout(async () => {
+      try {
+        await task();
+      } catch (err) {
+        console.error(`${label} error`, err);
+      }
+    }, 0);
   };
   const loaderSafetyTimer = window.setTimeout(() => {
     console.warn("[loader] timeout de seguridad: mostrando app-shell");
     revealAppShell();
-  }, 15000);
+  }, 10000);
 
   try {
-    try {
-      await withTimeout(loadPageLoaderLogo(), 5000);
-    } catch (err) {
-      console.warn("loadPageLoaderLogo timeout/error", err);
-    }
-    try {
-      await withTimeout(applyLoaderAvatar(null, requireSession()), 5000);
-    } catch (err) {
-      console.warn("applyLoaderAvatar inicial timeout/error", err);
-    }
+    applyPageLoaderLogo(PAGE_LOADER_LOGO_FALLBACK);
 
     const currentUser = await loadCurrentUser();
-    await applyLoaderAvatar(currentUser || null, currentUser?.id_usuario || requireSession());
     const btnAssign = document.querySelector("#btn-assign-client");
     if (usernameEl && currentUser) {
       const fullName = [currentUser.nombre, currentUser.apellido]
@@ -2587,9 +2575,6 @@ async function init() {
       usernameEl.textContent = fullName || currentUser.correo || "Usuario";
     }
     setSessionRoles(currentUser || {});
-    maybePromptAvatarProfileSetup(currentUser).catch((err) => {
-      console.error("avatar onboarding prompt error", err);
-    });
     const sessionRoles = getSessionRoles();
     const actualIsSuper =
       isTrue(sessionRoles?.permiso_superadmin) || isTrue(currentUser?.permiso_superadmin);
@@ -2609,39 +2594,20 @@ async function init() {
       isTrue(currentUser?.acceso_cliente);
     const isAdmin = clientViewActive ? false : actualIsAdmin;
     const isSuper = clientViewActive ? false : actualIsSuper;
-    maybePromptHomePushPermission({
-      currentUser,
-      sessionRoles: {
-        ...(sessionRoles || {}),
-        acceso_cliente: effectiveAccesoCliente,
-        permiso_admin: isAdmin,
-        permiso_superadmin: isSuper,
-      },
-    }).catch((err) => {
-      console.error("home push permission prompt error", err);
-    });
     const canSeeRate = !!currentUser && !effectiveAccesoCliente;
     if (tasaActualEl) {
       if (!canSeeRate) {
         stopTasaAutoRefresh();
         tasaActualEl.classList.add("hidden");
         tasaPanelEl?.classList.add("hidden");
-      } else {
-        const rate = await fetchP2PRate();
-        renderTasaActual(rate);
-        startTasaAutoRefresh();
-      }
-    }
-    if (isSuper) {
-      const serverMarkup = await fetchP2PMarkup();
-      if (Number.isFinite(serverMarkup)) {
-        setTasaMarkup(serverMarkup);
       }
     }
     renderTasaMarkupInput({ isSuper });
-    await initWhatsappHetznerToggle({ isSuperadmin: isSuper });
-    await loadWhatsappQrWarning({ isSuperadmin: isSuper });
-    startWhatsappQrWarningPolling({ isSuperadmin: isSuper });
+    if (!isSuper) {
+      initWhatsappHetznerToggle({ isSuperadmin: false });
+      loadWhatsappQrWarning({ isSuperadmin: false });
+      startWhatsappQrWarningPolling({ isSuperadmin: false });
+    }
     if (adminLink) {
       adminLink.classList.toggle("hidden", !isAdmin);
       adminLink.style.display = isAdmin ? "block" : "none";
@@ -2657,28 +2623,21 @@ async function init() {
       testingBtn.classList.toggle("hidden", !isSuper);
       testingBtn.style.display = isSuper ? "inline-flex" : "none";
     }
-    await checkMissingDataNotice(currentUser);
-    await loadPendingReminderDates({ isSuperadmin: isSuper });
-    await loadPendingReminderNoPhoneClients({ isSuperadmin: isSuper });
+    if (!isSuper) {
+      loadPendingReminderDates({ isSuperadmin: false });
+      loadPendingReminderNoPhoneClients({ isSuperadmin: false });
+    }
 
-    const sessionUserId = requireSession();
     const cachedCart = getCachedCart();
-    const cartData = sessionUserId ? await fetchCart() : cachedCart || { items: [] };
+    const catalog = await loadCatalog();
+    const cartData = cachedCart || { items: [] };
     setCachedCart(cartData);
-    const [catalog, stockMap, homeBannersResp] = await Promise.all([
-      loadCatalog(),
-      loadStockSummary(isAdmin),
-      fetchHomeBanners(),
-    ]);
     const { categorias, plataformas, precios, descuentos } = catalog;
     allCatalogPlataformas = Array.isArray(plataformas) ? plataformas : [];
     const plataformasDisponibles = (plataformas || []).filter(
       (plat) => !isTrue(plat?.no_disponible),
     );
-    const customHomeBanners = Array.isArray(homeBannersResp?.items)
-      ? homeBannersResp.items
-      : [];
-    renderHomeBanners(plataformasDisponibles, categorias, customHomeBanners);
+    renderHomeBanners(plataformasDisponibles, categorias, []);
     // Si no hay sesión, mostrar precios detal por defecto.
     const esCliente = !currentUser || effectiveAccesoCliente;
     setDiscountAudience(esCliente);
@@ -2690,7 +2649,7 @@ async function init() {
         return { ...p, precio_usd_detal: valor, precio_usd_mayor: undefined };
       })
       .filter(Boolean);
-    setStockData(stockMap);
+    setStockData({});
     const preciosMap = buildPreciosMap(preciosVisibles);
     setPrecios(preciosMap);
     setDescuentos(descuentos || []);
@@ -2751,13 +2710,80 @@ async function init() {
         });
       },
     });
+    window.clearTimeout(loaderSafetyTimer);
+    revealAppShell();
 
-    // Aviso de servicios entregados (solo si hay nuevos) sin badge
-    try {
-      const userId = requireSession();
-      if (!userId) {
-        throw new Error("Usuario invitado");
+    runAfterReveal("home banners", async () => {
+      const homeBannersResp = await fetchHomeBanners();
+      const customHomeBanners = Array.isArray(homeBannersResp?.items)
+        ? homeBannersResp.items
+        : [];
+      if (customHomeBanners.length) {
+        renderHomeBanners(plataformasDisponibles, categorias, customHomeBanners);
       }
+    });
+
+    runAfterReveal("stock summary", async () => {
+      const stockMap = await loadStockSummary(isAdmin);
+      setStockData({ ...(stockMap || {}), __loaded: true });
+    });
+
+    runAfterReveal("loader avatar", async () => {
+      await applyLoaderAvatar(currentUser || null, currentUser?.id_usuario || requireSession());
+    });
+
+    runAfterReveal("avatar onboarding", async () => {
+      await maybePromptAvatarProfileSetup(currentUser);
+    });
+
+    runAfterReveal("missing data notice", async () => {
+      await checkMissingDataNotice(currentUser);
+    });
+
+    if (effectiveAccesoCliente) {
+      runAfterReveal("home push permission prompt", async () => {
+        await maybePromptHomePushPermission({
+          currentUser,
+          sessionRoles: {
+            ...(sessionRoles || {}),
+            acceso_cliente: effectiveAccesoCliente,
+            permiso_admin: isAdmin,
+            permiso_superadmin: isSuper,
+          },
+        });
+      });
+    } else {
+      hidePushPermissionPrompt();
+    }
+
+    if (canSeeRate) {
+      runAfterReveal("tasa actual", async () => {
+        const rate = await fetchP2PRate();
+        renderTasaActual(rate);
+        startTasaAutoRefresh();
+      });
+    }
+
+    if (isSuper) {
+      runAfterReveal("superadmin home widgets", async () => {
+        const serverMarkup = await fetchP2PMarkup();
+        if (Number.isFinite(serverMarkup)) {
+          setTasaMarkup(serverMarkup);
+        }
+        renderTasaMarkupInput({ isSuper: true });
+        await initWhatsappHetznerToggle({ isSuperadmin: true });
+        await loadWhatsappQrWarning({ isSuperadmin: true });
+        startWhatsappQrWarningPolling({ isSuperadmin: true });
+        await Promise.all([
+          loadPendingReminderDates({ isSuperadmin: true }),
+          loadPendingReminderNoPhoneClients({ isSuperadmin: true }),
+        ]);
+      });
+    }
+
+    runAfterReveal("delivery notice", async () => {
+      const userId = requireSession();
+      if (!userId) return;
       const entregas = await fetchEntregadas();
       if (!entregas?.error) {
         const count = entregas.entregadas || 0;
@@ -2767,20 +2793,18 @@ async function init() {
           setDeliverySeen(userId, count);
         }
       }
-    } catch (err) {
-      if (String(err?.message || "") !== "Usuario invitado") {
-        console.warn("No se pudo cargar entregas", err);
-      }
-    }
+    });
 
-    // Toggle Testing/Production
     if (testingBtn && !testingBtn.dataset.bound) {
       testingBtn.dataset.bound = "1";
       const applyState = (isTesting) => {
         testingBtn.textContent = isTesting === true ? "Testing" : "Production";
         testingBtn.classList.toggle("testing-off", !isTesting);
       };
-      fetchTestingFlag().then((flag) => applyState(flag === true));
+      runAfterReveal("testing flag", async () => {
+        const flag = await fetchTestingFlag();
+        applyState(flag === true);
+      });
       testingBtn.addEventListener("click", async () => {
         testingBtn.disabled = true;
         try {

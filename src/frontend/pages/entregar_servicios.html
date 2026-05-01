@@ -176,6 +176,63 @@
       .datos-confirm-line {
         font-size: 14px;
       }
+      .indicaciones-iniciar,
+      .politica-uso {
+        margin: 12px 0 0;
+        padding: 14px;
+        border-radius: 12px;
+      }
+      .indicaciones-iniciar {
+        margin-top: -10px;
+        padding-top: 22px;
+        border: 1px solid #d1d5db;
+        border-top: 0;
+        border-radius: 0 0 10px 10px;
+        background: #edf0f4;
+        color: #26303c;
+        position: relative;
+        z-index: 0;
+      }
+      .cuenta-table-wrap.has-indicaciones {
+        border-bottom: 1px solid #d1d5db;
+        border-radius: 10px;
+        position: relative;
+        z-index: 1;
+      }
+      .cuenta-table-wrap.has-indicaciones .table-base {
+        border-bottom: 1px solid #d1d5db;
+        border-radius: 10px;
+      }
+      .politica-uso {
+        border: 1px solid #545d6b;
+        background: #3a414d;
+        color: #ffffff;
+      }
+      .politica-uso + .proximas-bloque {
+        margin-top: 18px;
+      }
+      .entrega-section-heading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 16px 0 8px;
+      }
+      .entrega-section-heading h3 {
+        margin: 0;
+      }
+      .indicaciones-iniciar-title,
+      .politica-uso-title {
+        margin: 0 0 8px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .indicaciones-iniciar-text,
+      .politica-uso-text {
+        margin: 0;
+        white-space: pre-wrap;
+        line-height: 1.45;
+      }
     </style>
   </head>
   <body>
@@ -228,7 +285,6 @@
         fetchVentaEntregaByVenta,
         notificarSpotifyProveedorPendientes,
       } from "../scripts/api.js";
-      import { buildServiceCopyText } from "../scripts/copy-format.js";
       import { formatDDMMYYYY } from "../scripts/date-format.js";
       import { buildNotification } from "../scripts/notification-templates.js";
       import { copyTextNotify } from "../scripts/copy-toast.js";
@@ -519,6 +575,84 @@
           .replace(/>/g, "&gt;")
           .replace(/"/g, "&quot;");
 
+      const buildIndicacionesIniciarHtml = (value = "") => {
+        const text = String(value || "").trim();
+        if (!text) return "";
+        return `
+          <div class="indicaciones-iniciar">
+            <h4 class="indicaciones-iniciar-title">Indicaciones para iniciar sesión</h4>
+            <p class="indicaciones-iniciar-text">${escapeHtml(text)}</p>
+          </div>
+        `;
+      };
+
+      const buildPoliticaUsoHtml = (value = "") => {
+        const text = String(value || "").trim();
+        if (!text) return "";
+        return `
+          <div class="politica-uso">
+            <h4 class="politica-uso-title">Política de uso</h4>
+            <p class="politica-uso-text">${escapeHtml(text)}</p>
+            <p class="politica-uso-text">Si incumple las indicaciones se suspenderá el servicio.</p>
+          </div>
+        `;
+      };
+
+      const buildEntregaCopyText = ({
+        item = {},
+        fechaCorte = "",
+        plataformaNombre = "",
+        signupRegistroUrl = "",
+      } = {}) => {
+        const lines = [];
+        const platformLabel = String(plataformaNombre || item?.plataforma || "")
+          .trim()
+          .toUpperCase();
+        const ventaId = item?.id_venta || "";
+        const signupUrl = String(signupRegistroUrl || "").trim();
+        const correo = normalizeCopyValue(item?.correo);
+        const clave = normalizeCopyValue(item?.clave);
+        const pin = resolveVentaPin(item);
+        const politicaUso = normalizeCopyValue(item?.politica_uso);
+        const indicacionIniciar = normalizeCopyValue(item?.indicacion_iniciar);
+        const porAcceso = isTrue(item?.por_acceso);
+        const nPerfilRaw = normalizeCopyValue(item?.n_perfil || item?.perfil);
+        const perfilTxt = nPerfilRaw
+          ? nPerfilRaw.startsWith("M")
+            ? nPerfilRaw
+            : `M${nPerfilRaw}`
+          : "";
+
+        lines.push(`*${platformLabel || "SERVICIO"}* 🫎 \`ID Venta: #${ventaId}\``);
+        if (signupUrl) lines.push(`Registrate en nuestra Web: ${signupUrl}`);
+        lines.push("");
+        if (correo) lines.push(`*Correo:* ${correo}`);
+        if (clave) lines.push(`*Clave:* ${clave}`);
+        if (perfilTxt) {
+          lines.push(`*Perfil:* ${perfilTxt}`);
+        } else if (porAcceso) {
+          lines.push("*Acceso:* 1 dispositivo");
+        }
+        if (pin) lines.push(`*Pin:* ${pin}`);
+        if (fechaCorte) {
+          lines.push("");
+          lines.push("_Próxima fecha de pago:_");
+          lines.push(`\`${formatFechaCorte(fechaCorte)}\``);
+        }
+        if (politicaUso) {
+          lines.push("");
+          lines.push("*| Políticas de uso:*");
+          lines.push(`- ${politicaUso}`);
+          lines.push("Si incumple las indicaciones se suspenderá el servicio.");
+        }
+        if (indicacionIniciar) {
+          lines.push("");
+          lines.push("*| Indicaciones para iniciar sesión:*");
+          lines.push(`* ${indicacionIniciar}`);
+        }
+        return lines.join("\n");
+      };
+
       const formatFechaCorte = (value) => {
         if (!value) return "";
         return formatDDMMYYYY(value);
@@ -603,6 +737,7 @@
               item.id_venta ? ` 🫎 \`ID Venta: #${item.id_venta}\`` : ""
             }`.trim()
           );
+          lines.push("");
         }
         if (item.correo) lines.push(`*Correo:* ${item.correo}`);
         lines.push(`*Clave:* ${item.clave || "-"}`);
@@ -613,10 +748,74 @@
         } else if (porPantalla && item.n_perfil) {
           lines.push(`*Perfil:* M${item.n_perfil}`);
         }
-        if (item.pin) lines.push(`*PIN:* ${item.pin}`);
+        const pin = resolveVentaPin(item);
+        if (pin) lines.push(`*PIN:* ${pin}`);
         if (fechaCorte) {
-          lines.push("*Próxima fecha de pago:*", `_${formatFechaCorte(fechaCorte)}_`);
+          lines.push("");
+          lines.push("*Próxima fecha de pago:*");
+          lines.push(`\`${formatFechaCorte(fechaCorte)}\``);
         }
+        return lines.join("\n");
+      };
+
+      const appendRenovacionItemLines = (lines, item) => {
+        lines.push(`\`ID Venta: #${item.id_venta || ""}\``);
+        if (item.correo) lines.push(`*Correo:* ${item.correo}`);
+        lines.push(`*Clave:* ${item.clave || "-"}`);
+        const porPantalla = isTrue(item?.por_pantalla);
+        const porAcceso = isTrue(item?.por_acceso);
+        if (!porPantalla && porAcceso) {
+          lines.push("*Acceso:* 1 dispositivo");
+        } else if (porPantalla && item.n_perfil) {
+          lines.push(`*Perfil:* M${item.n_perfil}`);
+        }
+        const pin = resolveVentaPin(item);
+        if (pin) lines.push(`*PIN:* ${pin}`);
+      };
+
+      const buildRenovacionesOrdenMensaje = (rows = []) => {
+        const items = (rows || [])
+          .filter((row) => toPositiveId(row?.id_venta))
+          .slice()
+          .sort((a, b) => {
+            const fechaCmp = String(a?.fecha_corte || "").localeCompare(String(b?.fecha_corte || ""));
+            if (fechaCmp) return fechaCmp;
+            const platCmp = String(a?.plataforma || "").localeCompare(String(b?.plataforma || ""), "es", {
+              sensitivity: "base",
+            });
+            if (platCmp) return platCmp;
+            return (toPositiveId(a?.id_venta) || 0) - (toPositiveId(b?.id_venta) || 0);
+          });
+        if (!items.length) return "";
+        const lines = ["*✅ Servicios renovados 🫡*"];
+        const byFecha = new Map();
+        items.forEach((item) => {
+          const fechaKey = String(item?.fecha_corte || "").trim() || "__sin_fecha__";
+          if (!byFecha.has(fechaKey)) byFecha.set(fechaKey, []);
+          byFecha.get(fechaKey).push(item);
+        });
+        Array.from(byFecha.entries()).forEach(([fechaKey, fechaItems]) => {
+          const byPlatform = new Map();
+          fechaItems.forEach((item) => {
+            const platformKey = String(item?.plataforma || "SERVICIO").trim().toUpperCase();
+            if (!byPlatform.has(platformKey)) byPlatform.set(platformKey, []);
+            byPlatform.get(platformKey).push(item);
+          });
+          Array.from(byPlatform.entries()).forEach(([platformName, platformItems]) => {
+            lines.push("");
+            lines.push(`*${platformName || "SERVICIO"}* 🫎`);
+            lines.push("");
+            platformItems.forEach((item, idx) => {
+              if (idx > 0) lines.push("");
+              appendRenovacionItemLines(lines, item);
+            });
+            if (fechaKey !== "__sin_fecha__") {
+              lines.push("");
+              lines.push("*Próxima fecha de pago:*");
+              lines.push(`\`${formatFechaCorte(fechaKey)}\``);
+            }
+          });
+        });
         return lines.join("\n");
       };
 
@@ -648,8 +847,7 @@
           return;
         }
         setStatus("");
-        const sectionHtml = plataformas
-          .map((platObj) => {
+        const renderPlatformBlock = (platObj) => {
             const rows = [...(platObj.rows || [])].sort((a, b) => {
               const ventaA = toPositiveId(a?.id_venta);
               const ventaB = toPositiveId(b?.id_venta);
@@ -669,9 +867,13 @@
               !isGiftCard && (FORCE_CLIENT_INPUTS || platObj.correo_cliente === true || platId === 9);
             const showClaveInput =
               !isGiftCard && showClientInputs && (platObj.clave_cliente === true || platId === 9);
+            const hasClaveColumnData = rows.some((r) => normalizeCopyValue(r?.clave));
+            const hasPerfilColumnData = rows.some((r) => normalizeCopyValue(r?.perfil) || normalizeCopyValue(r?.n_perfil));
+            const hasPinColumnData = rows.some((r) => resolveVentaPin(r));
+            const showClaveColumn = !isGiftCard && (!isRenovacion || hasClaveColumnData);
             const showPinColumn =
-              isGiftCard || (!isRenovacion && isTrue(platObj.usa_pines));
-            const showPerfilColumn = !isGiftCard && !!(platObj.por_acceso || platObj.por_pantalla);
+              isGiftCard || (!isRenovacion && isTrue(platObj.usa_pines)) || (isRenovacion && hasPinColumnData);
+            const showPerfilColumn = !isGiftCard && (isRenovacion ? hasPerfilColumnData : !!(platObj.por_acceso || platObj.por_pantalla));
             const perfilHeader = platObj.por_acceso ? "Acceso" : "Perfil";
             const showTipoColumn = !isGiftCard && !isRenovacion && platId === 9;
             const isReportesEditPlat9 = Boolean(
@@ -734,28 +936,11 @@
                   ? buildRenovacionMensaje(r, r.fecha_corte, r.plataforma)
                   : requiresClientInputs
                     ? ""
-                    : buildServiceCopyText({
-                        plataforma: r.plataforma,
-                        idVenta: r.id_venta,
-                        correo: r.correo,
-                        clave: r.clave,
-                        nPerfil: r.n_perfil,
-                        pin: pinVenta,
+                    : buildEntregaCopyText({
+                        item: r,
                         fechaCorte: r.fecha_corte,
-                        porAcceso: r.por_acceso,
-                        porPantalla: r.por_pantalla,
-                        usaPines: r.usa_pines,
-                        ventaPerfil: r.venta_perfil,
-                        ventaMiembro: r.venta_miembro,
-                        idPlataforma: r.id_plataforma,
-                        perfilHogar: r.perfil_hogar,
-                        isSubCuenta: r.es_subcuenta,
-                        esTarjetaDeRegalo: isGiftCard,
-                        region: r.region,
-                        valorTarjeta: r.valor_tarjeta_de_regalo,
-                        moneda: r.moneda,
-                        usuarioNoRegistrado: shouldUseSignupHeaderOnCopy,
-                        signupRegistroUrl: signupHeaderShortUrl,
+                        plataformaNombre: r.plataforma,
+                        signupRegistroUrl: shouldUseSignupHeaderOnCopy ? signupHeaderShortUrl : "",
                       });
                 const annotateBtn = canAnnotateCliente
                   ? `<button type="button" class="btn-outline btn-anotar-cliente" data-venta="${r.id_venta}">Anotar cliente</button>`
@@ -814,7 +999,7 @@
                             : ""
                       }
                     </td>
-                    ${isRenovacion ? "" : `<td>${
+                    ${showClaveColumn ? `<td>${
                       showClaveInput && requiresClientInputs
                         ? `<div class="fecha-wrap">
                             <div class="input-inline">
@@ -826,7 +1011,7 @@
                               r.clave
                             )}">${escapeHtml(r.clave)}</span>`
                           : ""
-                    }</td>`}
+                    }</td>` : ""}
                     ${showTipoColumn ? `<td>${
                       requiresClientInputs
                         ? `<div class="fecha-wrap">
@@ -840,7 +1025,7 @@
                           </div>`
                         : ""
                     }</td>` : ""}
-                    ${isRenovacion ? "" : showPerfilColumn ? `<td>${perfilTxt ? `<div>${escapeHtml(perfilTxt)}</div>` : ""}</td>` : ""}
+                    ${showPerfilColumn ? `<td>${perfilTxt ? `<div>${escapeHtml(perfilTxt)}</div>` : ""}</td>` : ""}
                     ${showPinColumn ? `<td>${pinCellHtml}</td>` : ""}
                     <td>${r.fecha_corte ? formatDDMMYYYY(r.fecha_corte) : isPendiente ? "Pendiente" : ""}</td>
                     <td>
@@ -861,7 +1046,7 @@
                 `;
               })
               .join("");
-            return `
+          return `
               <div class="proximas-bloque">
                 <h3 class="proximas-title">${platObj.nombre}</h3>
                 ${
@@ -891,7 +1076,7 @@
                       </div>`
                     : ""
                 }
-                <div class="cuenta-table-wrap">
+                <div class="cuenta-table-wrap${String(platObj.indicacion_iniciar || "").trim() ? " has-indicaciones" : ""}">
                   <table class="table-base" style="${platObj.color_1 ? `--table-header-bg:${platObj.color_1};` : ""}">
                     <thead>
                       <tr>
@@ -906,9 +1091,9 @@
                             : `
                               <th>ID Venta</th>
                               ${isGiftCard ? "" : "<th>Correo</th>"}
-                              ${isGiftCard ? "" : isRenovacion ? "" : "<th>Clave</th>"}
+                              ${isGiftCard ? "" : showClaveColumn ? "<th>Clave</th>" : ""}
                               ${isGiftCard ? "" : showTipoColumn ? "<th>Tipo</th>" : ""}
-                              ${isGiftCard ? "" : isRenovacion ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
+                              ${isGiftCard ? "" : showPerfilColumn ? `<th>${perfilHeader}</th>` : ""}
                               ${showPinColumn ? "<th>PIN</th>" : ""}
                               ${isGiftCard ? "" : "<th>Fecha de corte</th>"}
                               <th>Acción</th>
@@ -919,13 +1104,41 @@
                    <tbody>${body}</tbody>
                  </table>
                 </div>
+                ${buildIndicacionesIniciarHtml(platObj.indicacion_iniciar)}
               </div>
             `;
-          })
-          .join("");
+        };
+        const withoutPolicy = [];
+        const withPolicy = new Map();
+        plataformas.forEach((platObj) => {
+          const politica = String(platObj?.politica_uso || "").trim();
+          if (!politica) {
+            withoutPolicy.push(platObj);
+            return;
+          }
+          if (!withPolicy.has(politica)) withPolicy.set(politica, []);
+          withPolicy.get(politica).push(platObj);
+        });
+        const sectionHtml = [
+          ...withoutPolicy.map(renderPlatformBlock),
+          ...Array.from(withPolicy.entries()).map(
+            ([politica, relatedPlatforms]) =>
+              `${buildPoliticaUsoHtml(politica)}${relatedPlatforms.map(renderPlatformBlock).join("")}`,
+          ),
+        ].join("");
+        const allRows = plataformas.flatMap((platObj) => platObj?.rows || []);
+        const bulkRenewHtml =
+          isRenovacion && allRows.length > 1
+            ? `<button type="button" class="btn-outline btn-copy-renew-bulk" data-copy="${encodeURIComponent(
+                buildRenovacionesOrdenMensaje(allRows),
+              )}">Copiar mensaje de renovación</button>`
+            : "";
+        const titleHtml = title
+          ? `<div class="entrega-section-heading"><h3>${escapeHtml(title)}</h3>${bulkRenewHtml}</div>`
+          : "";
         tablasEl.insertAdjacentHTML(
           "beforeend",
-          `${title ? `<h3 style="margin: 16px 0 8px;">${title}</h3>` : ""}${sectionHtml}`
+          `${titleHtml}${sectionHtml}`
         );
       };
 
@@ -1013,7 +1226,7 @@
             const { data: plats, error: platErr } = await supabase
               .from("plataformas")
               .select(
-                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, tarjeta_de_regalo, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre"
+                "id_plataforma, nombre, por_acceso, por_pantalla, usa_pines, tarjeta_de_regalo, color_1, entrega_inmediata, correo_cliente, clave_cliente, cuenta_madre, indicacion_iniciar, politica_uso"
               )
               .in("id_plataforma", platIds);
             if (platErr) throw platErr;
@@ -1085,6 +1298,8 @@
                 por_pantalla: isTrue(plat.por_pantalla),
                 usa_pines: isTrue(plat.usa_pines),
                 tarjeta_de_regalo: isTrue(plat.tarjeta_de_regalo),
+                indicacion_iniciar: plat.indicacion_iniciar || "",
+                politica_uso: plat.politica_uso || "",
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -1120,6 +1335,8 @@
               region: v.precios?.region || "",
               valor_tarjeta_de_regalo: v.precios?.valor_tarjeta_de_regalo || "",
               moneda: v.precios?.moneda || "",
+              indicacion_iniciar: plat.indicacion_iniciar || "",
+              politica_uso: plat.politica_uso || "",
             });
           });
 
@@ -1144,6 +1361,8 @@
                 por_pantalla: isTrue(plat.por_pantalla),
                 usa_pines: isTrue(plat.usa_pines),
                 tarjeta_de_regalo: isTrue(plat.tarjeta_de_regalo),
+                indicacion_iniciar: plat.indicacion_iniciar || "",
+                politica_uso: plat.politica_uso || "",
               };
             const porAcceso = !!plat.por_acceso;
             const usaPines = !!plat.usa_pines;
@@ -1179,6 +1398,8 @@
               region: v.precios?.region || "",
               valor_tarjeta_de_regalo: v.precios?.valor_tarjeta_de_regalo || "",
               moneda: v.precios?.moneda || "",
+              indicacion_iniciar: plat.indicacion_iniciar || "",
+              politica_uso: plat.politica_uso || "",
             });
           });
 
@@ -1218,15 +1439,37 @@
                   const platName = plat.nombre ? plat.nombre.toUpperCase() : `PLATAFORMA ${platId}`;
                   const correoCuenta = resolveVentaCorreo(venta, plat);
                   const claveCuenta = resolveVentaClave(venta, plat);
+                  const porAcceso = !!plat.por_acceso;
+                  const usaPines = !!plat.usa_pines;
+                  const ventaPerfil = venta.cuentas?.venta_perfil;
+                  const ventaMiembro = venta.cuentas?.venta_miembro;
+                  const perfilTxt = porAcceso
+                    ? "1 acceso"
+                    : venta.perfiles?.n_perfil
+                    ? `M${venta.perfiles.n_perfil}`
+                    : "";
                   return {
                     id_venta: h.id_venta,
                     correo: correoCuenta,
                     clave: claveCuenta,
+                    n_perfil: venta.perfiles?.n_perfil || "",
+                    pin_perfil: venta.perfiles?.pin || "",
+                    pin_cuenta: venta.cuentas?.pin || "",
+                    pin_tarjeta: venta.tarjetas_de_regalo?.pin || "",
                     fecha_corte: venta.fecha_corte || "",
                     plataforma: platName,
                     id_plataforma: platId,
                     color_1: plat.color_1 || null,
                     plan_label: resolvePlanLabel(venta, plat),
+                    por_acceso: porAcceso,
+                    por_pantalla: isTrue(plat.por_pantalla),
+                    usa_pines: usaPines,
+                    venta_perfil: ventaPerfil,
+                    venta_miembro: ventaMiembro,
+                    perfil_hogar: venta.perfiles?.perfil_hogar,
+                    perfil: perfilTxt,
+                    indicacion_iniciar: plat.indicacion_iniciar || "",
+                    politica_uso: plat.politica_uso || "",
                   };
                 })
                 .filter(Boolean);
@@ -1240,6 +1483,11 @@
               acc[key] = {
                 nombre: r.plan_label ? `${r.plataforma} · ${r.plan_label}` : r.plataforma,
                 color_1: r.color_1 || null,
+                indicacion_iniciar: r.indicacion_iniciar || "",
+                politica_uso: r.politica_uso || "",
+                por_acceso: isTrue(r.por_acceso),
+                por_pantalla: isTrue(r.por_pantalla),
+                usa_pines: isTrue(r.usa_pines),
                 rows: [],
               };
             }
@@ -1421,7 +1669,7 @@
         syncEditRowUpdateButtonState(input.closest('tr[data-edit-row="1"]'));
       });
       tablasEl?.addEventListener("click", (e) => {
-        const btn = e.target.closest(".btn-copy-renew");
+        const btn = e.target.closest(".btn-copy-renew, .btn-copy-renew-bulk");
         if (!btn) return;
         const text = decodeURIComponent(btn.dataset.copy || "");
         copyToClipboard(text, btn);

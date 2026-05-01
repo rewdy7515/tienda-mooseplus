@@ -11,6 +11,7 @@ let currentPlatform = null;
 let currentQty = 1; // items
 let currentMonths = 1;
 let stockByPlatform = {};
+let stockDataLoaded = false;
 let selectedButtonEl = null;
 let modalImageListenerBound = false;
 let modalTopEl = null;
@@ -600,7 +601,7 @@ const renderPrecios = (plataformaId, flags) => {
       }
     }
     const ms = currentPlatform?.mostrar_stock;
-    const showStock = !(
+    const showStock = stockDataLoaded && !(
       ms === false ||
       ms === 0 ||
       ms === "0" ||
@@ -987,6 +988,7 @@ export const setDescuentos = (rows = []) => {
 
 export const setStockData = (map) => {
   stockByPlatform = map || {};
+  stockDataLoaded = Boolean(map && map.__loaded === true);
 };
 
 export const setDiscountAudience = (isCliente = true) => {
@@ -1269,7 +1271,8 @@ export const openModal = (platform) => {
       entrega_inmediata === true ||
       entrega_inmediata === "true" ||
       entrega_inmediata === "1";
-    const isProntoStock = showStock && entrega && (stockByPlatform[id_plataforma] ?? 0) === 0;
+    const isProntoStock =
+      stockDataLoaded && showStock && entrega && (stockByPlatform[id_plataforma] ?? 0) === 0;
     const badgeText = isProntoStock
       ? "Pronto mas stock"
       : entrega
