@@ -25,6 +25,9 @@ const modalSolPerfil = document.querySelector("#sol-modal-perfil");
 const modalSolPin = document.querySelector("#sol-modal-pin");
 const modalSolNotas = document.querySelector("#sol-modal-notas");
 const modalSolClose = document.querySelector(".modal-sol-close");
+const modalSolImageWrap = document.querySelector("#sol-modal-image-wrap");
+const modalSolImage = document.querySelector("#sol-modal-image");
+const modalSolImageEmpty = document.querySelector("#sol-modal-image-empty");
 
 let porPlataforma = new Map();
 let reportesSolRows = [];
@@ -70,6 +73,62 @@ const tableStyleForColor = (color) => {
   const c = normalizeHexColor(color);
   if (!c) return "";
   return ` style="--table-header-bg:${c};"`;
+};
+
+const extractStorageRef = (rawPath) => {
+  const raw = String(rawPath || "").trim();
+  if (!raw) return null;
+  if (!/^https?:\/\//i.test(raw)) {
+    return { bucket: "private_assets", path: raw.replace(/^\/+/, "") };
+  }
+  try {
+    const parsed = new URL(raw);
+    const match = parsed.pathname.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
+    );
+    if (match && match[1] && match[2]) {
+      return { bucket: match[1], path: decodeURIComponent(match[2]) };
+    }
+    const idx = parsed.pathname.indexOf("/private_assets/");
+    if (idx >= 0) {
+      return {
+        bucket: "private_assets",
+        path: decodeURIComponent(parsed.pathname.slice(idx + "/private_assets/".length)),
+      };
+    }
+  } catch (_err) {
+    return null;
+  }
+  return null;
+};
+
+const getImageUrl = async (path) => {
+  if (!path) return null;
+  const storageRef = extractStorageRef(path);
+  if (!storageRef) {
+    return /^https?:\/\//i.test(path) ? path : null;
+  }
+  const fallbackPublicUrl = () => {
+    try {
+      const { data } = supabase.storage.from(storageRef.bucket).getPublicUrl(storageRef.path);
+      return String(data?.publicUrl || "").trim() || null;
+    } catch (_err) {
+      return /^https?:\/\//i.test(path) ? path : null;
+    }
+  };
+  try {
+    const { data, error } = await supabase.storage
+      .from(storageRef.bucket)
+      .createSignedUrl(storageRef.path, 3600);
+    if (error) {
+      console.error("signed url error", error);
+      return fallbackPublicUrl();
+    }
+    return data?.signedUrl || null;
+  } catch (err) {
+    console.error("signed url error", err);
+    return fallbackPublicUrl();
+  }
 };
 
 const escapeHtml = (value) =>
@@ -653,7 +712,7 @@ solFilterSelect?.addEventListener("change", () => {
   renderSolucionadosList();
 });
 
-function openModalSol(row) {
+async function openModalSol(row) {
   if (!modalSol) return;
   modalSolTitle.textContent = row.plataformas?.nombre || "Detalle de reporte";
   const ventaId = toPositiveId(row?.id_venta);
@@ -689,6 +748,18 @@ function openModalSol(row) {
     }
   } else {
     modalSolNotas.textContent = "-";
+  }
+  const imagePath = String(row?.imagen || "").trim();
+  const imageUrl = imagePath ? await getImageUrl(imagePath) : null;
+  if (modalSolImageWrap) modalSolImageWrap.classList.remove("hidden");
+  if (modalSolImage) modalSolImage.classList.add("hidden");
+  if (modalSolImageEmpty) modalSolImageEmpty.classList.add("hidden");
+  if (imageUrl && modalSolImage) {
+    modalSolImage.src = imageUrl;
+    modalSolImage.classList.remove("hidden");
+  } else if (modalSolImageEmpty) {
+    modalSolImageEmpty.classList.remove("hidden");
+    if (modalSolImage) modalSolImage.removeAttribute("src");
   }
   modalSol.classList.remove("hidden");
 }

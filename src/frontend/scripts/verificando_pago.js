@@ -584,7 +584,7 @@ const verifyPago = async () => {
   }
 
   if (diffReal >= 0 && Number.isFinite(tasaBase) && tasaBase) {
-    if (diffReal > 0) {
+    if (diffReal > 0 && !orden?.recargar_saldo) {
       const saldoUsd = Number(((pagoMonto - montoBaseBs) / tasaBase).toFixed(2));
       if (Number.isFinite(saldoUsd) && sessionUserId) {
         const { data: userSaldo, error: saldoErr } = await supabase
@@ -611,7 +611,14 @@ const verifyPago = async () => {
       diffReal > 0 && Number.isFinite(tasaBase) && tasaBase
         ? Number(((pagoMonto - montoBaseBs) / tasaBase).toFixed(2))
         : 0;
-    await creditSaldo(round2(baseUsd + extraUsd));
+    const procResp = await procesarOrden(orden.id_orden, {
+      saldo_a_favor: round2(baseUsd + extraUsd),
+    });
+    if (procResp?.error) {
+      console.error("procesar recarga saldo error", procResp);
+      setStatus(procResp.error || "No se pudo acreditar el saldo.");
+      return;
+    }
     orden.en_espera = false;
     orden.pago_verificado = true;
     orderProcessed = true;

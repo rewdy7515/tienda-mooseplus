@@ -860,6 +860,25 @@
             }
           }
 
+          try {
+            const resp = await fetch("/api/ventas/auto-pending-stock/procesar", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({
+                id_plataforma: Number(plataforma),
+                id_cuenta: cuentaInserted?.id_cuenta || null,
+                source: "agregar_servicios",
+              }),
+            });
+            if (!resp.ok) {
+              const body = await resp.json().catch(() => ({}));
+              console.warn("auto pending stock response error", body?.error || resp.status);
+            }
+          } catch (autoErr) {
+            console.warn("auto pending stock trigger error", autoErr);
+          }
+
           setStatus(`Cuenta agregada correctamente: ${correo}`);
         } catch (err) {
           console.error("agregar cuenta error", err);

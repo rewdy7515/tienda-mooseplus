@@ -1098,6 +1098,7 @@
               .select("id_cuenta, id_plataforma, inactiva, ocupado, venta_perfil, venta_miembro")
               .eq("ocupado", false)
               .eq("venta_perfil", false)
+              .neq("id_plataforma", 9)
               .eq("inactiva", false),
             supabase
               .from("tarjetas_de_regalo")
@@ -1165,6 +1166,7 @@
           (cuentasLibres || []).forEach((cuentaRow) => {
             const platformId = toPositiveInt(cuentaRow?.id_plataforma);
             if (!platformId) return;
+            // Plat 9 stock is profile-slot based; cuentas must not inflate availability.
             if (platformId === 9) return;
             const platformInfo = platformById.get(platformId) || {};
             if (isTrue(platformInfo?.tarjeta_de_regalo)) return;

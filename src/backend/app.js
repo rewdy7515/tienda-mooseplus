@@ -12176,9 +12176,12 @@ const autoAssignReportedPendingVentas = async ({
 
         if (!esReportada) {
           const entregaInmediata = isTrue(plataforma?.entrega_inmediata);
-          const autoAssignBloqueado =
-            Number(plataformaId) === 9 || isTrue(plataforma?.cuenta_madre);
-          if (!entregaInmediata || autoAssignBloqueado || tieneRecursoAsignado) {
+          const plataformaCuentaMadre = isTrue(plataforma?.cuenta_madre);
+          const puedeAutoAsignarPendiente = entregaInmediata || plataformaCuentaMadre;
+          // Las plataformas con cuenta madre pueden resolver pendientes cuando se carga stock.
+          // Plat 9 conserva su flujo especial y no se auto-asigna desde este worker.
+          const autoAssignBloqueado = Number(plataformaId) === 9;
+          if (!puedeAutoAsignarPendiente || autoAssignBloqueado || tieneRecursoAsignado) {
             summary.skipped += 1;
             continue;
           }
@@ -12342,6 +12345,35 @@ const autoAssignReportedPendingVentas = async ({
         .update(updateVenta)
         .eq("id_venta", ventaId);
       if (updVentaErr) throw updVentaErr;
+
+      const updateHistorial = {
+        id_cuenta: nuevoCuentaId,
+        id_perfil: nuevoPerfilId || null,
+      };
+      const { error: updHistErr } = await supabaseAdmin
+        .from("historial_ventas")
+        .update(updateHistorial)
+        .eq("id_venta", ventaId)
+        .eq("renovacion", false);
+      if (updHistErr) {
+        if (isMissingHistorialPerfilColumnError(updHistErr)) {
+          const { error: updHistNoPerfilErr } = await supabaseAdmin
+            .from("historial_ventas")
+            .update({ id_cuenta: nuevoCuentaId })
+            .eq("id_venta", ventaId)
+            .eq("renovacion", false);
+          if (updHistNoPerfilErr) throw updHistNoPerfilErr;
+        } else {
+          throw updHistErr;
+        }
+      }
+
+      const { error: updOrdenItemErr } = await supabaseAdmin
+        .from("ordenes_items")
+        .update({ id_cuenta: nuevoCuentaId })
+        .eq("id_venta", ventaId);
+      if (updOrdenItemErr) throw updOrdenItemErr;
+
       if (esReportada) {
         console.log("[autoAssignReportedPendingVentas] whatsapp servicio entregado omitido", {
           id_venta: ventaId,
@@ -21423,6 +21455,42 @@ app.post("/api/ventas/proveedor/spotify/notificar-pendientes", async (req, res) 
   }
 });
 
+app.post("/api/ventas/auto-pending-stock/procesar", async (req, res) => {
+  try {
+    await requireAdminSession(req);
+    if (autoPendingStockDeliveryInProgress) {
+      return res.json({ ok: true, skipped: true, reason: "in_progress" });
+    }
+
+    const plataformaIds = uniqPositiveIds(
+      []
+        .concat(req.body?.id_plataforma || [])
+        .concat(req.body?.id_plataformas || [])
+        .concat(req.body?.plataforma_ids || []),
+    );
+
+    autoPendingStockDeliveryInProgress = true;
+    try {
+      const summary = await autoAssignReportedPendingVentas({
+        includeUnreported: true,
+        plataformaIds,
+      });
+      return res.json({ ok: true, ...summary });
+    } finally {
+      autoPendingStockDeliveryInProgress = false;
+    }
+  } catch (err) {
+    if (err?.code === AUTH_REQUIRED || err?.message === AUTH_REQUIRED) {
+      return res.status(401).json({ error: "Usuario no autenticado" });
+    }
+    if (err?.code === ADMIN_REQUIRED || err?.message === ADMIN_REQUIRED) {
+      return res.status(403).json({ error: "Solo admin/superadmin" });
+    }
+    console.error("[ventas/auto-pending-stock/procesar] error", err);
+    return res.status(500).json({ error: err?.message || "No se pudo procesar pendientes por stock." });
+  }
+});
+
 // Detalle de orden (info + items del carrito asociado)
 app.get("/api/ordenes/detalle", async (req, res) => {
   try {
@@ -22661,58 +22729,83 @@ app.post("/api/checkout", async (req, res) => {
       });
     }
 
-    const result = await processOrderFromItems({
-      ordenId,
-      idUsuarioSesion,
-      idUsuarioVentas,
-      historialRegistradoPor,
-      items,
-      priceMap,
-      platInfoById,
-      platNameById,
-      pickPrecio,
-      descuentos,
-      discountColumns,
-      discountColumnById,
-      isCliente,
-      referencia,
-      archivos,
-      id_metodo_de_pago,
-      carritoId,
-      montoHistorialTotalOverride: hasCustomItemAmounts ? null : montoBaseCobrado,
-      itemAmountMapById: hasCustomItemAmounts ? customItemAmountMap : null,
-      adminInvolucradoId: adminInvolucradoGiftId,
-      snapshotTotalUsd: checkoutTotal,
-      snapshotMontoBsTotal: monto_bs,
-      snapshotTasaBs: tasaBs,
-      saldoAplicadoExpectedUsd: ordenSaldoUsage.saldoAplicadoUsd,
+    const checkoutProcessLock = await acquireSharedOrderProcessLock(ordenId, {
+      source: "checkout_immediate_process",
     });
-    console.log("[checkout] procesado", {
-      id_orden: ordenId,
-      ventas: result.ventasCount,
-      pendientes: result.pendientesCount,
-    });
-    const renewalConsistencyAfter = await getOrderRenewalConsistency(ordenId);
-    if (!renewalConsistencyAfter.consistent) {
-      throw buildOrderRenewalConsistencyError(renewalConsistencyAfter);
+    if (!checkoutProcessLock?.acquired) {
+      console.warn("[checkout] orden ya está siendo procesada", {
+        id_orden: ordenId,
+        reason: checkoutProcessLock?.reason || null,
+      });
+      return res.status(202).json({
+        ok: true,
+        id_orden: ordenId,
+        id_carrito_nuevo: nuevoCarritoId,
+        total: checkoutTotal,
+        ventas: 0,
+        pendientes: 0,
+        already_processing: true,
+        lock_reason: checkoutProcessLock?.reason || null,
+      });
     }
 
-    await supabaseAdmin
-      .from("ordenes")
-      .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
-      .eq("id_orden", ordenId);
+    let result = null;
     try {
-      await cleanupClosedOrderCarrito({
-        idOrden: ordenId,
-        idCarrito: carritoId,
-        source: "checkout_verified",
+      result = await processOrderFromItems({
+        ordenId,
+        idUsuarioSesion,
+        idUsuarioVentas,
+        historialRegistradoPor,
+        items,
+        priceMap,
+        platInfoById,
+        platNameById,
+        pickPrecio,
+        descuentos,
+        discountColumns,
+        discountColumnById,
+        isCliente,
+        referencia,
+        archivos,
+        id_metodo_de_pago,
+        carritoId,
+        montoHistorialTotalOverride: hasCustomItemAmounts ? null : montoBaseCobrado,
+        itemAmountMapById: hasCustomItemAmounts ? customItemAmountMap : null,
+        adminInvolucradoId: adminInvolucradoGiftId,
+        snapshotTotalUsd: checkoutTotal,
+        snapshotMontoBsTotal: monto_bs,
+        snapshotTasaBs: tasaBs,
+        saldoAplicadoExpectedUsd: ordenSaldoUsage.saldoAplicadoUsd,
       });
-    } catch (cleanupErr) {
-      console.error("[checkout] error limpiando carrito de orden cerrada", {
-        id_orden: toPositiveInt(ordenId) || null,
-        id_carrito: toPositiveInt(carritoId) || null,
-        error: cleanupErr?.message || cleanupErr,
+      console.log("[checkout] procesado", {
+        id_orden: ordenId,
+        ventas: result.ventasCount,
+        pendientes: result.pendientesCount,
       });
+      const renewalConsistencyAfter = await getOrderRenewalConsistency(ordenId);
+      if (!renewalConsistencyAfter.consistent) {
+        throw buildOrderRenewalConsistencyError(renewalConsistencyAfter);
+      }
+
+      await supabaseAdmin
+        .from("ordenes")
+        .update({ pago_verificado: true, en_espera: result.pendientesCount > 0 })
+        .eq("id_orden", ordenId);
+      try {
+        await cleanupClosedOrderCarrito({
+          idOrden: ordenId,
+          idCarrito: carritoId,
+          source: "checkout_verified",
+        });
+      } catch (cleanupErr) {
+        console.error("[checkout] error limpiando carrito de orden cerrada", {
+          id_orden: toPositiveInt(ordenId) || null,
+          id_carrito: toPositiveInt(carritoId) || null,
+          error: cleanupErr?.message || cleanupErr,
+        });
+      }
+    } finally {
+      await releaseSharedOrderProcessLock(ordenId);
     }
 
     res.json({
@@ -23021,7 +23114,7 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     const { data: orden, error: ordErr } = await supabaseAdmin
       .from("ordenes")
       .select(
-        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, tasa_bs, monto_bs, monto_transferido, monto_mayor, pago_verificado, en_espera, orden_cancelada"
+        "id_orden, id_usuario, id_admin, id_carrito, referencia, comprobante, id_metodo_de_pago, total, total_bruto_usd, usa_saldo, saldo_aplicado_usd, tasa_bs, monto_bs, monto_transferido, monto_mayor, pago_verificado, en_espera, orden_cancelada, recargar_saldo"
       )
       .eq("id_orden", idOrden)
       .single();
@@ -23087,7 +23180,25 @@ app.post("/api/ordenes/procesar", async (req, res) => {
     } = {}) => {
       const montoAutoNorm = Math.round((Number(montoAuto) || 0) * 100) / 100;
       const montoManualNorm = Math.round((Number(saldoAFavor) || 0) * 100) / 100;
-      const montoTotalAcreditar = Math.max(0, montoAutoNorm) + Math.max(0, montoManualNorm);
+      const isRecargaSaldoOrder = isTrue(orden?.recargar_saldo);
+      if (isRecargaSaldoOrder && isTrue(orden?.pago_verificado)) {
+        return res.json({
+          ok: true,
+          id_orden: idOrden,
+          ventas: 0,
+          pendientes: 0,
+          id_admin: idAdminEntrega,
+          saldo_acreditado: false,
+          excedente_acreditado: 0,
+          saldo_nuevo: null,
+          sin_items: true,
+          already_processed: true,
+          motivo_sin_items: "recarga_saldo_ya_verificada",
+        });
+      }
+      const montoTotalAcreditar = isRecargaSaldoOrder
+        ? Math.max(0, montoManualNorm || montoAutoNorm)
+        : Math.max(0, montoAutoNorm) + Math.max(0, montoManualNorm);
       const saldoAcreditadoInfo = await acreditarSaldoManual(montoTotalAcreditar);
 
       const ordenUpdate = {
