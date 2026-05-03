@@ -1876,7 +1876,7 @@
           if (cuentaIds.length) {
             const { data: cuentasData, error: cuentasErr } = await supabase
               .from("cuentas")
-              .select("id_cuenta, completa, venta_perfil, venta_miembro, id_plataforma")
+              .select("id_cuenta, completa, venta_perfil, venta_miembro, id_plataforma, cuenta_madre, id_cuenta_madre")
               .in("id_cuenta", cuentaIds);
             if (cuentasErr) throw cuentasErr;
             (cuentasData || []).forEach((c) => {
@@ -2024,12 +2024,22 @@
               .update(updatePayload)
               .eq("id_venta", it.id_venta);
             if (error) throw error;
-            if (isSpotifyCompletaRenovacion(it) && claveFueModificada && it.id_cuenta) {
+            const esCuentaMadrePlat9 =
+              Number(platIdNum) === 9 && cuentaInfo && isTrue(cuentaInfo?.cuenta_madre);
+            if (isSpotifyCompletaRenovacion(it) && claveFueModificada && it.id_cuenta && !esCuentaMadrePlat9) {
               const { error: cuentaClaveErr } = await supabase
                 .from("cuentas")
                 .update({ clave: nuevaClaveCuenta })
                 .eq("id_cuenta", Number(it.id_cuenta));
               if (cuentaClaveErr) throw cuentaClaveErr;
+            } else if (isSpotifyCompletaRenovacion(it) && claveFueModificada && esCuentaMadrePlat9) {
+              console.warn(
+                "[renovar_cliente] se omite update de cuentas.clave en cuenta madre plat 9",
+                {
+                  id_venta: Number(it.id_venta) || null,
+                  id_cuenta: Number(it.id_cuenta) || null,
+                },
+              );
             }
 
             const montoCalculado = resolveMonto(platIdNum, cuentaInfo, accesoCliente) * (it.meses || 1);

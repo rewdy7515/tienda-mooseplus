@@ -2488,22 +2488,35 @@ Su nueva cuenta de Spotify tendrá todos sus Playlists y Me gusta de la cuenta a
                 ? cuentaMiembroId
                 : null
               : toPositiveId(target?.idCuenta);
+            let skipCuentaClaveUpdate = false;
+            if (targetCuentaClaveId && isPlat9) {
+              skipCuentaClaveUpdate = cuentaMadreFlow && targetCuentaClaveId === cuentaMadreId;
+              if (!skipCuentaClaveUpdate) {
+                const { data: cuentaClaveTarget, error: cuentaClaveTargetErr } = await supabase
+                  .from("cuentas")
+                  .select("id_cuenta, cuenta_madre")
+                  .eq("id_cuenta", Number(targetCuentaClaveId))
+                  .maybeSingle();
+                if (cuentaClaveTargetErr) throw cuentaClaveTargetErr;
+                skipCuentaClaveUpdate = isTrue(cuentaClaveTarget?.cuenta_madre);
+              }
+            }
             const updates = [
               supabase
                 .from("ventas")
                 .update({ clave_miembro: nextVal })
                 .eq("id_venta", idVenta),
             ];
-            if (targetCuentaClaveId) {
+            if (targetCuentaClaveId && !skipCuentaClaveUpdate) {
               updates.push(
                 supabase
                   .from("cuentas")
                   .update({ clave: nextVal })
                   .eq("id_cuenta", Number(targetCuentaClaveId)),
               );
-            } else if (memberCredentialFlow) {
+            } else if (memberCredentialFlow || skipCuentaClaveUpdate) {
               console.warn(
-                "[pedidos_pendientes] se omite update de clave en cuenta madre para venta tipo miembro",
+                "[pedidos_pendientes] se omite update de cuentas.clave en cuenta madre plat 9",
                 {
                   id_venta: toPositiveId(idVenta) || null,
                   id_cuenta_miembro: cuentaMiembroId || null,
