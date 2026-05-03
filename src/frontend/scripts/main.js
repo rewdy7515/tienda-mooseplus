@@ -105,6 +105,7 @@ const HOME_BANNERS_WHEEL_MIN_DOMINANCE = 6;
 const HOME_BANNERS_WHEEL_MAX_VERTICAL_DRIFT = 26;
 const HOME_BANNERS_WHEEL_COOLDOWN_MS = 220;
 const HOME_BANNERS_WHEEL_GESTURE_RESET_MS = 180;
+const HOME_BANNERS_LOAD_TIMEOUT_MS = 8000;
 const MOBILE_PULL_REFRESH_THRESHOLD_PX = 160;
 const MOBILE_PULL_REFRESH_AXIS_LOCK_PX = 14;
 const HOME_BANNER_ROUTE_PREFIX = "/src/frontend/pages/";
@@ -1822,6 +1823,32 @@ const syncHomeBannersViewportSize = () => {
   }
 };
 
+const waitForHomeBannerImages = async ({ timeoutMs = HOME_BANNERS_LOAD_TIMEOUT_MS } = {}) => {
+  if (!homeBannersTrack || !homeBannersWrap || homeBannersWrap.classList.contains("hidden")) return;
+  const imgs = Array.from(homeBannersTrack.querySelectorAll(".home-banner-card img"));
+  if (!imgs.length) return;
+
+  await Promise.race([
+    Promise.all(
+      imgs.map(
+        (img) =>
+          new Promise((resolve) => {
+            if (!img || img.complete) {
+              resolve();
+              return;
+            }
+            img.addEventListener("load", resolve, { once: true });
+            img.addEventListener("error", resolve, { once: true });
+          }),
+      ),
+    ),
+    new Promise((resolve) => {
+      window.setTimeout(resolve, Math.max(1000, Number(timeoutMs) || HOME_BANNERS_LOAD_TIMEOUT_MS));
+    }),
+  ]);
+  syncHomeBannersViewportSize();
+};
+
 const attachMobilePullToRefresh = () => {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (document.body?.dataset.mobilePullRefreshBound === "1") return;
@@ -1999,7 +2026,7 @@ const renderHomeBanners = (plataformas = [], categorias = [], customBanners = []
             src="${escapeHtml(item.image)}"
             alt="${escapeHtml(item.nombre)}"
             draggable="false"
-            loading="${idx === 0 ? "eager" : "lazy"}"
+            loading="eager"
             fetchpriority="${idx === 0 ? "high" : "auto"}"
             sizes="(max-width: 700px) calc(100vw - 24px), min(1650px, calc(100vw - 40px))"
             decoding="async"
@@ -2638,6 +2665,19 @@ async function init() {
       (plat) => !isTrue(plat?.no_disponible),
     );
     renderHomeBanners(plataformasDisponibles, categorias, []);
+    try {
+      const homeBannersResp = await fetchHomeBanners();
+      const customHomeBanners = Array.isArray(homeBannersResp?.items)
+        ? homeBannersResp.items
+        : [];
+      if (customHomeBanners.length) {
+        renderHomeBanners(plataformasDisponibles, categorias, customHomeBanners);
+      }
+    } catch (bannerErr) {
+      console.error("home banners error", bannerErr);
+    }
+    await waitForHomeBannerImages();
+
     // Si no hay sesión, mostrar precios detal por defecto.
     const esCliente = !currentUser || effectiveAccesoCliente;
     setDiscountAudience(esCliente);
@@ -2712,16 +2752,6 @@ async function init() {
     });
     window.clearTimeout(loaderSafetyTimer);
     revealAppShell();
-
-    runAfterReveal("home banners", async () => {
-      const homeBannersResp = await fetchHomeBanners();
-      const customHomeBanners = Array.isArray(homeBannersResp?.items)
-        ? homeBannersResp.items
-        : [];
-      if (customHomeBanners.length) {
-        renderHomeBanners(plataformasDisponibles, categorias, customHomeBanners);
-      }
-    });
 
     runAfterReveal("stock summary", async () => {
       const stockMap = await loadStockSummary(isAdmin);
